@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -10,7 +11,7 @@ import { ApiErrorCode, type Device, type GpioLevel } from '@tempestas/domain';
 import { acceptsCommands } from '../nodes/node-registry';
 import { NodeEntity } from '../nodes/models';
 import { Clock } from '../common/clock';
-import { HardwareService } from '../hardware/hardware.service';
+import { HardwareError, HardwareService } from '../hardware/hardware.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { DeviceEntity } from './models';
 import type { CreateDeviceDto } from './dto/create-device.dto';
@@ -196,11 +197,20 @@ export class DevicesService {
       });
     }
 
-    await this.hardware.setPin(device.node.slug, {
-      pin: device.gpio,
-      level,
-      label: device.name,
-    });
+    try {
+      await this.hardware.setPin(device.node.slug, {
+        pin: device.gpio,
+        level,
+        label: device.name,
+      });
+    } catch (err: unknown) {
+      // A known hardware condition is not a 500. An offline node, an
+      // unacknowledged command and a readback mismatch are all expected states
+      // with distinct remedies, and the client - browser or rules engine - has
+      // to be able to tell them apart. Anything else is genuinely unexpected
+      // and is left to propagate.
+      throw err instanceof HardwareError ? toHttpError(err) : err;
+    }
 
     const now = this.clock.now();
     if (direction === 'on') {
@@ -241,4 +251,19 @@ export class DevicesService {
       canTurnOnAt: earliest?.toISOString() ?? null,
     };
   }
+}
+
+/**
+ * `NodeOffline` and `ReadbackMismatch` are conflicts with the physical world -
+ * the request is well-formed and the answer is no. An unreachable transport is
+ * a 503, because it is the server that is unable to act rather than the request
+ * that is wrong.
+ */
+function toHttpError(
+  err: HardwareError,
+): ConflictException | ServiceUnavailableException {
+  const body = { code: err.code, message: err.message };
+  return err.code === ApiErrorCode.HardwareUnreachable
+    ? new ServiceUnavailableException(body)
+    : new ConflictException(body);
 }

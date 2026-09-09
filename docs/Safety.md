@@ -15,15 +15,33 @@ say so out loud and get it confirmed; do not quietly relax it.
 ### 1. Commands are never retained
 
 A retained `gpio/set` replays on **every reconnect** of a node that may be running a combustion
-burner. State and status are retained; commands are transient. Three independent guards:
+burner. State and status are retained; commands are transient.
 
-- the node **drops** any inbound command carrying the retain flag and alarms `RETAINED_COMMAND_DROPPED`;
-- every command carries `expiresAt` and is rejected late as `COMMAND_EXPIRED`;
-- both ends connect with `cleanStart` — a persistent session is precisely a queue of commands
-  waiting to replay.
+⚠ **The retain flag does not enforce this on its own.** MQTT sets it on a delivered message only
+when that delivery is caused by a new subscription, so a retained command published while everyone
+is already connected arrives looking entirely legitimate — verified against a real broker in phase
+7, where the node obeyed it and the message stayed on the bus to replay later.
+
+The layer that works is **ownership**: the server is the only legitimate publisher of a command, so
+anything else is `CONTROLLER_CONFLICT`. The server logs it at ERROR and **clears the retained slot**.
+Delivery itself is stopped only by broker ACLs (phase 12), and a node must refuse a foreign
+`issuedBy` (phase 8). `expiresAt` and `cleanStart` remain as the other two layers.
+
+The full layering and the obligations it puts on a node are in
+[MQTT Contract](Infrastructure/MQTT%20Contract.md#the-retained-command-trap).
 
 Encoded in [../libs/domain/src/lib/hardware/mqtt-contract.ts](../libs/domain/src/lib/hardware/mqtt-contract.ts)
 as `mqttQos`, so it cannot drift into folklore.
+
+### 1b. A clean disconnect fires no will
+
+MQTT **suppresses the last will on a graceful DISCONNECT**. The LWT therefore covers a crash, a
+kill, or a network drop — and not an orderly shutdown. Anything that stops cleanly must publish its
+own retained `status: offline` first, or it is left looking online forever while nothing is driving
+its pins. The server does this in `onModuleDestroy`; every node must do the same.
+
+Found by testing: a virtual node calling `client.end()` fired no will at all, and the registry went
+on reporting it as online.
 
 ### 2. Stale is not off
 

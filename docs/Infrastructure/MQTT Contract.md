@@ -11,8 +11,10 @@ The contract is code, in [../../libs/domain/src/lib/hardware/mqtt-contract.ts](.
 including the QoS and retain flags as a const object — so they cannot drift into folklore.
 
 > [!note] Status
-> `MqttHardwareService` is **phase 7, not yet built**. The contract, the topic builders and the
-> QoS table already exist and the fake driver is written against the same interface.
+> Built, phase 7. [`MqttHardwareService`](../../apps/server/src/app/hardware/mqtt-hardware.service.ts)
+> is the driver; everything decidable without a socket is in
+> [`mqtt-codec.ts`](../../apps/server/src/app/hardware/mqtt-codec.ts) as pure functions. Verified
+> end to end against a real Mosquitto with [`tools/virtual-node.cjs`](../../tools/virtual-node.cjs).
 
 ## Key files
 
@@ -43,9 +45,9 @@ tempestas/v1/server/status                            server LWT   QoS1  retain=
 These are in the header comment of `mqtt-contract.ts` because they are protocol requirements, not
 implementation preferences. Full reasoning in [Safety](../Safety.md).
 
-1. **Commands are never retained.** A retained `gpio/set` replays a burner-on command on every
-   reconnect. Guarded three ways: the node drops retained commands and alarms
-   `RETAINED_COMMAND_DROPPED`; every command carries `expiresAt`; both ends use `cleanStart`.
+1. **Commands are never retained** — and the retain flag alone does **not** enforce it. See
+   [the retained-command trap](#the-retained-command-trap) below, which is the most important thing
+   on this page.
 2. **Stale is not off.** A node's LWT makes its pins `unknown`, not `0`.
 3. **The server has an LWT too**, so every node fails safe when the brain dies, not just one.
 4. **Levels, not on/off.** The wire carries electrical levels only; the server owns the
@@ -81,6 +83,50 @@ interface MqttEnvelope {
   successful readback; the caller must not persist a state change otherwise.
 - **`alarm`** — an `AlarmCode` plus severity. Never retained: a retained alarm resurrects a cleared
   fault.
+
+## The retained-command trap
+
+⚠ **Found by testing phase 7 against a real broker, not by reading the spec.** A retained
+`gpio/set` was published while the server and the node were both already connected. Both received
+it with **`retain=0`**, the node obeyed it, and it stayed retained on the broker to replay on every
+future reconnect.
+
+The cause is in the MQTT specification: a delivered PUBLISH carries the retain flag **only when it
+is delivered because of a new subscription**. Published to an existing subscriber it is
+indistinguishable from a legitimate command. So "drop anything with the retain flag" catches the
+replay-on-reconnect case and nothing else.
+
+What actually defends the burner, in order of strength:
+
+| Layer                                                       | Stops                      | Status                              |
+| ----------------------------------------------------------- | -------------------------- | ----------------------------------- |
+| Broker ACL — only the server may publish commands           | delivery at all            | **phase 12**                        |
+| Ownership check — `issuedBy` must be the current controller | obeying a foreign command  | node: **phase 8**; server: **done** |
+| `expiresAt` on every command                                | a late or replayed command | done                                |
+| `cleanStart` on both ends                                   | a queued session replaying | done                                |
+| Retain-flag drop                                            | replay on reconnect        | done                                |
+
+The server now treats **any** command it did not issue as `CONTROLLER_CONFLICT`, whatever the retain
+flag says, logs it at ERROR, and **clears the retained slot** by publishing a zero-length retained
+payload. It cannot stop the delivery — that is the ACL's job — but it stops the message lurking.
+
+## Required agent behaviour
+
+A node is not free to interpret this contract loosely. These are obligations, and the virtual node
+in `tools/` implements all of them as a reference:
+
+- **Refuse a command whose `issuedBy` is not the controller you are bound to**, and alarm
+  `CONTROLLER_CONFLICT`. This is the layer that stops a foreign command being obeyed.
+- **Drop any inbound command carrying the retain flag** and alarm `RETAINED_COMMAND_DROPPED`.
+- **Refuse a command past its `expiresAt`** and alarm `COMMAND_EXPIRED`.
+- **Ignore an empty command payload.** A zero-length payload is how a retained command is cleared;
+  parsing it throws, and reacting to it creates a publish loop.
+- **Publish `status: offline` (retained) before a clean shutdown.** MQTT **suppresses the will on a
+  graceful DISCONNECT**, so the LWT covers a crash or a network drop but _not_ an orderly stop. A
+  node that exits cleanly without doing this is left looking online forever. (Also verified the hard
+  way: a `client.end()` in testing fired no will at all.)
+- **Enforce your own dead-man locally**, counting server heartbeats. It has to work when the brain
+  is gone entirely.
 
 ## Level-triggered, not edge-triggered
 
