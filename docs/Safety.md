@@ -34,8 +34,8 @@ An "assume off" default is how a UI ends up confidently showing a burner as idle
 ### 3. Publish first, persist only on success
 
 ```ts
-await this.hardware.setPin(device.node.slug, { pin, level, label });   // rejects on readback mismatch
-device.onAt = now;                                                     // only now
+await this.hardware.setPin(device.node.slug, { pin, level, label }); // rejects on readback mismatch
+device.onAt = now; // only now
 await this.devices.save(device);
 ```
 
@@ -70,13 +70,13 @@ Full lifecycle in [Infrastructure/Nodes.md](Infrastructure/Nodes.md).
 
 BCM 9–27 default to **pull-down** on the BCM2711. Four of the five relays are **active-LOW**:
 
-| Device | BCM | polarity | level when unclaimed | relay when unclaimed |
-|---|---|---|---|---|
-| Extra Relay | 12 | active-LOW | LOW | **ON** |
-| **CO2 Generator** | 16 | active-LOW | LOW | **ON** |
-| Exhaust Fan | 20 | active-LOW | LOW | **ON** |
-| Lights | 21 | active-LOW | LOW | **ON** |
-| Single Light | 26 | active-HIGH | LOW | OFF |
+| Device            | BCM | polarity    | level when unclaimed | relay when unclaimed |
+| ----------------- | --- | ----------- | -------------------- | -------------------- |
+| Extra Relay       | 12  | active-LOW  | LOW                  | **ON**               |
+| **CO2 Generator** | 16  | active-LOW  | LOW                  | **ON**               |
+| Exhaust Fan       | 20  | active-LOW  | LOW                  | **ON**               |
+| Lights            | 21  | active-LOW  | LOW                  | **ON**               |
+| Single Light      | 26  | active-HIGH | LOW                  | OFF                  |
 
 A line is unclaimed during the **entire boot window**, **every crash-restart gap**, after any
 `gpio_free()`, and **forever if the agent fails to start**. In all of those windows a gas burner is
@@ -123,15 +123,15 @@ Each node enforces its own timeout locally, with no server involvement, so it wo
 is gone entirely. It belongs in the MQTT contract as a **required node behaviour**, not a
 convention — a Pi sidecar and an ESP32 must both implement it. Safe state is per device class:
 
-| Device class | On loss of commands | Why |
-|---|---|---|
-| CO2 generator | long hold at night, short by day | It is *also* the night heater |
-| Exhaust fan | OFF | Benign either way; off is the quiet default |
-| Lights | brief hold, then OFF | A blip shouldn't kill a heat-contributing light, but nothing runs unattended forever |
+| Device class  | On loss of commands              | Why                                                                                  |
+| ------------- | -------------------------------- | ------------------------------------------------------------------------------------ |
+| CO2 generator | long hold at night, short by day | It is _also_ the night heater                                                        |
+| Exhaust fan   | OFF                              | Benign either way; off is the quiet default                                          |
+| Lights        | brief hold, then OFF             | A blip shouldn't kill a heat-contributing light, but nothing runs unattended forever |
 
 The burner wears two hats. By day it is enrichment and failing it off costs nothing; by night it is
 the heat source and failing it off on a cold night is how plants die. The dead-man cannot tell which
-mode it is in without the brain that just died — but it *can* read a clock, so it applies the same
+mode it is in without the brain that just died — but it _can_ read a clock, so it applies the same
 night window locally and holds longer at night before dropping the line.
 
 **Open question:** how long is that night hold? Long enough to ride out a restart or a WiFi blip,
@@ -166,7 +166,7 @@ Four layers, because a second writer on one line is the failure that produces im
 4. A **startup preflight** that refuses to start if any managed line is held by another consumer.
 
 And a hard rule for the Python venv: **never install `RPi.GPIO`, `rpi-lgpio` or `gpiozero`.**
-`rpi-lgpio` shims the RPi.GPIO API onto lgpio via a *different* handle and will fight ours for the
+`rpi-lgpio` shims the RPi.GPIO API onto lgpio via a _different_ handle and will fight ours for the
 same lines — exactly the live defect in the old `device_health_check.py`, which still imports
 `RPi.GPIO` with no `setmode` and was missed by the lgpio migration. Making it impossible beats
 remembering.
@@ -175,7 +175,7 @@ remembering.
 
 The node re-asserts the **full desired state of every line** on a 5 s heartbeat rather than sending
 one-shot toggles. Any missed message self-heals on the next tick. This is what eliminates both the
-old system's 43k loopback POSTs a day *and* its silent DB↔hardware divergence.
+old system's 43k loopback POSTs a day _and_ its silent DB↔hardware divergence.
 
 Guard rail: only one controller may hold the heartbeat. Starting the Mac's NestJS must stop the
 Pi's, or bump the controller `epoch` to take over cleanly. Bake that handover into one script so it

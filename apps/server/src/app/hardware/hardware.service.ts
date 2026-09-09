@@ -1,5 +1,10 @@
 import type { Observable } from 'rxjs';
-import type { GpioLevel, NodeCapabilities, NodeId, NodeKind } from '@tempestas/domain';
+import type {
+  GpioLevel,
+  NodeCapabilities,
+  NodeId,
+  NodeKind,
+} from '@tempestas/domain';
 
 /**
  * The single seam between the application and physical hardware.

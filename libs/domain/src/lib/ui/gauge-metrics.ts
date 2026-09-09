@@ -69,7 +69,10 @@ export const GAUGE_METRICS: Record<GaugeMetricKey, GaugeMetric> = {
   },
 };
 
-export function gaugeColorFor(metric: GaugeMetric, value: number | null): string | null {
+export function gaugeColorFor(
+  metric: GaugeMetric,
+  value: number | null,
+): string | null {
   if (value === null) {
     return null;
   }

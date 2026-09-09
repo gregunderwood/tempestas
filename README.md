@@ -13,15 +13,15 @@ Zone "greenhouse"  ── rules: thresholds, enabledRoles, sensor policy
    └── Node "north-end"       esp32   · sensor only (future)
 ```
 
-| | |
-|---|---|
-| Monorepo | Nx 22, npm, Node 22 |
-| API | NestJS 11 · TypeORM 0.3 · Postgres 17 |
-| Web | Angular 20 standalone · Angular Material (M3) |
-| Shared | `libs/domain` → `@tempestas/domain` |
-| Node agent | Python + `uv`, one per node (phase 8) |
-| Transport | MQTT (Mosquitto) to nodes · socket.io to browsers |
-| Tests | Vitest, colocated `*.spec.ts` |
+|            |                                                   |
+| ---------- | ------------------------------------------------- |
+| Monorepo   | Nx 22, npm, Node 22                               |
+| API        | NestJS 11 · TypeORM 0.3 · Postgres 17             |
+| Web        | Angular 20 standalone · Angular Material (M3)     |
+| Shared     | `libs/domain` → `@tempestas/domain`               |
+| Node agent | Python + `uv`, one per node (phase 8)             |
+| Transport  | MQTT (Mosquitto) to nodes · socket.io to browsers |
+| Tests      | Vitest, colocated `*.spec.ts`                     |
 
 ## Quick start
 

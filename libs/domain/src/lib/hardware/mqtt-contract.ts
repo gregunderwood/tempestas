@@ -42,7 +42,8 @@ export const mqttTopics = {
   sample: (n: NodeId, s: string) => `${MQTT_ROOT}/node/${n}/sensor/${s}/sample`,
   gpioSet: (n: NodeId) => `${MQTT_ROOT}/node/${n}/gpio/set`,
   gpioSync: (n: NodeId) => `${MQTT_ROOT}/node/${n}/gpio/sync`,
-  gpioState: (n: NodeId, pin: number) => `${MQTT_ROOT}/node/${n}/gpio/state/${pin}`,
+  gpioState: (n: NodeId, pin: number) =>
+    `${MQTT_ROOT}/node/${n}/gpio/state/${pin}`,
   gpioResult: (n: NodeId) => `${MQTT_ROOT}/node/${n}/gpio/result`,
   heartbeat: (n: NodeId) => `${MQTT_ROOT}/node/${n}/control/heartbeat`,
   alarm: (n: NodeId) => `${MQTT_ROOT}/node/${n}/alarm`,

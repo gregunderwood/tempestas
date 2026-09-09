@@ -37,14 +37,17 @@ export class NodesController {
   @Put(':id')
   update(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateNodeDto
+    @Body() dto: UpdateNodeDto,
   ): Promise<Node> {
     return this.nodes.update(id, dto);
   }
 
   @Post(':id/admit')
   @HttpCode(200)
-  admit(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AdmitNodeDto): Promise<Node> {
+  admit(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdmitNodeDto,
+  ): Promise<Node> {
     return this.nodes.admit(id, dto);
   }
 

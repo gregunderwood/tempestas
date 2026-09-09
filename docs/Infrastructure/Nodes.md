@@ -30,11 +30,11 @@ WiFi must not be able to inject a temperature reading that starts a combustion b
            (gone; returns as pending on its next hello)
 ```
 
-| Status | Readings | Commands |
-|---|---|---|
-| `pending` | **discarded** | none |
-| `admitted` | persisted | yes |
-| `disabled` | **discarded** | none |
+| Status     | Readings      | Commands |
+| ---------- | ------------- | -------- |
+| `pending`  | **discarded** | none     |
+| `admitted` | persisted     | yes      |
+| `disabled` | **discarded** | none     |
 
 `pending` is inert in both directions. `disabled` is the terminal state for a node that should never
 be believed again — and unlike deleting it, a `hello` cannot bring it back, because **a hello never
@@ -45,11 +45,11 @@ moves status**.
 This split is the whole point of `node-registry.ts`, and `patchFromHello`'s return type enforces it
 by simply not having the other fields:
 
-| Owner | Fields |
-|---|---|
+| Owner                 | Fields                                           |
+| --------------------- | ------------------------------------------------ |
 | The node, via `hello` | `kind`, `capabilities`, `agentVersion`, `bootId` |
-| The node, via its LWT | `online`, `lastSeenAt` |
-| A human, via the API | `status`, `displayName`, `location`, `zoneId` |
+| The node, via its LWT | `online`, `lastSeenAt`                           |
+| A human, via the API  | `status`, `displayName`, `location`, `zoneId`    |
 
 A node that re-announces itself therefore cannot admit itself, un-admit itself, undo a rejection, or
 rename what an operator called it.
@@ -69,14 +69,14 @@ event that needs a human.
 **`hello` from a known slug** refreshes the node-owned fields and classifies the result, which is
 what the log line is for:
 
-| Outcome | Level | Meaning |
-|---|---|---|
-| `rebooted` | log | `bootId` changed. Phase 7 uses this to re-assert pin state |
-| `capabilities-changed` | warn | A device may now be bound to a pin the node no longer exposes |
-| `agent-upgraded` | log | Only the version moved |
-| `seen` | debug | Re-announced, unchanged — must stay quiet or it buries the WARNs |
+| Outcome                | Level | Meaning                                                          |
+| ---------------------- | ----- | ---------------------------------------------------------------- |
+| `rebooted`             | log   | `bootId` changed. Phase 7 uses this to re-assert pin state       |
+| `capabilities-changed` | warn  | A device may now be bound to a pin the node no longer exposes    |
+| `agent-upgraded`       | log   | Only the version moved                                           |
+| `seen`                 | debug | Re-announced, unchanged — must stay quiet or it buries the WARNs |
 
-**Availability** sets `online`. Only an *online* transition updates `lastSeenAt`: leaving it alone on
+**Availability** sets `online`. Only an _online_ transition updates `lastSeenAt`: leaving it alone on
 an LWT is what makes "offline since" answerable at all. Going offline logs at WARN and says the
 thing that matters — **its pin states are now unknown, not off**.
 
@@ -89,10 +89,10 @@ re-announced yet or a stale retained message.
 ```ts
 interface NodeCapabilities {
   contractVersion: 1;
-  gpio?: { pins: number[]; supportsReadback: boolean };   // absent = sensor-only node
-  sensors: SensorCapability[];                            // empty = actuator-only node
-  maxCommandRateHz?: number;                              // an ESP32 handles commands more slowly
-  hasRtc: boolean;                                        // an ESP32 has none: its clock is diagnostic
+  gpio?: { pins: number[]; supportsReadback: boolean }; // absent = sensor-only node
+  sensors: SensorCapability[]; // empty = actuator-only node
+  maxCommandRateHz?: number; // an ESP32 handles commands more slowly
+  hasRtc: boolean; // an ESP32 has none: its clock is diagnostic
 }
 ```
 
@@ -136,9 +136,7 @@ if (!acceptsCommands(device.node.status)) {
 ### ✅ Return a reason, not a boolean, when the caller has to log it
 
 ```ts
-type SampleResolution =
-  | { accepted: true; node: NodeEntity }
-  | { accepted: false; reason: 'unknown-node' | 'pending' | 'disabled' };
+type SampleResolution = { accepted: true; node: NodeEntity } | { accepted: false; reason: 'unknown-node' | 'pending' | 'disabled' };
 ```
 
 Narrow it with `resolution.accepted === false`, not `!resolution.accepted` — the equality comparison
@@ -147,7 +145,7 @@ against the literal is what narrows the union under this TS config.
 ### ❌ Don't let a `hello` write a human-owned field
 
 ```ts
-Object.assign(existing, { ...patch, status: NodeStatus.Admitted });   // ❌ the gate is now theatre
+Object.assign(existing, { ...patch, status: NodeStatus.Admitted }); // ❌ the gate is now theatre
 ```
 
 ### ❌ Don't delete a node to reject it

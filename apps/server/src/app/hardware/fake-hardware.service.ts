@@ -1,6 +1,15 @@
-import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { Subject, type Observable } from 'rxjs';
-import { NodeKind, type NodeCapabilities, type NodeId } from '@tempestas/domain';
+import {
+  NodeKind,
+  type NodeCapabilities,
+  type NodeId,
+} from '@tempestas/domain';
 import {
   HardwareService,
   type NodeAvailability,
@@ -56,13 +65,14 @@ export class FakeHardwareService
 
   constructor(
     private readonly nodes: FakeNodeSpec[] = DEFAULT_FAKE_NODES,
-    private readonly tickMs = 10_000
+    private readonly tickMs = 10_000,
   ) {
     super();
   }
 
   readonly samples$: Observable<SensorSample> = this.samples.asObservable();
-  readonly availability$: Observable<NodeAvailability> = this.availability.asObservable();
+  readonly availability$: Observable<NodeAvailability> =
+    this.availability.asObservable();
   readonly hello$: Observable<NodeHello> = this.hello.asObservable();
 
   /**
@@ -80,10 +90,16 @@ export class FakeHardwareService
     if (this.timer) return;
     for (const n of this.nodes) {
       this.hello.next(this.helloFor(n));
-      this.availability.next({ nodeId: n.nodeId, online: true, at: new Date() });
+      this.availability.next({
+        nodeId: n.nodeId,
+        online: true,
+        at: new Date(),
+      });
     }
     this.timer = setInterval(() => this.tick(), this.tickMs);
-    this.logger.log(`Fake hardware started with ${this.nodes.length} simulated nodes`);
+    this.logger.log(
+      `Fake hardware started with ${this.nodes.length} simulated nodes`,
+    );
   }
 
   onModuleDestroy(): void {
@@ -152,7 +168,8 @@ export class FakeHardwareService
 
     this.minutes = (this.minutes + 1) % (24 * 60);
     // Diurnal baseline, coldest around 05:00 and warmest around 17:00.
-    const diurnal = 18 + 7 * Math.sin(((this.minutes - 300) / 1440) * 2 * Math.PI);
+    const diurnal =
+      18 + 7 * Math.sin(((this.minutes - 300) / 1440) * 2 * Math.PI);
 
     let delta = (diurnal - this.temperature) * 0.05;
     if (burnerOn) delta += 0.25;
@@ -164,7 +181,10 @@ export class FakeHardwareService
     if (fanOn) co2Delta -= 30;
     this.co2 = Math.max(400, Math.min(2500, Math.round(this.co2 + co2Delta)));
 
-    this.humidity = Math.max(20, Math.min(95, this.humidity + (fanOn ? -0.5 : 0.2)));
+    this.humidity = Math.max(
+      20,
+      Math.min(95, this.humidity + (fanOn ? -0.5 : 0.2)),
+    );
 
     for (const node of this.nodes) {
       if (!node.sensorId) continue;
@@ -175,7 +195,10 @@ export class FakeHardwareService
         sensorId: node.sensorId,
         receivedAt: new Date(),
         // The second node sits at the other end of the greenhouse.
-        temperature: node.nodeId === 'sim-esp32' ? this.temperature - 1.5 : this.temperature,
+        temperature:
+          node.nodeId === 'sim-esp32'
+            ? this.temperature - 1.5
+            : this.temperature,
         humidity: Math.round(this.humidity * 10) / 10,
         co2: this.co2,
         nodeSeq: n,
