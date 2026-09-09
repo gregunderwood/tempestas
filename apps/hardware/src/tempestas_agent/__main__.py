@@ -22,6 +22,7 @@ import paho.mqtt.client as mqtt
 from . import contract
 from .agent import Agent, build_backends
 from .config import ConfigError, load
+from .runtime import AlreadyRunning, SingleInstance, sd_notify
 
 log = logging.getLogger("tempestas.agent")
 
@@ -145,6 +146,11 @@ def main() -> int:
         help="fake sensor and GPIO; needs no hardware and touches no chip",
     )
     parser.add_argument("--log-level", default="INFO")
+    parser.add_argument(
+        "--lock-file",
+        default=None,
+        help="advisory lock path (default /run/tempestas/agent-<node>.lock)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -157,6 +163,17 @@ def main() -> int:
     except ConfigError as err:
         log.error("refusing to start: %s", err)
         return 2
+
+    # Before anything is opened or announced: two agents on one node_id fight
+    # over the same MQTT client id, and that reads in the server's log as a node
+    # rebooting in a loop rather than as the misconfiguration it is.
+    lock_path = args.lock_file or f"/run/tempestas/agent-{config.node_id}.lock"
+    lock = SingleInstance(lock_path)
+    try:
+        lock.acquire()
+    except (AlreadyRunning, OSError) as err:
+        log.error("refusing to start: %s", err)
+        return 3
 
     sensor, gpio = build_backends(config, simulated=args.simulated)
     agent = Agent(config, client=None, sensor=sensor, gpio=gpio)
@@ -173,6 +190,10 @@ def main() -> int:
         log.info("no GPIO lines configured: this agent cannot drive a pin at all")
     client.connect(config.mqtt.host, config.mqtt.port, keepalive=config.mqtt.keepalive_s)
     client.loop_start()
+
+    # Readiness is a fact, so report it rather than making whatever is ordered
+    # after this unit guess with a sleep - which is what the old system did.
+    sd_notify("READY=1")
 
     stopping = False
 
@@ -197,6 +218,7 @@ def main() -> int:
             agent.check_deadman()
             time.sleep(config.sensor.sample_interval_s)
     finally:
+        sd_notify("STOPPING=1")
         # MQTT suppresses the will on a graceful disconnect, so say it ourselves
         # or this node is left looking online forever.
         qos, retain = contract.QOS["status"]
@@ -211,6 +233,7 @@ def main() -> int:
         client.disconnect()
         sensor.stop()
         gpio.close()
+        lock.release()
         log.info("stopped")
     return 0
 
