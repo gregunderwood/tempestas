@@ -195,10 +195,10 @@ Two things to read out of the soak, in this order:
 ### Mounting the Pi does not have to wait for the soak
 
 Worth separating two things the plan runs together: **mounting the Pi to the panel is not the same
-as wiring its GPIO.** The Stage B posture is `gpio.lines = []`, which is enforced by the agent
-having no GPIO backend at all - so the Pi can be screwed to the panel, powered, and moved, with the
-relay ribbon simply not connected, and nothing about that posture changes. Leave the relay board
-unpowered too, and there is no path to a relay at all.
+as wiring its GPIO.** The sensor-only posture is `gpio.lines = []`, which makes `gpio.build()`
+return `NoGpio` whatever else is configured - so the Pi can be screwed to the panel, powered, and
+moved, with the relay ribbon simply not connected, and nothing about that posture changes. Leave the
+relay board unpowered too, and there is no path to a relay at all.
 
 That matters because of what the bench soak can and cannot tell us:
 
@@ -231,8 +231,8 @@ The bench sequence is further along than the phase table suggests, because the p
 | 1. Baseline `gpioget` before any change               | ✅ all lines inactive                                 |
 | 2. `gpio=` defaults in `config.txt`, reboot, re-check | ⬜ **not needed on this board** — see open question 2 |
 | 3. Relays connected, watch for clicks during boot     | ✅ all three stayed de-energised through a full boot  |
-| 4. `kill -9` the agent and watch the gap              | ⬜ moot until the agent owns the lines                |
-| 5. Verify the safety surface against the LEDs         | ⬜ needs the `lgpio` backend                          |
+| 4. `kill -9` the agent and watch the gap              | ✅ measured — **there is no gap**, see below          |
+| 5. Verify the safety surface against the LEDs         | 🔄 backend written and claiming; LED pass still to do |
 | 6. Loads one at a time, burner last                   | 🔄 **channel 6 switches its load; 7 and 8 do not**    |
 
 Channels 7 and 8 energise but no power reaches their outlets — an output-side wiring fault, not
@@ -240,9 +240,20 @@ diagnosed yet, and not blocking: both are sound from the controller's side. The 
 moves to **channel 6** with the standing condition that only one of its two ganged outlets is ever
 occupied. See [Hardware](Hardware.md#elantriss-own-relay-board).
 
-GPIO is **not** implemented and that is deliberate — see
-[Node Agent](Infrastructure/Node%20Agent.md#the-stage-b-posture). Deployment (a systemd unit, the
-`flock`, `Type=notify`, `OOMScoreAdjust`) is also still to do; the agent has only been run in the
+**Step 4 turned up the opposite of what the plan assumed.** A `SIGKILL` leaves the pad an output
+still driving its last level, with its bias intact — verified with `pinctrl get` on an unwired pin.
+There is no float-back and therefore no gap. The hazard it replaces is worse in one way and better
+in another: a crash at the safe level _holds_ the safe level, but a crash with the burner energised
+holds that indefinitely, with the node-side dead-man dead alongside the process. systemd restarting
+the agent is the cover, since the claim drives the failsafe. Written up in
+[Safety](Safety.md#the-boot-window-hazard).
+
+`LgpioBackend` is implemented, tested, and verified against the real chip on elantris: it resolves
+`pinctrl-bcm2711` by label through the kernel's chipinfo ioctl, claims BCM 5/6/4 at their
+de-energised level, reads them back, and refuses to start when a second process holds a line. It
+has **not** driven a relay from an MQTT command end to end yet. See
+[Node Agent](Infrastructure/Node%20Agent.md#the-gpio-backend). Deployment (a systemd unit, the
+`flock`, `Type=notify`, `OOMScoreAdjust`) is still to do; the agent has only been run in the
 foreground.
 
 The samples currently reach elantris's own broker, which is loopback-only, so they do not reach the

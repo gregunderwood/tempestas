@@ -10,15 +10,16 @@ It lives in this repository on purpose: a change to the contract touches both si
 commit rather than becoming a two-repo dance that will eventually be done wrong at 2 a.m.
 
 > [!note] Status
-> Stage B. The agent runs against the real SCD41 on elantris and publishes real samples.
-> **It has no GPIO backend at all** — see [The Stage B posture](#the-stage-b-posture).
+> Stage C. The agent runs against the real SCD41 on elantris and publishes real samples, and
+> `LgpioBackend` claims the three wired relay lines on the real chip. It has not yet driven a
+> relay from a command end to end — see [The GPIO backend](#the-gpio-backend).
 
 ## Key files
 
 - [../../apps/hardware/src/tempestas_agent/contract.py](../../apps/hardware/src/tempestas_agent/contract.py) — the Python mirror of the MQTT contract
 - [../../apps/hardware/src/tempestas_agent/agent.py](../../apps/hardware/src/tempestas_agent/agent.py) — announce, sample, judge commands, dead-man
 - [../../apps/hardware/src/tempestas_agent/sensor.py](../../apps/hardware/src/tempestas_agent/sensor.py) — raw SCD4x over I²C, and the closed-loop simulator
-- [../../apps/hardware/src/tempestas_agent/gpio.py](../../apps/hardware/src/tempestas_agent/gpio.py) — the seam where a relay backend will go
+- [../../apps/hardware/src/tempestas_agent/gpio.py](../../apps/hardware/src/tempestas_agent/gpio.py) — the relay backends: `NoGpio`, `SimulatedGpio`, `LgpioBackend`
 - [../../apps/hardware/agent.example.toml](../../apps/hardware/agent.example.toml) — every option, with the reasoning
 
 ## Running it
@@ -45,22 +46,53 @@ It has been verified to bite: changing `sample/1` to `sample/2` in the TypeScrip
 flipping `gpioSet` to `retain: true`, fails the Python suite. A formatting change does not
 — prettier wrapping a builder onto two lines is not drift, and the regex allows for it.
 
-## The Stage B posture
+## The sensor-only posture
 
 **With `gpio.lines` empty the agent has no GPIO whatsoever.** This is structural, not a flag:
 
-1. `gpio.build()` returns `NoGpio`, and the real backend does not exist — asking for one
-   raises `NotImplementedError` naming Stage C.
+1. `gpio.build()` returns `NoGpio` regardless of what else is configured.
 2. No chip is opened. Nothing is claimed.
 3. `capabilities` omits `gpio` entirely, so the server's pin check refuses to create a
    device on this node at all, and no pin here is addressable.
 4. A write to `NoGpio` **raises** rather than quietly doing nothing.
 
-The real `lgpio` backend is deliberately unwritten. Writing untested relay-driving code now
-would produce something that looks ready before the boot-window hazard has been measured —
-and that hazard is the gate: BCM 9–27 default to pull-down and four of the five relays are
-active-LOW, so an unclaimed line commands its relay **on**. See
-[Safety](../Safety.md#the-boot-window-hazard).
+## The GPIO backend
+
+`LgpioBackend` is the real one, over the `lgpio` chardev API. It is an optional dependency
+(`uv sync --extra gpio`) because it needs `swig` and `liblgpio-dev` to build, which a Mac
+does not have and a sensor-only node does not need.
+
+**The chip is selected by label, never by number.** `/dev/gpiochip4` is a symlink to
+`gpiochip0` on a Pi 4 and a real chip on a Pi 5; one build has to be right on both. The label
+comes from the kernel's own `GPIO_GET_CHIPINFO` ioctl — the same thing `gpiodetect` reads —
+and a label that is not present refuses to start, naming what was found. Opening the wrong
+chip would not fail: it would drive line 5 of `raspberrypi-exp-gpio` and report success.
+
+### Three things measured on the hardware, not read in a datasheet
+
+Each one contradicts what was assumed, and each has a test and a comment next to the code.
+
+| Behaviour                                                                                                                    | What it forces                                                                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `gpio_claim_output` sets direction, level **and** bias in one call                                                           | Claim at the **failsafe** level, so the pad is never an output at a level nobody chose                                    |
+| A **second claim on a line this handle already holds keeps the old level** and returns success                               | Claim happens exactly once; a second `claim()` raises rather than being a silent no-op                                    |
+| **Releasing does not revert the pad.** `gpio_free` and `SIGKILL` both leave it an output driving its last level, bias intact | See [Safety](../Safety.md#the-boot-window-hazard) — this is why claim-at-failsafe is the recovery, not state preservation |
+
+### The rest of the contract
+
+- **The bias pulls toward the declared failsafe level**, not toward a fixed direction —
+  `SET_PULL_UP` for an active-LOW relay, `SET_PULL_DOWN` for an active-HIGH one. Generalised so
+  a future board with mixed polarity does not depend on anyone remembering.
+- **The claim readback is a startup gate.** A line that claims successfully but reads back at the
+  wrong level refuses to start. A broken board is cheapest to find before the first command.
+- **`level()` reads the pad**, never a cache, and returns `None` on a read error. Unknown is a real
+  answer; reporting a burner relay as off because a read failed is not.
+- **`failsafe()` deliberately never raises.** The dead-man drives the failsafe and _then_ publishes
+  its alarm; a raise here would lose the one message a human needs at that moment. Every line is
+  attempted even after an earlier one fails, and each failure logs at ERROR.
+- **`close()` drives the failsafe and stops.** No `gpio_free`, no `gpiochip_close` — freeing is the
+  operation that hurt the old system, and there is nothing to gain by it when the process is about
+  to exit anyway.
 
 ## Guards on the command path
 
@@ -131,6 +163,6 @@ later. `tests/test_sensor.py` pins that ordering with a fake bus that records co
 ## When to update this file
 
 - A guard is added to or changed on the command path
-- The GPIO backend gains a real implementation (and the Stage B posture stops being true)
+- A guard, bias rule or failsafe behaviour in the GPIO backend changes
 - The sensor driver changes, or another sensor kind is supported
 - The dead-man behaviour or its configuration changes
