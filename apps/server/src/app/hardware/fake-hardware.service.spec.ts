@@ -1,4 +1,5 @@
 import { firstValueFrom, toArray, take } from 'rxjs';
+import { ApiErrorCode } from '@tempestas/domain';
 import {
   DEFAULT_FAKE_NODES,
   FakeHardwareService,
@@ -88,3 +89,22 @@ async function sampleAfterTicks(hw: FakeHardwareService, n: number) {
   sub.unsubscribe();
   return last;
 }
+
+// The fake stands in for a real node in every local dev session, so an
+// ordinary condition must not reach the client as an opaque 500. Same reasoning
+// as the MQTT driver.
+describe('FakeHardwareService failure codes', () => {
+  it('reports an unknown node as unreachable hardware, with a typed code', async () => {
+    const hw = new FakeHardwareService();
+    await expect(hw.setPin('nope', BURNER)).rejects.toMatchObject({
+      code: ApiErrorCode.HardwareUnreachable,
+    });
+  });
+
+  it('reports a pin the node does not expose with its own code', async () => {
+    const hw = new FakeHardwareService();
+    await expect(hw.setPin('sim-esp32', BURNER)).rejects.toMatchObject({
+      code: ApiErrorCode.PinNotAvailable,
+    });
+  });
+});

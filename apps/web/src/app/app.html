@@ -1,2 +1,34 @@
-<temp-nx-welcome></temp-nx-welcome>
-<router-outlet></router-outlet>
+<mat-toolbar color="primary" class="temp-toolbar">
+  <span class="temp-brand">tempestas</span>
+
+  <nav class="temp-nav">
+    <a mat-button routerLink="/dashboard" routerLinkActive="temp-active">Dashboard</a>
+    <a mat-button routerLink="/readings" routerLinkActive="temp-active">Readings</a>
+    <a mat-button routerLink="/devices" routerLinkActive="temp-active">Devices</a>
+    <a mat-button routerLink="/nodes" routerLinkActive="temp-active">Nodes</a>
+  </nav>
+
+  <span class="temp-spacer"></span>
+
+  <!-- Live vs not is worth showing always: a dashboard that has quietly stopped
+       updating looks exactly like one where nothing is happening. -->
+  <span class="temp-link" [class.temp-link-down]="!connected()">
+    <mat-icon>{{ connected() ? 'wifi' : 'wifi_off' }}</mat-icon>
+    <span class="temp-link-label">{{ connected() ? 'live' : 'offline' }}</span>
+  </span>
+</mat-toolbar>
+
+@if (sensorStale()) {
+  <div class="temp-banner" role="alert">
+    <mat-icon>warning</mat-icon>
+    <div>
+      <strong>Sensors have gone quiet.</strong>
+      Automation is holding its last state rather than guessing — nothing is being switched on or
+      off. Affected: {{ staleRoles() }}.
+    </div>
+  </div>
+}
+
+<main class="tempestas-page">
+  <router-outlet />
+</main>
