@@ -314,11 +314,19 @@ Answer each before its stage, not before starting.
    greenhouse Pi 5's mystery channel. elantris has its own panel with three known outlet-wired
    relays and five unwired ones, so nothing unidentified is in reach. The question still stands for
    the Pi 5 itself, before that board is ever touched again.
-2. **Does elantris's relay board have input pull-ups, is it active-LOW, and where is its JD-VCC
-   jumper?** This decides whether external pull-ups are mandatory and whether the coils are isolated
-   from the Pi's 5 V rail. The polarity and jumper are answerable from a close-up photo of the
-   header end of the board; the pull-ups want ten minutes with a multimeter. **Gates all of Stage
-   C.** See [Hardware](Hardware.md#elantriss-own-relay-board).
+2. **Partly answered from close-ups (2026-09-09).** The board is 8× Songle SRD-05VDC-SL-C,
+   opto-isolated, header `Gnd In1..In8 Vcc`, and the `Vcc`–`JDVcc` jumper is **fitted** — the
+   shipped default, which ties the coil supply to the logic supply. Two things follow and one
+   remains:
+   - **Wire the logic side to 3.3 V, not 5 V**, and remove that jumper. A 3.3 V high against a 5 V
+     LED anode leaves ~0.5 mA flowing, which can hold an opto partly on so the relay never cleanly
+     releases. See [Hardware](Hardware.md#wire-the-logic-side-to-33-v-not-5-v).
+   - **The boot window may be far less dangerous here than the plan assumed.** Opto isolation plus a
+     ~1 kΩ series resistor means the Pi's ~50 kΩ pull-down can only deliver ~75 µA, which should not
+     turn an optocoupler on.
+   - **Still to confirm, and it is a one-minute bench test:** power the board with no load, leave an
+     input disconnected and check the relay stays released, then tie it to ground and check it
+     clicks. That proves the polarity empirically instead of inferring it. **Gates Stage C.**
 3. **How long should a node hold the burner on at night after losing the brain?** The one dead-man
    case that isn't obvious, since the burner is the night heater. Long enough to ride out a restart
    or a WiFi blip; short enough that a dead controller doesn't leave it burning until morning.
