@@ -222,6 +222,24 @@ Which suggests a better sequence than the plan's, and it is strictly less work:
 Step 4 is a better instrument than the plan's step 4, because "different rooms, so expect an offset"
 stops being a caveat and becomes a measurement.
 
+### Stage C, partially done
+
+The bench sequence is further along than the phase table suggests, because the panel arrived built:
+
+| Stage C step                                          | State                                                 |
+| ----------------------------------------------------- | ----------------------------------------------------- |
+| 1. Baseline `gpioget` before any change               | ✅ all lines inactive                                 |
+| 2. `gpio=` defaults in `config.txt`, reboot, re-check | ⬜ **not needed on this board** — see open question 2 |
+| 3. Relays connected, watch for clicks during boot     | ✅ all three stayed de-energised through a full boot  |
+| 4. `kill -9` the agent and watch the gap              | ⬜ moot until the agent owns the lines                |
+| 5. Verify the safety surface against the LEDs         | ⬜ needs the `lgpio` backend                          |
+| 6. Loads one at a time, burner last                   | 🔄 **channel 6 switches its load; 7 and 8 do not**    |
+
+Channels 7 and 8 energise but no power reaches their outlets — an output-side wiring fault, not
+diagnosed yet, and not blocking: both are sound from the controller's side. The burner therefore
+moves to **channel 6** with the standing condition that only one of its two ganged outlets is ever
+occupied. See [Hardware](Hardware.md#elantriss-own-relay-board).
+
 GPIO is **not** implemented and that is deliberate — see
 [Node Agent](Infrastructure/Node%20Agent.md#the-stage-b-posture). Deployment (a systemd unit, the
 `flock`, `Type=notify`, `OOMScoreAdjust`) is also still to do; the agent has only been run in the
@@ -314,19 +332,18 @@ Answer each before its stage, not before starting.
    greenhouse Pi 5's mystery channel. elantris has its own panel with three known outlet-wired
    relays and five unwired ones, so nothing unidentified is in reach. The question still stands for
    the Pi 5 itself, before that board is ever touched again.
-2. **Partly answered from close-ups (2026-09-09).** The board is 8× Songle SRD-05VDC-SL-C,
-   opto-isolated, header `Gnd In1..In8 Vcc`, and the `Vcc`–`JDVcc` jumper is **fitted** — the
-   shipped default, which ties the coil supply to the logic supply. Two things follow and one
-   remains:
-   - **Wire the logic side to 3.3 V, not 5 V**, and remove that jumper. A 3.3 V high against a 5 V
-     LED anode leaves ~0.5 mA flowing, which can hold an opto partly on so the relay never cleanly
-     releases. See [Hardware](Hardware.md#wire-the-logic-side-to-33-v-not-5-v).
-   - **The boot window may be far less dangerous here than the plan assumed.** Opto isolation plus a
-     ~1 kΩ series resistor means the Pi's ~50 kΩ pull-down can only deliver ~75 µA, which should not
-     turn an optocoupler on.
-   - **Still to confirm, and it is a one-minute bench test:** power the board with no load, leave an
-     input disconnected and check the relay stays released, then tie it to ground and check it
-     clicks. That proves the polarity empirically instead of inferring it. **Gates Stage C.**
+2. ~~**Relay board polarity, pull-ups and JD-VCC.**~~ **Answered on the bench, 2026-09-09.**
+   - **Active LOW, measured.** Driving a line low energises; releasing it de-energises. Confirmed on
+     all three wired channels.
+   - **The boot window is clean on this board.** BCM 4, 5 and 6 come up as unclaimed inputs held
+     high by their internal pull-ups, and all three relays stayed de-energised through a full boot,
+     observed directly. The opto isolation plus a ~1.8 kΩ series resistor means the Pi's ~50 kΩ
+     pull-down could never deliver the milliamps an optocoupler needs. The firmware `gpio=` defaults
+     and external pull-ups drop from mandatory to belt-and-braces **on this board** — they remain
+     mandatory on the greenhouse Pi's directly-driven one.
+   - **Logic runs at 5 V with the jumper fitted**, reversing an earlier recommendation in these
+     docs. See [Hardware](Hardware.md#drive-the-logic-side-at-5-v-jumper-fitted).
+
 3. **How long should a node hold the burner on at night after losing the brain?** The one dead-man
    case that isn't obvious, since the burner is the night heater. Long enough to ride out a restart
    or a WiFi blip; short enough that a dead controller doesn't leave it burning until morning.

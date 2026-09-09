@@ -32,12 +32,12 @@ mounts. Three channels are wired:
 
 **As actually wired on the panel** (2026-09-09):
 
-| Relay channel | `In`        | Pi pin | BCM | Switches                            |
-| ------------- | ----------- | ------ | --- | ----------------------------------- |
-| **6**         | `In6`       | 29     | 5   | **both** outlets of one box, ganged |
-| **7**         | `In7`       | 31     | 6   | one outlet — **CO2 generator**      |
-| **8**         | `In8`       | 7      | 4   | one outlet — spare                  |
-| 1–5           | `In1`–`In5` | —      | —   | **unwired** — free for bench use    |
+| Relay channel | `In`        | Pi pin | BCM | Switches                                                |
+| ------------- | ----------- | ------ | --- | ------------------------------------------------------- |
+| **6**         | `In6`       | 29     | 5   | **both** outlets of one box, ganged — **CO2 generator** |
+| **7**         | `In7`       | 31     | 6   | one outlet — ⚠ load side unproven                       |
+| **8**         | `In8`       | 7      | 4   | one outlet — ⚠ load side unproven                       |
+| 1–5           | `In1`–`In5` | —      | —   | **unwired** — free for bench use                        |
 
 The three BCM pins are unchanged from the recommendation — 4, 5 and 6, all of which default to
 pull-up at reset — but they landed on a different permutation of the channels. Electrically that is
@@ -52,11 +52,23 @@ any arithmetic.
 Channel _N_ is driven by terminal `In`_N_, so wiring to `In1`–`In3` would drive three unconnected
 relays and switch nothing, which presents as a software fault rather than a wiring one.
 
-**The burner goes on channel 7**, one of the two single outlets, reached through **BCM 6 / pin 31**.
-Channel 6 gangs both outlets of its box, which is the wrong shape for a combustion appliance —
-nothing else should be capable of being switched with it.
+**The burner goes on channel 6**, reached through **BCM 5 / pin 29** — not the choice the reasoning
+below would have made, but the choice the hardware forced.
 
-BCM 4's 1-Wire caveat now falls on channel 8, the spare, which is the harmless place for it.
+Bench-tested 2026-09-09: **channel 6 switches its load reliably. Channels 7 and 8 energise — the
+coil pulls in and the indicator lights — but no power reaches their outlets.** The fault is on the
+output side of those two channels and is not yet diagnosed; the likeliest candidate is the load
+landing on `NC` instead of `NO`, which a continuity check across each screw block will settle. Both
+channels are sound from the controller's point of view, so nothing in software is blocked by it.
+
+⚠ **Channel 6 gangs both outlets of its box, and the burner is now on it.** That is the shape this
+document previously argued against, so the mitigation has to be explicit: **only one of the two
+outlets is ever occupied.** Anything plugged into the second is energised whenever the burner is.
+That is a procedural control where a physical one would be better — fit a blank insert or tape over
+the unused half, and label the box. The moment a second appliance appears there, it is being
+switched by a combustion controller that knows nothing about it.
+
+Once 7 or 8 is fixed, move the burner to a single outlet and this caveat goes away.
 
 ⚠ **Label the ganged box.** Two outlets that switch together look exactly like two independent
 outlets. Anything plugged into the second one is controlled by whatever the first one is for.
@@ -87,32 +99,59 @@ space heater and asking the contacts for more than they can break. The load side
 the relay, not by the receptacle, and that is not visible to anyone looking at the wall plate. Label
 the box.
 
-### Wire the logic side to 3.3 V, not 5 V
+### Drive the logic side at 5 V, jumper fitted
 
-This is the one wiring decision worth getting right before anything is connected, and it follows
-from the board being 5 V and the Pi being 3.3 V.
+**This reverses an earlier recommendation in this file, which was wrong.** The reasoning and the
+correction are both kept, because the wrong version was argued confidently and someone will
+otherwise re-derive it.
 
-On an active-LOW opto board the input pin sits at the LED's cathode, with the anode at `Vcc` through
-a series resistor. Pulling the input to 0 V lights the LED and energises the relay. To _de_-energise,
-the Pi drives the pin high — but the Pi's high is **3.3 V**, and if `Vcc` is 5 V there is still
-about `(5 − 3.3 − 1.2) / 1 kΩ ≈ 0.5 mA` flowing through the LED. That is enough to hold some
-optocouplers partly on, so the relay may buzz or fail to release.
+As wired and working:
 
-The fix is standard, and it is why the jumper matters:
+| Pi pin | To    |                                                |
+| ------ | ----- | ---------------------------------------------- |
+| **4**  | `Vcc` | 5 V — logic **and**, via the jumper, the coils |
+| 25     | `Gnd` | one ground net on the board                    |
+| 29     | `In6` | BCM 5                                          |
+| 31     | `In7` | BCM 6                                          |
+| 7      | `In8` | BCM 4                                          |
 
-1. **Remove the `Vcc`–`JDVcc` jumper.** As shipped it ties the coil supply to the logic supply, so
-   the coils draw through whatever feeds `Vcc` and the opto isolation is defeated for the supply.
-2. **`Vcc` (10-pin header) → the Pi's 3.3 V**, `Gnd` → Pi ground. Now the Pi's high equals the LED's
-   anode voltage, so a high is _zero_ volts across the LED and the relay releases cleanly.
-3. **`JDVcc` → the Pi's 5 V (pin 4).** That is one wire and no second ground: the board has a single
-   ground net, already tied to the Pi at pin 25. Three Songle coils is roughly **220 mA**, which a
-   Pi 4 on a decent 3 A supply carries without complaint, and it lands on the 5 V input rail rather
-   than the 3.3 V regulator, so the logic side is unaffected.
+The `Vcc`–`JDVcc` jumper stays **fitted**.
 
-   Two conditions on that. Use a **good PSU** — coil inrush on a marginal supply is how an SD card
-   gets corrupted — and keep the lead short. And **revisit it if more channels are ever wired**:
-   eight coils would be ~600 mA, at which point a separate brick stops being optional. The board's
-   flyback diodes (D1–D8) handle the switching transients.
+#### What the wrong version argued
+
+On an active-LOW opto board the input sits at the LED's cathode with the anode at `Vcc`. With
+`Vcc` at 5 V, the Pi's 3.3 V "off" still leaves about `(5 − 3.3 − 1.2) / 1.8 kΩ ≈ 0.5 mA` through
+the LED, which can hold an optocoupler partly on so the relay never cleanly releases. Running the
+logic at 3.3 V makes "off" zero volts across the LED. That effect is real.
+
+#### Why it was the wrong trade here
+
+It fixes a release problem this board does not have, and creates a pull-in problem it does. The
+LED drive current when the pin is pulled low, with the `182` (1.8 kΩ) resistors this board carries:
+
+| `Vcc` | LED current |
+| ----- | ----------- |
+| 5 V   | **2.11 mA** |
+| 3.3 V | **1.17 mA** |
+
+A PC817 at ~1 mA transfers poorly, so its output transistor does not saturate, so the coil driver
+only partly turns on and the coil sits near its pull-in threshold. On a 5 V Songle coil that is the
+difference between switching and almost switching.
+
+#### The residual, which is real and accepted
+
+Pi GPIOs are **not 5 V tolerant**. When a pin is not driving — at boot, or unclaimed — the board
+pulls it up toward `Vcc` through that resistor and the Pi's input protection clamps it near 3.9 V.
+It is out of spec, it is what essentially every Pi-plus-relay-board does, and the pull-up-at-reset
+pins chosen here make it milder. The clean fix, if it is ever wanted, is a buffer or a relay board
+designed for 3.3 V logic — not a configuration change.
+
+#### The lesson worth keeping
+
+The symptom that triggered the 3.3 V change — "relays click, load does not follow" — turned out to
+be **the same on both voltages**, and was an output-side wiring fault on two channels. The voltage
+was never the cause. Check that a symptom actually tracks a change before attributing it to that
+change.
 
 ### The boot window may be much less dangerous on this board
 
@@ -184,7 +223,7 @@ not the relay channel:
 | ----------------- | ----------------------------------------------- |
 | `nodeId`          | `elantris` (the slug)                           |
 | `name`            | CO2 Generator                                   |
-| `gpio`            | **6** — BCM 6 (pin 31), which is `In7`, relay 7 |
+| `gpio`            | **5** — BCM 5 (pin 29), which is `In6`, relay 6 |
 | `onLevel`         | **0** — active LOW, _pending the bench test_    |
 | `onDelayDuration` | 300 (the anti-short-cycle minimum-off)          |
 | `role`            | `co2_generator`                                 |
