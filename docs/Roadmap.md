@@ -232,7 +232,7 @@ The bench sequence is further along than the phase table suggests, because the p
 | 2. `gpio=` defaults in `config.txt`, reboot, re-check | ⬜ **not needed on this board** — see open question 2 |
 | 3. Relays connected, watch for clicks during boot     | ✅ all three stayed de-energised through a full boot  |
 | 4. `kill -9` the agent and watch the gap              | ✅ measured — **there is no gap**, see below          |
-| 5. Verify the safety surface against the LEDs         | 🔄 backend written and claiming; LED pass still to do |
+| 5. Verify the safety surface against the LEDs         | ✅ all three, driven from the agent's own backend     |
 | 6. Loads one at a time, burner last                   | 🔄 **channel 6 switches its load; 7 and 8 do not**    |
 
 Channels 7 and 8 energise but no power reaches their outlets — an output-side wiring fault, not
@@ -250,8 +250,15 @@ the agent is the cover, since the claim drives the failsafe. Written up in
 
 `LgpioBackend` is implemented, tested, and verified against the real chip on elantris: it resolves
 `pinctrl-bcm2711` by label through the kernel's chipinfo ioctl, claims BCM 5/6/4 at their
-de-energised level, reads them back, and refuses to start when a second process holds a line. It
-has **not** driven a relay from an MQTT command end to end yet. See
+de-energised level, reads them back, and refuses to start when a second process holds a line.
+
+**Step 5 passed against the LEDs**, driven from that backend via
+[../tools/relay-check.py](../tools/relay-check.py): BCM 6 → `DS7`, BCM 4 → `DS8`, BCM 5 → `DS6`,
+each observed, never two at once. That confirms the permutation in the wiring table through the
+agent's own code path rather than through `gpioset`. It also confirms the property the whole design
+leans on: **claiming at the failsafe releases whatever the previous run left energised** — going
+7 → 8 → 6, each step dropped the one before it without being told to. Nothing was plugged into any
+outlet. GPIO has **not** yet been driven from an MQTT command end to end. See
 [Node Agent](Infrastructure/Node%20Agent.md#the-gpio-backend). Deployment (a systemd unit, the
 `flock`, `Type=notify`, `OOMScoreAdjust`) is still to do; the agent has only been run in the
 foreground.
