@@ -30,21 +30,33 @@ A plywood panel carrying: two 2-gang metal outlet boxes (four outlets), a blue 8
 board, two barrier terminal blocks, a mains inlet box, and an empty set of standoffs where the Pi
 mounts. Three channels are wired:
 
+**As actually wired on the panel** (2026-09-09):
+
 | Relay channel | `In`        | Pi pin | BCM | Switches                            |
 | ------------- | ----------- | ------ | --- | ----------------------------------- |
-| **6**         | `In6`       | 7      | 4   | **both** outlets of one box, ganged |
-| **7**         | `In7`       | 29     | 5   | one outlet — **CO2 generator**      |
-| **8**         | `In8`       | 31     | 6   | one outlet — spare                  |
+| **6**         | `In6`       | 29     | 5   | **both** outlets of one box, ganged |
+| **7**         | `In7`       | 31     | 6   | one outlet — **CO2 generator**      |
+| **8**         | `In8`       | 7      | 4   | one outlet — spare                  |
 | 1–5           | `In1`–`In5` | —      | —   | **unwired** — free for bench use    |
+
+The three BCM pins are unchanged from the recommendation — 4, 5 and 6, all of which default to
+pull-up at reset — but they landed on a different permutation of the channels. Electrically that is
+identical and not worth rewiring.
+
+⚠ **There is no longer a mnemonic to fall back on.** The earlier `In = BCM + 2` rule is gone; the
+mapping is arbitrary and only this table is authoritative. Which makes the empirical check below
+matter more, not less: drive each pin low in turn and note which `DS` lights, rather than trusting
+any arithmetic.
 
 ⚠ **The wired channels are 6, 7 and 8 — the three at one end of the board, not the first three.**
 Channel _N_ is driven by terminal `In`_N_, so wiring to `In1`–`In3` would drive three unconnected
 relays and switch nothing, which presents as a software fault rather than a wiring one.
 
-**The burner goes on channel 7**, one of the two single outlets. Channel 6 gangs both outlets of its
-box, which is the wrong shape for a combustion appliance — nothing else should be capable of being
-switched with it. That pairing also puts the ganged channel on BCM 4, the pin furthest from the
-others and the one carrying the 1-Wire caveat, which is the right place for the least-used line.
+**The burner goes on channel 7**, one of the two single outlets, reached through **BCM 6 / pin 31**.
+Channel 6 gangs both outlets of its box, which is the wrong shape for a combustion appliance —
+nothing else should be capable of being switched with it.
+
+BCM 4's 1-Wire caveat now falls on channel 8, the spare, which is the harmless place for it.
 
 ⚠ **Label the ganged box.** Two outlets that switch together look exactly like two independent
 outlets. Anything plugged into the second one is controlled by whatever the first one is for.
@@ -168,14 +180,14 @@ Two things this table settles:
 Once the bench test has confirmed the polarity, this is the row — note `gpio` is the **BCM** number,
 not the relay channel:
 
-| field             | value                                        |
-| ----------------- | -------------------------------------------- |
-| `nodeId`          | `elantris` (the slug)                        |
-| `name`            | CO2 Generator                                |
-| `gpio`            | **5** — BCM 5, which is `In7`, relay 7       |
-| `onLevel`         | **0** — active LOW, _pending the bench test_ |
-| `onDelayDuration` | 300 (the anti-short-cycle minimum-off)       |
-| `role`            | `co2_generator`                              |
+| field             | value                                           |
+| ----------------- | ----------------------------------------------- |
+| `nodeId`          | `elantris` (the slug)                           |
+| `name`            | CO2 Generator                                   |
+| `gpio`            | **6** — BCM 6 (pin 31), which is `In7`, relay 7 |
+| `onLevel`         | **0** — active LOW, _pending the bench test_    |
+| `onDelayDuration` | 300 (the anti-short-cycle minimum-off)          |
+| `role`            | `co2_generator`                                 |
 
 ⚠ **`Extra Relay` (BCM 12) is unidentified and active-LOW.** `on_delay_duration = 0` suggests
 something benign, but until somebody traces the wire, treat it as hazardous and do not wire it to
