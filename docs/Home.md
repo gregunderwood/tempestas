@@ -25,6 +25,7 @@ the greenhouse for eight years.
 - [[Rules and Climate]] — the control law, thresholds, DST
 - [[Hardware]] — pins, polarity, relays, the SCD4x
 - [[Roadmap]] — phases, what is done, open questions
+- [[Web App]] — the dashboard, error handling, the stale-sensor banner
 
 ### Infrastructure
 

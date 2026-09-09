@@ -6,11 +6,13 @@ import {
 } from '@nestjs/common';
 import { Subject, type Observable } from 'rxjs';
 import {
+  ApiErrorCode,
   NodeKind,
   type NodeCapabilities,
   type NodeId,
 } from '@tempestas/domain';
 import {
+  HardwareError,
   HardwareService,
   type NodeAvailability,
   type NodeHello,
@@ -145,10 +147,22 @@ export class FakeHardwareService
   }
 
   async setPin(nodeId: NodeId, command: PinCommand): Promise<void> {
+    // Typed failures, for the same reason the MQTT driver has them: a fake that
+    // throws a bare Error turns an ordinary condition into an opaque 500, and
+    // this is the driver every developer runs against locally.
     const node = this.nodes.find((n) => n.nodeId === nodeId);
-    if (!node) throw new Error(`Unknown simulated node ${nodeId}`);
+    if (!node) {
+      throw new HardwareError(
+        ApiErrorCode.HardwareUnreachable,
+        `Unknown simulated node ${nodeId}; the fake driver only knows ` +
+          this.nodes.map((n) => n.nodeId).join(', '),
+      );
+    }
     if (!node.pins.includes(command.pin)) {
-      throw new Error(`Node ${nodeId} does not expose pin ${command.pin}`);
+      throw new HardwareError(
+        ApiErrorCode.PinNotAvailable,
+        `Node ${nodeId} does not expose pin ${command.pin}`,
+      );
     }
     this.pinState.set(`${nodeId}:${command.pin}`, command.level);
   }
