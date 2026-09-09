@@ -21,7 +21,7 @@ Every phase ends in something runnable. **Phases 1–7 need no hardware and no s
 | 4   | Devices module, pure `device-state.ts`, `FakeHardwareService`, interlock tests              | **done**                | CRUD + on/off/force-on via curl · a second `POST /on` returns **409** with `canTurnOnAt`                                                                                                  |
 | 4.5 | **Node registry** — `hello` ingest, LWT → online, pending/admit lifecycle                   | **done**                | a `hello` for an unknown slug → **pending** row · a sample from it is **discarded** · admit → samples persist                                                                             |
 | 5   | Rules engine (pure) + `ClimateResolver` + `enabledRoles` + tests                            | **done**                | with `enabledRoles: ['co2_generator']` and a lights device present, dropping the fake temp to 20 °C drives **only** the burner                                                            |
-| 6   | Readings query surface, stats, retention cron, realtime gateway, health                     | **next**                | a socket client gets `reading:latest` every ~10 s and `device:state` on toggle                                                                                                            |
+| 6   | Readings query surface, stats, retention cron, realtime gateway, health                     | **done**                | a socket client gets `reading:latest` every ~10 s and `device:state` on toggle                                                                                                            |
 | 7   | `MqttHardwareService`; fake driver spawns **two virtual nodes** with different capabilities |                         | `mosquitto_sub -t 'tempestas/v1/node/+/#' -v` shows a **non-retained** `gpio/set` · hand-publish a sample → persists → evaluates → pushes · `mosquitto_pub -r` is dropped **and alarmed** |
 | 8   | Python sidecar on elantris: sensor first, then GPIO                                         |                         | real SCD4x samples arriving over MQTT and landing in Postgres                                                                                                                             |
 | 9   | Angular shell, routes, API services, error interceptor, M3 theme                            |                         | an induced 409 raises a snackbar; no `{error}`-in-200 handling anywhere in the source                                                                                                     |
@@ -64,6 +64,24 @@ build, because every test mocked the repository that the constraint lives in.
 Coverage thresholds were also failing, and had been unrun since they were written in phase 1. They
 now pass at 98.8% lines / 100% functions over `app/devices` and `app/rules`, and `--coverage` is
 part of the documented gate.
+
+### What phase 6 decided
+
+**`sensor_readings` will not be partitioned.** The plan called for range-partitioning by month from
+day one, but Postgres requires a unique constraint on a partitioned table to include every partition
+key column — and adding `created_at` to the QoS-1 dedupe key destroys it, since a redelivered
+duplicate carries a different `created_at`. Duplicate rows mean duplicate rules evaluations, so the
+dedupe wins. At 90-day retention this table is ~1.5M rows steady state, which needs no partitioning.
+Revisit if retention passes a year or the node count reaches double figures.
+
+**Insert batching is deferred, not forgotten.** Buffering 6 samples and writing every 60 s would cut
+commits 6×, but the rules engine reads the latest reading per node from this table every 10 s — a
+60 s buffer puts every control decision up to a minute behind the sensor and adds a crash window.
+If SD write volume becomes binding, boot from a USB3 SSD (open question 5) instead.
+
+**Stats windows are settled**, which closes open question 7: `to` is never in the future, `days=n`
+is calendar-aligned through the zone's timezone, no parameters means a rolling 24 hours, and a
+reversed range is refused rather than swapped.
 
 Phase 7 is the highest-value checkpoint in the plan: it validates the entire node contract **before
 any sidecar exists**, and the two-virtual-node trick proves the multi-node path with zero hardware.
@@ -173,8 +191,9 @@ Answer each before its stage, not before starting.
    question permanently.
 6. **Confirm one dashboard, not one per node.** The web UI is served only by elantris; other nodes
    are agents with no UI.
-7. **Stats default window** — default to `now - 24h → now` rather than the Python behaviour, which
-   runs to _today_ 23:59:59 and so includes the future. _(Blocks phase 6.)_
+7. ~~**Stats default window.**~~ **Answered in phase 6:** a rolling 24 hours by default, `days=n`
+   aligned to local midnight, and `to` clamped so it is never in the future. See
+   [Readings](Infrastructure/Readings.md#how-a-query-becomes-a-window).
 
 ## Known platform risks
 

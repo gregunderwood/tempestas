@@ -33,6 +33,8 @@ the greenhouse for eight years.
 - [[Migrations]]
 - [[MQTT Contract]]
 - [[Nodes]]
+- [[Readings]] — the query surface, window semantics, retention
+- [[Realtime]] — the socket.io contract to the browser
 
 ## See also
 

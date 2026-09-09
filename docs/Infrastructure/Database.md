@@ -155,8 +155,12 @@ hardware exactly when it matters.
   out from under them.
 - **Retention has to be batched.** An unbounded `DELETE` of millions of rows locks an SD card for
   minutes. The old system had the retention command written but never scheduled.
-- **Range-partition `sensor_readings` by month from day one** (planned, phase 6). Retrofitting
-  partitioning onto 3M rows later is painful.
+- **`sensor_readings` is deliberately NOT partitioned.** Postgres requires a unique constraint on a
+  partitioned table to include every partition key column, and adding `created_at` to the dedupe key
+  destroys it — a redelivered duplicate is stamped with a different `created_at` and no longer
+  conflicts. The dedupe is a correctness property and partitioning is an optimisation, so the
+  dedupe wins. See [Readings](Readings.md#why-sensor_readings-is-not-partitioned) for the reasoning
+  and the volume maths.
 
 ## When to update this file
 

@@ -188,6 +188,26 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     return { accepted: true, node };
   }
 
+  /**
+   * Three numbers, one query. `findAll` costs three round-trips because it
+   * decorates each node with aggregates; the status tick and the health probe
+   * only need the counts, and they run every 10 s and on every curl.
+   */
+  async counts(): Promise<{ total: number; online: number; pending: number }> {
+    const row = await this.nodes
+      .createQueryBuilder('n')
+      .select('COUNT(*)', 'total')
+      .addSelect('COUNT(*) FILTER (WHERE n.online)', 'online')
+      .addSelect(`COUNT(*) FILTER (WHERE n.status = 'pending')`, 'pending')
+      .getRawOne<{ total: string; online: string; pending: string }>();
+
+    return {
+      total: Number(row?.total ?? 0),
+      online: Number(row?.online ?? 0),
+      pending: Number(row?.pending ?? 0),
+    };
+  }
+
   async findAll(): Promise<Node[]> {
     const rows = await this.nodes.find({ order: { slug: 'ASC' } });
     return this.decorate(rows);
