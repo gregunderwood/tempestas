@@ -9,7 +9,12 @@ import { NodeEntity } from './models';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([NodeEntity, DeviceEntity, SensorReadingEntity, ZoneEntity]),
+    TypeOrmModule.forFeature([
+      NodeEntity,
+      DeviceEntity,
+      SensorReadingEntity,
+      ZoneEntity,
+    ]),
   ],
   controllers: [NodesController],
   providers: [NodesService],

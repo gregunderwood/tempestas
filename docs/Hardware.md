@@ -11,10 +11,10 @@ this file over that one.**
 
 ## The boxes
 
-| Host | Board | OS | Role |
-|---|---|---|---|
-| `elantris` | Raspberry Pi 4B, arm64 | Debian 13 (trixie), headless | The first node **and** the brain. `192.168.2.70`, user `gunderwood`, Wi-Fi (`wlan0`) |
-| `greenhouse` | Raspberry Pi 5 | 32-bit userland | Runs the legacy Flask app on lights + fans. Later reflashed to arm64 and demoted to a node |
+| Host         | Board                  | OS                           | Role                                                                                       |
+| ------------ | ---------------------- | ---------------------------- | ------------------------------------------------------------------------------------------ |
+| `elantris`   | Raspberry Pi 4B, arm64 | Debian 13 (trixie), headless | The first node **and** the brain. `192.168.2.70`, user `gunderwood`, Wi-Fi (`wlan0`)       |
+| `greenhouse` | Raspberry Pi 5         | 32-bit userland              | Runs the legacy Flask app on lights + fans. Later reflashed to arm64 and demoted to a node |
 
 Node-to-node TCP works (ports 22 and 80 open from elantris to greenhouse). **ICMP is filtered on
 both greenhouse and the Mac, so `ping` fails misleadingly** — that is not a connectivity problem.
@@ -24,13 +24,13 @@ There is no MQTT broker anywhere else on the LAN; Mosquitto on elantris is a cle
 
 Verified live from the greenhouse Postgres. These get re-entered by hand into the fresh database.
 
-| name | gpio | on_delay (s) | on level | rules today | goes where |
-|---|---|---|---|---|---|
-| CO2 Generator | 16 | 300 | **LOW** (active-low) | disabled | → **elantris / tempestas** |
-| Exhaust Fan | 20 | 60 | LOW | enabled | stays on the Pi 5 for now |
-| Lights | 21 | 900 | LOW | enabled | stays on the Pi 5 for now |
-| Single Light | 26 | 900 | **HIGH** (active-high) | enabled | stays on the Pi 5 for now |
-| Extra Relay | 12 | 0 | LOW | disabled | spare — **unknown function** |
+| name          | gpio | on_delay (s) | on level               | rules today | goes where                   |
+| ------------- | ---- | ------------ | ---------------------- | ----------- | ---------------------------- |
+| CO2 Generator | 16   | 300          | **LOW** (active-low)   | disabled    | → **elantris / tempestas**   |
+| Exhaust Fan   | 20   | 60           | LOW                    | enabled     | stays on the Pi 5 for now    |
+| Lights        | 21   | 900          | LOW                    | enabled     | stays on the Pi 5 for now    |
+| Single Light  | 26   | 900          | **HIGH** (active-high) | enabled     | stays on the Pi 5 for now    |
+| Extra Relay   | 12   | 0            | LOW                    | disabled    | spare — **unknown function** |
 
 Two things this table settles:
 
@@ -51,9 +51,9 @@ Verified on elantris: `gpiodetect` reports only `gpiochip0 [pinctrl-bcm2711]` (5
 `gpiochip1 [raspberrypi-exp-gpio]`. **There is no real chip 4** — `/dev/gpiochip4` is a
 compatibility symlink to `gpiochip0`.
 
-The old code probes `[4, 0, 1, 2, 3]` and opens chip 4 first because a **Pi 5's** RP1 bank *is*
+The old code probes `[4, 0, 1, 2, 3]` and opens chip 4 first because a **Pi 5's** RP1 bank _is_
 chip 4. On elantris that works only by the accident of the symlink. Since the Pi 5 will eventually
-run the *same* sidecar, the node selects its chip by **label** — `pinctrl-bcm2711` on a Pi 4,
+run the _same_ sidecar, the node selects its chip by **label** — `pinctrl-bcm2711` on a Pi 4,
 `pinctrl-rp1` on a Pi 5 — and fails loudly if neither is found. One sidecar build, correct on both
 boards, instead of a probe order that happens to work.
 
@@ -113,7 +113,7 @@ and python3-dev are already present. Verified working: `import board` reports bo
   This bites everyone once.
 - **`ping` to greenhouse or the Mac fails by design** (ICMP filtered). Test with `nc -z host port`.
 - **SD card endurance.** ~150–250 MB/day of writes before erase-block amplification.
-  `synchronous_commit = off` (which is *not* `fsync=off` — worst case is losing under a second of
+  `synchronous_commit = off` (which is _not_ `fsync=off` — worst case is losing under a second of
   sensor rows), batched inserts, `wal_compression`, capped journald. **Booting from a USB3 SSD is
   the strong recommendation** — one hour of work, removes the endurance question permanently.
 - **Wi-Fi-only nodes are a reliability factor.** The existing `wifi_monitor.sh` watchdog exists for

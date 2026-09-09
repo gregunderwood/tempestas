@@ -9,7 +9,12 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Subscription } from 'rxjs';
-import { ApiErrorCode, NodeStatus, type Node, type NodeId } from '@tempestas/domain';
+import {
+  ApiErrorCode,
+  NodeStatus,
+  type Node,
+  type NodeId,
+} from '@tempestas/domain';
 import {
   HardwareService,
   type NodeAvailability,
@@ -21,7 +26,12 @@ import { ZoneEntity } from '../zones/models';
 import { NodeEntity } from './models';
 import type { AdmitNodeDto } from './dto/admit-node.dto';
 import type { UpdateNodeDto } from './dto/update-node.dto';
-import { acceptsSamples, newNodeFromHello, patchFromHello, type HelloFacts } from './node-registry';
+import {
+  acceptsSamples,
+  newNodeFromHello,
+  patchFromHello,
+  type HelloFacts,
+} from './node-registry';
 
 /** Why a sample was refused. Carried so the log line can say which it was. */
 export type SampleRejection = 'unknown-node' | 'pending' | 'disabled';
@@ -54,15 +64,19 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     private readonly readings: Repository<SensorReadingEntity>,
     @InjectRepository(ZoneEntity)
     private readonly zones: Repository<ZoneEntity>,
-    private readonly hardware: HardwareService
+    private readonly hardware: HardwareService,
   ) {}
 
   onModuleInit(): void {
     this.subscriptions.add(
-      this.hardware.hello$.subscribe((hello) => this.enqueue(() => this.handleHello(hello)))
+      this.hardware.hello$.subscribe((hello) =>
+        this.enqueue(() => this.handleHello(hello)),
+      ),
     );
     this.subscriptions.add(
-      this.hardware.availability$.subscribe((a) => this.enqueue(() => this.handleAvailability(a)))
+      this.hardware.availability$.subscribe((a) =>
+        this.enqueue(() => this.handleAvailability(a)),
+      ),
     );
   }
 
@@ -77,20 +91,24 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
    */
   private enqueue(task: () => Promise<void>): void {
     this.queue = this.queue.then(task).catch((err: unknown) => {
-      this.logger.error(`Registry task failed: ${err instanceof Error ? err.message : err}`);
+      this.logger.error(
+        `Registry task failed: ${err instanceof Error ? err.message : err}`,
+      );
     });
   }
 
   async handleHello(hello: NodeHello): Promise<void> {
     const facts = toFacts(hello);
-    const existing = await this.nodes.findOne({ where: { slug: facts.nodeId } });
+    const existing = await this.nodes.findOne({
+      where: { slug: facts.nodeId },
+    });
 
     if (!existing) {
       await this.nodes.save(this.nodes.create(newNodeFromHello(facts)));
       // WARN, not LOG: this is the one registry event that needs a human.
       this.logger.warn(
         `Node "${facts.nodeId}" announced itself and is PENDING - it receives no commands and ` +
-          `its readings are DISCARDED until it is admitted.`
+          `its readings are DISCARDED until it is admitted.`,
       );
       return;
     }
@@ -101,16 +119,20 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
 
     switch (outcome) {
       case 'rebooted':
-        this.logger.log(`Node "${facts.nodeId}" rebooted (bootId ${facts.bootId})`);
+        this.logger.log(
+          `Node "${facts.nodeId}" rebooted (bootId ${facts.bootId})`,
+        );
         break;
       case 'capabilities-changed':
         this.logger.warn(
           `Node "${facts.nodeId}" changed its capabilities - a device may now be bound to a pin ` +
-            `the node no longer exposes`
+            `the node no longer exposes`,
         );
         break;
       case 'agent-upgraded':
-        this.logger.log(`Node "${facts.nodeId}" agent is now ${facts.agentVersion}`);
+        this.logger.log(
+          `Node "${facts.nodeId}" agent is now ${facts.agentVersion}`,
+        );
         break;
       case 'seen':
         this.logger.debug(`Node "${facts.nodeId}" re-announced, unchanged`);
@@ -119,12 +141,16 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
   }
 
   async handleAvailability(availability: NodeAvailability): Promise<void> {
-    const row = await this.nodes.findOne({ where: { slug: availability.nodeId } });
+    const row = await this.nodes.findOne({
+      where: { slug: availability.nodeId },
+    });
     if (!row) {
       // Registration happens on `hello`, which is the only channel carrying
       // capabilities. A retained status for a slug we have never met is either
       // a node that has not re-announced yet or a stale retained message.
-      this.logger.debug(`Ignoring status for unregistered node "${availability.nodeId}"`);
+      this.logger.debug(
+        `Ignoring status for unregistered node "${availability.nodeId}"`,
+      );
       return;
     }
 
@@ -140,7 +166,9 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`Node "${row.slug}" is online`);
     } else {
       // Stale is not off. The pins of a node that dropped are UNKNOWN.
-      this.logger.warn(`Node "${row.slug}" went OFFLINE - its pin states are now unknown, not off`);
+      this.logger.warn(
+        `Node "${row.slug}" went OFFLINE - its pin states are now unknown, not off`,
+      );
     }
   }
 
@@ -194,7 +222,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
 
     if (was !== NodeStatus.Admitted) {
       this.logger.warn(
-        `Node "${row.slug}" ADMITTED (was ${was}) - its readings will now persist and it may be commanded`
+        `Node "${row.slug}" ADMITTED (was ${was}) - its readings will now persist and it may be commanded`,
       );
     }
     return this.findOne(id);
@@ -211,7 +239,9 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     row.status = NodeStatus.Disabled;
     await this.nodes.save(row);
     if (was !== NodeStatus.Disabled) {
-      this.logger.warn(`Node "${row.slug}" DISABLED (was ${was}) - no commands, no readings`);
+      this.logger.warn(
+        `Node "${row.slug}" DISABLED (was ${was}) - no commands, no readings`,
+      );
     }
     return this.findOne(id);
   }
@@ -238,10 +268,15 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       });
     }
     await this.nodes.remove(row);
-    this.logger.warn(`Pending node "${row.slug}" deleted; it will return as pending if it says hello again`);
+    this.logger.warn(
+      `Pending node "${row.slug}" deleted; it will return as pending if it says hello again`,
+    );
   }
 
-  private async applyHumanFields(row: NodeEntity, dto: AdmitNodeDto | UpdateNodeDto): Promise<void> {
+  private async applyHumanFields(
+    row: NodeEntity,
+    dto: AdmitNodeDto | UpdateNodeDto,
+  ): Promise<void> {
     if (dto.zoneId !== undefined) {
       const zone = await this.zones.findOne({ where: { id: dto.zoneId } });
       if (!zone) {
@@ -282,7 +317,9 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       .getRawMany<{ nodeId: string; latest: Date | string }>();
 
     const countBy = new Map(counts.map((c) => [c.nodeId, Number(c.count)]));
-    const latestBy = new Map(latest.map((l) => [l.nodeId, new Date(l.latest).toISOString()]));
+    const latestBy = new Map(
+      latest.map((l) => [l.nodeId, new Date(l.latest).toISOString()]),
+    );
 
     return rows.map((row) => ({
       id: row.id,

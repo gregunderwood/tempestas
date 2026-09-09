@@ -19,13 +19,23 @@ describe('isOn', () => {
 
   it('is on when onAt is after offAt', () => {
     expect(
-      isOn(device({ onAt: at('2026-01-10T10:00:00Z'), offAt: at('2026-01-10T09:00:00Z') }))
+      isOn(
+        device({
+          onAt: at('2026-01-10T10:00:00Z'),
+          offAt: at('2026-01-10T09:00:00Z'),
+        }),
+      ),
     ).toBe(true);
   });
 
   it('is off when onAt is before offAt', () => {
     expect(
-      isOn(device({ onAt: at('2026-01-10T09:00:00Z'), offAt: at('2026-01-10T10:00:00Z') }))
+      isOn(
+        device({
+          onAt: at('2026-01-10T09:00:00Z'),
+          offAt: at('2026-01-10T10:00:00Z'),
+        }),
+      ),
     ).toBe(false);
   });
 
@@ -37,7 +47,9 @@ describe('isOn', () => {
 
 describe('canTurnOnAt', () => {
   it('returns null while the device is on', () => {
-    expect(canTurnOnAt(device({ onAt: at('2026-01-10T10:00:00Z') }))).toBeNull();
+    expect(
+      canTurnOnAt(device({ onAt: at('2026-01-10T10:00:00Z') })),
+    ).toBeNull();
   });
 
   it('returns null when it has never been on', () => {
