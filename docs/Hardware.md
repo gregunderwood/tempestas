@@ -20,6 +20,58 @@ Node-to-node TCP works (ports 22 and 80 open from elantris to greenhouse). **ICM
 both greenhouse and the Mac, so `ping` fails misleadingly** — that is not a connectivity problem.
 There is no MQTT broker anywhere else on the LAN; Mosquitto on elantris is a clean install.
 
+## elantris's own relay board
+
+⚠ **This is a different board from the greenhouse's existing wiring**, and confusing the two would
+be expensive. The table further down is the **greenhouse Pi 5's** hardwired loads, which stay where
+they are. elantris gets its own purpose-built panel, photographed 2026-09-09.
+
+A plywood panel carrying: two 2-gang metal outlet boxes (four outlets), a blue 8-channel relay
+board, two barrier terminal blocks, a mains inlet box, and an empty set of standoffs where the Pi
+mounts. Three channels are wired:
+
+| Relay | Switches                         | Intended load          |
+| ----- | -------------------------------- | ---------------------- |
+| 1     | Box A, outlet 1                  | —                      |
+| 2     | Box A, outlet 2                  | —                      |
+| 3     | Box B, **both** outlets (ganged) | —                      |
+| 4–8   | **unwired**                      | free for bench testing |
+
+**Loads plug in rather than being hardwired**, and that changes bring-up for the better. Stage C's
+"mains loads one at a time in ascending order of consequence" stops being wiring work: plug a desk
+lamp into a relay's outlet, watch it switch, unplug it. The CO2 generator goes in last, into a
+socket already proven with something harmless.
+
+The five unwired channels are free test channels — their LEDs show switching with no load attached
+at all, which is exactly what the boot-window measurement needs.
+
+### Still unknown, and gating
+
+Neither is answerable from a photograph:
+
+- **Active-LOW or active-HIGH?** Blue 8-channel boards are usually opto-isolated and active-LOW, but
+  "usually" does not decide which level de-energises a propane burner. The silkscreen says.
+- **Is there a JD-VCC jumper, and where is it?** It decides whether the relay coils are isolated
+  from the Pi's 5 V rail or backfeeding it. A close-up of the header end of the board answers both
+  this and the polarity question.
+- **Do the inputs have their own pull-ups?** Still a multimeter question - see open question 2.
+
+### Choosing pins: a free extra layer
+
+Nothing is wired to the Pi yet, so the pin numbers are still a choice, and the choice is worth
+making deliberately. On the BCM2711, **GPIO 0-8 default to pull-UP at reset and GPIO 9-27 default to
+pull-DOWN**. For an active-LOW relay board that means a line on GPIO 5, 6, 7 or 8 sits at the
+de-energised level through the whole boot window, where BCM 12/16/20/21 - the greenhouse's existing
+choices - sit at the energised one.
+
+BCM 2 and 3 are the SCD4x's I2C bus and BCM 0/1 are the HAT EEPROM pins, so the realistic candidates
+are **BCM 4, 5, 6, 7, 8**.
+
+This is a cheap additional layer, **not** a replacement for the measurement. The internal pull-up is
+~50 kΩ (~66 µA), which the plan already calls too weak to trust against an opto-isolator input, and
+what a high-impedance input actually does depends on the relay board's own circuit. Choose these
+pins anyway - it costs nothing and removes one way to be wrong.
+
 ## The devices
 
 Verified live from the greenhouse Postgres. These get re-entered by hand into the fresh database.
