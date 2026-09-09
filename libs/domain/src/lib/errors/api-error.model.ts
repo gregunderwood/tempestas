@@ -8,6 +8,8 @@ export enum ApiErrorCode {
   DeviceAlreadyOff = 'DEVICE_ALREADY_OFF',
   DeviceCooldown = 'DEVICE_COOLDOWN',
   NodeOffline = 'NODE_OFFLINE',
+  /** The node drove the pin but read back something else. State is UNKNOWN. */
+  ReadbackMismatch = 'READBACK_MISMATCH',
   NodeNotAdmitted = 'NODE_NOT_ADMITTED',
   /** Deleting an admitted node would cascade away its reading history. */
   NodeNotDeletable = 'NODE_NOT_DELETABLE',

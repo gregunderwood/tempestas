@@ -1,7 +1,9 @@
 import { Global, Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Clock, SystemClock } from '../common/clock';
 import { FakeHardwareService } from './fake-hardware.service';
 import { HardwareService } from './hardware.service';
+import { MqttHardwareService } from './mqtt-hardware.service';
 
 /**
  * HARDWARE_DRIVER=fake|mqtt is the seam that lets phases 1-6 be built and
@@ -11,8 +13,8 @@ import { HardwareService } from './hardware.service';
  */
 const hardwareProvider: Provider = {
   provide: HardwareService,
-  inject: [ConfigService],
-  useFactory: (config: ConfigService) => {
+  inject: [ConfigService, Clock],
+  useFactory: (config: ConfigService, clock: Clock) => {
     const driver = config.get<string>('HARDWARE_DRIVER', 'fake');
     if (driver === 'fake') {
       // Deliberately NOT started here: it announces its nodes from
@@ -20,17 +22,21 @@ const hardwareProvider: Provider = {
       // comment on FakeHardwareService.onApplicationBootstrap.
       return new FakeHardwareService();
     }
-    // MqttHardwareService lands in phase 7. Failing loudly beats silently
-    // falling back to a simulator on a box that controls a burner.
+    if (driver === 'mqtt') {
+      // Connects from onApplicationBootstrap, for the same reason.
+      return new MqttHardwareService(config, clock);
+    }
+    // Failing loudly beats silently falling back to a simulator on a box that
+    // controls a burner.
     throw new Error(
-      `HARDWARE_DRIVER="${driver}" is not implemented yet; only "fake" is available.`,
+      `HARDWARE_DRIVER="${driver}" is not a driver; use "fake" or "mqtt".`,
     );
   },
 };
 
 @Global()
 @Module({
-  providers: [hardwareProvider],
+  providers: [{ provide: Clock, useClass: SystemClock }, hardwareProvider],
   exports: [HardwareService],
 })
 export class HardwareModule {}

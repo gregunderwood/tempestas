@@ -88,6 +88,40 @@ npx prettier --write .
 `test` alone cannot catch a type error — Vitest transpiles without typechecking. See
 [Testing](../Testing.md).
 
+## Running against a real broker (phase 7+)
+
+`HARDWARE_DRIVER=mqtt` needs a broker. Locally:
+
+```bash
+brew install mosquitto
+/opt/homebrew/sbin/mosquitto -c tools/mosquitto.dev.conf     # loopback, anonymous
+
+HARDWARE_DRIVER=mqtt MQTT_URL=mqtt://127.0.0.1:1883 npx nx serve server
+node tools/virtual-node.cjs bench-pi 2 300                   # a node that speaks the contract
+mosquitto_sub -h 127.0.0.1 -v -t 'tempestas/v1/#' -F '%I %t %r %p'
+```
+
+`tools/mosquitto.dev.conf` is **loopback and anonymous, for development only**. The real broker gets
+`allow_anonymous false` with per-node credentials and ACLs — an MQTT write goes straight to a GPIO
+pin and a propane burner, which is why [Safety](../Safety.md) ranks securing Mosquitto above every
+other auth concern. Note that elantris's broker is deliberately still localhost-only.
+
+The virtual node advertises five GPIO pins and one SCD4x, answers commands with a matching readback,
+and implements the guards a real agent must. `kill -9` it to watch its last will fire; a clean exit
+deliberately does not fire one.
+
+Useful things to watch for on the bus:
+
+```bash
+# retained messages only - a COMMAND must never appear here
+mosquitto_sub -h 127.0.0.1 -v -t 'tempestas/v1/#' -F '%t %r' --retained-only -W 3
+
+# inject a rogue retained command; the server must alarm CONTROLLER_CONFLICT and clear it
+mosquitto_pub -h 127.0.0.1 -r -q 1 -t 'tempestas/v1/node/bench-pi/gpio/set' \
+  -m '{"schema":"gpioSet/1","node":"bench-pi","ts":"2026-01-01T00:00:00Z","id":"rogue",
+       "issuedBy":"attacker","expiresAt":"2099-01-01T00:00:00Z","lines":[{"pin":16,"level":0}]}'
+```
+
 ## Working against real hardware
 
 MQTT hands you a better loop than remote development does. Because the transport is MQTT over the

@@ -22,8 +22,8 @@ Every phase ends in something runnable. **Phases 1–7 need no hardware and no s
 | 4.5 | **Node registry** — `hello` ingest, LWT → online, pending/admit lifecycle                   | **done**                | a `hello` for an unknown slug → **pending** row · a sample from it is **discarded** · admit → samples persist                                                                             |
 | 5   | Rules engine (pure) + `ClimateResolver` + `enabledRoles` + tests                            | **done**                | with `enabledRoles: ['co2_generator']` and a lights device present, dropping the fake temp to 20 °C drives **only** the burner                                                            |
 | 6   | Readings query surface, stats, retention cron, realtime gateway, health                     | **done**                | a socket client gets `reading:latest` every ~10 s and `device:state` on toggle                                                                                                            |
-| 7   | `MqttHardwareService`; fake driver spawns **two virtual nodes** with different capabilities |                         | `mosquitto_sub -t 'tempestas/v1/node/+/#' -v` shows a **non-retained** `gpio/set` · hand-publish a sample → persists → evaluates → pushes · `mosquitto_pub -r` is dropped **and alarmed** |
-| 8   | Python sidecar on elantris: sensor first, then GPIO                                         |                         | real SCD4x samples arriving over MQTT and landing in Postgres                                                                                                                             |
+| 7   | `MqttHardwareService`; fake driver spawns **two virtual nodes** with different capabilities | **done**                | `mosquitto_sub -t 'tempestas/v1/node/+/#' -v` shows a **non-retained** `gpio/set` · hand-publish a sample → persists → evaluates → pushes · `mosquitto_pub -r` is dropped **and alarmed** |
+| 8   | Python sidecar on elantris: sensor first, then GPIO                                         | **next**                | real SCD4x samples arriving over MQTT and landing in Postgres                                                                                                                             |
 | 9   | Angular shell, routes, API services, error interceptor, M3 theme                            |                         | an induced 409 raises a snackbar; no `{error}`-in-200 handling anywhere in the source                                                                                                     |
 | 10  | Gauge component, dashboard, readings screens                                                |                         | gauge colours match the old thresholds at boundary values; a `null` CO2 renders an em-dash                                                                                                |
 | 11  | Devices screens (+ `role`, `onLevel`, node selector) and **nodes screens**                  |                         | `/nodes` becomes a real route with an admit flow                                                                                                                                          |
@@ -95,6 +95,31 @@ any sidecar exists**, and the two-virtual-node trick proves the multi-node path 
   on a node you just disabled. Deliberate: the node's own dead-man should drop that line (phase 8),
   not a command from a server that declared the node untrusted. Revisit if the dead-man work changes
   the reasoning.
+
+### What phase 7 found
+
+The checkpoint was run against a real Mosquitto with `tools/virtual-node.cjs`, and it earned its
+billing as the highest-value check in the plan. Three defects surfaced that no unit test would have:
+
+**The retain flag does not detect a retained command.** A retained `gpio/set` published while the
+server and node were both connected arrived with `retain=0`, the node obeyed it, and it stayed on
+the bus to replay on every future reconnect. MQTT only sets that flag when delivery is _caused by a
+new subscription_. The server now rejects any command it did not issue as `CONTROLLER_CONFLICT` and
+clears the retained slot; delivery can only be stopped by broker ACLs. See
+[MQTT Contract](Infrastructure/MQTT%20Contract.md#the-retained-command-trap).
+
+**A graceful disconnect fires no will.** A virtual node calling `client.end()` produced no LWT at
+all, and the registry went on reporting it online. The will covers a crash, not an orderly stop, so
+anything that stops cleanly must publish its own retained `status: offline` first.
+
+**An offline node was a 500.** The driver threw a bare `Error`, so an expected condition reached the
+client as "Internal server error" with nothing to branch on — the exact failure mode this project
+exists to remove. Hardware failures now carry an `ApiErrorCode` and translate: `NODE_OFFLINE` and
+`READBACK_MISMATCH` to 409, `HARDWARE_UNREACHABLE` to 503.
+
+Also worth recording, because it validated a design decision: the node's retained `status` and its
+first sample both arrived **before** its `hello`. Both were correctly refused — registration needs
+capabilities and only `hello` carries them.
 
 ## Hardware bring-up and cutover
 
