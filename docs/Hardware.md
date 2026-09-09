@@ -45,16 +45,63 @@ socket already proven with something harmless.
 The five unwired channels are free test channels — their LEDs show switching with no load attached
 at all, which is exactly what the boot-window measurement needs.
 
-### Still unknown, and gating
+### The board, from the close-ups (2026-09-09)
 
-Neither is answerable from a photograph:
+|                |                                                                                |
+| -------------- | ------------------------------------------------------------------------------ |
+| Relays         | **Songle SRD-05VDC-SL-C**, 8 channels, 5 V coils                               |
+| Contact rating | **10 A 250 VAC / 10 A 30 VDC**                                                 |
+| Signal header  | 10-pin: `Gnd In1 In2 In3 In4 In5 In6 In7 In8 Vcc` — currently **unpopulated**  |
+| Supply header  | 3-pin: `Gnd Vcc JDVcc`, with the **jumper fitted across Vcc–JDVcc**            |
+| Isolation      | Opto-isolated inputs (one optocoupler per channel), series resistors ~1–1.8 kΩ |
+| Per channel    | `DS1–DS8` indicator LEDs, `Q1–Q8` coil drivers, `D1–D8` flyback diodes         |
 
-- **Active-LOW or active-HIGH?** Blue 8-channel boards are usually opto-isolated and active-LOW, but
-  "usually" does not decide which level de-energises a propane burner. The silkscreen says.
-- **Is there a JD-VCC jumper, and where is it?** It decides whether the relay coils are isolated
-  from the Pi's 5 V rail or backfeeding it. A close-up of the header end of the board answers both
-  this and the polarity question.
-- **Do the inputs have their own pull-ups?** Still a multimeter question - see open question 2.
+### ⚠ Do not plug a heater into these outlets
+
+The relay contacts are **10 A**; the outlets they feed are 15 A. Nothing stops someone plugging in a
+space heater and asking the contacts for more than they can break. The load side is now limited by
+the relay, not by the receptacle, and that is not visible to anyone looking at the wall plate. Label
+the box.
+
+### Wire the logic side to 3.3 V, not 5 V
+
+This is the one wiring decision worth getting right before anything is connected, and it follows
+from the board being 5 V and the Pi being 3.3 V.
+
+On an active-LOW opto board the input pin sits at the LED's cathode, with the anode at `Vcc` through
+a series resistor. Pulling the input to 0 V lights the LED and energises the relay. To _de_-energise,
+the Pi drives the pin high — but the Pi's high is **3.3 V**, and if `Vcc` is 5 V there is still
+about `(5 − 3.3 − 1.2) / 1 kΩ ≈ 0.5 mA` flowing through the LED. That is enough to hold some
+optocouplers partly on, so the relay may buzz or fail to release.
+
+The fix is standard, and it is why the jumper matters:
+
+1. **Remove the `Vcc`–`JDVcc` jumper.** As shipped it ties the coil supply to the logic supply, so
+   the coils draw through whatever feeds `Vcc` and the opto isolation is defeated for the supply.
+2. **`Vcc` (10-pin header) → the Pi's 3.3 V**, `Gnd` → Pi ground. Now the Pi's high equals the LED's
+   anode voltage, so a high is _zero_ volts across the LED and the relay releases cleanly.
+3. **`JDVcc` → 5 V** for the coils, with that supply's ground on the 3-pin block. Three Songle coils
+   is roughly 220 mA; the Pi's 5 V pin can carry that, but a separate supply keeps coil switching
+   noise off the rail the sensor and the controller share.
+
+### The boot window may be much less dangerous on this board
+
+The plan's boot-window analysis assumed a directly-driven board, where a pulled-down input energises
+the relay. This board is opto-isolated with a ~1 kΩ series resistor, which changes the arithmetic: a
+Pi pin at reset is an input with a ~50 kΩ pull-down, so the current available through the LED is
+about `(5 − 1.2) / 51 kΩ ≈ 75 µA`. An optocoupler needs milliamps. **75 µA should not turn it on.**
+
+That is a reason for optimism, not a conclusion. Confirm it empirically, and it takes under a
+minute with no load attached:
+
+1. Power the board, leave `In1` disconnected. The relay should stay released and `DS1` dark.
+2. Tie `In1` to `Gnd`. It should click and `DS1` should light — which also **proves the polarity**
+   rather than inferring it from the topology.
+3. Connect it to a Pi pin, hold the pin low through a reboot, and watch what the LED does across the
+   whole boot window.
+
+If step 1 passes, the firmware `gpio=` defaults and the external pull-ups become belt-and-braces on
+this board rather than mandatory. If it fails, they are mandatory exactly as the plan says.
 
 ### Choosing pins: a free extra layer
 
