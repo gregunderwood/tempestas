@@ -61,7 +61,16 @@ def main(argv: list[str]) -> int:
             return 2
 
     hw = g.build(LINES, "pinctrl-bcm2711", simulated=False)
-    hw.claim(LINES, FAILSAFE)
+    try:
+        hw.claim(LINES, FAILSAFE)
+    except g.GpioBusy as err:
+        # The expected answer when tempestas-agent is running. Say so plainly
+        # rather than dumping a traceback at somebody standing at the panel.
+        print(
+            f"{err}\n\nIs tempestas-agent running? `systemctl stop tempestas-agent`",
+            file=sys.stderr,
+        )
+        return 1
     if want is not None:
         hw.write(want, 0)  # 0 == energised
 

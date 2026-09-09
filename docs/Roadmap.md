@@ -231,7 +231,7 @@ The bench sequence is further along than the phase table suggests, because the p
 | 1. Baseline `gpioget` before any change               | ✅ all lines inactive                                 |
 | 2. `gpio=` defaults in `config.txt`, reboot, re-check | ⬜ **not needed on this board** — see open question 2 |
 | 3. Relays connected, watch for clicks during boot     | ✅ all three stayed de-energised through a full boot  |
-| 4. `kill -9` the agent and watch the gap              | ✅ measured — **there is no gap**, see below          |
+| 4. `kill -9` the agent and watch the gap              | ✅ measured, then closed under systemd — see below    |
 | 5. Verify the safety surface against the LEDs         | ✅ all three, driven from the agent's own backend     |
 | 6. Loads one at a time, burner last                   | 🔄 **channel 6 switches its load; 7 and 8 do not**    |
 
@@ -245,7 +245,9 @@ still driving its last level, with its bias intact — verified with `pinctrl ge
 There is no float-back and therefore no gap. The hazard it replaces is worse in one way and better
 in another: a crash at the safe level _holds_ the safe level, but a crash with the burner energised
 holds that indefinitely, with the node-side dead-man dead alongside the process. systemd restarting
-the agent is the cover, since the claim drives the failsafe. Written up in
+the agent is the cover, since the claim drives the failsafe — and that is now real rather than
+planned: `kill -9` on the deployed unit restarted it in ~5 s and re-claimed at the failsafe.
+`RestartSec=5` is therefore the width of the exposure, not a tuning knob. Written up in
 [Safety](Safety.md#the-boot-window-hazard).
 
 `LgpioBackend` is implemented, tested, and verified against the real chip on elantris: it resolves
@@ -258,7 +260,15 @@ each observed, never two at once. That confirms the permutation in the wiring ta
 agent's own code path rather than through `gpioset`. It also confirms the property the whole design
 leans on: **claiming at the failsafe releases whatever the previous run left energised** — going
 7 → 8 → 6, each step dropped the one before it without being told to. Nothing was plugged into any
-outlet. GPIO has **not** yet been driven from an MQTT command end to end. See
+outlet.
+
+**The agent is now deployed** — systemd, `Type=notify`, the `flock`, `OOMScoreAdjust=-900`, GPIO
+enabled in `etc/agent.toml`. Verified rather than assumed: the bench tool and a second agent are
+both refused while it runs, a relay left energised is dropped when the agent starts, `kill -9` is
+recovered in ~5 s, and a cold reboot brings it up in 21.6 s with the lines claimed and dark.
+`systemd-analyze verify` found two directives in the shipped unit that systemd had been silently
+ignoring, including the start limit that the no-crash-loop rule depends on. GPIO has **not** yet
+been driven from an MQTT command end to end. See
 [Node Agent](Infrastructure/Node%20Agent.md#the-gpio-backend). Deployment (a systemd unit, the
 `flock`, `Type=notify`, `OOMScoreAdjust`) is still to do; the agent has only been run in the
 foreground.
