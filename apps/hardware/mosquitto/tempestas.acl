@@ -1,0 +1,58 @@
+# Install to /etc/mosquitto/tempestas.acl
+#
+# Authentication says who a client is. This file is the only thing that says
+# whose relays it may command. Without it one leaked node credential commands
+# every node on the bus, including the one holding the burner.
+#
+# Mosquitto matches in order and denies anything not granted. Reload with
+# `sudo systemctl reload mosquitto` - a restart is not needed for ACL changes.
+
+# ------------------------------------------------------------ the controller
+#
+# The only legitimate publisher of a command. The node refuses an issuedBy that
+# is not its bound controller, but that check runs AFTER delivery; this is the
+# layer that stops the message arriving at all.
+user tempestas-server
+topic write tempestas/v1/server/status
+topic write tempestas/v1/node/+/gpio/set
+topic write tempestas/v1/node/+/gpio/sync
+topic write tempestas/v1/node/+/control/heartbeat
+topic read tempestas/v1/node/+/hello
+topic read tempestas/v1/node/+/status
+topic read tempestas/v1/node/+/sensor/+/sample
+topic read tempestas/v1/node/+/gpio/result
+topic read tempestas/v1/node/+/gpio/state/+
+topic read tempestas/v1/node/+/alarm
+
+# ------------------------------------------------------------ elantris
+#
+# Write is scoped to its OWN subtree, so this credential cannot publish a
+# sample as another node - which is the same threat the admission gate covers
+# from the other side. Note it gets no write on gpio/set at all: a node that
+# could command itself would make the controller's ownership meaningless.
+user elantris
+topic write tempestas/v1/node/elantris/hello
+topic write tempestas/v1/node/elantris/status
+topic write tempestas/v1/node/elantris/sensor/+/sample
+topic write tempestas/v1/node/elantris/gpio/result
+topic write tempestas/v1/node/elantris/gpio/state/+
+topic write tempestas/v1/node/elantris/alarm
+topic read tempestas/v1/node/elantris/gpio/set
+topic read tempestas/v1/node/elantris/gpio/sync
+topic read tempestas/v1/node/elantris/control/heartbeat
+# The server's own LWT. A node watches it so it can fail safe immediately
+# rather than waiting out its dead-man when the brain dies.
+topic read tempestas/v1/server/status
+
+# ------------------------------------------------------------ observers
+#
+# Read-only across the whole tree, for the soak logger and anything else that
+# watches without acting. It exists because the node credential deliberately
+# cannot read: `elantris` may WRITE its samples and may not subscribe to them,
+# so a diagnostic tool cannot borrow the node's identity and quietly gain a
+# publish right it has no use for.
+#
+# No write rule at all. Not even on its own subtree - there is nothing an
+# observer should ever put on this bus.
+user tempestas-observer
+topic read tempestas/v1/#

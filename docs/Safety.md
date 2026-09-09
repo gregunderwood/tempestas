@@ -246,9 +246,29 @@ cannot be half-done.
 LAN-only on a home network. No accounts, no JWT — disproportionate, and the kind of thing that
 locks you out of your own greenhouse at 2 a.m. In priority order:
 
-1. **Secure Mosquitto first.** This is the real attack surface: an MQTT write goes straight to a
-   GPIO pin and a propane burner, bypassing any HTTP control. `allow_anonymous false`, credentials
-   per node, listener bound to the LAN interface. Everything below matters less than this line.
+1. **Secure Mosquitto first.** ✅ **Done (2026-09-09).** This is the real attack surface: an MQTT
+   write goes straight to a GPIO pin and a propane burner, bypassing any HTTP control. Everything
+   below matters less than this line.
+
+   The posture, in [../apps/hardware/mosquitto/](../apps/hardware/mosquitto/): `allow_anonymous false`,
+   a listener bound by **interface** (`bind_interface wlan0`, not a hardcoded address — this box is
+   on DHCP and a lease change would otherwise stop the broker), an explicit loopback listener
+   alongside it, and three identities scoped by ACL.
+
+   ⚠ **The Mosquitto 2.x trap:** shipping no `listener` directive gives you a local-only listener
+   that also **allows anonymous connections**. Adding a listener to reach the LAN silently inherits
+   that. `allow_anonymous false` has to land in the same change, not afterwards.
+
+   | Identity             | May publish                                | May read               | Why                                                                           |
+   | -------------------- | ------------------------------------------ | ---------------------- | ----------------------------------------------------------------------------- |
+   | `tempestas-server`   | commands, heartbeat, its own status        | every node's telemetry | The only legitimate publisher of a command                                    |
+   | `elantris`           | **only its own** subtree, never `gpio/set` | its own commands       | A node that could command itself makes the controller's ownership meaningless |
+   | `tempestas-observer` | **nothing**                                | the whole tree         | The node credential cannot read its own samples, so a logger cannot borrow it |
+
+   Authentication says who a client is; only the ACL says whose relays it may command. Both halves
+   were verified against the live broker with QoS-1 publishes, since **a denied QoS-0 publish is
+   silent** and looks exactly like success — check for `PUBACK RC:135`, do not infer from no error.
+
 2. **No WAN port-forward.** If remote access is wanted, Tailscale/WireGuard — not authentication.
 3. **One shared token on mutating verbs only** (`X-Tempestas-Token` on POST/PUT/PATCH/DELETE
    including `/on`, `/off`, `/force-on`). GETs stay open so a phone dashboard is frictionless. The

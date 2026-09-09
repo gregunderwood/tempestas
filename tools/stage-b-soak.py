@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import signal
 import sys
 import time
@@ -68,6 +69,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", required=True)
     parser.add_argument("--broker", default="127.0.0.1")
+    # The broker refuses anonymous clients. Read from the environment rather
+    # than the command line so a credential never lands in `ps` or a unit file;
+    # tempestas-observer is read-only across the whole tree and cannot publish.
+    parser.add_argument("--username", default=os.environ.get("MQTT_USERNAME"))
+    parser.add_argument("--password", default=os.environ.get("MQTT_PASSWORD"))
     parser.add_argument("--interval", type=float, default=60.0)
     args = parser.parse_args()
 
@@ -78,6 +84,8 @@ def main() -> int:
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="stage-b-soak")
     client.on_message = on_message
     client.on_connect = lambda c, *_: c.subscribe(TOPIC, qos=0)
+    if args.username:
+        client.username_pw_set(args.username, args.password or None)
     client.connect(args.broker, 1883, keepalive=30)
     client.loop_start()
 
