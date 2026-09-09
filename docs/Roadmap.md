@@ -71,6 +71,11 @@ never touched.
   only safe once `/boot/firmware/config.txt` carries the `gpio=` defaults, and it does not yet.
   Enabling it first would mean a kernel hang reboots into a boot window that commands the burner
   relay on. Firmware defaults first (Stage C step 2), watchdog second.
+- **The sudo password is unchanged, by decision (2026-09-09).** It was written into `/etc/fstab` and
+  a journald drop-in during phase 0 provisioning by a `sudo -S` wrapper that ate stdin; both files
+  have been cleaned. The box is LAN-only, has no relays wired and nothing exposed, so rotation waits
+  until the system is running rather than interrupting bring-up. Do it before anything is wired to
+  mains, and note the same string is reused as a seeded dev-app password elsewhere.
 - **Postgres SD-card tuning is deferred.** `synchronous_commit = off`, `wal_compression = on`,
   `shared_buffers = 256MB`, `checkpoint_timeout = 15min` are still to apply, and nothing uses that
   database yet — the server runs against Docker Postgres on the Mac. It belongs with deployment.
