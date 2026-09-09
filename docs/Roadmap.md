@@ -12,33 +12,33 @@ Every phase ends in something runnable. **Phases 1–7 need no hardware and no s
 
 ## Status
 
-| # | Phase | State | Checkpoint |
-|---|---|---|---|
-| 0 | Provision elantris: Node 22, swap, Postgres, Mosquitto | **partial** — see below | `node -v` = v22.x · `psql -c 'select 1'` · `mosquitto_pub`→`sub` round-trip |
-| 1 | Nx workspace, generators, version pins, prettier/eslint/nvmrc | **done** | `nx run-many -t lint,test,build` green · `tsconfig.base.json` has **`paths`**, not `references` · no `jest*` outside node_modules · `CYPRESS_INSTALL_BINARY=0` on the Pi |
-| 2 | `libs/domain`: models, MQTT contract, gauge metrics, path alias, dep constraints | **done** | a throwaway `import { Reading }` compiles in **both** app builds |
-| 3 | TypeORM config, entities, `InitialSchema`, seed | **done** | FK order `zones → nodes → devices → sensor_readings` · `\d+ devices` shows `UNIQUE (node_id, gpio)` and **no** unique index on `role` · revert drops cleanly |
-| 4 | Devices module, pure `device-state.ts`, `FakeHardwareService`, interlock tests | **done** | CRUD + on/off/force-on via curl · a second `POST /on` returns **409** with `canTurnOnAt` |
-| 4.5 | **Node registry** — `hello` ingest, LWT → online, pending/admit lifecycle | **done** | a `hello` for an unknown slug → **pending** row · a sample from it is **discarded** · admit → samples persist |
-| 5 | Rules engine (pure) + `ClimateResolver` + `enabledRoles` + tests | **next** | with `enabledRoles: ['co2_generator']` and a lights device present, dropping the fake temp to 20 °C drives **only** the burner |
-| 6 | Readings query surface, stats, retention cron, realtime gateway, health | | a socket client gets `reading:latest` every ~10 s and `device:state` on toggle |
-| 7 | `MqttHardwareService`; fake driver spawns **two virtual nodes** with different capabilities | | `mosquitto_sub -t 'tempestas/v1/node/+/#' -v` shows a **non-retained** `gpio/set` · hand-publish a sample → persists → evaluates → pushes · `mosquitto_pub -r` is dropped **and alarmed** |
-| 8 | Python sidecar on elantris: sensor first, then GPIO | | real SCD4x samples arriving over MQTT and landing in Postgres |
-| 9 | Angular shell, routes, API services, error interceptor, M3 theme | | an induced 409 raises a snackbar; no `{error}`-in-200 handling anywhere in the source |
-| 10 | Gauge component, dashboard, readings screens | | gauge colours match the old thresholds at boundary values; a `null` CO2 renders an em-dash |
-| 11 | Devices screens (+ `role`, `onLevel`, node selector) and **nodes screens** | | `/nodes` becomes a real route with an admit flow |
-| 12 | Hardening: token guard, CORS, Mosquitto ACLs, CI on Node 22 | | `curl -X POST` without the token → 401; GETs unaffected |
+| #   | Phase                                                                                       | State                   | Checkpoint                                                                                                                                                                                |
+| --- | ------------------------------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | Provision elantris: Node 22, swap, Postgres, Mosquitto                                      | **partial** — see below | `node -v` = v22.x · `psql -c 'select 1'` · `mosquitto_pub`→`sub` round-trip                                                                                                               |
+| 1   | Nx workspace, generators, version pins, prettier/eslint/nvmrc                               | **done**                | `nx run-many -t lint,test,build` green · `tsconfig.base.json` has **`paths`**, not `references` · no `jest*` outside node_modules · `CYPRESS_INSTALL_BINARY=0` on the Pi                  |
+| 2   | `libs/domain`: models, MQTT contract, gauge metrics, path alias, dep constraints            | **done**                | a throwaway `import { Reading }` compiles in **both** app builds                                                                                                                          |
+| 3   | TypeORM config, entities, `InitialSchema`, seed                                             | **done**                | FK order `zones → nodes → devices → sensor_readings` · `\d+ devices` shows `UNIQUE (node_id, gpio)` and **no** unique index on `role` · revert drops cleanly                              |
+| 4   | Devices module, pure `device-state.ts`, `FakeHardwareService`, interlock tests              | **done**                | CRUD + on/off/force-on via curl · a second `POST /on` returns **409** with `canTurnOnAt`                                                                                                  |
+| 4.5 | **Node registry** — `hello` ingest, LWT → online, pending/admit lifecycle                   | **done**                | a `hello` for an unknown slug → **pending** row · a sample from it is **discarded** · admit → samples persist                                                                             |
+| 5   | Rules engine (pure) + `ClimateResolver` + `enabledRoles` + tests                            | **done**                | with `enabledRoles: ['co2_generator']` and a lights device present, dropping the fake temp to 20 °C drives **only** the burner                                                            |
+| 6   | Readings query surface, stats, retention cron, realtime gateway, health                     | **next**                | a socket client gets `reading:latest` every ~10 s and `device:state` on toggle                                                                                                            |
+| 7   | `MqttHardwareService`; fake driver spawns **two virtual nodes** with different capabilities |                         | `mosquitto_sub -t 'tempestas/v1/node/+/#' -v` shows a **non-retained** `gpio/set` · hand-publish a sample → persists → evaluates → pushes · `mosquitto_pub -r` is dropped **and alarmed** |
+| 8   | Python sidecar on elantris: sensor first, then GPIO                                         |                         | real SCD4x samples arriving over MQTT and landing in Postgres                                                                                                                             |
+| 9   | Angular shell, routes, API services, error interceptor, M3 theme                            |                         | an induced 409 raises a snackbar; no `{error}`-in-200 handling anywhere in the source                                                                                                     |
+| 10  | Gauge component, dashboard, readings screens                                                |                         | gauge colours match the old thresholds at boundary values; a `null` CO2 renders an em-dash                                                                                                |
+| 11  | Devices screens (+ `role`, `onLevel`, node selector) and **nodes screens**                  |                         | `/nodes` becomes a real route with an admit flow                                                                                                                                          |
+| 12  | Hardening: token guard, CORS, Mosquitto ACLs, CI on Node 22                                 |                         | `curl -X POST` without the token → 401; GETs unaffected                                                                                                                                   |
 
 ### Phase 0 is not finished
 
 Verified on elantris (2026-09-08):
 
-| Item | State |
-|---|---|
-| Postgres | ✅ 17.11 native apt, service active |
+| Item      | State                                                       |
+| --------- | ----------------------------------------------------------- |
+| Postgres  | ✅ 17.11 native apt, service active                         |
 | Mosquitto | ✅ 2.0.21, service active, `pub`→`sub` round-trip confirmed |
-| Node 22 | ❌ **not installed** — no `~/.nvm/versions/node` |
-| Swap | ❌ **none** (`swapon --show` is empty) |
+| Node 22   | ❌ **not installed** — no `~/.nvm/versions/node`            |
+| Swap      | ❌ **none** (`swapon --show` is empty)                      |
 
 Neither gap blocks phases 5–7, which run entirely on the Mac. Both block phase 8. Note the swap gap
 against the memory pressure warnings in [Development setup](Getting%20Started/Development%20setup.md) —
@@ -48,6 +48,22 @@ The Python side has been part-provisioned by hand: `swig`, `liblgpio-dev`, `pyth
 `build-essential` are installed (the `lgpio` wheel will not build without the first two) and a
 scratch venv at `~/scd-venv` validated `import board` → `RASPBERRY_PI_4B` and `adafruit_scd4x`
 1.4.13. See [Hardware](Hardware.md).
+
+### What phase 5 turned up
+
+The live checkpoint exposed a real defect in the phase-4.5 ingest path, since fixed: the QoS-1
+dedupe key was `(node_id, sensor_id, node_seq)`, but **a node's sequence counter restarts at 1 when
+its agent restarts** - an ESP32 has nowhere cheap to persist one. Every sample after a node reboot
+collided with the previous boot's rows and was dropped. The symptom is indistinguishable from a
+stale sensor: readings simply stop, the rules engine holds last state, and nothing above debug level
+says why. The key is now scoped to the node's `boot_id`.
+
+That is the class of bug the live checkpoints exist to catch - it passed 153 unit tests and a clean
+build, because every test mocked the repository that the constraint lives in.
+
+Coverage thresholds were also failing, and had been unrun since they were written in phase 1. They
+now pass at 98.8% lines / 100% functions over `app/devices` and `app/rules`, and `--coverage` is
+part of the documented gate.
 
 Phase 7 is the highest-value checkpoint in the plan: it validates the entire node contract **before
 any sidecar exists**, and the two-virtual-node trick proves the multi-node path with zero hardware.
@@ -83,7 +99,7 @@ the boot-window hazard empirically. Do not skip a step:
 
 1. Baseline `gpioget` before any change (captured: all `inactive`).
 2. Add the `gpio=` defaults to `config.txt`, reboot, re-check — expect `active active active active
-   inactive`. This proves the boot-window fix.
+inactive`. This proves the boot-window fix.
 3. Connect the relay board with **no mains load, LEDs only**. Power-cycle and watch which relays
    click during boot. **If any active-low relay energises before the agent starts, external
    pull-ups are mandatory before mains.**
@@ -117,12 +133,12 @@ wiring, and don't reformat the Pi 5's SD card for at least a month.
 
 ## Deployment (phases 8+, not yet built)
 
-| Component | Runtime | Why |
-|---|---|---|
-| Python node agent | **native systemd** | Needs `/dev/gpiochip0`, `/dev/i2c-1`, group membership — and must start even if dockerd is broken. Never put a container runtime in front of the safety-critical process |
-| Mosquitto | **native systemd** | The agent depends on it; keep the whole safety path Docker-free (~8 MiB) |
-| Postgres 17 | **native apt** | One canonical data directory managed by `pg_ctlcluster`, no bind-mount path to typo. Saves ~200 MiB of duplicated page cache on a 3.7 GiB box |
-| NestJS + Angular bundle | **Docker**, built on the Mac, pushed to GHCR, pulled over SSH | The Mac is arm64, so images build natively with no QEMU |
+| Component               | Runtime                                                       | Why                                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Python node agent       | **native systemd**                                            | Needs `/dev/gpiochip0`, `/dev/i2c-1`, group membership — and must start even if dockerd is broken. Never put a container runtime in front of the safety-critical process |
+| Mosquitto               | **native systemd**                                            | The agent depends on it; keep the whole safety path Docker-free (~8 MiB)                                                                                                 |
+| Postgres 17             | **native apt**                                                | One canonical data directory managed by `pg_ctlcluster`, no bind-mount path to typo. Saves ~200 MiB of duplicated page cache on a 3.7 GiB box                            |
+| NestJS + Angular bundle | **Docker**, built on the Mac, pushed to GHCR, pulled over SSH | The Mac is arm64, so images build natively with no QEMU                                                                                                                  |
 
 Other decisions already made: **Caddy** over nginx (automatic WebSocket upgrade — the
 `map $http_upgrade` footgun is sitting in the current greenhouse nginx.conf; SPA fallback in one
@@ -142,14 +158,14 @@ Answer each before its stage, not before starting.
 
 1. **What does "Extra Relay" (BCM 12) actually control?** `on_delay_duration = 0` suggests something
    benign, but it is unknown and active-LOW. Identify it before it is ever wired to elantris.
-   *(Blocks Stage C step 6.)*
+   _(Blocks Stage C step 6.)_
 2. **Does the relay board have input pull-ups, and is it low-level-trigger with a jumper?** This
    decides whether external pull-ups are mandatory. Ten minutes with a multimeter, and it gates the
-   whole relay bring-up. *(Blocks Stage C.)*
+   whole relay bring-up. _(Blocks Stage C.)_
 3. **How long should a node hold the burner on at night after losing the brain?** The one dead-man
    case that isn't obvious, since the burner is the night heater. Long enough to ride out a restart
    or a WiFi blip; short enough that a dead controller doesn't leave it burning until morning.
-   *(Blocks phase 8.)*
+   _(Blocks phase 8.)_
 4. **Is there any independent backup heat?** If yes, the dead-man can be aggressive and question 3
    gets easy. If no, the hold has to be long, and Stage A is the single best resilience purchase
    available.
@@ -158,7 +174,7 @@ Answer each before its stage, not before starting.
 6. **Confirm one dashboard, not one per node.** The web UI is served only by elantris; other nodes
    are agents with no UI.
 7. **Stats default window** — default to `now - 24h → now` rather than the Python behaviour, which
-   runs to *today* 23:59:59 and so includes the future. *(Blocks phase 6.)*
+   runs to _today_ 23:59:59 and so includes the future. _(Blocks phase 6.)_
 
 ## Known platform risks
 

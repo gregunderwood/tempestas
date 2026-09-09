@@ -13,6 +13,7 @@ every list below, and why "it compiles and the tests pass" is not the bar here.
 - Where a thing belongs / zones vs nodes vs devices / the hardware seam → Read [./docs/Architecture.md](./docs/Architecture.md)
 - The MQTT topics, payloads, QoS or retain flags → Read [./docs/Infrastructure/MQTT Contract.md](./docs/Infrastructure/MQTT%20Contract.md)
 - Node registration, admission, capabilities, `pending` → Read [./docs/Infrastructure/Nodes.md](./docs/Infrastructure/Nodes.md)
+- Home Assistant, external automation, or "could HA run the rules instead?" → Read [./docs/Infrastructure/Home Assistant.md](./docs/Infrastructure/Home%20Assistant.md)
 - Entities, schema decisions, queries → Read [./docs/Infrastructure/Database.md](./docs/Infrastructure/Database.md)
 - A schema change → Read [./docs/Infrastructure/Migrations.md](./docs/Infrastructure/Migrations.md)
 - Thresholds, hysteresis, the control law, DST → Read [./docs/Rules and Climate.md](./docs/Rules%20and%20Climate.md)
@@ -29,6 +30,7 @@ npm run migration:run                 # apply migrations
 npx nx serve server                   # API on :7000, HARDWARE_DRIVER=fake
 npx nx serve web                      # Angular dev server (on the Mac, never on the Pi)
 npx nx run-many -t lint,test,build    # the gate — all four projects
+npx nx test server --coverage         # also the gate: thresholds are checked ONLY here
 npx nx test server                    # one project
 npx prettier --write .                # format
 ```
@@ -36,6 +38,8 @@ npx prettier --write .                # format
 - **`npx nx run-many -t lint,test,build` is the final step before declaring work done.** Not
   `test` alone: Vitest transpiles without typechecking, so only the webpack/Angular builds
   catch a type error. Two real type errors in phase 4.5 were invisible to a green test run.
+- **And `npx nx test server --coverage`**, which is where the thresholds are actually checked.
+  They went unrun for four phases and were failing when phase 5 first looked.
 - `npm run migration:generate -- apps/server/src/migrations/<Name>` needs the database up.
 - There is no `serve` on `libs/domain`; it is consumed through the `@tempestas/domain` alias.
 
@@ -45,11 +49,11 @@ npx prettier --write .                # format
 and during the transition **two independent controllers are acting on one airspace** — keep it
 current or somebody wires a second controller onto a live relay.
 
-| Role | Owner today | Notes |
-|---|---|---|
-| `co2_generator` | **tempestas** (elantris) | The first and only role tempestas owns |
-| `exhaust_fan` | legacy Flask app (greenhouse Pi 5) | Moves over after a full day of verified burner control |
-| `lights` | legacy Flask app (greenhouse Pi 5) | Moves last |
+| Role            | Owner today                        | Notes                                                  |
+| --------------- | ---------------------------------- | ------------------------------------------------------ |
+| `co2_generator` | **tempestas** (elantris)           | The first and only role tempestas owns                 |
+| `exhaust_fan`   | legacy Flask app (greenhouse Pi 5) | Moves over after a full day of verified burner control |
+| `lights`        | legacy Flask app (greenhouse Pi 5) | Moves last                                             |
 
 Creating a device row for a role tempestas does not own is **safe** — ownership is explicit in
 `enabledRoles`, never inferred from which device rows exist. See [docs/Architecture.md](docs/Architecture.md).
@@ -58,8 +62,8 @@ Creating a device row for a role tempestas does not own is **safe** — ownershi
 
 See [docs/Architecture.md](docs/Architecture.md) for full details.
 
-- **Multi-node greenhouse controller.** A *zone* is an airspace and owns the rules; a *node* is a
-  wiring identity (which box holds this pin); a *device* is a relay-controlled thing on a node.
+- **Multi-node greenhouse controller.** A _zone_ is an airspace and owns the rules; a _node_ is a
+  wiring identity (which box holds this pin); a _device_ is a relay-controlled thing on a node.
 - **Rules scope to the zone, not the node** — a rule reads a sensor at one end of the greenhouse
   and actuates a relay at the other.
 - **Nx monorepo**: `apps/server` (NestJS), `apps/web` (Angular), `libs/domain` (shared contract),
@@ -78,7 +82,7 @@ accident most often:
 
 - **Commands are never retained.** A retained `gpio/set` replays a burner-on command on every
   reconnect. State and status are retained; commands are not.
-- **Stale is not off.** When a node drops, its pins become *unknown*, not `0`. Only a fresh
+- **Stale is not off.** When a node drops, its pins become _unknown_, not `0`. Only a fresh
   retained `gpio/state` or a successful sync restores known state.
 - **Publish first, persist only on success.** The old system logged a failed GPIO write and
   updated the row anyway, so the UI confidently showed a heater running when it was not.
@@ -112,8 +116,8 @@ the house style in other Sign In Solutions repos. The bar is still high, just ai
 - **Don't** reference tickets, PRs, phases-in-flight, or "as discussed" — the docs and the commit
   history are the time capsule. A comment reads as current understanding.
 - **Don't** speculate about future problems. If it becomes real, fix it then.
-- If a block needs a paragraph to explain *what it does*, simplify the block. A paragraph
-  explaining *why it must be this way* is fine and often required.
+- If a block needs a paragraph to explain _what it does_, simplify the block. A paragraph
+  explaining _why it must be this way_ is fine and often required.
 
 ## Pitfalls that have already bitten
 
@@ -122,6 +126,12 @@ the house style in other Sign In Solutions repos. The bar is still high, just ai
   `onModuleInit` first, so the registry is subscribed before any node speaks.
 - **Postgres reorders `jsonb` object keys.** Comparing `capabilities` with `JSON.stringify` logs a
   false "capabilities changed" on every restart. Compare key sets, not serialisations.
+- **A node's sequence counter restarts at 1 when its agent restarts.** Anything keyed on `node_seq`
+  must also be keyed on the node's `boot_id`, or it silently drops everything after a reboot — which
+  presents as a stale sensor, not as an error.
+- **A mocked repository cannot fail a database constraint.** The dedupe bug above passed 153 unit
+  tests and a clean build. Where a constraint carries the guarantee, verify it against real
+  Postgres.
 - **Never `synchronize: true`.** Schema changes go through reviewed migrations.
 - **Never build or run `nx serve` on the Pi.** An Angular dev server plus tsserver puts Postgres
   and the sidecar in reach of the OOM killer, and the OOM killer can take out the burner

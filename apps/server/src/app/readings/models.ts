@@ -17,7 +17,19 @@ import { NodeEntity } from '../nodes/models';
 @Index('ix_readings_node_created_at', ['nodeId', 'createdAt'])
 // MQTT QoS 1 is at-least-once, and on a flaky ESP32 link duplicate samples are
 // not hypothetical. A duplicate sample would mean a duplicate rules evaluation.
-@Unique('uq_readings_node_sensor_seq', ['nodeId', 'sensorId', 'nodeSeq'])
+//
+// Scoped to the BOOT, not just the node. A node's sequence counter restarts at 1
+// when its agent restarts - an ESP32 has nowhere cheap to persist one - so a
+// node-and-seq key silently swallowed every sample after a reboot until the
+// counter passed its previous high-water mark. That failure is invisible: it
+// looks exactly like a stale sensor, and it stops the burner being driven by
+// fresh data.
+@Unique('uq_readings_node_sensor_boot_seq', [
+  'nodeId',
+  'sensorId',
+  'bootId',
+  'nodeSeq',
+])
 export class SensorReadingEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -49,6 +61,14 @@ export class SensorReadingEntity {
   /** Advisory, from the node. Diagnostic only - an ESP32 has no RTC. */
   @Column({ type: 'bigint', name: 'node_seq', nullable: true })
   nodeSeq!: string | null;
+
+  /**
+   * The node's boot generation, copied from `nodes.boot_id` at ingest. Part of
+   * the dedupe key above, and useful provenance on its own: it says which run of
+   * which agent produced this row. Null for a node that has not said hello.
+   */
+  @Column({ type: 'text', name: 'boot_id', nullable: true })
+  bootId!: string | null;
 
   @Column({ type: 'timestamptz', name: 'node_ts', nullable: true })
   nodeTs!: Date | null;

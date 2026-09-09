@@ -23,6 +23,7 @@ invariants which keep a burner safe are visible in the code rather than remember
 
 ```bash
 npx nx run-many -t lint,test,build     # the gate
+npx nx test server --coverage          # the thresholds are only checked here
 npx prettier --write .                 # format
 ```
 
@@ -79,8 +80,10 @@ compilation if the two sides disagree.
 
 ```ts
 // libs/domain/src/lib/nodes/admit.dto.ts
-import { IsUUID } from 'class-validator';   // ❌ eslint: bannedExternalImports
-export class AdmitNodeDto { @IsUUID() zoneId?: string }
+import { IsUUID } from 'class-validator'; // ❌ eslint: bannedExternalImports
+export class AdmitNodeDto {
+  @IsUUID() zoneId?: string;
+}
 ```
 
 #### ❌ Don't hand-duplicate a type across the two apps
@@ -94,7 +97,7 @@ exists to prevent.
 
 ```ts
 export interface Reading {
-  createdAt: string;   // ISO-8601, server-stamped on receipt
+  createdAt: string; // ISO-8601, server-stamped on receipt
 }
 ```
 
@@ -106,7 +109,7 @@ hack unwriteable.
 
 ```ts
 export type GpioLevel = 0 | 1;
-onLevel: GpioLevel;     // per-device: four relays are active-LOW, one active-HIGH
+onLevel: GpioLevel; // per-device: four relays are active-LOW, one active-HIGH
 ```
 
 The old `on_state` arrived over the wire as bool, string or int depending on the code path.
@@ -128,7 +131,7 @@ throw new ConflictException({
 #### ❌ Don't return an error inside a 200
 
 ```ts
-return { error: 'device is already on' };   // ❌
+return { error: 'device is already on' }; // ❌
 ```
 
 The old API did this everywhere, with no interceptor and no `catchError` anywhere in the client —
@@ -207,7 +210,7 @@ const ON_LEVEL_ACTIVE_LOW = 0;
 
 ```ts
 // find the node by its slug
-const node = await this.nodes.findOne({ where: { slug } });   // ❌
+const node = await this.nodes.findOne({ where: { slug } }); // ❌
 ```
 
 #### ❌ Don't reference tickets, phases-in-flight, or "as discussed"
@@ -217,7 +220,7 @@ const node = await this.nodes.findOne({ where: { slug } });   // ❌
 ```
 
 The docs and the commit history are the time capsule; a comment reads as current understanding.
-Naming a *future* phase for work this file will need is fine (`MqttHardwareService lands in phase 7`)
+Naming a _future_ phase for work this file will need is fine (`MqttHardwareService lands in phase 7`)
 — naming the phase that produced the current line is not.
 
 #### ❌ Don't speculate about future problems
@@ -230,8 +233,8 @@ If it becomes real, fix it then, in its own commit with its own context.
 
 #### ❌ Don't let a comment explain a block that should be simplified
 
-If it takes a paragraph to say *what* the code does, extract a named function. A paragraph on *why
-it must be this way* is fine and often required.
+If it takes a paragraph to say _what_ the code does, extract a named function. A paragraph on _why
+it must be this way_ is fine and often required.
 
 ## Pitfalls
 
@@ -242,8 +245,9 @@ it must be this way* is fine and often required.
   key sets. `node-registry.ts` has a `deepEquals` for exactly this.
 - **`pg` parses `timestamp without time zone` as local time.** Every timestamp column is
   `timestamptz`. A migration that forgets it should fail loudly.
-- **Coverage thresholds apply to `app/devices` and `app/rules` only**, by an explicit `include`
-  list in `apps/server/vitest.config.ts`. See [Testing](Testing.md).
+- **Coverage thresholds apply to `app/devices` and `app/rules` only**, by an `include` list in
+  `apps/server/vitest.config.ts`, with modules/controllers/DTOs/entities excluded. They are checked
+  only under `--coverage`, so that belongs in the gate. See [Testing](Testing.md).
 - **Nx caches `lint` and `test`.** A "passing" run that printed nothing may be a cache hit; that is
   fine, but if you are chasing a flake, `--skip-nx-cache`.
 - **Don't add a dependency for one helper.** The dependency list is deliberately short; every
