@@ -164,11 +164,13 @@ def main() -> int:
     agent.client = client
     wire(agent, client)
 
+    # Start BEFORE describing: the serial and the applied temperature offset are
+    # only known once the chip has been talked to, and they are the two things
+    # worth having in the log when a reading later looks wrong.
+    sensor.start()
     log.info("node=%s sensor=%s gpio=%s", config.node_id, sensor.describe(), gpio.describe())
     if not config.has_gpio:
         log.info("no GPIO lines configured: this agent cannot drive a pin at all")
-
-    sensor.start()
     client.connect(config.mqtt.host, config.mqtt.port, keepalive=config.mqtt.keepalive_s)
     client.loop_start()
 

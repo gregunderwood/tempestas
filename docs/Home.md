@@ -32,6 +32,7 @@ the greenhouse for eight years.
 - [[Home Assistant]] — the observer/controller boundary, and why the rules stay here
 - [[Migrations]]
 - [[MQTT Contract]]
+- [[Node Agent]] — the Python agent on each box: guards, dead-man, the sensor driver
 - [[Nodes]]
 - [[Readings]] — the query surface, window semantics, retention
 - [[Realtime]] — the socket.io contract to the browser

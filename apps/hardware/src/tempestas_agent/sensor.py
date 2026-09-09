@@ -104,6 +104,11 @@ class Scd4xSensor:
         self._altitude_m = altitude_m
         self._bus = None
         self.serial: str | None = None
+        # Read back during start(), while the chip is still idle. An attribute
+        # rather than a method because it CANNOT be read later: the SCD4x NACKs
+        # every configuration command once periodic measurement is running, and
+        # that surfaces as a Remote I/O error rather than a wrong answer.
+        self.applied_offset_c: float | None = None
 
     def start(self) -> None:
         from smbus2 import SMBus
@@ -123,6 +128,11 @@ class Scd4xSensor:
             self._send(_SET_TEMP_OFFSET, arg=self._encode_offset(self._offset_c))
         if self._altitude_m is not None:
             self._send(_SET_ALTITUDE, arg=self._altitude_m)
+
+        # Read the offset back BEFORE measurement starts: this is the only
+        # window the chip will answer in, and an offset that silently failed to
+        # apply is exactly the failure this re-applying exists to catch.
+        self.applied_offset_c = round(175 * self._read_words(_GET_TEMP_OFFSET, 1)[0] / 65535, 2)
 
         self._send(_START_PERIODIC)
 
@@ -149,9 +159,6 @@ class Scd4xSensor:
         """0x0000 is a pass. Takes about 10 seconds."""
         return self._read_words(_SELF_TEST, 1, exec_ms=10_000)[0]
 
-    def temperature_offset(self) -> float:
-        return 175 * self._read_words(_GET_TEMP_OFFSET, 1)[0] / 65535
-
     def persist_settings(self) -> None:
         self._send(_PERSIST_SETTINGS, exec_ms=800)
 
@@ -163,7 +170,11 @@ class Scd4xSensor:
         self._bus = None
 
     def describe(self) -> str:
-        return f"scd4x @ i2c-{self._bus_no}:0x{self._addr:02x} serial={self.serial or 'unknown'}"
+        offset = "unknown" if self.applied_offset_c is None else f"{self.applied_offset_c:.2f}C"
+        return (
+            f"scd4x @ i2c-{self._bus_no}:0x{self._addr:02x} "
+            f"serial={self.serial or 'unknown'} offset={offset}"
+        )
 
     @staticmethod
     def _encode_offset(offset_c: float) -> int:
