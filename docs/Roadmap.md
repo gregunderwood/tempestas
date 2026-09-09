@@ -192,6 +192,36 @@ Two things to read out of the soak, in this order:
    anything. Note also that the first few minutes after a restart are warm-up transient: this run
    opened at 20.7 °C / 75 % and settled over about five minutes.
 
+### Mounting the Pi does not have to wait for the soak
+
+Worth separating two things the plan runs together: **mounting the Pi to the panel is not the same
+as wiring its GPIO.** The Stage B posture is `gpio.lines = []`, which is enforced by the agent
+having no GPIO backend at all - so the Pi can be screwed to the panel, powered, and moved, with the
+relay ribbon simply not connected, and nothing about that posture changes. Leave the relay board
+unpowered too, and there is no path to a relay at all.
+
+That matters because of what the bench soak can and cannot tell us:
+
+- **Shape and CO2 baseline: valid now.** Two sensors in different rooms should still track each
+  other's diurnal shape, and the CO2 baseline behaviour is informative wherever the box sits.
+- **The temperature offset: not really.** The plan is explicit that the offset must be tuned "at the
+  installed self-heating equilibrium, not in open air". A Pi on a bench and a Pi mounted on a panel
+  beside eight relay coils are different thermal environments, so an offset tuned now has to be
+  re-tuned after mounting regardless.
+
+Which suggests a better sequence than the plan's, and it is strictly less work:
+
+1. Let the bench soak run long enough to confirm shape and plumbing - it has already proved the
+   pipeline end to end.
+2. Mount the Pi to the panel, **relay ribbon disconnected, relay board unpowered**.
+3. Move the panel into the greenhouse.
+4. Re-run the soak there. Now both sensors are in **the same air**, so the difference between them
+   is the offset error rather than a room difference - a direct calibration instead of an inference
+   - and the Pi is at its real installed equilibrium.
+
+Step 4 is a better instrument than the plan's step 4, because "different rooms, so expect an offset"
+stops being a caveat and becomes a measurement.
+
 GPIO is **not** implemented and that is deliberate — see
 [Node Agent](Infrastructure/Node%20Agent.md#the-stage-b-posture). Deployment (a systemd unit, the
 `flock`, `Type=notify`, `OOMScoreAdjust`) is also still to do; the agent has only been run in the
@@ -228,8 +258,10 @@ inactive`. This proves the boot-window fix.
 4. `kill -9` the agent and watch the gap. Same test, same conclusion.
 5. Verify the safety surface against the LEDs: readback failure, dead-man trip, max-on latch,
    min-dwell clamp, retained-command rejection, expired-command rejection.
-6. Then mains loads **one at a time in ascending order of consequence**: exhaust fan → lights →
-   single light → extra relay → **CO2 generator last**.
+6. Then loads **one at a time in ascending order of consequence**. On elantris's panel this is far
+   easier than the plan assumed, because loads plug in rather than being wired: a desk lamp into
+   relay 1's outlet, watch it switch, unplug it; repeat per channel; **the CO2 generator last**,
+   into a socket already proven with something harmless.
 
 **Stage D — shadow mode.** Move elantris into the greenhouse, sensor connected, **relays connected
 to nothing**, global `dry_run: true` so NestJS computes and publishes intent that the agent logs but
@@ -278,12 +310,15 @@ The app and agent write JSON to **stdout and own no files**; journald caps itsel
 
 Answer each before its stage, not before starting.
 
-1. **What does "Extra Relay" (BCM 12) actually control?** `on_delay_duration = 0` suggests something
-   benign, but it is unknown and active-LOW. Identify it before it is ever wired to elantris.
-   _(Blocks Stage C step 6.)_
-2. **Does the relay board have input pull-ups, and is it low-level-trigger with a jumper?** This
-   decides whether external pull-ups are mandatory. Ten minutes with a multimeter, and it gates the
-   whole relay bring-up. _(Blocks Stage C.)_
+1. ~~**What does "Extra Relay" (BCM 12) control?**~~ **Moot for elantris (2026-09-09).** That was the
+   greenhouse Pi 5's mystery channel. elantris has its own panel with three known outlet-wired
+   relays and five unwired ones, so nothing unidentified is in reach. The question still stands for
+   the Pi 5 itself, before that board is ever touched again.
+2. **Does elantris's relay board have input pull-ups, is it active-LOW, and where is its JD-VCC
+   jumper?** This decides whether external pull-ups are mandatory and whether the coils are isolated
+   from the Pi's 5 V rail. The polarity and jumper are answerable from a close-up photo of the
+   header end of the board; the pull-ups want ten minutes with a multimeter. **Gates all of Stage
+   C.** See [Hardware](Hardware.md#elantriss-own-relay-board).
 3. **How long should a node hold the burner on at night after losing the brain?** The one dead-man
    case that isn't obvious, since the burner is the night heater. Long enough to ride out a restart
    or a WiFi blip; short enough that a dead controller doesn't leave it burning until morning.
