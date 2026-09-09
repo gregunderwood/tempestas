@@ -1,0 +1,128 @@
+# Hardware
+
+## What it is
+
+The physical facts: which box, which pin, which polarity, which sensor, and the quirks that have
+already caused bugs. None of this is discoverable from the code, and several items contradict the
+old repo's `CLAUDE.md` — where the light pins are reversed and the thresholds are stale. **Trust
+this file over that one.**
+
+⚠ Read [Safety](Safety.md) before wiring or energising anything.
+
+## The boxes
+
+| Host | Board | OS | Role |
+|---|---|---|---|
+| `elantris` | Raspberry Pi 4B, arm64 | Debian 13 (trixie), headless | The first node **and** the brain. `192.168.2.70`, user `gunderwood`, Wi-Fi (`wlan0`) |
+| `greenhouse` | Raspberry Pi 5 | 32-bit userland | Runs the legacy Flask app on lights + fans. Later reflashed to arm64 and demoted to a node |
+
+Node-to-node TCP works (ports 22 and 80 open from elantris to greenhouse). **ICMP is filtered on
+both greenhouse and the Mac, so `ping` fails misleadingly** — that is not a connectivity problem.
+There is no MQTT broker anywhere else on the LAN; Mosquitto on elantris is a clean install.
+
+## The devices
+
+Verified live from the greenhouse Postgres. These get re-entered by hand into the fresh database.
+
+| name | gpio | on_delay (s) | on level | rules today | goes where |
+|---|---|---|---|---|---|
+| CO2 Generator | 16 | 300 | **LOW** (active-low) | disabled | → **elantris / tempestas** |
+| Exhaust Fan | 20 | 60 | LOW | enabled | stays on the Pi 5 for now |
+| Lights | 21 | 900 | LOW | enabled | stays on the Pi 5 for now |
+| Single Light | 26 | 900 | **HIGH** (active-high) | enabled | stays on the Pi 5 for now |
+| Extra Relay | 12 | 0 | LOW | disabled | spare — **unknown function** |
+
+Two things this table settles:
+
+- **Active-high vs active-low is per-device data, not a constant.** Four relays are active-LOW
+  (standard opto-isolated boards); `Single Light` is active-HIGH. That is why `onLevel` is a column
+  and why a node receives explicit electrical levels rather than "on"/"off".
+- **The CO2 handover is clean.** `CO2 Generator` already has automation disabled on the old system,
+  so moving it is a wiring change plus enabling the rule here — not two controllers contending for
+  one device.
+
+⚠ **`Extra Relay` (BCM 12) is unidentified and active-LOW.** `on_delay_duration = 0` suggests
+something benign, but until somebody traces the wire, treat it as hazardous and do not wire it to
+elantris.
+
+## Select the GPIO chip by label, not by number
+
+Verified on elantris: `gpiodetect` reports only `gpiochip0 [pinctrl-bcm2711]` (58 lines) and
+`gpiochip1 [raspberrypi-exp-gpio]`. **There is no real chip 4** — `/dev/gpiochip4` is a
+compatibility symlink to `gpiochip0`.
+
+The old code probes `[4, 0, 1, 2, 3]` and opens chip 4 first because a **Pi 5's** RP1 bank *is*
+chip 4. On elantris that works only by the accident of the symlink. Since the Pi 5 will eventually
+run the *same* sidecar, the node selects its chip by **label** — `pinctrl-bcm2711` on a Pi 4,
+`pinctrl-rp1` on a Pi 5 — and fails loudly if neither is found. One sidecar build, correct on both
+boards, instead of a probe order that happens to work.
+
+## The boot-window hazard
+
+Unclaimed active-low lines command their relays **ON**, and a line is unclaimed through the whole
+boot window and every crash gap. This is the most dangerous property of the build and it is not yet
+mitigated. Full detail, the measurement that gates it, and the three required mitigations are in
+[Safety](Safety.md#the-boot-window-hazard).
+
+## The sensor
+
+**SCD-4x (Adafruit SCD-41, STEMMA QT)** on I²C, `/dev/i2c-1`. Currently one per node; the capability
+model allows several.
+
+- **Phase 1 uses `adafruit-circuitpython-scd4x` on Blinka** — already installed and a year in
+  production. Phase 2 may replace it behind the same interface with a raw `smbus2` driver derived
+  from the existing `scd4x_healthcheck.py`, which already implements the protocol with CRC-8. That
+  also fixes a subtle bug: the datasheet says `data_ready` is true when the **low 11 bits** are
+  non-zero (`& 0x07FF`, which the healthcheck script gets right) where the Adafruit driver tests the
+  whole word.
+- **Temperature offset.** The sensor reads ~2 °C high against two independent references. The SCD4x
+  default offset is 4 °C, so the correct value is 6 °C — but the Adafruit setter does **not** call
+  `persist_settings`, so it is volatile and has almost certainly been reset by every power cycle
+  since it was set. **Apply it at every startup** rather than depending on persistence, and tune it
+  at the installed self-heating equilibrium, not in open air.
+- **Never invent data.** On a zero CO2 the agent publishes `valid: false, value: null`. It does not
+  substitute the last known good value as the old code does — see [Safety](Safety.md).
+- **Calibration is destructive and there is no terminal on MQTT.** Two-phase confirm
+  (`prepare` → single-use token → `commit`), preconditions the agent enforces and refuses on
+  (periodic measurement running ≥ 3 min, CO2 σ < 20 ppm over 60 s), and a config gate defaulting to
+  off. Target **420 ppm as a required parameter with no default** — the two existing scripts
+  disagree (400 vs 500), and forcing the caller to state it stops that recurring.
+
+## Building the Python environment on trixie
+
+Debian 13 is PEP 668 externally-managed. Dependencies go through **`uv`** (always-a-venv, and
+`uv.lock` is genuinely reproducible). The gotcha, found the hard way:
+
+```bash
+# The pip `lgpio` wheel (pulled in by adafruit-blinka) will NOT build without these two.
+sudo apt install -y swig liblgpio-dev python3-dev build-essential
+python3 -m venv .venv          # fully isolated - NOT --system-site-packages
+.venv/bin/pip install -r requirements.txt
+```
+
+`swig` provides the SWIG codegen and `liblgpio-dev` provides `-llgpio` to link against; gcc, make
+and python3-dev are already present. Verified working: `import board` reports board_id
+`RASPBERRY_PI_4B`, `adafruit_scd4x` 1.4.13 imports.
+
+**Never install `RPi.GPIO`, `rpi-lgpio` or `gpiozero`** into that venv — see [Safety](Safety.md).
+
+## Pitfalls
+
+- **`i2cdetect` lives in `/usr/sbin`**, which is not on a normal user's `PATH`.
+- **systemd cannot see nvm.** It is a shell function; units need the absolute interpreter path.
+  This bites everyone once.
+- **`ping` to greenhouse or the Mac fails by design** (ICMP filtered). Test with `nc -z host port`.
+- **SD card endurance.** ~150–250 MB/day of writes before erase-block amplification.
+  `synchronous_commit = off` (which is *not* `fsync=off` — worst case is losing under a second of
+  sensor rows), batched inserts, `wal_compression`, capped journald. **Booting from a USB3 SSD is
+  the strong recommendation** — one hour of work, removes the endurance question permanently.
+- **Wi-Fi-only nodes are a reliability factor.** The existing `wifi_monitor.sh` watchdog exists for
+  exactly this reason and should carry over per node.
+
+## When to update this file
+
+- A device is added, moved, rewired, or its polarity or pin changes
+- `Extra Relay` is finally identified
+- A node is added to the LAN, or an IP/hostname changes
+- A sensor is replaced, or its offset is re-tuned
+- A new build dependency is discovered on a fresh OS image
