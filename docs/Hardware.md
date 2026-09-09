@@ -66,8 +66,24 @@ mitigated. Full detail, the measurement that gates it, and the three required mi
 
 ## The sensor
 
-**SCD-4x (Adafruit SCD-41, STEMMA QT)** on I²C, `/dev/i2c-1`. Currently one per node; the capability
-model allows several.
+**SCD-4x (Adafruit SCD-41, STEMMA QT)** on I²C, `/dev/i2c-1`, address `0x62`. Currently one per node;
+the capability model allows several.
+
+Measured on elantris (2026-09-09), with `scd4x_healthcheck.py`:
+
+|                             |                           |
+| --------------------------- | ------------------------- |
+| Serial                      | `5fd90b073b7a`            |
+| Internal self-test          | **PASS** (`0x0000`)       |
+| Live read                   | 636 ppm, 21.4 °C, 64 % RH |
+| Stored `temperature_offset` | **6.56 °C**               |
+
+That offset is worth a note, because the plan predicted the opposite. It assumed the value would
+have been lost — the Adafruit setter never calls `persist_settings`, so it is volatile. The chip
+currently holds 6.56 °C, close to the ~6 °C the plan expected somebody to have set. **This is not
+yet evidence that it persisted**: the sensor has been powered continuously since it was set, so the
+NVM question is still open and only a power cycle settles it. Applying the offset at every startup
+stays correct either way, and the agent now logs the value it reads back at boot.
 
 - **Phase 1 uses `adafruit-circuitpython-scd4x` on Blinka** — already installed and a year in
   production. Phase 2 may replace it behind the same interface with a raw `smbus2` driver derived
@@ -82,6 +98,10 @@ model allows several.
   at the installed self-heating equilibrium, not in open air.
 - **Never invent data.** On a zero CO2 the agent publishes `valid: false, value: null`. It does not
   substitute the last known good value as the old code does — see [Safety](Safety.md).
+- **Configuration commands are NACKed while periodic measurement is running** (`Errno 121 Remote
+I/O error`). Everything that configures the chip, _and any read-back of that configuration_, has
+  to happen in the idle window at startup. Found by doing it wrong on real hardware; the ordering
+  is now pinned by a test with a fake bus that records command words.
 - **Calibration is destructive and there is no terminal on MQTT.** Two-phase confirm
   (`prepare` → single-use token → `commit`), preconditions the agent enforces and refuses on
   (periodic measurement running ≥ 3 min, CO2 σ < 20 ppm over 60 s), and a config gate defaulting to

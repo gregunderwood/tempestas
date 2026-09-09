@@ -12,22 +12,22 @@ Every phase ends in something runnable. **Phases 1–7 need no hardware and no s
 
 ## Status
 
-| #   | Phase                                                                                       | State    | Checkpoint                                                                                                                                                                                |
-| --- | ------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | Provision elantris: Node 22, swap, Postgres, Mosquitto                                      | **done** | `node -v` = v22.x · `psql -c 'select 1'` · `mosquitto_pub`→`sub` round-trip                                                                                                               |
-| 1   | Nx workspace, generators, version pins, prettier/eslint/nvmrc                               | **done** | `nx run-many -t lint,test,build` green · `tsconfig.base.json` has **`paths`**, not `references` · no `jest*` outside node_modules · `CYPRESS_INSTALL_BINARY=0` on the Pi                  |
-| 2   | `libs/domain`: models, MQTT contract, gauge metrics, path alias, dep constraints            | **done** | a throwaway `import { Reading }` compiles in **both** app builds                                                                                                                          |
-| 3   | TypeORM config, entities, `InitialSchema`, seed                                             | **done** | FK order `zones → nodes → devices → sensor_readings` · `\d+ devices` shows `UNIQUE (node_id, gpio)` and **no** unique index on `role` · revert drops cleanly                              |
-| 4   | Devices module, pure `device-state.ts`, `FakeHardwareService`, interlock tests              | **done** | CRUD + on/off/force-on via curl · a second `POST /on` returns **409** with `canTurnOnAt`                                                                                                  |
-| 4.5 | **Node registry** — `hello` ingest, LWT → online, pending/admit lifecycle                   | **done** | a `hello` for an unknown slug → **pending** row · a sample from it is **discarded** · admit → samples persist                                                                             |
-| 5   | Rules engine (pure) + `ClimateResolver` + `enabledRoles` + tests                            | **done** | with `enabledRoles: ['co2_generator']` and a lights device present, dropping the fake temp to 20 °C drives **only** the burner                                                            |
-| 6   | Readings query surface, stats, retention cron, realtime gateway, health                     | **done** | a socket client gets `reading:latest` every ~10 s and `device:state` on toggle                                                                                                            |
-| 7   | `MqttHardwareService`; fake driver spawns **two virtual nodes** with different capabilities | **done** | `mosquitto_sub -t 'tempestas/v1/node/+/#' -v` shows a **non-retained** `gpio/set` · hand-publish a sample → persists → evaluates → pushes · `mosquitto_pub -r` is dropped **and alarmed** |
-| 8   | Python sidecar on elantris: sensor first, then GPIO                                         | **next** | real SCD4x samples arriving over MQTT and landing in Postgres                                                                                                                             |
-| 9   | Angular shell, routes, API services, error interceptor, M3 theme                            |          | an induced 409 raises a snackbar; no `{error}`-in-200 handling anywhere in the source                                                                                                     |
-| 10  | Gauge component, dashboard, readings screens                                                |          | gauge colours match the old thresholds at boundary values; a `null` CO2 renders an em-dash                                                                                                |
-| 11  | Devices screens (+ `role`, `onLevel`, node selector) and **nodes screens**                  |          | `/nodes` becomes a real route with an admit flow                                                                                                                                          |
-| 12  | Hardening: token guard, CORS, Mosquitto ACLs, CI on Node 22                                 |          | `curl -X POST` without the token → 401; GETs unaffected                                                                                                                                   |
+| #   | Phase                                                                                       | State           | Checkpoint                                                                                                                                                                                |
+| --- | ------------------------------------------------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | Provision elantris: Node 22, swap, Postgres, Mosquitto                                      | **done**        | `node -v` = v22.x · `psql -c 'select 1'` · `mosquitto_pub`→`sub` round-trip                                                                                                               |
+| 1   | Nx workspace, generators, version pins, prettier/eslint/nvmrc                               | **done**        | `nx run-many -t lint,test,build` green · `tsconfig.base.json` has **`paths`**, not `references` · no `jest*` outside node_modules · `CYPRESS_INSTALL_BINARY=0` on the Pi                  |
+| 2   | `libs/domain`: models, MQTT contract, gauge metrics, path alias, dep constraints            | **done**        | a throwaway `import { Reading }` compiles in **both** app builds                                                                                                                          |
+| 3   | TypeORM config, entities, `InitialSchema`, seed                                             | **done**        | FK order `zones → nodes → devices → sensor_readings` · `\d+ devices` shows `UNIQUE (node_id, gpio)` and **no** unique index on `role` · revert drops cleanly                              |
+| 4   | Devices module, pure `device-state.ts`, `FakeHardwareService`, interlock tests              | **done**        | CRUD + on/off/force-on via curl · a second `POST /on` returns **409** with `canTurnOnAt`                                                                                                  |
+| 4.5 | **Node registry** — `hello` ingest, LWT → online, pending/admit lifecycle                   | **done**        | a `hello` for an unknown slug → **pending** row · a sample from it is **discarded** · admit → samples persist                                                                             |
+| 5   | Rules engine (pure) + `ClimateResolver` + `enabledRoles` + tests                            | **done**        | with `enabledRoles: ['co2_generator']` and a lights device present, dropping the fake temp to 20 °C drives **only** the burner                                                            |
+| 6   | Readings query surface, stats, retention cron, realtime gateway, health                     | **done**        | a socket client gets `reading:latest` every ~10 s and `device:state` on toggle                                                                                                            |
+| 7   | `MqttHardwareService`; fake driver spawns **two virtual nodes** with different capabilities | **done**        | `mosquitto_sub -t 'tempestas/v1/node/+/#' -v` shows a **non-retained** `gpio/set` · hand-publish a sample → persists → evaluates → pushes · `mosquitto_pub -r` is dropped **and alarmed** |
+| 8   | Python sidecar on elantris: sensor first, then GPIO                                         | **in progress** | real SCD4x samples arriving over MQTT and landing in Postgres                                                                                                                             |
+| 9   | Angular shell, routes, API services, error interceptor, M3 theme                            |                 | an induced 409 raises a snackbar; no `{error}`-in-200 handling anywhere in the source                                                                                                     |
+| 10  | Gauge component, dashboard, readings screens                                                |                 | gauge colours match the old thresholds at boundary values; a `null` CO2 renders an em-dash                                                                                                |
+| 11  | Devices screens (+ `role`, `onLevel`, node selector) and **nodes screens**                  |                 | `/nodes` becomes a real route with an admit flow                                                                                                                                          |
+| 12  | Hardening: token guard, CORS, Mosquitto ACLs, CI on Node 22                                 |                 | `curl -X POST` without the token → 401; GETs unaffected                                                                                                                                   |
 
 ### Phase 0, as actually provisioned
 
@@ -156,6 +156,26 @@ exists to remove. Hardware failures now carry an `ApiErrorCode` and translate: `
 Also worth recording, because it validated a design decision: the node's retained `status` and its
 first sample both arrived **before** its `hello`. Both were correctly refused — registration needs
 capabilities and only `hello` carries them.
+
+### Phase 8 / Stage B so far
+
+The agent is built and running against the real SCD41 on elantris, publishing real samples over
+MQTT. What is done and what is not:
+
+| Stage B step                                              | State                                           |
+| --------------------------------------------------------- | ----------------------------------------------- |
+| 1. `scd4x_healthcheck.py`, record serial and self-test    | ✅ serial `5fd90b073b7a`, self-test PASS        |
+| 2. Agent in **sim mode**, whole topic tree verified       | ✅ against the Mac's broker and the real server |
+| 3. Real sensor with `gpio.lines` **empty**                | ✅ on elantris, sensor-only, no chip opened     |
+| 4. 48 h against greenhouse's live stream, tune the offset | ⬜ not started                                  |
+
+GPIO is **not** implemented and that is deliberate — see
+[Node Agent](Infrastructure/Node%20Agent.md#the-stage-b-posture). Deployment (a systemd unit, the
+`flock`, `Type=notify`, `OOMScoreAdjust`) is also still to do; the agent has only been run in the
+foreground.
+
+The samples currently reach elantris's own broker, which is loopback-only, so they do not reach the
+server on the Mac. Closing that loop needs the broker listener decision above.
 
 ## Hardware bring-up and cutover
 
