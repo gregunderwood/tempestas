@@ -5,7 +5,7 @@ a thin Python agent per node and MQTT in between, replacing the Flask/Angular-16
 the greenhouse for eight years.
 
 > [!info] About the name
-> *Tempestas* is the Roman goddess of storms and weather. Aulus Atilius Calatinus dedicated a temple
+> _Tempestas_ is the Roman goddess of storms and weather. Aulus Atilius Calatinus dedicated a temple
 > to her after his fleet survived a storm off Corsica in 259 BC — a name for the thing you appease
 > when the weather is what stands between you and losing everything.
 >
@@ -29,6 +29,7 @@ the greenhouse for eight years.
 ### Infrastructure
 
 - [[Database]]
+- [[Home Assistant]] — the observer/controller boundary, and why the rules stay here
 - [[Migrations]]
 - [[MQTT Contract]]
 - [[Nodes]]
