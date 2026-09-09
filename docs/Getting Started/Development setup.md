@@ -1,0 +1,130 @@
+# Development setup
+
+Everything up to phase 7 runs on the Mac with **no Pi, no broker and no relays** — that is what the
+`HARDWARE_DRIVER=fake` seam is for.
+
+## Prerequisites
+
+- Node 22 (`nvm use` — the repo pins it in `.nvmrc` and in `engines`)
+- Docker (local Postgres only; production Postgres on the Pi is native apt)
+- `mosquitto-clients` for phase 7 onward (`brew install mosquitto`)
+
+## Setup
+
+```bash
+nvm use
+npm ci
+docker compose up -d          # Postgres 17, container tempestas-db, host port 5433
+cp apps/server/.env.example apps/server/.env
+npm run migration:run
+npx nx serve server           # http://localhost:7000/api
+npx nx serve web              # http://localhost:4200
+```
+
+`apps/server/.env` is **gitignored**; `apps/server/.env.example` is the committed template and its
+defaults work as-is — 5433, `HARDWARE_DRIVER=fake`, `TEMPESTAS_TZ=America/Vancouver`. Port **5433**,
+not 5432, because 5432 on this machine belongs to another project.
+
+Both the app (`@nestjs/config`) and the migration CLI (`typeorm.config.ts`) read that one file, so a
+value missing from it fails in two different-looking ways.
+
+## Verify it works
+
+```bash
+curl -s localhost:7000/api/health | python3 -m json.tool     # {"status":"ok","db":true,...}
+curl -s localhost:7000/api/nodes  | python3 -m json.tool
+```
+
+On first boot the fake driver announces two simulated nodes, so the log should contain a **WARN that
+a node is pending** and, ten seconds later, a WARN that its readings are being discarded. That is
+the admission gate working, not a problem — admit it:
+
+```bash
+NODE_ID=$(curl -s localhost:7000/api/nodes | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])")
+ZONE_ID=$(docker exec tempestas-db psql -U tempestas -d tempestas -tAc "select id from zones limit 1;")
+curl -s -X POST localhost:7000/api/nodes/$NODE_ID/admit \
+  -H 'Content-Type: application/json' -d "{\"zoneId\":\"$ZONE_ID\"}"
+```
+
+## The fake hardware driver
+
+`HARDWARE_DRIVER=fake` spawns two simulated nodes with **deliberately different shapes** —
+`sim-pi` (5 GPIO pins + a sensor) and `sim-esp32` (sensor only, no GPIO). That proves the multi-node
+path and the capability model with zero hardware.
+
+It is a **closed loop**: the burner raises temperature and CO2, the fan lowers them, on a diurnal
+baseline. So the rules engine is genuinely exercised — burner on → CO2 climbs → rule turns it off.
+Ticks every 10 s.
+
+Anything other than `fake` or `mqtt` throws at boot rather than falling back to the simulator.
+
+## Seeding a zone and a device
+
+A device needs a node and a zone to exist first (FK order: `zones → nodes → devices`). Nodes create
+themselves from `hello`; zones and devices do not:
+
+```bash
+docker exec -i tempestas-db psql -U tempestas -d tempestas <<'SQL'
+INSERT INTO zones (slug, display_name, rules_config) VALUES (
+  'greenhouse', 'Greenhouse',
+  '{"enabledRoles":["co2_generator"],"thresholds":{"startTime":"06:30","endTime":"18:30",
+    "lightsOnTemp":26,"lightsOffTemp":27,"co2OffTemp":26,"co2NightOnTemp":3,
+    "exhaustOnTemp":30,"exhaustOffTemp":29.5,"co2ThresholdPpm":1500}}'
+) ON CONFLICT (slug) DO NOTHING;
+SQL
+```
+
+**Use `docker exec -i`.** Without `-i` stdin is not forwarded and the heredoc silently never
+arrives — the command appears to succeed and inserts nothing.
+
+## Running the checks
+
+```bash
+npx nx run-many -t lint,test,build     # the gate, always, before declaring work done
+npx nx test server                     # one project
+npx prettier --write .
+```
+
+`test` alone cannot catch a type error — Vitest transpiles without typechecking. See
+[Testing](../Testing.md).
+
+## Working against real hardware
+
+MQTT hands you a better loop than remote development does. Because the transport is MQTT over the
+LAN rather than in-process GPIO, **the Nx dev stack runs on the Mac and drives the actual sensor and
+actual relays on elantris**:
+
+```
+Mac: nx serve web + nx serve server ──MQTT──► Mosquitto on elantris ──► real SCD4x + real relays
+```
+
+Full dev speed, real hardware, zero Pi RAM cost.
+
+⚠ **Never run `nx serve` or a production build on the Pi.** VS Code Remote-SSH plus tsserver on an
+Nx monorepo is 1–2 GiB, and an Angular dev server another 1.5–2.5 GiB, against 3.7 GiB total. That
+puts Postgres and the sidecar in reach of the OOM killer, and on this box the OOM killer can take
+out the burner controller. It is a safety problem wearing a performance costume.
+
+**Remote-SSH is still fine, scoped:** open `apps/hardware/` as the Remote-SSH folder rather than the
+monorepo root, so no tsserver indexes the TypeScript side. Use it for the sidecar, systemd units,
+the Caddyfile and ops work.
+
+Guard rail: only one controller may hold the heartbeat. Starting the Mac's NestJS must stop the
+Pi's, or bump the controller `epoch` to take over cleanly.
+
+## Troubleshooting
+
+**`ECONNREFUSED 127.0.0.1:5433`** — `docker compose up -d`, then check `docker ps` shows
+`tempestas-db` as healthy.
+
+**Migrations say "already loaded" but a column is missing** — `npm run migration:show`. The CLI uses
+`apps/server/src/typeorm.config.ts`, which loads `apps/server/.env`, and that is a different code
+path from the running app's `@nestjs/config`.
+
+**No readings appear** — check the log for `Discarding readings from "..."`. A node's readings are
+discarded until it is admitted, by design.
+
+**`ping elantris` fails** — ICMP is filtered. Use `nc -z elantris 22`.
+
+**A lint or test target printed nothing and passed** — Nx cache hit. `--skip-nx-cache` if you are
+chasing a flake.
