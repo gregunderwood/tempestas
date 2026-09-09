@@ -80,9 +80,15 @@ The fix is standard, and it is why the jumper matters:
    the coils draw through whatever feeds `Vcc` and the opto isolation is defeated for the supply.
 2. **`Vcc` (10-pin header) → the Pi's 3.3 V**, `Gnd` → Pi ground. Now the Pi's high equals the LED's
    anode voltage, so a high is _zero_ volts across the LED and the relay releases cleanly.
-3. **`JDVcc` → 5 V** for the coils, with that supply's ground on the 3-pin block. Three Songle coils
-   is roughly 220 mA; the Pi's 5 V pin can carry that, but a separate supply keeps coil switching
-   noise off the rail the sensor and the controller share.
+3. **`JDVcc` → the Pi's 5 V (pin 4).** That is one wire and no second ground: the board has a single
+   ground net, already tied to the Pi at pin 25. Three Songle coils is roughly **220 mA**, which a
+   Pi 4 on a decent 3 A supply carries without complaint, and it lands on the 5 V input rail rather
+   than the 3.3 V regulator, so the logic side is unaffected.
+
+   Two conditions on that. Use a **good PSU** — coil inrush on a marginal supply is how an SD card
+   gets corrupted — and keep the lead short. And **revisit it if more channels are ever wired**:
+   eight coils would be ~600 mA, at which point a separate brick stops being optional. The board's
+   flyback diodes (D1–D8) handle the switching transients.
 
 ### The boot window may be much less dangerous on this board
 
@@ -190,8 +196,29 @@ stays correct either way, and the agent now logs the value it reads back at boot
   also fixes a subtle bug: the datasheet says `data_ready` is true when the **low 11 bits** are
   non-zero (`& 0x07FF`, which the healthcheck script gets right) where the Adafruit driver tests the
   whole word.
-- **Temperature offset.** The sensor reads ~2 °C high against two independent references. The SCD4x
-  default offset is 4 °C, so the correct value is 6 °C — but the Adafruit setter does **not** call
+- **Temperature offset: measured 2026-09-09 against two references.** At 21:06:17Z the SCD41
+  reported **19.31 °C / 77.8 % RH** with two LCD hygrometers beside it reading **21.4 °C / 61 %** and
+  **21.6 °C / 64 %** — so it runs **2.19 °C cold** with a stored offset of **6.56 °C**, and the
+  corrected value is **≈ 4.37 °C**, close to the SCD4x factory default of 4 °C.
+
+  The humidity error is mostly a _consequence_ of that, not a second fault. Holding the reference
+  water content fixed, a sensor that thinks it is 19.31 °C should report 71.5 % where the true value
+  is 62.5 %; it reported 77.8 %, leaving 6.3 points unexplained — inside the combined tolerance of
+  the SCD4x (±6 % RH) and a cheap LCD hygrometer (±5 %). Correct the temperature and the humidity
+  largely corrects itself.
+
+  ⚠ **This is a bench figure and it is not yet the one to commit to.** The offset must be tuned at
+  the _installed_ equilibrium, and the number depends entirely on where the sensor physically ends
+  up — see below. Applying it mid-soak would also put a step discontinuity through the dataset; the
+  soak can be bias-corrected in post instead, now that the bias is known.
+
+- **Put the sensor in the air it is measuring, not in the enclosure.** On a STEMMA QT cable it can
+  sit well away from the Pi and the relay coils. Inside the panel it would read the enclosure rather
+  than the greenhouse, and the offset would spend its life fighting self-heating that changes with
+  relay duty. Outside, the bench figure above roughly transfers and stays stable.
+
+- **Historic note.** The old assumption was that the sensor read ~2 °C high and the correct offset
+  was therefore 6 °C — but the Adafruit setter does **not** call
   `persist_settings`, so it is volatile and has almost certainly been reset by every power cycle
   since it was set. **Apply it at every startup** rather than depending on persistence, and tune it
   at the installed self-heating equilibrium, not in open air.
