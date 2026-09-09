@@ -4,6 +4,7 @@ import {
   acceptsSamples,
   newNodeFromHello,
   patchFromHello,
+  pinsWithdrawn,
   type HelloFacts,
   type RegisteredNode,
 } from './node-registry';
@@ -119,22 +120,22 @@ describe('patchFromHello', () => {
   });
 
   it('reports a reboot when the bootId changes', () => {
-    const { outcome } = patchFromHello(
+    const { outcomes } = patchFromHello(
       registered(),
       hello({ bootId: 'boot-2' }),
     );
-    expect(outcome).toBe('rebooted');
+    expect(outcomes).toContain('rebooted');
   });
 
   it('will not claim a reboot it cannot prove', () => {
     // A row first seen before boot_id existed. Inventing a reboot here would
     // put a lie in the log used to diagnose the next outage.
-    const { outcome } = patchFromHello(registered({ bootId: null }), hello());
-    expect(outcome).toBe('seen');
+    const { outcomes } = patchFromHello(registered({ bootId: null }), hello());
+    expect(outcomes).toEqual(['seen']);
   });
 
   it('reports a capability change when the exposed pins move', () => {
-    const { outcome } = patchFromHello(
+    const { outcomes } = patchFromHello(
       registered(),
       hello({
         capabilities: capabilities({
@@ -142,15 +143,15 @@ describe('patchFromHello', () => {
         }),
       }),
     );
-    expect(outcome).toBe('capabilities-changed');
+    expect(outcomes).toContain('capabilities-changed');
   });
 
   it('reports an agent upgrade when only the version moved', () => {
-    const { outcome } = patchFromHello(
+    const { outcomes } = patchFromHello(
       registered(),
       hello({ agentVersion: '1.1.0' }),
     );
-    expect(outcome).toBe('agent-upgraded');
+    expect(outcomes).toContain('agent-upgraded');
   });
 
   // capabilities round-trip through jsonb, and Postgres does not preserve
@@ -171,10 +172,76 @@ describe('patchFromHello', () => {
       contractVersion: 1,
     } as unknown as NodeCapabilities;
 
-    const { outcome } = patchFromHello(
+    const { outcomes } = patchFromHello(
       registered(),
       hello({ capabilities: reordered }),
     );
-    expect(outcome).toBe('seen');
+    expect(outcomes).toEqual(['seen']);
+  });
+});
+
+// Found by running the real agent: an agent restarting with new capabilities is
+// BOTH a reboot and a capability change. Reporting only the reboot hid a node
+// dropping every GPIO pin it had while a device was still bound to one.
+describe('a hello can be several things at once', () => {
+  it('reports a reboot AND a capability change together', () => {
+    const { outcomes } = patchFromHello(
+      registered(),
+      hello({
+        bootId: 'boot-2',
+        capabilities: capabilities({ gpio: undefined }),
+      }),
+    );
+    expect(outcomes).toEqual(
+      expect.arrayContaining(['rebooted', 'capabilities-changed']),
+    );
+  });
+
+  it('reports all three when the agent is upgraded too', () => {
+    const { outcomes } = patchFromHello(
+      registered(),
+      hello({
+        bootId: 'boot-2',
+        agentVersion: '2.0.0',
+        capabilities: capabilities({ gpio: undefined }),
+      }),
+    );
+    expect(outcomes.sort()).toEqual([
+      'agent-upgraded',
+      'capabilities-changed',
+      'rebooted',
+    ]);
+  });
+});
+
+describe('pinsWithdrawn', () => {
+  it('names the pins a node used to expose and no longer does', () => {
+    const before = capabilities({
+      gpio: { pins: [12, 16, 20], supportsReadback: true },
+    });
+    const after = capabilities({
+      gpio: { pins: [12], supportsReadback: true },
+    });
+    expect(pinsWithdrawn(before, after)).toEqual([16, 20]);
+  });
+
+  // The case that actually happened: a node became sensor-only.
+  it('treats losing gpio entirely as withdrawing every pin', () => {
+    const before = capabilities({
+      gpio: { pins: [16], supportsReadback: true },
+    });
+    expect(pinsWithdrawn(before, capabilities({ gpio: undefined }))).toEqual([
+      16,
+    ]);
+  });
+
+  it('is empty when pins are only added', () => {
+    const before = capabilities({
+      gpio: { pins: [16], supportsReadback: true },
+    });
+    const after = capabilities({
+      gpio: { pins: [16, 20], supportsReadback: true },
+    });
+    expect(pinsWithdrawn(before, after)).toEqual([]);
   });
 });

@@ -67,6 +67,12 @@ export interface HelloPatch {
  * Why this hello was interesting, if it was. At one hello per node restart this
  * is cheap to log - but `seen` stays at debug, because a node re-announcing on
  * every reconnect must not bury the line that says a new node needs admitting.
+ *
+ * A hello can be several of these at once, and reporting only the most dramatic
+ * one hides the rest. Not hypothetical: an agent restarting with new
+ * capabilities is BOTH a reboot and a capability change, and reporting only the
+ * reboot silently swallowed a node dropping every GPIO pin it had while a device
+ * was still bound to one of them.
  */
 export type HelloOutcome =
   'rebooted' | 'capabilities-changed' | 'agent-upgraded' | 'seen';
@@ -115,7 +121,7 @@ export function newNodeFromHello(hello: HelloFacts): NewNodeFields {
 export function patchFromHello(
   existing: RegisteredNode,
   hello: HelloFacts,
-): { patch: HelloPatch; outcome: HelloOutcome } {
+): { patch: HelloPatch; outcomes: HelloOutcome[] } {
   return {
     patch: {
       kind: hello.kind,
@@ -125,22 +131,44 @@ export function patchFromHello(
       online: true,
       lastSeenAt: hello.receivedAt,
     },
-    outcome: classifyHello(existing, hello),
+    outcomes: classifyHello(existing, hello),
   };
 }
 
+/** Every applicable outcome, not just the loudest. `['seen']` when unchanged. */
 function classifyHello(
   existing: RegisteredNode,
   hello: HelloFacts,
-): HelloOutcome {
+): HelloOutcome[] {
+  const outcomes: HelloOutcome[] = [];
   // A null bootId is a node first seen before this field existed, so a reboot
   // is not provable. Claiming one would be a lie in a log used for diagnosis.
-  if (existing.bootId !== null && existing.bootId !== hello.bootId)
-    return 'rebooted';
-  if (!deepEquals(existing.capabilities, hello.capabilities))
-    return 'capabilities-changed';
-  if (existing.agentVersion !== hello.agentVersion) return 'agent-upgraded';
-  return 'seen';
+  if (existing.bootId !== null && existing.bootId !== hello.bootId) {
+    outcomes.push('rebooted');
+  }
+  if (!deepEquals(existing.capabilities, hello.capabilities)) {
+    outcomes.push('capabilities-changed');
+  }
+  if (existing.agentVersion !== hello.agentVersion) {
+    outcomes.push('agent-upgraded');
+  }
+  return outcomes.length > 0 ? outcomes : ['seen'];
+}
+
+/**
+ * Pins the node used to expose and no longer does.
+ *
+ * A device bound to one of these is orphaned: it still exists, still looks
+ * drivable in the UI, and every attempt fails at the node. Saying so once, at
+ * the moment it happens, beats a ten-second failure loop nobody can explain.
+ */
+export function pinsWithdrawn(
+  previous: NodeCapabilities,
+  next: NodeCapabilities,
+): number[] {
+  const before = new Set(previous.gpio?.pins ?? []);
+  const after = new Set(next.gpio?.pins ?? []);
+  return [...before].filter((pin) => !after.has(pin)).sort((a, b) => a - b);
 }
 
 /**
