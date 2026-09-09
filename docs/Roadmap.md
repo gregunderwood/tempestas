@@ -62,11 +62,18 @@ never touched.
 
 ### Still open on this box
 
-- **The Mosquitto listener is loopback-only** (Mosquitto 2.x default). That is fine for phase 8,
-  where the sidecar runs on the box, and it blocks the Mac-drives-real-hardware loop that
-  [Development setup](Getting%20Started/Development%20setup.md) describes. Opening it needs
-  `allow_anonymous false` with per-node credentials and ACLs applied at the same time — an MQTT
-  write goes straight to a GPIO pin and a propane burner — so it is a deliberate step.
+- ~~**The Mosquitto listener is loopback-only.**~~ **Done (2026-09-09).** Opened to the LAN with
+  `allow_anonymous false`, three ACL-scoped identities, and the listener bound by interface rather
+  than address. Samples now reach the Mac. Config in
+  [../apps/hardware/mosquitto/](../apps/hardware/mosquitto/), posture and the verification method in
+  [Safety](Safety.md#authentication-is-an-interlock-not-security).
+
+  Two things worth carrying forward. **A denied QoS-0 publish is silent** — the first round of
+  checks looked like four passes and was four unknowns; only QoS 1 makes the broker answer with
+  `RC:135`. And the change **broke the soak logger**, which had been connecting anonymously: that is
+  what produced `tempestas-observer`, a read-only identity, since the node credential deliberately
+  cannot subscribe to its own samples.
+
 - **The systemd watchdog is deliberately NOT enabled**, and the ordering is why: a watchdog reboot is
   only safe once `/boot/firmware/config.txt` carries the `gpio=` defaults, and it does not yet.
   Enabling it first would mean a kernel hang reboots into a boot window that commands the burner
@@ -273,8 +280,14 @@ been driven from an MQTT command end to end. See
 `flock`, `Type=notify`, `OOMScoreAdjust`) is still to do; the agent has only been run in the
 foreground.
 
-The samples currently reach elantris's own broker, which is loopback-only, so they do not reach the
-server on the Mac. Closing that loop needs the broker listener decision above.
+Samples now reach the Mac over the LAN listener, verified by subscribing as `tempestas-observer`
+from the Mac and reading live `status` and `sample` payloads off `192.168.2.70:1883`.
+
+What remains for the end-to-end loop is a deliberate flip, not a missing piece: `apps/server/.env`
+carries the working `tempestas-server` credential but still has `HARDWARE_DRIVER=fake`. Setting it
+to `mqtt` makes the Mac the **controller** of a live node - it starts heartbeating, elantris binds
+to it, and its commands drive real relays. Only one controller may hold the heartbeat, so that step
+belongs with the handover script rather than with a config edit.
 
 ## Hardware bring-up and cutover
 

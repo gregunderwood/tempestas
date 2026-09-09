@@ -183,9 +183,36 @@ mosquitto_pub -r -t 'tempestas/v1/node/elantris/gpio/set' -m '{...}'   # MUST be
 - **QoS 0 for the heartbeat is deliberate.** A missed heartbeat must _look_ missed, not be
   redelivered late.
 
+## Broker credentials and ACLs
+
+The broker refuses anonymous clients and scopes every credential to its own topics. The files are
+[../../apps/hardware/mosquitto/tempestas.conf](../../apps/hardware/mosquitto/tempestas.conf) and
+[../../apps/hardware/mosquitto/tempestas.acl](../../apps/hardware/mosquitto/tempestas.acl); the
+reasoning and the identity table are in
+[Safety](../Safety.md#authentication-is-an-interlock-not-security).
+
+What this means for anything speaking the contract:
+
+- **A node may not publish another node's topics**, so `node` in a payload can be trusted to match
+  the topic it arrived on. That is an ACL guarantee, not a parsing one.
+- **A node may not publish `gpio/set` at all**, including to itself. The `issuedBy` ownership check
+  still runs, because the ACL is one broker's configuration and the check is the contract.
+- **Only `tempestas-server` may publish `server/status`**, so a node watching the server's LWT
+  cannot be tricked into failing safe by another node.
+- **Read and write are separate grants.** A credential that publishes samples cannot subscribe to
+  them - which is why a logger needs its own read-only identity rather than borrowing a node's.
+
+> [!warning] Verifying an ACL
+> A publish denied by an ACL is **silent at QoS 0** - no error, no disconnect, indistinguishable
+> from success. Test with `mosquitto_pub -q 1 -V 5 -d` and read the `PUBACK` reason code: `RC:0` or
+> `RC:16` is accepted, `RC:135` is Not authorized.
+
+Reload after an ACL edit with `sudo systemctl reload mosquitto`; a restart is not needed.
+
 ## When to update this file
 
 - A topic, payload field or QoS/retain flag changes (change `mqtt-contract.ts` first — this doc
   describes it, not the other way round)
+- An MQTT identity is added, or an ACL grant changes
 - A new alarm code is added
 - The contract major version moves
