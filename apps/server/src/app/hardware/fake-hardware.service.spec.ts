@@ -1,5 +1,8 @@
 import { firstValueFrom, toArray, take } from 'rxjs';
-import { DEFAULT_FAKE_NODES, FakeHardwareService } from './fake-hardware.service';
+import {
+  DEFAULT_FAKE_NODES,
+  FakeHardwareService,
+} from './fake-hardware.service';
 import type { SensorSample } from './hardware.service';
 
 const BURNER = { pin: 16, level: 0 as const }; // active-LOW: 0 == energised
@@ -18,15 +21,22 @@ describe('FakeHardwareService', () => {
     const collected = firstValueFrom(hw.samples$.pipe(take(2), toArray()));
     hw.tick();
     const samples = await collected;
-    expect(samples.map((s) => s.nodeId).sort()).toEqual(['sim-esp32', 'sim-pi']);
+    expect(samples.map((s) => s.nodeId).sort()).toEqual([
+      'sim-esp32',
+      'sim-pi',
+    ]);
   });
 
   it('rejects a pin the node does not expose, as a real node would', async () => {
-    await expect(hw.setPin('sim-esp32', BURNER)).rejects.toThrow(/does not expose pin/);
+    await expect(hw.setPin('sim-esp32', BURNER)).rejects.toThrow(
+      /does not expose pin/,
+    );
   });
 
   it('rejects an unknown node', async () => {
-    await expect(hw.setPin('nope', BURNER)).rejects.toThrow(/Unknown simulated node/);
+    await expect(hw.setPin('nope', BURNER)).rejects.toThrow(
+      /Unknown simulated node/,
+    );
   });
 
   // The property the rules engine work depends on: this is a closed loop, so

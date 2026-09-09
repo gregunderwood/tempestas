@@ -89,7 +89,7 @@ synchronize: true,   // ❌ never, in any config, for any reason
 ## Pitfalls
 
 - **The generator needs the database running and up to date.** Against a stale database it will
-  generate the *difference from stale*, which is a migration that fails for the next person.
+  generate the _difference from stale_, which is a migration that fails for the next person.
 - **Expand-contract, once anything is deployed.** Without it, "roll back the image" is a lie —
   the previous image still has to run against the migrated schema. Add the column, deploy, backfill,
   then remove the old one in a later migration.

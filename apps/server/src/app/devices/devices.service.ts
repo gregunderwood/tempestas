@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiErrorCode, type Device, type GpioLevel } from '@tempestas/domain';
@@ -29,16 +34,22 @@ export class DevicesService {
     @InjectRepository(NodeEntity)
     private readonly nodes: Repository<NodeEntity>,
     private readonly hardware: HardwareService,
-    private readonly clock: Clock
+    private readonly clock: Clock,
   ) {}
 
   async findAll(): Promise<Device[]> {
-    const rows = await this.devices.find({ relations: { node: true }, order: { name: 'ASC' } });
+    const rows = await this.devices.find({
+      relations: { node: true },
+      order: { name: 'ASC' },
+    });
     return rows.map((r) => this.toDto(r));
   }
 
   async findOneEntity(id: string): Promise<DeviceEntity> {
-    const row = await this.devices.findOne({ where: { id }, relations: { node: true } });
+    const row = await this.devices.findOne({
+      where: { id },
+      relations: { node: true },
+    });
     if (!row) {
       throw new NotFoundException({
         code: ApiErrorCode.NotFound,
@@ -53,7 +64,10 @@ export class DevicesService {
   }
 
   async findByRole(zoneId: string, role: string): Promise<DeviceEntity[]> {
-    return this.devices.find({ where: { zoneId, role: role as never }, relations: { node: true } });
+    return this.devices.find({
+      where: { zoneId, role: role as never },
+      relations: { node: true },
+    });
   }
 
   async create(dto: CreateDeviceDto): Promise<Device> {
@@ -162,7 +176,7 @@ export class DevicesService {
   private async drive(
     device: DeviceEntity,
     level: GpioLevel,
-    direction: 'on' | 'off'
+    direction: 'on' | 'off',
   ): Promise<Device> {
     // The admission gate, on the way out. A node nobody admitted receives no
     // commands - the mirror of its readings being discarded on the way in.
@@ -190,7 +204,7 @@ export class DevicesService {
     }
     await this.devices.save(device);
     this.logger.log(
-      `${device.name} -> ${direction} (node ${device.node.slug} pin ${device.gpio})`
+      `${device.name} -> ${direction} (node ${device.node.slug} pin ${device.gpio})`,
     );
     return this.toDto(device);
   }

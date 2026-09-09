@@ -1,4 +1,9 @@
-import { NodeStatus, type NodeCapabilities, type NodeId, type NodeKind } from '@tempestas/domain';
+import {
+  NodeStatus,
+  type NodeCapabilities,
+  type NodeId,
+  type NodeKind,
+} from '@tempestas/domain';
 
 /**
  * The registry decisions, as pure functions.
@@ -63,7 +68,8 @@ export interface HelloPatch {
  * is cheap to log - but `seen` stays at debug, because a node re-announcing on
  * every reconnect must not bury the line that says a new node needs admitting.
  */
-export type HelloOutcome = 'rebooted' | 'capabilities-changed' | 'agent-upgraded' | 'seen';
+export type HelloOutcome =
+  'rebooted' | 'capabilities-changed' | 'agent-upgraded' | 'seen';
 
 /** Admitted only: a pending node's readings are discarded, not merely ignored. */
 export function acceptsSamples(status: NodeStatus): boolean {
@@ -108,7 +114,7 @@ export function newNodeFromHello(hello: HelloFacts): NewNodeFields {
  */
 export function patchFromHello(
   existing: RegisteredNode,
-  hello: HelloFacts
+  hello: HelloFacts,
 ): { patch: HelloPatch; outcome: HelloOutcome } {
   return {
     patch: {
@@ -123,11 +129,16 @@ export function patchFromHello(
   };
 }
 
-function classifyHello(existing: RegisteredNode, hello: HelloFacts): HelloOutcome {
+function classifyHello(
+  existing: RegisteredNode,
+  hello: HelloFacts,
+): HelloOutcome {
   // A null bootId is a node first seen before this field existed, so a reboot
   // is not provable. Claiming one would be a lie in a log used for diagnosis.
-  if (existing.bootId !== null && existing.bootId !== hello.bootId) return 'rebooted';
-  if (!deepEquals(existing.capabilities, hello.capabilities)) return 'capabilities-changed';
+  if (existing.bootId !== null && existing.bootId !== hello.bootId)
+    return 'rebooted';
+  if (!deepEquals(existing.capabilities, hello.capabilities))
+    return 'capabilities-changed';
   if (existing.agentVersion !== hello.agentVersion) return 'agent-upgraded';
   return 'seen';
 }
@@ -139,7 +150,13 @@ function classifyHello(existing: RegisteredNode, hello: HelloFacts): HelloOutcom
  */
 function deepEquals(a: unknown, b: unknown): boolean {
   if (a === b) return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (
+    typeof a !== 'object' ||
+    typeof b !== 'object' ||
+    a === null ||
+    b === null
+  )
+    return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   if (Array.isArray(a) && Array.isArray(b)) {
     // Order-sensitive: jsonb preserves array order, so a reordered pin list is

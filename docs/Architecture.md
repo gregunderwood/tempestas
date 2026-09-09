@@ -28,8 +28,8 @@ Zone "greenhouse"  ── rules_config: thresholds, enabledRoles, sensorPolicy
    └── Node "north-end"       esp32   · sensor only
 ```
 
-**Rules scope to the zone, not the node.** A node is a *wiring and transport* identity: which box
-owns this pin, which box holds this sensor. A rule operates on an *airspace* — one greenhouse, one
+**Rules scope to the zone, not the node.** A node is a _wiring and transport_ identity: which box
+owns this pin, which box holds this sensor. A rule operates on an _airspace_ — one greenhouse, one
 temperature, one CO2 concentration, with sensors at each end and relays wherever the wiring landed.
 Scoping rules to nodes would mean the node holding the burner cannot see the thermometer at the
 other end.
@@ -48,19 +48,21 @@ Consequences you will meet in the schema:
 A per-role **sensor policy** in the zone's `rules_config` covers "sensors at each end" as data:
 
 ```jsonc
-{ "enabledRoles": ["co2_generator"],
+{
+  "enabledRoles": ["co2_generator"],
   "sensorPolicy": {
     "default": { "source": "mean", "maxAgeMs": 120000 },
-    "byRole": { "exhaust_fan":   { "source": "max" },
-                "co2_generator": { "source": "node:elantris" } } },
-  "thresholds": { "co2NightOnTemp": 3, "co2ThresholdPpm": 1500 } }
+    "byRole": { "exhaust_fan": { "source": "max" }, "co2_generator": { "source": "node:elantris" } },
+  },
+  "thresholds": { "co2NightOnTemp": 3, "co2ThresholdPpm": 1500 },
+}
 ```
 
 `source` is one of `mean | max | min | node:<slug>`. Four options, not a predicate language.
 
 **There is deliberately no `Rule` entity.** The three rule bodies are fixed physics with hysteresis,
 and a DSL with one user is a liability when a mis-click controls a burner. The tripwire for
-revisiting: when two rules are needed on the *same* role with *different* bodies, or a
+revisiting: when two rules are needed on the _same_ role with _different_ bodies, or a
 non-developer needs to author one.
 
 ### Ownership is explicit, never inferred

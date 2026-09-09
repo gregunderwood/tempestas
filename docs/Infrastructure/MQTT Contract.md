@@ -59,9 +59,9 @@ Every payload extends `MqttEnvelope`:
 
 ```ts
 interface MqttEnvelope {
-  schema: string;   // "name/major" — consumers reject an unknown major loudly
+  schema: string; // "name/major" — consumers reject an unknown major loudly
   node: NodeId;
-  ts: string;       // ISO-8601 with offset
+  ts: string; // ISO-8601 with offset
   seq?: number;
 }
 ```
@@ -86,7 +86,7 @@ interface MqttEnvelope {
 
 The node re-asserts the full desired state of every line on a **5 s heartbeat** rather than sending
 one-shot toggles, so any missed message self-heals on the next tick. This is what eliminates both
-the old system's ~43,000 loopback HTTP POSTs a day *and* its silent DB↔hardware divergence.
+the old system's ~43,000 loopback HTTP POSTs a day _and_ its silent DB↔hardware divergence.
 
 Only one controller may hold the heartbeat — `epoch` is how a second controller takes over cleanly.
 
@@ -134,7 +134,7 @@ mosquitto_pub -r -t 'tempestas/v1/node/elantris/gpio/set' -m '{...}'   # MUST be
 - **Per-node credentials and ACLs are not optional.** Any MQTT client can otherwise publish as any
   node, and an MQTT write goes straight to a GPIO pin and a propane burner. Restrict each node to
   `tempestas/v1/node/{its own slug}/#`.
-- **QoS 0 for the heartbeat is deliberate.** A missed heartbeat must *look* missed, not be
+- **QoS 0 for the heartbeat is deliberate.** A missed heartbeat must _look_ missed, not be
   redelivered late.
 
 ## When to update this file

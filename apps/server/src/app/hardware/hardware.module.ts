@@ -23,7 +23,7 @@ const hardwareProvider: Provider = {
     // MqttHardwareService lands in phase 7. Failing loudly beats silently
     // falling back to a simulator on a box that controls a burner.
     throw new Error(
-      `HARDWARE_DRIVER="${driver}" is not implemented yet; only "fake" is available.`
+      `HARDWARE_DRIVER="${driver}" is not implemented yet; only "fake" is available.`,
     );
   },
 };

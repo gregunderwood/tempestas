@@ -43,7 +43,7 @@ export class DevicesController {
   @Put(':id')
   update(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateDeviceDto
+    @Body() dto: UpdateDeviceDto,
   ): Promise<Device> {
     return this.devices.update(id, dto);
   }
@@ -51,7 +51,7 @@ export class DevicesController {
   @Patch(':id')
   patchRules(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: PatchDeviceRulesDto
+    @Body() dto: PatchDeviceRulesDto,
   ): Promise<Device> {
     return this.devices.setRulesEnabled(id, dto.rulesEnabled);
   }

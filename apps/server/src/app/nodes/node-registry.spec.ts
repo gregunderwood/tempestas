@@ -10,12 +10,19 @@ import {
 
 const AT = new Date('2026-01-10T12:00:00Z');
 
-function capabilities(overrides: Partial<NodeCapabilities> = {}): NodeCapabilities {
+function capabilities(
+  overrides: Partial<NodeCapabilities> = {},
+): NodeCapabilities {
   return {
     contractVersion: 1,
     gpio: { pins: [12, 16, 20, 21, 26], supportsReadback: true },
     sensors: [
-      { sensorId: 'scd4x-0', kind: 'scd4x', metrics: ['temperature', 'humidity', 'co2'], sampleIntervalMs: 10_000 },
+      {
+        sensorId: 'scd4x-0',
+        kind: 'scd4x',
+        metrics: ['temperature', 'humidity', 'co2'],
+        sampleIntervalMs: 10_000,
+      },
     ],
     hasRtc: true,
     ...overrides,
@@ -72,7 +79,9 @@ describe('newNodeFromHello', () => {
   });
 
   it('names it after its slug so the nodes list can render it', () => {
-    expect(newNodeFromHello(hello({ nodeId: 'ghost' })).displayName).toBe('ghost');
+    expect(newNodeFromHello(hello({ nodeId: 'ghost' })).displayName).toBe(
+      'ghost',
+    );
   });
 });
 
@@ -80,7 +89,11 @@ describe('patchFromHello', () => {
   // The single most important property in this file: a node cannot admit
   // itself, un-admit itself, or undo a human's rejection by re-announcing.
   it('cannot touch status, whatever the node claims', () => {
-    for (const status of [NodeStatus.Pending, NodeStatus.Admitted, NodeStatus.Disabled]) {
+    for (const status of [
+      NodeStatus.Pending,
+      NodeStatus.Admitted,
+      NodeStatus.Disabled,
+    ]) {
       const { patch } = patchFromHello(registered({ status }), hello());
       expect(Object.keys(patch)).not.toContain('status');
     }
@@ -96,13 +109,20 @@ describe('patchFromHello', () => {
   it('does take the node-owned facts, and marks it seen', () => {
     const { patch } = patchFromHello(
       registered({ agentVersion: '0.9.0' }),
-      hello({ agentVersion: '1.0.0' })
+      hello({ agentVersion: '1.0.0' }),
     );
-    expect(patch).toMatchObject({ agentVersion: '1.0.0', online: true, lastSeenAt: AT });
+    expect(patch).toMatchObject({
+      agentVersion: '1.0.0',
+      online: true,
+      lastSeenAt: AT,
+    });
   });
 
   it('reports a reboot when the bootId changes', () => {
-    const { outcome } = patchFromHello(registered(), hello({ bootId: 'boot-2' }));
+    const { outcome } = patchFromHello(
+      registered(),
+      hello({ bootId: 'boot-2' }),
+    );
     expect(outcome).toBe('rebooted');
   });
 
@@ -116,13 +136,20 @@ describe('patchFromHello', () => {
   it('reports a capability change when the exposed pins move', () => {
     const { outcome } = patchFromHello(
       registered(),
-      hello({ capabilities: capabilities({ gpio: { pins: [12, 16], supportsReadback: true } }) })
+      hello({
+        capabilities: capabilities({
+          gpio: { pins: [12, 16], supportsReadback: true },
+        }),
+      }),
     );
     expect(outcome).toBe('capabilities-changed');
   });
 
   it('reports an agent upgrade when only the version moved', () => {
-    const { outcome } = patchFromHello(registered(), hello({ agentVersion: '1.1.0' }));
+    const { outcome } = patchFromHello(
+      registered(),
+      hello({ agentVersion: '1.1.0' }),
+    );
     expect(outcome).toBe('agent-upgraded');
   });
 
@@ -133,13 +160,21 @@ describe('patchFromHello', () => {
     const reordered = {
       hasRtc: true,
       sensors: [
-        { sampleIntervalMs: 10_000, metrics: ['temperature', 'humidity', 'co2'], kind: 'scd4x', sensorId: 'scd4x-0' },
+        {
+          sampleIntervalMs: 10_000,
+          metrics: ['temperature', 'humidity', 'co2'],
+          kind: 'scd4x',
+          sensorId: 'scd4x-0',
+        },
       ],
       gpio: { supportsReadback: true, pins: [12, 16, 20, 21, 26] },
       contractVersion: 1,
     } as unknown as NodeCapabilities;
 
-    const { outcome } = patchFromHello(registered(), hello({ capabilities: reordered }));
+    const { outcome } = patchFromHello(
+      registered(),
+      hello({ capabilities: reordered }),
+    );
     expect(outcome).toBe('seen');
   });
 });

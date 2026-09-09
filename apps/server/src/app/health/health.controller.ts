@@ -16,6 +16,10 @@ export class HealthController {
     } catch {
       db = false;
     }
-    return { status: db ? 'ok' : 'degraded', db, uptimeSeconds: Math.round(process.uptime()) };
+    return {
+      status: db ? 'ok' : 'degraded',
+      db,
+      uptimeSeconds: Math.round(process.uptime()),
+    };
   }
 }

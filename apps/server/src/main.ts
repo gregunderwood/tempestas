@@ -9,7 +9,11 @@ async function bootstrap() {
   // lvcc installs class-validator and never wires this up, so its DTOs are
   // decorative. Here it is global, strips unknown keys, and rejects them.
   app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true })
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
   );
 
   // Non-negotiable on this system: on SIGTERM we must publish the server's LWT
@@ -18,7 +22,10 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   app.enableCors({
-    origin: [/^http:\/\/localhost:\d+$/, /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/],
+    origin: [
+      /^http:\/\/localhost:\d+$/,
+      /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/,
+    ],
     credentials: true,
   });
 
