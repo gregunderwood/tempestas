@@ -109,8 +109,15 @@ and python3-dev are already present. Verified working: `import board` reports bo
 ## Pitfalls
 
 - **`i2cdetect` lives in `/usr/sbin`**, which is not on a normal user's `PATH`.
-- **systemd cannot see nvm.** It is a shell function; units need the absolute interpreter path.
-  This bites everyone once.
+- **systemd cannot see nvm.** It is a shell function, so units need the absolute interpreter path —
+  on elantris that is `/home/gunderwood/.nvm/versions/node/v22.23.2/bin/node`.
+- **`sudo -S` consumes stdin, so `echo config | sudo tee /etc/thing` writes the PASSWORD into the
+  file.** Not hypothetical: it put a sudo password into `/etc/fstab` and a journald drop-in on this
+  box. Stage privileged writes as the normal user and then `sudo install -m 644 /tmp/staged
+/etc/thing`, which takes no stdin — and validate afterwards, since `findmnt --verify` catches
+  fstab damage immediately.
+- **Check `.conf.d/` before concluding a setting is unset.** Reading only
+  `/etc/systemd/journald.conf` reported an uncapped journal that a drop-in had already capped.
 - **`ping` to greenhouse or the Mac fails by design** (ICMP filtered). Test with `nc -z host port`.
 - **SD card endurance.** ~150–250 MB/day of writes before erase-block amplification.
   `synchronous_commit = off` (which is _not_ `fsync=off` — worst case is losing under a second of
