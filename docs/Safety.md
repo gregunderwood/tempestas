@@ -108,10 +108,29 @@ Three mitigations, all required, because each covers a window the others do not:
 1. **Firmware** — `gpio=12,16,20,21=op,dh` and `gpio=26=op,dl` in `/boot/firmware/config.txt`.
    VideoCore applies this ~1 s after power-on, before the kernel. Closes the boot window.
 2. **Hardware** — external 10 kΩ pull-ups to 3V3 on each active-low relay input. The only
-   mitigation that works when no software is running; after `gpio_free()` the pad reverts to input
-   regardless of what any code intended.
-3. **Software** — claim active-low lines with `SET_PULL_UP`, not `SET_PULL_NONE`. The internal
-   ~50 kΩ pull-up is ~66 µA, too weak to trust against an opto-isolator input.
+   mitigation that works when no software is running.
+3. **Software** — claim each line with a bias pulling toward its **declared failsafe level**
+   (`SET_PULL_UP` for an active-low relay), not `SET_PULL_NONE`. The internal ~50 kΩ pull-up is
+   ~66 µA, too weak to trust against an opto-isolator input on its own, but the bias survives both
+   a release and a kill, so it is the state the pad settles into once no software is left to have
+   an opinion.
+
+> [!important] What a released line actually does, measured
+> The assumption above used to be that **after `gpio_free()` the pad reverts to input**. On this
+> kernel it does not. Measured on elantris with `pinctrl get`: `gpio_free()`, and a `SIGKILL` of
+> the whole process, both leave the pad an **output still driving its last level**, with the bias
+> intact. It does not float and it does not revert.
+>
+> That cuts both ways. A process killed at the safe level holds the safe level — better than
+> assumed. A process killed with a burner energised holds **that**, indefinitely, with nothing
+> supervising it and the node-side dead-man dead along with the process. The cover is systemd
+> restarting the agent, whose claim then drives the failsafe; the exposure is the restart delay.
+>
+> Two consequences, both already in the code: claim at the **failsafe** level rather than trying to
+> preserve state across a restart, and rely on the server's level-triggered re-assert to bring a
+> legitimately-running burner back. The old system's `gpio_free()` hazard was real but had a
+> different mechanism — `RPi.GPIO.cleanup()` explicitly sets pins back to input, which the chardev
+> path does not.
 
 Two related deletions, both carried from the old system:
 
@@ -185,8 +204,13 @@ Four layers, because a second writer on one line is the failure that produces im
    unlimited `Restart=always`.
 2. An advisory **`flock` on `/run/tempestas/hw.lock`** taken before opening the chip, which also
    makes the CLI safely refuse to run against a live service.
-3. **The kernel** — `gpio_claim_output` on a claimed line returns busy.
-4. A **startup preflight** that refuses to start if any managed line is held by another consumer.
+3. **The kernel** — `gpio_claim_output` on a claimed line returns `GPIO busy`. This is the layer
+   that actually enforces it, and it is the one that cannot be bypassed.
+4. A **startup preflight** that refuses to start if any managed line is held by another consumer,
+   naming it. Note what this layer is and is not: `gpio_get_line_info` reports another **userspace**
+   holder (measured — a second process shows `user='lg'`), and reports **nothing** for a line owned
+   by a kernel driver — BCM 2 and 3 are the live I²C bus and still read as free. So the preflight
+   buys a better error message, not the guarantee; layer 3 is the guarantee.
 
 And a hard rule for the Python venv: **never install `RPi.GPIO`, `rpi-lgpio` or `gpiozero`.**
 `rpi-lgpio` shims the RPi.GPIO API onto lgpio via a _different_ handle and will fight ours for the
