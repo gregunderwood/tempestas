@@ -179,19 +179,22 @@ class TestBackendWiring:
         _, gpio = build_backends(config, simulated=False)
         assert isinstance(gpio, gpio_mod.NoGpio)
 
-    # The real backend is Stage C and must not be reachable by accident.
-    def test_asking_for_real_gpio_fails_loudly_rather_than_pretending(self):
+    # Configured lines and simulated=False is the production path, and it must
+    # reach the real chardev backend - not a simulator that would report a
+    # burner relay as switched while nothing moved.
+    def test_configured_lines_reach_the_real_backend(self, monkeypatch):
         config = AgentConfig(
             node_id="bench",
             sensor=SensorConfig(kind="simulated"),
-            gpio=GpioConfig(lines=(16,), failsafe={16: 1}),
+            gpio=GpioConfig(lines=(5,), failsafe={5: 1}),
         )
-        try:
-            build_backends(config, simulated=False)
-        except NotImplementedError as err:
-            assert "Stage C" in str(err)
-        else:
-            raise AssertionError("a real GPIO backend should not exist yet")
+        claimed: list[tuple] = []
+        monkeypatch.setattr(
+            gpio_mod.LgpioBackend, "claim", lambda _self, lines, fs: claimed.append((lines, fs))
+        )
+        _, gpio = build_backends(config, simulated=False)
+        assert isinstance(gpio, gpio_mod.LgpioBackend)
+        assert claimed == [((5,), {5: 1})]
 
 
 def _command(**overrides) -> bytes:
