@@ -1,0 +1,72 @@
+# Install to /etc/systemd/system/tempestas-agent.service
+#
+# Kept in the repository rather than hand-edited on the box: everything under
+# /etc that this system needs should be installable by a provision script, so
+# Postgres stays the only stateful thing on the node.
+
+[Unit]
+Description=tempestas node agent
+Documentation=https://github.com/gregunderwood/tempestas/blob/main/docs/Infrastructure/Node%20Agent.md
+# Ordering, not a sleep. The old system waited an unconditional 15s in the unit
+# and another 5s inside the app, which is a guess that is either wasteful or
+# wrong.
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+# There is deliberately no ordering against the I2C bus. systemd only creates
+# .device units for devices udev tags for it, and i2c is not one - so
+# `After=dev-i2c\x2d1.device` looks like ordering while doing nothing at all,
+# which is worse than no ordering. Instead the agent opens the bus, fails fast
+# if it is not there, and Restart=on-failure retries. A failure that retries
+# beats a sleep that guesses.
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=gunderwood
+Group=gunderwood
+# i2c for the sensor. `gpio` is NOT granted: this agent has no GPIO lines, and
+# the Stage B posture is that it cannot acquire any.
+SupplementaryGroups=i2c
+
+WorkingDirectory=/home/gunderwood/tempestas/apps/hardware
+# The venv interpreter by absolute path. systemd cannot see `uv run`, and it
+# cannot see nvm either - both are shell-level conveniences.
+ExecStart=/home/gunderwood/tempestas/apps/hardware/.venv/bin/tempestas-agent \
+    --config /home/gunderwood/tempestas/etc/agent.toml
+Environment=PYTHONUNBUFFERED=1
+
+# Gives us /run/tempestas for the advisory lock, cleaned up automatically.
+RuntimeDirectory=tempestas
+RuntimeDirectoryMode=0755
+
+# on-failure with a start limit, NEVER unlimited Restart=always. The old unit
+# restarted forever, which combined with a boot-time relay click test to become
+# repeated ignition attempts on a gas burner.
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# The OOM killer is a safety hazard on this box: it can take out the process
+# that controls a burner. Make this the last thing it considers.
+OOMScoreAdjust=-900
+MemoryMin=64M
+
+# The 5.4GB log was possible because the app owned its own file. This one writes
+# to stdout and owns nothing; journald caps itself.
+StandardOutput=journal
+StandardError=journal
+
+# Modest hardening. Not NoNewPrivileges-everything: this needs /dev/i2c-1, and
+# a lockdown that breaks the sensor is worse than one that is merely tidy.
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/gunderwood/tempestas
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

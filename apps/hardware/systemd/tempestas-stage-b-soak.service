@@ -1,0 +1,24 @@
+# TEMPORARY. Stage B step 4 only - remove this unit and tools/stage-b-soak.py
+# once the 48h comparison has been read and temperature_offset_c is tuned.
+
+[Unit]
+Description=tempestas Stage B soak logger (temporary)
+After=tempestas-agent.service mosquitto.service
+Wants=tempestas-agent.service
+
+[Service]
+Type=simple
+User=gunderwood
+Group=gunderwood
+ExecStart=/home/gunderwood/tempestas/apps/hardware/.venv/bin/python \
+    /home/gunderwood/tempestas/tools/stage-b-soak.py \
+    --out /home/gunderwood/tempestas/soak/stage-b-soak.csv
+Restart=on-failure
+RestartSec=10
+# Well below the agent: if memory gets tight, lose the soak, not the sensor.
+OOMScoreAdjust=200
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
