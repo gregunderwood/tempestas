@@ -12,7 +12,13 @@ Coverage **thresholds** are enforced on exactly two paths, both in
 `src/app/rules/**`, at 90% lines / 90% functions / 85% branches / 90% statements. `libs/domain`
 collects coverage but sets no thresholds. Everything else is smoke-tested.
 
-Coverage only runs when asked: `npx nx test server --coverage`.
+Coverage only runs when asked — `npx nx test server --coverage` — and it is **part of the gate**,
+because a threshold nobody runs is decoration. It went unrun through phases 1-4 and was failing when
+phase 5 first checked it.
+
+An `exclude` list keeps modules, controllers, DTOs and entities out of the measurement. A controller
+here is one line of delegation and a DTO is a declaration; counting them makes the number describe
+how much boilerplate exists rather than whether the interlocks are tested.
 
 ## Key files
 
@@ -84,7 +90,7 @@ it('never changes the status of a node that already exists', async () => { ... }
 ### ✅ Assert the boundary, not the middle
 
 ```ts
-expect(dto.canTurnOnAt).toBe('2026-01-10T12:04:00.000Z');   // offAt + exactly 300s
+expect(dto.canTurnOnAt).toBe('2026-01-10T12:04:00.000Z'); // offAt + exactly 300s
 ```
 
 Every threshold gets its boundary values: `25.9 / 26.0 / 27.0 / 27.1`, window edges
@@ -122,12 +128,12 @@ const service = new NodesService(...);
 vi.spyOn(service, 'resolveForSample').mockResolvedValue(...);   // ❌ in a NodesService spec
 ```
 
-Mock it in the *consumer's* spec (`readings-ingest.service.spec.ts` does), never in its own.
+Mock it in the _consumer's_ spec (`readings-ingest.service.spec.ts` does), never in its own.
 
 ### ❌ Don't let a spec depend on wall-clock time
 
 ```ts
-const service = new DevicesService(repo, nodeRepo, hardware, new SystemClock());  // ❌
+const service = new DevicesService(repo, nodeRepo, hardware, new SystemClock()); // ❌
 ```
 
 ### ❌ Don't leave a `jest` artifact anywhere
@@ -141,12 +147,15 @@ left Jest configs behind after moving to Vitest and both runners half-work.
   a new safety-critical module needs adding to that list or its coverage silently doesn't count.
   Adding a threshold to `app/readings` or `app/nodes` is not the goal; adding a boundary case to
   `app/rules` is.
-- **The DST tests are the reason for the port** and they are still to be written (phase 5):
-  explicit UTC instants across the March and November `America/Vancouver` boundaries, including the
-  two distinct instants that both read 01:30 local, and a six-month-old reading resolving with
-  *its own* offset. The Python version fails these.
+- **The DST tests are the reason for the port**, and they live in
+  [../apps/server/src/app/rules/local-time.spec.ts](../apps/server/src/app/rules/local-time.spec.ts):
+  explicit UTC instants across the March and November `America/Vancouver` boundaries, the two
+  distinct instants that both read 01:30 local, and a January and a July instant at the same UTC
+  wall time resolving an hour apart. The Python version fails the last of those. Note what they
+  deliberately do _not_ assert: the two 01:30 instants get the _same_ minute-of-day, because "is it
+  night?" has one answer at 01:30 however often 01:30 happens.
 - **The never-been-on interlock is a known porting landmine.** Python's `can_turn_on` compares
-  `can_turn_on_at() < utcnow()` where the never-on branch internally returns *its own* `utcnow()` —
+  `can_turn_on_at() < utcnow()` where the never-on branch internally returns _its own_ `utcnow()` —
   so `t0 < t1` is True. Ported with a single injected `now`, `now < now` is False and a freshly
   created device can never be turned on. The never-on branch uses `<=`, and it has a regression test.
 - **Cypress ships no official arm64 Linux binary.** Set `CYPRESS_INSTALL_BINARY=0` on the Pi so

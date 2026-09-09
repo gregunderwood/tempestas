@@ -10,13 +10,17 @@ import { HardwareModule } from './hardware/hardware.module';
 import { NodesModule } from './nodes/nodes.module';
 import { NodeEntity } from './nodes/models';
 import { ReadingsModule } from './readings/readings.module';
+import { RulesModule } from './rules/rules.module';
 import { SensorReadingEntity } from './readings/models';
 import { ZoneEntity } from './zones/models';
 import { HealthController } from './health/health.controller';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, envFilePath: ['apps/server/.env', '.env'] }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['apps/server/.env', '.env'],
+    }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -43,6 +47,7 @@ import { HealthController } from './health/health.controller';
     NodesModule,
     DevicesModule,
     ReadingsModule,
+    RulesModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
