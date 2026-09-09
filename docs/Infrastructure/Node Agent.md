@@ -10,9 +10,9 @@ It lives in this repository on purpose: a change to the contract touches both si
 commit rather than becoming a two-repo dance that will eventually be done wrong at 2 a.m.
 
 > [!note] Status
-> Stage C. The agent runs against the real SCD41 on elantris and publishes real samples, and
-> `LgpioBackend` claims the three wired relay lines on the real chip. It has not yet driven a
-> relay from a command end to end — see [The GPIO backend](#the-gpio-backend).
+> Stage C. Deployed on elantris under systemd, owning the SCD41 and the three wired relay lines.
+> It has not yet driven a relay from an MQTT command end to end — see
+> [The GPIO backend](#the-gpio-backend).
 
 ## Key files
 
@@ -94,6 +94,58 @@ Each one contradicts what was assumed, and each has a test and a comment next to
   operation that hurt the old system, and there is nothing to gain by it when the process is about
   to exit anyway.
 
+## Deployment
+
+The unit lives at [../../apps/hardware/systemd/tempestas-agent.service](../../apps/hardware/systemd/tempestas-agent.service)
+and is installed by staging it in the repo checkout and then `sudo install`-ing it — never by
+piping content into a root-owned file, which is how a password once ended up inside `/etc/fstab`.
+
+```bash
+sudo install -m 0644 -o root -g root \
+  ~/tempestas/apps/hardware/systemd/tempestas-agent.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl restart tempestas-agent
+systemd-analyze verify /etc/systemd/system/tempestas-agent.service   # must be silent
+```
+
+`systemd-analyze verify` is part of the procedure, not a nicety. It found two real defects in a
+unit that had been running for weeks:
+
+| Defect                                                     | Effect                                                                                  |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `StartLimitIntervalSec` / `StartLimitBurst` in `[Service]` | Ignored with `Unknown key`. The 5-in-300s limit was never applied; the 10 s default was |
+| `%20` in the `Documentation=` URL                          | `%` is a systemd specifier, so the whole line was dropped as `Invalid slot`. Use `%%20` |
+
+Both are the same shape of bug: a directive that reads as enforced and is not. Check what is
+actually in effect with `systemctl show tempestas-agent -p StartLimitIntervalUSec`.
+
+### What the unit is doing and why
+
+- **`Type=notify`.** The agent calls `sd_notify("READY=1")` after the chip is claimed, the sensor
+  has started, and MQTT is connected. Readiness is a fact; the old system guessed at it with an
+  unconditional `sleep 15` in the unit and another `sleep 5` in the app.
+- **`SupplementaryGroups=i2c gpio`.** `/dev/gpiochip0` is `crw-rw---- root:gpio`. Listed explicitly
+  rather than inherited from the account, so the unit states what it needs.
+- **`Restart=on-failure`, never `always`,** with the start limit in `[Unit]`. `RestartSec=5` is not
+  cosmetic: a `SIGKILL` leaves the pads driving whatever they last drove, so the thing that turns a
+  burner off is this unit coming back and claiming at the failsafe. Five seconds is the width of
+  that exposure.
+- **No `PrivateDevices=yes`.** It would give the unit a scrubbed `/dev` with no `/dev/i2c-1` and no
+  `/dev/gpiochip0` — a lockdown that breaks the sensor and every relay in exchange for tidiness.
+- **No ordering against the I²C bus.** systemd only creates `.device` units for devices udev tags
+  for it, and i2c is not one, so `After=dev-i2c\x2d1.device` looks like ordering while doing
+  nothing. The agent opens the bus, fails fast, and the restart retries.
+
+### Verified on the box, not just configured
+
+| Check                                             | Result                                                              |
+| ------------------------------------------------- | ------------------------------------------------------------------- |
+| Start with GPIO configured                        | Claims BCM 5/6/4 at their failsafe; all three de-energised          |
+| `relay-check.py` against the live service         | Refused, `GpioBusy`, naming the holder                              |
+| A second agent                                    | Refused by the `flock`, exit 3                                      |
+| Agent started while a relay was already energised | Relay dropped by the claim — the recovery path, observed            |
+| `kill -9` the agent                               | systemd restarted it in ~5 s, re-claimed at failsafe, `NRestarts=1` |
+| Cold reboot                                       | Active 21.6 s after boot, lines claimed, relays dark, `NRestarts=0` |
+
 ## Guards on the command path
 
 `judge_command` is pure, so each of these is asserted directly rather than reasoned about:
@@ -159,10 +211,14 @@ later. `tests/test_sensor.py` pins that ordering with a fake bus that records co
   entrypoint appear differently. Kill by PID.
 - **A graceful stop publishes `status: offline` explicitly.** MQTT suppresses the will on a
   clean disconnect, so without that the node is left looking online forever.
+- **`systemctl stop` is a clean exit and does NOT trigger `Restart=on-failure`.** Stopping the
+  agent therefore leaves the pads holding whatever they last drove, with nothing supervising them.
+  Drive the failsafe before a long stop, or expect `relay-check.py` to be what turns things off.
 
 ## When to update this file
 
 - A guard is added to or changed on the command path
 - A guard, bias rule or failsafe behaviour in the GPIO backend changes
+- The systemd unit changes, or a new deployment check earns a row in the table above
 - The sensor driver changes, or another sensor kind is supported
 - The dead-man behaviour or its configuration changes

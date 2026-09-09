@@ -202,8 +202,21 @@ Four layers, because a second writer on one line is the failure that produces im
 
 1. **systemd is the only supervisor** — `Restart=on-failure` with a start limit, never the old
    unlimited `Restart=always`.
-2. An advisory **`flock` on `/run/tempestas/hw.lock`** taken before opening the chip, which also
-   makes the CLI safely refuse to run against a live service.
+
+   ⚠ `StartLimitIntervalSec` and `StartLimitBurst` belong in **`[Unit]`**, not `[Service]`. Under
+   `[Service]` systemd logs `Unknown key` and silently falls back to the 10 s default — the unit
+   shipped that way and the limit was never in effect. `systemd-analyze verify` catches it;
+   `systemctl show -p StartLimitIntervalUSec` confirms what is actually applied.
+
+2. An advisory **`flock` on `/run/tempestas/agent-<node>.lock`** taken before the backends are built
+   and therefore before the chip is opened. Per node id, because that is the thing two agents
+   actually collide over.
+
+   It does **not** cover the bench tool: `tools/relay-check.py` takes no lock. That is deliberate —
+   layer 3 below refuses it at the kernel, which is a stronger guarantee than an advisory lock two
+   programs have to agree to honour, and the tool prints the refusal plainly. Verified against the
+   live service.
+
 3. **The kernel** — `gpio_claim_output` on a claimed line returns `GPIO busy`. This is the layer
    that actually enforces it, and it is the one that cannot be bypassed.
 4. A **startup preflight** that refuses to start if any managed line is held by another consumer,
