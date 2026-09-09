@@ -48,7 +48,9 @@ Two corrections to an earlier survey of this box, both from looking in the wrong
 - **Swap was never missing.** The first check ran `swapon --show`, which lives in `/usr/sbin` and is
   not on the login PATH, and its empty output was read as "no swap". `free -h` had shown 2 GiB all
   along, backed by zram. `/usr/sbin` is now on the PATH in `~/.profile` so that is harder to repeat.
-- **The journald cap was already applied**, in `/etc/systemd/journald.conf.d/99-tempestas.conf`. The
+- **The journald cap was already applied**, in `/etc/systemd/journald.conf.d/99-tempestas.conf`, and
+  more thoroughly than the plan asks: persistent storage, a 200M cap with 25M per file, 14-day
+  retention, compression, rate limiting and `ForwardToSyslog=no` so nothing is written twice. The
   first check read only `/etc/systemd/journald.conf` and missed the drop-in directory.
 
 The disk swapfile is a deliberate substitution for the plan's 2 GiB `dphys-swapfile`: zram is
