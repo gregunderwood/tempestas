@@ -30,12 +30,17 @@ A plywood panel carrying: two 2-gang metal outlet boxes (four outlets), a blue 8
 board, two barrier terminal blocks, a mains inlet box, and an empty set of standoffs where the Pi
 mounts. Three channels are wired:
 
-| Relay | Switches                         | Intended load          |
-| ----- | -------------------------------- | ---------------------- |
-| 1     | Box A, outlet 1                  | —                      |
-| 2     | Box A, outlet 2                  | —                      |
-| 3     | Box B, **both** outlets (ganged) | —                      |
-| 4–8   | **unwired**                      | free for bench testing |
+| Relay channel | Drive terminal | Switches                         |
+| ------------- | -------------- | -------------------------------- |
+| **6**         | `In6`          | one outlet                       |
+| **7**         | `In7`          | one outlet                       |
+| **8**         | `In8`          | one outlet pair, ganged          |
+| 1–5           | `In1`–`In5`    | **unwired** — free for bench use |
+
+⚠ **The wired channels are 6, 7 and 8 — the three at one end of the board, not the first three.**
+Channel _N_ is driven by terminal `In`_N_, so wiring to `In1`–`In3` would drive three unconnected
+relays and switch nothing, which presents as a software fault rather than a wiring one. Which of
+6/7/8 is the ganged pair still needs confirming against the panel.
 
 **Loads plug in rather than being hardwired**, and that changes bring-up for the better. Stage C's
 "mains loads one at a time in ascending order of consequence" stops being wiring work: plug a desk
@@ -118,7 +123,12 @@ de-energised level through the whole boot window, where BCM 12/16/20/21 - the gr
 choices - sit at the energised one.
 
 BCM 2 and 3 are the SCD4x's I2C bus and BCM 0/1 are the HAT EEPROM pins, so the realistic candidates
-are **BCM 4, 5, 6, 7, 8**.
+are **BCM 4, 5, 6, 7, 8**. Use **BCM 4, 5, 6 → `In6`, `In7`, `In8`** — a monotonic mapping with the
+checkable rule `In = BCM + 2`.
+
+⚠ **BCM numbers and `In` numbers are separate numbering systems that now overlap.** There is a
+`BCM 6` and an `In6`, and they are not connected to each other. The `gpio` column on a device row is
+the **BCM** number; the relay channel is the `In` number. Name which one you mean, every time.
 
 This is a cheap additional layer, **not** a replacement for the measurement. The internal pull-up is
 ~50 kΩ (~66 µA), which the plan already calls too weak to trust against an opto-isolator input, and
@@ -190,12 +200,13 @@ yet evidence that it persisted**: the sensor has been powered continuously since
 NVM question is still open and only a power cycle settles it. Applying the offset at every startup
 stays correct either way, and the agent now logs the value it reads back at boot.
 
-- **Phase 1 uses `adafruit-circuitpython-scd4x` on Blinka** — already installed and a year in
-  production. Phase 2 may replace it behind the same interface with a raw `smbus2` driver derived
-  from the existing `scd4x_healthcheck.py`, which already implements the protocol with CRC-8. That
-  also fixes a subtle bug: the datasheet says `data_ready` is true when the **low 11 bits** are
-  non-zero (`& 0x07FF`, which the healthcheck script gets right) where the Adafruit driver tests the
-  whole word.
+- **The driver is raw `smbus2`, not Blinka.** The plan proposed
+  `adafruit-circuitpython-scd4x` first and a raw driver later; the raw one already existed in
+  `scd4x_healthcheck.py` and had been correct on this hardware for a year, so it went in from the
+  start. It drops a large dependency tree and its swig/liblgpio build requirement, and it fixes a
+  real bug: the datasheet says `data_ready` is true when the **low 11 bits** are non-zero
+  (`& 0x07FF`), which the healthcheck script gets right and the Adafruit driver does not — it tests
+  the whole word.
 - **Temperature offset: measured 2026-09-09 against two references.** At 21:06:17Z the SCD41
   reported **19.31 °C / 77.8 % RH** with two LCD hygrometers beside it reading **21.4 °C / 61 %** and
   **21.6 °C / 64 %** — so it runs **2.19 °C cold** with a stored offset of **6.56 °C**, and the
@@ -217,11 +228,9 @@ stays correct either way, and the agent now logs the value it reads back at boot
   than the greenhouse, and the offset would spend its life fighting self-heating that changes with
   relay duty. Outside, the bench figure above roughly transfers and stays stable.
 
-- **Historic note.** The old assumption was that the sensor read ~2 °C high and the correct offset
-  was therefore 6 °C — but the Adafruit setter does **not** call
-  `persist_settings`, so it is volatile and has almost certainly been reset by every power cycle
-  since it was set. **Apply it at every startup** rather than depending on persistence, and tune it
-  at the installed self-heating equilibrium, not in open air.
+- **Apply the offset at every startup** rather than depending on persistence. The Adafruit setter
+  never calls `persist_settings`, so anything set through it is volatile — and even where a value
+  has survived, re-applying it costs one I2C write and removes the question.
 - **Never invent data.** On a zero CO2 the agent publishes `valid: false, value: null`. It does not
   substitute the last known good value as the old code does — see [Safety](Safety.md).
 - **Configuration commands are NACKed while periodic measurement is running** (`Errno 121 Remote
