@@ -131,6 +131,13 @@ the house style in other Sign In Solutions repos. The bar is still high, just ai
 - **A node's sequence counter restarts at 1 when its agent restarts.** Anything keyed on `node_seq`
   must also be keyed on the node's `boot_id`, or it silently drops everything after a reboot — which
   presents as a stale sensor, not as an error.
+- **The MQTT retain flag is only set when delivery is caused by a new subscription.** A retained
+  command published to an already-connected client is indistinguishable from a real one. Detect
+  foreign commands by ownership (`issuedBy`), never by the retain flag.
+- **A graceful MQTT disconnect fires no last will.** Anything stopping cleanly must publish its own
+  retained `status: offline`.
+- **A hardware failure must carry an `ApiErrorCode`.** A bare `Error` from the driver becomes a 500
+  that no client can branch on; `DevicesService` translates `HardwareError` into a real status.
 - **A mocked repository cannot fail a database constraint.** The dedupe bug above passed 153 unit
   tests and a clean build. Where a constraint carries the guarantee, verify it against real
   Postgres.

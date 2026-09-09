@@ -9,12 +9,33 @@ import type { NodeCapabilities, NodeId, NodeKind } from '../nodes/node.model';
  * 1. COMMANDS ARE NEVER RETAINED.
  *    A retained `gpio/set` replays on every reconnect of a node that may be
  *    running a gas burner. State and status are retained; commands are not.
- *    Three independent guards enforce this:
- *      a. the node DROPS any inbound command carrying the retain flag,
- *         and publishes RETAINED_COMMAND_DROPPED;
- *      b. every command carries `expiresAt` and is rejected when late;
- *      c. both ends connect with cleanStart - a persistent session is
- *         precisely a queue of commands waiting to replay.
+ *
+ *    ⚠ THE RETAIN FLAG IS NOT A SUFFICIENT DEFENCE, and it is worth knowing
+ *    exactly why. MQTT sets the retain flag on a delivered PUBLISH only when
+ *    the message is delivered BECAUSE OF a new subscription. A retained
+ *    command published while the node and server are already subscribed
+ *    arrives with retain=0 and is indistinguishable from a legitimate command
+ *    - and then lurks, retained, to replay on every future reconnect. This was
+ *    verified against a real broker, not reasoned about.
+ *
+ *    So the guards are layered, and the ownership one does the real work:
+ *      a. THE SERVER IS THE ONLY LEGITIMATE PUBLISHER of `gpio/set` and
+ *         `gpio/sync`. Any command whose `issuedBy` (or `controller`) is not
+ *         the current controller is a CONTROLLER_CONFLICT, whatever its retain
+ *         flag says. The server alarms and CLEARS the retained slot; a node
+ *         must refuse it;
+ *      b. the node also drops any inbound command carrying the retain flag,
+ *         and publishes RETAINED_COMMAND_DROPPED - this catches the
+ *         replay-on-reconnect case;
+ *      c. every command carries `expiresAt` and is rejected when late;
+ *      d. both ends connect with cleanStart - a persistent session is
+ *         precisely a queue of commands waiting to replay;
+ *      e. broker ACLs restrict publish rights per client, which is the only
+ *         layer that stops a foreign command from ever being delivered.
+ *
+ *    A zero-length payload on a command topic is how a retained command is
+ *    CLEARED. Every agent must ignore an empty command payload rather than
+ *    parsing it, and must never react to one.
  *
  * 2. STALE IS NOT OFF.
  *    When a node's LWT fires, its pins become UNKNOWN, not 0. Only a fresh
@@ -51,6 +72,33 @@ export const mqttTopics = {
   allNodes: `${MQTT_ROOT}/node/+/#`,
   serverStatus: `${MQTT_ROOT}/server/status`,
 } as const;
+
+/**
+ * The `schema` value for each payload, as "name/major".
+ *
+ * Both sides reject an unknown MAJOR loudly rather than parsing hopefully: a
+ * silently-extended payload is how a Python agent and a TypeScript server come
+ * to disagree about what a field means at 2 a.m. Adding a field is a minor
+ * change and needs no bump; changing or removing one does.
+ */
+export const MQTT_SCHEMAS = {
+  hello: 'hello/1',
+  status: 'status/1',
+  sample: 'sample/1',
+  gpioSet: 'gpioSet/1',
+  gpioSync: 'gpioSync/1',
+  gpioState: 'gpioState/1',
+  gpioResult: 'gpioResult/1',
+  heartbeat: 'heartbeat/1',
+  alarm: 'alarm/1',
+} as const;
+
+/** `"sample/2"` -> `2`. Null when the value is not a schema string at all. */
+export function schemaMajor(schema: unknown): number | null {
+  if (typeof schema !== 'string') return null;
+  const major = Number(schema.split('/')[1]);
+  return Number.isInteger(major) ? major : null;
+}
 
 /** Every payload carries these. */
 export interface MqttEnvelope {

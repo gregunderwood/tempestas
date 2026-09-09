@@ -1,5 +1,6 @@
 import type { Observable } from 'rxjs';
 import type {
+  ApiErrorCode,
   GpioLevel,
   NodeCapabilities,
   NodeId,
@@ -14,6 +15,25 @@ import type {
  * devices, scheduler, gateway - can be built and tested before any node or
  * sidecar exists, by binding it to the fake driver.
  */
+
+/**
+ * A hardware failure with a machine-readable code.
+ *
+ * The driver stays free of HTTP concerns - it throws this, and `DevicesService`
+ * translates it into a status code. Without it an offline node surfaced as a
+ * bare 500 "Internal server error", which is precisely the class of response
+ * this project exists to stop producing: the client cannot tell "the node is
+ * gone" from "the server is broken", and neither can the rules engine.
+ */
+export class HardwareError extends Error {
+  constructor(
+    readonly code: ApiErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'HardwareError';
+  }
+}
 
 export interface SensorSample {
   nodeId: NodeId;

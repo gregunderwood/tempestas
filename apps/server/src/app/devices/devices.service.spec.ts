@@ -2,7 +2,10 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import { ApiErrorCode, DeviceRole, NodeStatus } from '@tempestas/domain';
 import { FixedClock } from '../common/clock';
-import type { HardwareService } from '../hardware/hardware.service';
+import {
+  HardwareError,
+  type HardwareService,
+} from '../hardware/hardware.service';
 import type { RealtimeGateway } from '../realtime/realtime.gateway';
 import { DevicesService } from './devices.service';
 import type { DeviceEntity } from './models';
@@ -366,5 +369,35 @@ describe('DevicesService realtime fan-out', () => {
     expect(publishDeviceState).toHaveBeenCalledWith(
       expect.objectContaining({ rulesEnabled: false }),
     );
+  });
+});
+
+// An offline node, an unacknowledged command and a readback mismatch are
+// expected states with distinct remedies. Surfacing them as a bare 500 is the
+// exact class of response this project exists to stop producing: the client
+// cannot tell "the node is gone" from "the server is broken".
+describe('DevicesService hardware failure translation', () => {
+  it.each([
+    [ApiErrorCode.NodeOffline, 409],
+    [ApiErrorCode.ReadbackMismatch, 409],
+    [ApiErrorCode.HardwareUnreachable, 503],
+  ])('maps %s to HTTP %i with its code intact', async (code, status) => {
+    const setPin = vi.fn().mockRejectedValue(new HardwareError(code, 'nope'));
+    const { service, save } = makeService(burner(), setPin);
+
+    await expect(service.turnOn('dev-1')).rejects.toMatchObject({
+      status,
+      response: { code },
+    });
+    // And, as ever, nothing is persisted when the write did not succeed.
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('lets a genuinely unexpected error propagate untranslated', async () => {
+    const setPin = vi
+      .fn()
+      .mockRejectedValue(new TypeError('undefined is not a function'));
+    const { service } = makeService(burner(), setPin);
+    await expect(service.turnOn('dev-1')).rejects.toBeInstanceOf(TypeError);
   });
 });
