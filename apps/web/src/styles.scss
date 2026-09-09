@@ -1,1 +1,41 @@
-/* You can add global styles to this file, and also import other style files */
+@use '@angular/material' as mat;
+
+// Angular Material 20 is M3, and M3 dropped the `deeppurple-amber` theme the
+// old app used. Rather than take a prebuilt, the palettes are declared here so
+// the greenhouse's own colours survive the port - and so the gauge thresholds
+// in `@tempestas/domain` have something coherent to sit against.
+html {
+  color-scheme: light dark;
+
+  @include mat.theme(
+    (
+      color: (
+        primary: mat.$violet-palette,
+        tertiary: mat.$orange-palette,
+      ),
+      typography: Roboto,
+      density: 0,
+    )
+  );
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  font-family: Roboto, 'Helvetica Neue', sans-serif;
+  background: var(--mat-sys-surface);
+  color: var(--mat-sys-on-surface);
+}
+
+// A dashboard that is read from a phone in a greenhouse, in sunlight, with wet
+// hands. Nothing here is subtle on purpose.
+.tempestas-page {
+  padding: 1rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}

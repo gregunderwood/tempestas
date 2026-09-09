@@ -21,6 +21,7 @@ every list below, and why "it compiles and the tests pass" is not the bar here.
 - A schema change → Read [./docs/Infrastructure/Migrations.md](./docs/Infrastructure/Migrations.md)
 - Thresholds, hysteresis, the control law, DST → Read [./docs/Rules and Climate.md](./docs/Rules%20and%20Climate.md)
 - Pins, polarity, relays, the SCD4x sensor, the boot window → Read [./docs/Hardware.md](./docs/Hardware.md)
+- The Angular dashboard, error handling, the banner → Read [./docs/Web App.md](./docs/Web%20App.md)
 - Tests (`*.spec.ts`) → Read [./docs/Testing.md](./docs/Testing.md)
 - "What's next" / "where were we" → Read [./docs/Roadmap.md](./docs/Roadmap.md)
 - First time in the repo, or nothing runs → Read [./docs/Getting Started/Development setup.md](./docs/Getting%20Started/Development%20setup.md)
