@@ -9,6 +9,8 @@ import { FixedClock } from '../common/clock';
 import type { DevicesService } from '../devices/devices.service';
 import type { DeviceEntity } from '../devices/models';
 import type { SensorReadingEntity } from '../readings/models';
+import type { NodesService } from '../nodes/nodes.service';
+import type { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { ZoneEntity } from '../zones/models';
 import { RulesService } from './rules.service';
 
@@ -115,13 +117,21 @@ function makeService(setup: Setup = {}) {
   });
   const devices = { findByRole, turnOn, turnOff } as unknown as DevicesService;
 
+  const nodes = {
+    counts: vi.fn().mockResolvedValue({ total: 2, online: 2, pending: 0 }),
+  } as unknown as NodesService;
+  const publishSystemStatus = vi.fn();
+  const realtime = { publishSystemStatus } as unknown as RealtimeGateway;
+
   const service = new RulesService(
     zones,
     readings,
     devices,
+    nodes,
+    realtime,
     new FixedClock(setup.now ?? NOW),
   );
-  return { service, turnOn, turnOff, findByRole };
+  return { service, turnOn, turnOff, findByRole, publishSystemStatus };
 }
 
 describe('Checkpoint 5', () => {
@@ -220,14 +230,12 @@ describe('dispatch outcomes', () => {
   });
 
   it('treats already-on as a no-change, not a failure', async () => {
-    const turnOn = vi
-      .fn()
-      .mockRejectedValue(
-        new ConflictException({
-          code: ApiErrorCode.DeviceAlreadyOn,
-          message: 'already on',
-        }),
-      );
+    const turnOn = vi.fn().mockRejectedValue(
+      new ConflictException({
+        code: ApiErrorCode.DeviceAlreadyOn,
+        message: 'already on',
+      }),
+    );
     const { service } = makeService({
       turnOn,
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
@@ -239,14 +247,12 @@ describe('dispatch outcomes', () => {
   });
 
   it('reports a refused node as a failure, with the code', async () => {
-    const turnOn = vi
-      .fn()
-      .mockRejectedValue(
-        new ConflictException({
-          code: ApiErrorCode.NodeNotAdmitted,
-          message: 'not admitted',
-        }),
-      );
+    const turnOn = vi.fn().mockRejectedValue(
+      new ConflictException({
+        code: ApiErrorCode.NodeNotAdmitted,
+        message: 'not admitted',
+      }),
+    );
     const { service } = makeService({
       turnOn,
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
@@ -421,5 +427,72 @@ describe('degraded conditions', () => {
     });
     await service.onApplicationBootstrap();
     expect(turnOn).not.toHaveBeenCalled();
+  });
+});
+
+// Layer 1 of the safety design holds last state when readings stop, and says so
+// out loud: "this is only sound if the alarm is actually visible." The banner is
+// driven by this event, so it is a required part of the feature.
+describe('system status fan-out', () => {
+  it('publishes a healthy status once per cycle, not once per zone', async () => {
+    const { service, publishSystemStatus } = makeService({
+      zones: [zone(), zone({ id: 'zone-2', slug: 'shed' })],
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    await service.evaluateAll();
+
+    expect(publishSystemStatus).toHaveBeenCalledTimes(1);
+    expect(publishSystemStatus).toHaveBeenCalledWith({
+      at: NOW.toISOString(),
+      sensorStale: false,
+      staleRoles: [],
+      nodesOnline: 2,
+      nodesTotal: 2,
+      lastEvaluationAt: NOW.toISOString(),
+    });
+  });
+
+  it('raises sensorStale so the dashboard can raise its banner', async () => {
+    const { service, publishSystemStatus } = makeService({
+      samples: [
+        {
+          slug: 'elantris',
+          temperature: 20,
+          co2: 800,
+          observedAt: new Date('2026-01-10T19:00:00Z'),
+        },
+      ],
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    await service.evaluateAll();
+
+    expect(publishSystemStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sensorStale: true,
+        staleRoles: [
+          DeviceRole.Lights,
+          DeviceRole.Co2Generator,
+          DeviceRole.ExhaustFan,
+        ],
+      }),
+    );
+  });
+
+  // A zone that throws must not take the status with it - that would remove the
+  // banner at exactly the moment something is wrong.
+  it('still publishes a status when a zone fails to evaluate', async () => {
+    const { service, publishSystemStatus } = makeService({
+      zones: [
+        zone({
+          id: 'z-bad',
+          slug: 'broken',
+          rulesConfig: rulesConfig({ timezone: 'X/Y' }),
+        }),
+      ],
+    });
+    await service.evaluateAll();
+    expect(publishSystemStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ lastEvaluationAt: null }),
+    );
   });
 });

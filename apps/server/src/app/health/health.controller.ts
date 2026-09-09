@@ -1,25 +1,19 @@
 import { Controller, Get } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import type { HealthReport } from '@tempestas/domain';
+import { HealthService } from './health.service';
 
 /** The endpoint you curl at 2am when the greenhouse is cold. */
 @Controller('health')
 export class HealthController {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(private readonly health: HealthService) {}
 
+  /**
+   * Always 200, even when degraded. The body carries the verdict and the
+   * reasons; a non-200 would make a load balancer or a phone shortcut hide
+   * exactly the information somebody is trying to read.
+   */
   @Get()
-  async check() {
-    let db = false;
-    try {
-      await this.dataSource.query('select 1');
-      db = true;
-    } catch {
-      db = false;
-    }
-    return {
-      status: db ? 'ok' : 'degraded',
-      db,
-      uptimeSeconds: Math.round(process.uptime()),
-    };
+  check(): Promise<HealthReport> {
+    return this.health.check();
   }
 }

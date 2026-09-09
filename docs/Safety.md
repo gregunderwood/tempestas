@@ -117,6 +117,11 @@ Neither automatic alternative is safe: failing everything off can freeze the gre
 heat on can cook it. A human decides. **This is only sound if the alarm is actually visible** — the
 banner is a required part of the feature, not a nice-to-have.
 
+The mechanism is the `system:status` socket event, whose `sensorStale` flag raises it; the last
+status is cached and replayed to a connecting browser so the banner never waits for the next tick.
+See [Realtime](Infrastructure/Realtime.md). `GET /api/health` reports the same condition for
+anything that is not a browser.
+
 ### Layer 2 — node side, dead-man
 
 Each node enforces its own timeout locally, with no server involvement, so it works when the brain

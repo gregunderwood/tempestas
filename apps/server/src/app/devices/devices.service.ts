@@ -11,6 +11,7 @@ import { acceptsCommands } from '../nodes/node-registry';
 import { NodeEntity } from '../nodes/models';
 import { Clock } from '../common/clock';
 import { HardwareService } from '../hardware/hardware.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { DeviceEntity } from './models';
 import type { CreateDeviceDto } from './dto/create-device.dto';
 import type { UpdateDeviceDto } from './dto/update-device.dto';
@@ -35,6 +36,7 @@ export class DevicesService {
     private readonly nodes: Repository<NodeEntity>,
     private readonly hardware: HardwareService,
     private readonly clock: Clock,
+    private readonly realtime: RealtimeGateway,
   ) {}
 
   async findAll(): Promise<Device[]> {
@@ -116,7 +118,11 @@ export class DevicesService {
   async setRulesEnabled(id: string, rulesEnabled: boolean): Promise<Device> {
     const row = await this.findOneEntity(id);
     row.rulesEnabled = rulesEnabled;
-    return this.toDto(await this.devices.save(row));
+    const dto = this.toDto(await this.devices.save(row));
+    // Handing a device to or from the rules engine changes what the UI has to
+    // show about it, so it is a state change like any other.
+    this.realtime.publishDeviceState(dto);
+    return dto;
   }
 
   async remove(id: string): Promise<void> {
@@ -206,7 +212,12 @@ export class DevicesService {
     this.logger.log(
       `${device.name} -> ${direction} (node ${device.node.slug} pin ${device.gpio})`,
     );
-    return this.toDto(device);
+
+    // Published only after the hardware acknowledged AND the row was saved, so
+    // the dashboard can never show a state the relay never reached.
+    const dto = this.toDto(device);
+    this.realtime.publishDeviceState(dto);
+    return dto;
   }
 
   toDto(row: DeviceEntity): Device {
