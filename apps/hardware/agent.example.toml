@@ -1,0 +1,39 @@
+# Copy to /etc/tempestas/agent.toml on the node.
+
+node_id = "elantris"
+kind = "rpi"
+agent_version = "0.1.0"
+
+# No heartbeat for this long and the node fails safe on its own, with no server
+# involvement. The burner's hold wants to be LONGER at night, because it is also
+# the heater - that value is still an open question, see docs/Roadmap.md.
+deadman_s = 30.0
+
+[mqtt]
+url = "mqtt://127.0.0.1:1883"
+# username / password once the broker stops being anonymous (phase 12).
+
+[sensor]
+kind = "scd4x"          # scd4x | simulated
+sensor_id = "scd4x-0"
+bus = 1
+address = 0x62
+sample_interval_s = 10.0
+# Applied at EVERY startup, never trusted to persist. Tune it at the installed
+# self-heating equilibrium, not in open air.
+# temperature_offset_c = 6.0
+# altitude_m = 600
+
+[gpio]
+# EMPTY IS THE STAGE B POSTURE: no lines means no gpio capability is advertised,
+# no chip is opened, and the server cannot create a device on this node at all.
+#
+# Do not populate this until the boot-window hazard has been measured - an
+# unclaimed active-LOW line commands its relay ON. See docs/Safety.md.
+lines = []
+chip_label = "pinctrl-bcm2711"   # pinctrl-rp1 on a Pi 5. By label, never number.
+
+# Every managed line needs a declared safe level; the agent refuses to start
+# otherwise. Active-LOW relays are de-energised by 1.
+[gpio.failsafe]
+# 16 = 1

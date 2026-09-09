@@ -13,6 +13,7 @@ import {
   ApiErrorCode,
   NodeStatus,
   type Node,
+  type NodeCapabilities,
   type NodeId,
 } from '@tempestas/domain';
 import {
@@ -30,6 +31,7 @@ import {
   acceptsSamples,
   newNodeFromHello,
   patchFromHello,
+  pinsWithdrawn,
   type HelloFacts,
 } from './node-registry';
 
@@ -113,31 +115,66 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const { patch, outcome } = patchFromHello(existing, facts);
+    const previousCapabilities = existing.capabilities;
+    const { patch, outcomes } = patchFromHello(existing, facts);
     Object.assign(existing, patch);
     await this.nodes.save(existing);
 
-    switch (outcome) {
-      case 'rebooted':
-        this.logger.log(
-          `Node "${facts.nodeId}" rebooted (bootId ${facts.bootId})`,
-        );
-        break;
-      case 'capabilities-changed':
-        this.logger.warn(
-          `Node "${facts.nodeId}" changed its capabilities - a device may now be bound to a pin ` +
-            `the node no longer exposes`,
-        );
-        break;
-      case 'agent-upgraded':
-        this.logger.log(
-          `Node "${facts.nodeId}" agent is now ${facts.agentVersion}`,
-        );
-        break;
-      case 'seen':
-        this.logger.debug(`Node "${facts.nodeId}" re-announced, unchanged`);
-        break;
+    // Every applicable outcome, not just the loudest: an agent restarting with
+    // new capabilities is both a reboot and a capability change, and reporting
+    // only the reboot once hid a node dropping every pin it had.
+    for (const outcome of outcomes) {
+      switch (outcome) {
+        case 'rebooted':
+          this.logger.log(
+            `Node "${facts.nodeId}" rebooted (bootId ${facts.bootId})`,
+          );
+          break;
+        case 'capabilities-changed':
+          await this.reportWithdrawnPins(existing, previousCapabilities, facts);
+          break;
+        case 'agent-upgraded':
+          this.logger.log(
+            `Node "${facts.nodeId}" agent is now ${facts.agentVersion}`,
+          );
+          break;
+        case 'seen':
+          this.logger.debug(`Node "${facts.nodeId}" re-announced, unchanged`);
+          break;
+      }
     }
+  }
+
+  /**
+   * Name the devices a capability change just orphaned.
+   *
+   * Without this the only symptom is every drive attempt failing at the node,
+   * once per rules tick, with nothing in the log connecting it to the cause.
+   */
+  private async reportWithdrawnPins(
+    node: NodeEntity,
+    previous: NodeCapabilities,
+    facts: HelloFacts,
+  ): Promise<void> {
+    const withdrawn = pinsWithdrawn(previous, facts.capabilities);
+    if (withdrawn.length === 0) {
+      this.logger.warn(`Node "${facts.nodeId}" changed its capabilities`);
+      return;
+    }
+
+    const onNode = await this.devices.find({ where: { nodeId: node.id } });
+    const orphaned = onNode.filter((d) => withdrawn.includes(d.gpio));
+    if (orphaned.length === 0) {
+      this.logger.warn(
+        `Node "${facts.nodeId}" withdrew pins [${withdrawn.join(', ')}]; nothing was bound to them`,
+      );
+      return;
+    }
+    this.logger.error(
+      `Node "${facts.nodeId}" withdrew pins [${withdrawn.join(', ')}], ORPHANING ` +
+        orphaned.map((d) => `"${d.name}" (pin ${d.gpio})`).join(', ') +
+        ` - every attempt to drive them will fail at the node until this is resolved`,
+    );
   }
 
   async handleAvailability(availability: NodeAvailability): Promise<void> {
