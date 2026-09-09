@@ -34,14 +34,14 @@ Every phase ends in something runnable. **Phases 1–7 need no hardware and no s
 Checkpoint verified on elantris: `node -v` = v22.x, `psql -c 'select 1'`, and a
 `mosquitto_pub`→`mosquitto_sub` round-trip. All three pass.
 
-| Item         | State                                                                              |
-| ------------ | ---------------------------------------------------------------------------------- |
-| Postgres     | ✅ 17.11 native apt, service active                                                |
-| Mosquitto    | ✅ 2.0.21, active, round-trip confirmed. **Listener is loopback-only** — see below |
-| Node 22      | ✅ v22.23.2 via nvm, arm64 prebuilt, `default` alias set                           |
-| Swap         | ✅ zram 2 GiB at priority **100**, plus a 1 GiB `/var/swapfile` at priority **-2** |
-| journald cap | ✅ `SystemMaxUse=200M`, `MaxRetentionSec=14day` (in `99-tempestas.conf`)           |
-| Timezone     | ✅ America/Vancouver — but the app still resolves `TEMPESTAS_TZ`, never the host   |
+| Item         | State                                                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Postgres     | ✅ 17.11 native apt, service active                                                                                      |
+| Mosquitto    | ✅ 2.0.21, active, round-trip confirmed. **Listener is loopback-only** — see below                                       |
+| Node 22      | ✅ v22.23.2 via nvm, arm64 prebuilt, `default` alias set                                                                 |
+| Swap         | ✅ zram 2 GiB at priority **100**, plus a 1 GiB `/var/swapfile` at priority **-2**                                       |
+| journald cap | ✅ `99-tempestas.conf`: persistent, 200M cap, 25M/file, 14-day retention, compressed, rate-limited, `ForwardToSyslog=no` |
+| Timezone     | ✅ America/Vancouver — but the app still resolves `TEMPESTAS_TZ`, never the host                                         |
 
 Two corrections to an earlier survey of this box, both from looking in the wrong place:
 
