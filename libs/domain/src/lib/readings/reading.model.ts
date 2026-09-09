@@ -26,17 +26,22 @@ export interface Reading {
   createdAt: string;
 }
 
+/**
+ * Null where the window contains no usable value - an empty window has no
+ * average, and CO2 has none if every reading in the window was invalid. The old
+ * `Stats` type was `any`, so this arrived at the client as NaN.
+ */
 export interface ReadingAverages {
-  temperature: number;
-  humidity: number;
+  temperature: number | null;
+  humidity: number | null;
   co2: number | null;
 }
 
 /** min/max are whole readings so the UI can link to the record that produced them. */
 export interface ReadingExtremes {
-  temperature: Reading;
-  humidity: Reading;
-  co2: Reading;
+  temperature: Reading | null;
+  humidity: Reading | null;
+  co2: Reading | null;
 }
 
 export interface ReadingStats {
@@ -53,6 +58,12 @@ export interface ReadingsQuery {
   from?: string;
   to?: string;
   nodeId?: NodeId;
+  /**
+   * Rows to return, newest first. Bounded on purpose: 90 days of retention at
+   * one sample per node per 10 s is over three quarters of a million rows, and
+   * the dashboard asks for stats over a window rather than the window itself.
+   */
+  limit?: number;
 }
 
 export type StatsQuery = ReadingsQuery;

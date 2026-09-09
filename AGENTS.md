@@ -15,6 +15,8 @@ every list below, and why "it compiles and the tests pass" is not the bar here.
 - Node registration, admission, capabilities, `pending` → Read [./docs/Infrastructure/Nodes.md](./docs/Infrastructure/Nodes.md)
 - Home Assistant, external automation, or "could HA run the rules instead?" → Read [./docs/Infrastructure/Home Assistant.md](./docs/Infrastructure/Home%20Assistant.md)
 - Entities, schema decisions, queries → Read [./docs/Infrastructure/Database.md](./docs/Infrastructure/Database.md)
+- Reading queries, stats, time windows, retention → Read [./docs/Infrastructure/Readings.md](./docs/Infrastructure/Readings.md)
+- Socket events to the browser → Read [./docs/Infrastructure/Realtime.md](./docs/Infrastructure/Realtime.md)
 - A schema change → Read [./docs/Infrastructure/Migrations.md](./docs/Infrastructure/Migrations.md)
 - Thresholds, hysteresis, the control law, DST → Read [./docs/Rules and Climate.md](./docs/Rules%20and%20Climate.md)
 - Pins, polarity, relays, the SCD4x sensor, the boot window → Read [./docs/Hardware.md](./docs/Hardware.md)

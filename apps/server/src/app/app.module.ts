@@ -10,10 +10,11 @@ import { HardwareModule } from './hardware/hardware.module';
 import { NodesModule } from './nodes/nodes.module';
 import { NodeEntity } from './nodes/models';
 import { ReadingsModule } from './readings/readings.module';
+import { RealtimeModule } from './realtime/realtime.module';
 import { RulesModule } from './rules/rules.module';
 import { SensorReadingEntity } from './readings/models';
 import { ZoneEntity } from './zones/models';
-import { HealthController } from './health/health.controller';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -44,12 +45,13 @@ import { HealthController } from './health/health.controller';
     // actually happens on a home LAN - not an adversary.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     HardwareModule,
+    RealtimeModule,
     NodesModule,
     DevicesModule,
     ReadingsModule,
     RulesModule,
+    HealthModule,
   ],
-  controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

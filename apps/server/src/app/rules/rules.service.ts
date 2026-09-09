@@ -18,6 +18,8 @@ import {
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
 import { DevicesService } from '../devices/devices.service';
+import { NodesService } from '../nodes/nodes.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { DeviceEntity } from '../devices/models';
 import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';
@@ -52,6 +54,8 @@ export class RulesService implements OnApplicationBootstrap {
     @InjectRepository(SensorReadingEntity)
     private readonly readings: Repository<SensorReadingEntity>,
     private readonly devices: DevicesService,
+    private readonly nodes: NodesService,
+    private readonly realtime: RealtimeGateway,
     private readonly clock: Clock,
   ) {}
 
@@ -92,7 +96,32 @@ export class RulesService implements OnApplicationBootstrap {
         );
       }
     }
+
+    await this.publishStatus(evaluations);
     return evaluations;
+  }
+
+  /**
+   * One status per cycle rather than per zone: the banner it drives is a
+   * property of the installation, and `staleRoles` is the union across zones
+   * because a quiet sensor anywhere is worth surfacing everywhere.
+   */
+  private async publishStatus(evaluations: RulesEvaluation[]): Promise<void> {
+    const staleRoles = [...new Set(evaluations.flatMap((e) => e.staleRoles))];
+    const counts = await this.nodes.counts();
+    const latest = evaluations
+      .map((e) => e.evaluatedAt)
+      .sort()
+      .at(-1);
+
+    this.realtime.publishSystemStatus({
+      at: this.clock.now().toISOString(),
+      sensorStale: staleRoles.length > 0,
+      staleRoles,
+      nodesOnline: counts.online,
+      nodesTotal: counts.total,
+      lastEvaluationAt: latest ?? null,
+    });
   }
 
   async evaluateZone(zone: ZoneEntity): Promise<RulesEvaluation> {

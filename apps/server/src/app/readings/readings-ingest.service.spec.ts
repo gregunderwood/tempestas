@@ -6,6 +6,7 @@ import type {
   SensorSample,
 } from '../hardware/hardware.service';
 import type { NodesService, SampleResolution } from '../nodes/nodes.service';
+import type { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ReadingsIngestService } from './readings-ingest.service';
 import type { SensorReadingEntity } from './models';
 
@@ -24,12 +25,18 @@ function sample(overrides: Partial<SensorSample> = {}): SensorSample {
   };
 }
 
+const PERSISTED_ROW = {
+  id: 'reading-uuid',
+  created_at: '2026-01-10T12:00:00.000Z',
+};
+
 function makeService(
   resolution: SampleResolution,
-  raw: unknown[] = [{ id: 'reading-uuid' }],
+  raw: unknown[] = [PERSISTED_ROW],
 ) {
   const execute = vi.fn().mockResolvedValue({ raw });
-  const orIgnore = vi.fn(() => ({ execute }));
+  const returning = vi.fn(() => ({ execute }));
+  const orIgnore = vi.fn(() => ({ returning }));
   const values = vi.fn(() => ({ orIgnore }));
   const insert = vi.fn(() => ({ values }));
   const readings = {
@@ -41,13 +48,17 @@ function makeService(
   } as unknown as NodesService;
   const hardware = { samples$: NEVER } as unknown as HardwareService;
 
+  const publishReading = vi.fn();
+  const realtime = { publishReading } as unknown as RealtimeGateway;
+
   const service = new ReadingsIngestService(
     readings,
     nodes,
     hardware,
     new FixedClock(NOW),
+    realtime,
   );
-  return { service, values, orIgnore, insert };
+  return { service, values, orIgnore, insert, publishReading };
 }
 
 /** The uuid is what the FK is written from; the bootId scopes the dedupe. */
@@ -150,5 +161,41 @@ describe('dedupe is scoped to the node boot', () => {
     expect(values).toHaveBeenCalledWith(
       expect.objectContaining({ bootId: null }),
     );
+  });
+});
+
+// The phase 6 checkpoint on the ingest side: a browser gets the row that was
+// actually written, not a reconstruction of it, and only when one was written.
+describe('realtime fan-out', () => {
+  it('publishes the persisted row, with its server-stamped id and time', async () => {
+    const { service, publishReading } = makeService(ADMITTED);
+    await service.ingest(sample());
+
+    expect(publishReading).toHaveBeenCalledWith({
+      id: 'reading-uuid',
+      nodeId: 'elantris',
+      sensorId: 'scd4x-0',
+      temperature: 21.5,
+      humidity: 55.2,
+      co2: 812,
+      createdAt: '2026-01-10T12:00:00.000Z',
+    });
+  });
+
+  it('publishes nothing for a duplicate', async () => {
+    const { service, publishReading } = makeService(ADMITTED, []);
+    await service.ingest(sample());
+    expect(publishReading).not.toHaveBeenCalled();
+  });
+
+  // A pending node must not reach the dashboard either. Discarding at ingest is
+  // what keeps every consumer downstream from having to re-check.
+  it('publishes nothing for a discarded sample', async () => {
+    const { service, publishReading } = makeService({
+      accepted: false,
+      reason: 'pending',
+    });
+    await service.ingest(sample());
+    expect(publishReading).not.toHaveBeenCalled();
   });
 });

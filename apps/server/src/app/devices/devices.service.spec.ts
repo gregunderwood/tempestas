@@ -3,6 +3,7 @@ import type { Repository } from 'typeorm';
 import { ApiErrorCode, DeviceRole, NodeStatus } from '@tempestas/domain';
 import { FixedClock } from '../common/clock';
 import type { HardwareService } from '../hardware/hardware.service';
+import type { RealtimeGateway } from '../realtime/realtime.gateway';
 import { DevicesService } from './devices.service';
 import type { DeviceEntity } from './models';
 import type { NodeEntity } from '../nodes/models';
@@ -63,13 +64,16 @@ function makeService(
     findOne: mocks.nodeFindOne,
   } as unknown as Repository<NodeEntity>;
   const hardware = { setPin, syncPins: vi.fn() } as unknown as HardwareService;
+  const publishDeviceState = vi.fn();
+  const realtime = { publishDeviceState } as unknown as RealtimeGateway;
   const service = new DevicesService(
     repo,
     nodeRepo,
     hardware,
     new FixedClock(NOW),
+    realtime,
   );
-  return { service, setPin, save: mocks.save, mocks };
+  return { service, setPin, save: mocks.save, mocks, publishDeviceState };
 }
 
 describe('DevicesService interlocks', () => {
@@ -326,5 +330,41 @@ describe('DevicesService mutations', () => {
     const { service, mocks } = makeService(burner());
     await service.remove('dev-1');
     expect(mocks.remove).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DevicesService realtime fan-out', () => {
+  // Published only after the hardware acknowledged AND the row saved, so the
+  // dashboard can never show a state the relay did not reach.
+  it('publishes the new state once a write succeeds', async () => {
+    const { service, publishDeviceState } = makeService(burner());
+    await service.turnOn('dev-1');
+    expect(publishDeviceState).toHaveBeenCalledTimes(1);
+    expect(publishDeviceState).toHaveBeenCalledWith(
+      expect.objectContaining({ isOn: true }),
+    );
+  });
+
+  it('publishes nothing when the hardware write fails', async () => {
+    const setPin = vi.fn().mockRejectedValue(new Error('READBACK_MISMATCH'));
+    const { service, publishDeviceState } = makeService(burner(), setPin);
+    await expect(service.turnOn('dev-1')).rejects.toThrow();
+    expect(publishDeviceState).not.toHaveBeenCalled();
+  });
+
+  it('publishes nothing when an interlock refuses', async () => {
+    const { service, publishDeviceState } = makeService(
+      burner({ onAt: new Date('2026-01-10T11:00:00Z') }),
+    );
+    await expect(service.turnOn('dev-1')).rejects.toThrow();
+    expect(publishDeviceState).not.toHaveBeenCalled();
+  });
+
+  it('publishes when a device is handed to or taken from the rules engine', async () => {
+    const { service, publishDeviceState } = makeService(burner());
+    await service.setRulesEnabled('dev-1', false);
+    expect(publishDeviceState).toHaveBeenCalledWith(
+      expect.objectContaining({ rulesEnabled: false }),
+    );
   });
 });

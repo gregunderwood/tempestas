@@ -13,6 +13,7 @@ import {
   type SensorSample,
 } from '../hardware/hardware.service';
 import { NodesService, type SampleRejection } from '../nodes/nodes.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { SensorReadingEntity } from './models';
 
 export type IngestResult = 'persisted' | 'duplicate' | 'discarded';
@@ -47,6 +48,7 @@ export class ReadingsIngestService implements OnModuleInit, OnModuleDestroy {
     private readonly nodes: NodesService,
     private readonly hardware: HardwareService,
     private readonly clock: Clock,
+    private readonly realtime: RealtimeGateway,
   ) {}
 
   onModuleInit(): void {
@@ -105,15 +107,30 @@ export class ReadingsIngestService implements OnModuleInit, OnModuleDestroy {
         nodeSeq: sample.nodeSeq === null ? null : String(sample.nodeSeq),
       })
       .orIgnore()
+      // RETURNING gives us the server-stamped id and created_at, so the socket
+      // payload is the row that was actually written rather than a
+      // reconstruction of it. It also stays empty on a conflict, which is how a
+      // duplicate is detected without a second query.
+      .returning('*')
       .execute();
 
-    const inserted = Array.isArray(result.raw) ? result.raw.length > 0 : true;
-    if (!inserted) {
+    const written = Array.isArray(result.raw) ? result.raw : [];
+    if (written.length === 0) {
       this.logger.debug(
         `Duplicate sample from "${sample.nodeId}" seq ${sample.nodeSeq} ignored`,
       );
       return 'duplicate';
     }
+
+    this.realtime.publishReading({
+      id: written[0].id,
+      nodeId: sample.nodeId,
+      sensorId: sample.sensorId,
+      temperature: sample.temperature,
+      humidity: sample.humidity,
+      co2: sample.co2 === null ? null : Math.round(sample.co2),
+      createdAt: new Date(written[0].created_at).toISOString(),
+    });
     return 'persisted';
   }
 
