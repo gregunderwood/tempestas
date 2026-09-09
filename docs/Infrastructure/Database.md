@@ -22,7 +22,7 @@ Local development runs Postgres in Docker on port **5433**. Production on the Pi
 
 ```
 zones ──┬── nodes ──┬── devices          UNIQUE (node_id, gpio)
-        │           └── sensor_readings  UNIQUE (node_id, sensor_id, node_seq)
+        │           └── sensor_readings  UNIQUE (node_id, sensor_id, boot_id, node_seq)
         └── devices (zone_id)
 ```
 
@@ -46,7 +46,7 @@ it carries, whether it has an RTC. Nothing in the server may branch on `kind`.
 `status` (`pending | admitted | disabled`) is the admission gate — see [Nodes](Nodes.md).
 `online` and `last_seen_at` are driven by the retained LWT and persisted so the list view is one
 query. `boot_id` changes on every restart of a node's agent, persisted so a bounce is detectable
-across a restart of the *server* too.
+across a restart of the _server_ too.
 
 ### `devices`
 
@@ -65,8 +65,13 @@ from `on_at > off_at`, and the anti-short-cycle interlock from `off_at + on_dela
 
 - `INDEX (created_at)` and `INDEX (node_id, created_at)`. The old schema had **no index on
   `created_at`** across 2.87M rows while every query ordered or filtered on it.
-- `UNIQUE (node_id, sensor_id, node_seq)` with `ON CONFLICT DO NOTHING` on insert, to absorb MQTT
-  QoS-1 duplicates. A duplicate sample would mean a duplicate rules evaluation.
+- `UNIQUE (node_id, sensor_id, boot_id, node_seq)` with `ON CONFLICT DO NOTHING` on insert, to
+  absorb MQTT QoS-1 duplicates. A duplicate sample would mean a duplicate rules evaluation.
+  **Scoped to the boot, not just the node:** a node's sequence counter restarts at 1 when its agent
+  does, so a `(node, sensor, seq)` key silently swallowed every sample after a reboot until the
+  counter passed its previous high-water mark. The symptom was indistinguishable from a stale
+  sensor. `boot_id` is copied from `nodes.boot_id` at ingest and is also useful provenance — it says
+  which run of which agent produced the row.
 - `created_at` is **server-stamped on receipt** and is the authoritative time axis. `node_ts` is the
   node's own clock, diagnostic only — an ESP32 has no RTC.
 - `co2` is nullable, and null means **unknown, never zero**.
@@ -102,9 +107,7 @@ This bit once — hardware calls addressed to a uuid instead of a topic segment.
 ### ✅ Aggregate once for a list view
 
 ```ts
-const counts = await this.devices.createQueryBuilder('d')
-  .select('d.nodeId', 'nodeId').addSelect('COUNT(*)', 'count')
-  .where('d.nodeId IN (:...ids)', { ids }).groupBy('d.nodeId').getRawMany();
+const counts = await this.devices.createQueryBuilder('d').select('d.nodeId', 'nodeId').addSelect('COUNT(*)', 'count').where('d.nodeId IN (:...ids)', { ids }).groupBy('d.nodeId').getRawMany();
 ```
 
 `deviceCount` and `latestReadingAt` on the nodes list are two grouped aggregates, so the endpoint
@@ -142,8 +145,9 @@ hardware exactly when it matters.
   the command looks like it succeeded.
 - **`node_seq` is a `bigint`**, which TypeORM represents as a **string** in TS. Insert
   `String(seq)`, not the number.
-- **A NULL `node_seq` defeats the dedupe** — NULLs are distinct in a unique index. That is why the
-  MQTT contract asks every node for a `seq`.
+- **A NULL `node_seq` or `boot_id` defeats the dedupe** — NULLs are distinct in a unique index. That
+  is why the MQTT contract asks every node for a `seq`, and why the registry records a `boot_id`
+  from the first `hello`.
 - **Deleting a node cascades its readings away.** `sensor_readings.node_id` is `ON DELETE CASCADE`,
   which is why only a `pending` node may be deleted; `disable` is the operation that means "stop
   trusting this" and keeps the data.

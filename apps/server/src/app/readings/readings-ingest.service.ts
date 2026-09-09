@@ -1,9 +1,17 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Subscription } from 'rxjs';
 import { Clock } from '../common/clock';
-import { HardwareService, type SensorSample } from '../hardware/hardware.service';
+import {
+  HardwareService,
+  type SensorSample,
+} from '../hardware/hardware.service';
 import { NodesService, type SampleRejection } from '../nodes/nodes.service';
 import { SensorReadingEntity } from './models';
 
@@ -28,14 +36,17 @@ export class ReadingsIngestService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ReadingsIngestService.name);
   private readonly subscriptions = new Subscription();
   private queue: Promise<unknown> = Promise.resolve();
-  private readonly discards = new Map<string, { count: number; lastLoggedAtMs: number }>();
+  private readonly discards = new Map<
+    string,
+    { count: number; lastLoggedAtMs: number }
+  >();
 
   constructor(
     @InjectRepository(SensorReadingEntity)
     private readonly readings: Repository<SensorReadingEntity>,
     private readonly nodes: NodesService,
     private readonly hardware: HardwareService,
-    private readonly clock: Clock
+    private readonly clock: Clock,
   ) {}
 
   onModuleInit(): void {
@@ -47,10 +58,10 @@ export class ReadingsIngestService implements OnModuleInit, OnModuleDestroy {
             this.logger.error(
               `Failed to ingest a sample from "${sample.nodeId}": ${
                 err instanceof Error ? err.message : err
-              }`
+              }`,
             );
           });
-      })
+      }),
     );
   }
 
@@ -67,16 +78,24 @@ export class ReadingsIngestService implements OnModuleInit, OnModuleDestroy {
       return 'discarded';
     }
 
-    // ON CONFLICT DO NOTHING against uq_readings_node_sensor_seq. MQTT QoS 1 is
-    // at-least-once, and a duplicate sample would mean a duplicate rules
-    // evaluation. A node that publishes no `seq` gets no protection here -
-    // NULLs are distinct in a unique index - which is why the contract asks for
-    // one.
+    // ON CONFLICT DO NOTHING against uq_readings_node_sensor_boot_seq. MQTT QoS
+    // 1 is at-least-once, and a duplicate sample would mean a duplicate rules
+    // evaluation.
+    //
+    // The key includes the node's boot generation because a node's sequence
+    // counter restarts at 1 when its agent does. Without that, every sample
+    // after a node reboot collided with the previous boot's rows and was
+    // dropped - which presents as a stale sensor rather than as an error.
+    //
+    // A node that publishes no `seq`, or has no bootId yet, gets no protection
+    // here: NULLs are distinct in a unique index. That is why the contract asks
+    // every node for a seq.
     const result = await this.readings
       .createQueryBuilder()
       .insert()
       .values({
         nodeId: resolution.node.id,
+        bootId: resolution.node.bootId,
         sensorId: sample.sensorId,
         temperature: sample.temperature,
         humidity: sample.humidity,
@@ -91,7 +110,7 @@ export class ReadingsIngestService implements OnModuleInit, OnModuleDestroy {
     const inserted = Array.isArray(result.raw) ? result.raw.length > 0 : true;
     if (!inserted) {
       this.logger.debug(
-        `Duplicate sample from "${sample.nodeId}" seq ${sample.nodeSeq} ignored`
+        `Duplicate sample from "${sample.nodeId}" seq ${sample.nodeSeq} ignored`,
       );
       return 'duplicate';
     }
@@ -105,7 +124,7 @@ export class ReadingsIngestService implements OnModuleInit, OnModuleDestroy {
     if (!seen) {
       this.discards.set(nodeId, { count: 0, lastLoggedAtMs: nowMs });
       this.logger.warn(
-        `Discarding readings from "${nodeId}" (${reason}) - admit the node to start believing it`
+        `Discarding readings from "${nodeId}" (${reason}) - admit the node to start believing it`,
       );
       return;
     }
@@ -113,7 +132,7 @@ export class ReadingsIngestService implements OnModuleInit, OnModuleDestroy {
     seen.count += 1;
     if (nowMs - seen.lastLoggedAtMs >= DISCARD_LOG_INTERVAL_MS) {
       this.logger.warn(
-        `Discarded ${seen.count} further readings from "${nodeId}" (${reason})`
+        `Discarded ${seen.count} further readings from "${nodeId}" (${reason})`,
       );
       seen.count = 0;
       seen.lastLoggedAtMs = nowMs;
