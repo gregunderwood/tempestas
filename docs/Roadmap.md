@@ -167,7 +167,30 @@ MQTT. What is done and what is not:
 | 1. `scd4x_healthcheck.py`, record serial and self-test    | ✅ serial `5fd90b073b7a`, self-test PASS        |
 | 2. Agent in **sim mode**, whole topic tree verified       | ✅ against the Mac's broker and the real server |
 | 3. Real sensor with `gpio.lines` **empty**                | ✅ on elantris, sensor-only, no chip opened     |
-| 4. 48 h against greenhouse's live stream, tune the offset | ⬜ not started                                  |
+| 4. 48 h against greenhouse's live stream, tune the offset | 🔄 **running since 2026-09-09 20:06Z**          |
+
+Both run under systemd and survive a reboot — verified by rebooting the box, which also confirmed
+the `/etc/fstab` swap repair holds. `tempestas-stage-b-soak.service` writes one CSV row a minute to
+`~/tempestas/soak/stage-b-soak.csv`, with elantris's own sample beside the greenhouse's live reading.
+
+**Baseline at the start of the soak** (elantris indoors, greenhouse in the sun):
+
+|             | elantris                | greenhouse     |
+| ----------- | ----------------------- | -------------- |
+| Temperature | ~18.8 °C                | ~29.6 °C       |
+| Humidity    | ~83 %                   | ~67 %          |
+| CO2         | ~810 ppm, rising slowly | ~410 ppm, flat |
+
+Two things to read out of the soak, in this order:
+
+1. **Does the shape track?** Different rooms, so the absolute values are not supposed to match. What
+   must track is the diurnal shape and the CO2 baseline behaviour.
+2. **Is `temperature_offset_c` too large?** The chip holds **6.56 °C**. A settled indoor reading of
+   18.8 °C at 83 % RH is a suspicious pair: the SCD4x derives humidity through the same temperature
+   compensation, so an offset that is too big reads _cold and damp together_ — which is this shape.
+   Check both against a reference thermometer and hygrometer in the same spot before concluding
+   anything. Note also that the first few minutes after a restart are warm-up transient: this run
+   opened at 20.7 °C / 75 % and settled over about five minutes.
 
 GPIO is **not** implemented and that is deliberate — see
 [Node Agent](Infrastructure/Node%20Agent.md#the-stage-b-posture). Deployment (a systemd unit, the
