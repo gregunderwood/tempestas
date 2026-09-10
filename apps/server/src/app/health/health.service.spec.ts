@@ -5,6 +5,7 @@ import type { NodesService } from '../nodes/nodes.service';
 import type { SensorReadingEntity } from '../readings/models';
 import type { RulesService } from '../rules/rules.service';
 import { HealthService } from './health.service';
+import { DivergenceLog } from '../common/divergence-log';
 
 const NOW = new Date('2026-01-10T12:00:00Z');
 
@@ -29,6 +30,7 @@ interface Setup {
   latestReading?: Date | null;
   counts?: { total: number; online: number; pending: number };
   evaluations?: RulesEvaluation[];
+  divergences?: DivergenceLog;
 }
 
 function makeService(setup: Setup = {}) {
@@ -65,6 +67,7 @@ function makeService(setup: Setup = {}) {
     nodes,
     rules,
     new FixedClock(NOW),
+    setup.divergences ?? new DivergenceLog(),
   );
 }
 
@@ -139,5 +142,53 @@ describe('HealthService', () => {
       problems: ['database unreachable'],
     });
     expect(report.uptimeSeconds).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// A relay and its row having disagreed means something upstream already failed.
+// Correcting the row is the fix; keeping it on a surface somebody reads is the
+// alarm, and this endpoint is what anything that is not a browser polls.
+describe('HealthService divergence reporting', () => {
+  function loggedAt(at: Date): DivergenceLog {
+    const log = new DivergenceLog();
+    log.record({
+      deviceName: 'CO2 Generator',
+      nodeId: 'elantris',
+      pin: 5,
+      hardwareOn: false,
+      reason: 'hardware reports de-energised, the row said on',
+      at,
+    });
+    return log;
+  }
+
+  it('reports a recent divergence and calls the system degraded', async () => {
+    const health = await makeService({
+      divergences: loggedAt(new Date(NOW.getTime() - 60_000)),
+    }).check();
+    expect(health.problems).toContainEqual(
+      expect.stringContaining('CO2 Generator'),
+    );
+    expect(health.status).toBe('degraded');
+  });
+
+  // An overnight failsafe has to still be reported when somebody looks in the
+  // morning, so the window is a day rather than minutes.
+  it('still reports one from eight hours ago', async () => {
+    const health = await makeService({
+      divergences: loggedAt(new Date(NOW.getTime() - 8 * 3600_000)),
+    }).check();
+    expect(health.problems).toContainEqual(
+      expect.stringContaining('divergence'),
+    );
+  });
+
+  it('lets one age out rather than reporting it forever', async () => {
+    const health = await makeService({
+      divergences: loggedAt(new Date(NOW.getTime() - 25 * 3600_000)),
+    }).check();
+    expect(health.problems).not.toContainEqual(
+      expect.stringContaining('divergence'),
+    );
   });
 });

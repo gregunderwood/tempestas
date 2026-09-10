@@ -308,15 +308,32 @@ export function verifyResult(
 export function decodeGpioState(
   raw: Record<string, unknown>,
   pin: number,
-): Decoded<{ pin: number; level: GpioLevel | null; known: boolean }> {
+): Decoded<{
+  pin: number;
+  level: GpioLevel | null;
+  known: boolean;
+  observedAt: Date;
+}> {
   const bad = checkSchema(raw, MQTT_SCHEMAS.gpioState);
   if (bad) return bad;
 
   const payload = raw as unknown as GpioStatePayload;
+  // The node's own timestamp is carried through because it ends up in a
+  // device's `offAt`, which decides when the minimum-off window started. An
+  // unparseable one is refused rather than defaulted to now: silently
+  // substituting our clock would restart a burner's cooldown from the moment we
+  // happened to receive the message.
+  const observedAt = new Date(payload.ts);
+  if (Number.isNaN(observedAt.getTime())) {
+    return {
+      ok: false,
+      reason: `gpio/state has an unparseable ts "${String(payload.ts)}"`,
+    };
+  }
   // `known: false` is a first-class state, not an error: it is what a node
   // reports for a line it has not claimed or cannot read back. Stale is not off.
   if (payload.known !== true) {
-    return { ok: true, value: { pin, level: null, known: false } };
+    return { ok: true, value: { pin, level: null, known: false, observedAt } };
   }
   if (payload.level !== 0 && payload.level !== 1) {
     return {
@@ -324,7 +341,10 @@ export function decodeGpioState(
       reason: `gpio/state claims known with level "${String(payload.level)}"`,
     };
   }
-  return { ok: true, value: { pin, level: payload.level, known: true } };
+  return {
+    ok: true,
+    value: { pin, level: payload.level, known: true, observedAt },
+  };
 }
 
 export function decodeAlarm(

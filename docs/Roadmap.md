@@ -327,9 +327,10 @@ working, not redundancy.
 **It also found a real defect, which is why the checkpoint exists.** The node failed safe and told
 nobody: the pad was de-energised while the retained `gpio/state` and the device row both still said
 the burner relay was ON. Written up as
-[rule 3b in Safety](Safety.md#3b-a-node-that-changes-a-line-on-its-own-must-say-so) - including the
-part still open, that `MqttHardwareService.pinState()` is maintained and has no callers, so the
-server holds the correct level and ignores it.
+[rule 3b in Safety](Safety.md#3b-a-node-that-changes-a-line-on-its-own-must-say-so), and closed on
+both sides: the node now republishes its line state, and the server consumes it and corrects the row
+per [rule 3c](Safety.md#3c-the-hardware-wins-and-the-disagreement-alarms). The server previously
+held the correct level in memory with no callers at all.
 
 A second, smaller gap: **`hello` is not retained**, so a controller that starts while a node is
 already connected never learns the node exists - only its retained `status`, which carries no

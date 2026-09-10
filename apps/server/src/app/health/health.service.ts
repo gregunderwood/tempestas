@@ -3,6 +3,14 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import type { HealthReport } from '@tempestas/domain';
 import { Clock } from '../common/clock';
+import { DivergenceLog } from '../common/divergence-log';
+
+/**
+ * How far back a corrected divergence still counts as a problem. Long enough
+ * that an overnight failsafe is still reported when somebody looks in the
+ * morning, short enough that it clears on its own.
+ */
+const DIVERGENCE_WINDOW_S = 24 * 60 * 60;
 import { NodesService } from '../nodes/nodes.service';
 import { SensorReadingEntity } from '../readings/models';
 import { RulesService } from '../rules/rules.service';
@@ -25,6 +33,7 @@ export class HealthService {
     private readonly nodes: NodesService,
     private readonly rules: RulesService,
     private readonly clock: Clock,
+    private readonly divergences: DivergenceLog,
   ) {}
 
   async check(): Promise<HealthReport> {
@@ -88,6 +97,20 @@ export class HealthService {
       // Not degraded: a pending node is the admission gate working. But it is
       // the thing somebody curling this endpoint most often needs told.
       problems.push(`${counts.pending} node(s) awaiting admission`);
+    }
+
+    // A relay and its row having disagreed means something upstream already
+    // failed, so it stays on this surface rather than being corrected quietly.
+    // The window is bounded because this log does not survive a restart - the
+    // ERROR entries in the journal are the durable record.
+    const recent = this.divergences.since(
+      new Date(now.getTime() - DIVERGENCE_WINDOW_S * 1000),
+    );
+    if (recent.length > 0) {
+      const names = [...new Set(recent.map((d) => d.deviceName))];
+      problems.push(
+        `hardware/database divergence corrected for: ${names.join(', ')}`,
+      );
     }
 
     // A pending node alone is not degradation, so it is excluded from the verdict.

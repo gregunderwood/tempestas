@@ -3,20 +3,29 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { Subscription } from 'rxjs';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiErrorCode, type Device, type GpioLevel } from '@tempestas/domain';
 import { acceptsCommands } from '../nodes/node-registry';
 import { NodeEntity } from '../nodes/models';
 import { Clock } from '../common/clock';
-import { HardwareError, HardwareService } from '../hardware/hardware.service';
+import {
+  HardwareError,
+  HardwareService,
+  type PinStateReport,
+} from '../hardware/hardware.service';
+import { DivergenceLog } from '../common/divergence-log';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { DeviceEntity } from './models';
 import type { CreateDeviceDto } from './dto/create-device.dto';
 import type { UpdateDeviceDto } from './dto/update-device.dto';
 import { canTurnOn, canTurnOnAt, isOn } from './device-state';
+import { correctionPatch, reconcilePinState } from './reconcile-pin-state';
 
 /**
  * The single owner of the on/off interlocks.
@@ -27,8 +36,9 @@ import { canTurnOn, canTurnOnAt, isOn } from './device-state';
  * place, which is this file.
  */
 @Injectable()
-export class DevicesService {
+export class DevicesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DevicesService.name);
+  private pinStates?: Subscription;
 
   constructor(
     @InjectRepository(DeviceEntity)
@@ -38,7 +48,69 @@ export class DevicesService {
     private readonly hardware: HardwareService,
     private readonly clock: Clock,
     private readonly realtime: RealtimeGateway,
+    private readonly divergences: DivergenceLog,
   ) {}
+
+  onModuleInit(): void {
+    // A node changes lines on its own when its dead-man trips or when it sees
+    // this controller's last will, and it is the only party that knows. Without
+    // this subscription the driver held the correct level and nothing read it,
+    // so a row stayed wrong until a human noticed - and the interlock reads
+    // that row, so a burner could be locked out of turning on.
+    this.pinStates = this.hardware.pinStates$.subscribe((report) => {
+      void this.reconcile(report).catch((err: unknown) => {
+        // Never allowed to kill the subscription: dropping it would silently
+        // restore the exact blindness this exists to remove.
+        this.logger.error(
+          `Reconciling ${report.nodeId} pin ${report.pin} failed: ${String(err)}`,
+        );
+      });
+    });
+  }
+
+  onModuleDestroy(): void {
+    this.pinStates?.unsubscribe();
+  }
+
+  /**
+   * Bring a device row into line with what its node reports.
+   *
+   * The hardware wins for the level. The correction records `offAt` at the
+   * moment the NODE observed the line, so the minimum-off window runs from when
+   * the relay really opened rather than from when we found out, and `onAt` is
+   * left alone - the timestamps are the audit trail.
+   */
+  private async reconcile(report: PinStateReport): Promise<void> {
+    const device = await this.devices.findOne({
+      where: { gpio: report.pin, node: { slug: report.nodeId } },
+      relations: { node: true },
+    });
+    if (!device) return;
+
+    const now = this.clock.now();
+    const verdict = reconcilePinState(device, report, now);
+    if (verdict.action !== 'correct') return;
+
+    Object.assign(device, correctionPatch(verdict));
+    await this.devices.save(device);
+
+    this.divergences.record({
+      deviceName: device.name,
+      nodeId: report.nodeId,
+      pin: report.pin,
+      hardwareOn: verdict.hardwareOn,
+      reason: verdict.reason,
+      at: now,
+    });
+    // ERROR, not WARN: the row and the relay disagreeing means something
+    // upstream already failed, and this is the durable record of it.
+    this.logger.error(
+      `DIVERGENCE on ${device.name} (${report.nodeId} pin ${report.pin}): ` +
+        `${verdict.reason}; corrected the row to ` +
+        `${verdict.hardwareOn ? 'ON' : 'OFF'} as of ${verdict.at.toISOString()}`,
+    );
+    this.realtime.publishDeviceState(this.toDto(device));
+  }
 
   async findAll(): Promise<Device[]> {
     const rows = await this.devices.find({
