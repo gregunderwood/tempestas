@@ -53,6 +53,44 @@ export interface ReadingStats {
   to: string;
 }
 
+/** One contiguous daylight or night period, with its statistics. */
+export interface SegmentStats {
+  kind: 'day' | 'night';
+  /** ISO-8601. */
+  from: string;
+  to: string;
+  /** True for the period still running, whose `to` is now. */
+  inProgress: boolean;
+  stats: ReadingStats;
+}
+
+/**
+ * The last few alternating daylight and night periods, oldest first, ending
+ * with the one still running. By day that reads previous day, last night,
+ * today so far; by night, previous night, yesterday's daylight, tonight so
+ * far.
+ *
+ * There is deliberately no combined 24-hour figure. A window that spans both
+ * averages two different jobs together - the burner is CO2 enrichment by day
+ * and the greenhouse's heat source by night - and the result describes neither.
+ * A 4 °C minimum is the night rule working or a midday fault, and only the
+ * period it belongs to says which.
+ *
+ * Empty when the zone's daylight window is zero-length, since there are then no
+ * alternating periods to show.
+ */
+export interface DayNightStats {
+  /** Oldest first. The last entry is the period still running. */
+  periods: SegmentStats[];
+  daylight: {
+    /** Local wall-clock, inclusive. */
+    startTime: string;
+    /** Local wall-clock, exclusive. */
+    endTime: string;
+    timezone: string;
+  };
+}
+
 export interface ReadingsQuery {
   days?: number;
   from?: string;

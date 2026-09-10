@@ -1,5 +1,5 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import type { Reading, ReadingStats } from '@tempestas/domain';
+import type { DayNightStats, Reading, ReadingStats } from '@tempestas/domain';
 import { ReadingsService } from './readings.service';
 import { ReadingsQueryDto, StatsQueryDto } from './dto/readings-query.dto';
 
@@ -26,5 +26,17 @@ export class ReadingsController {
   @Get('stats')
   stats(@Query() query: StatsQueryDto): Promise<ReadingStats> {
     return this.readings.stats(query);
+  }
+
+  /**
+   * The same window split at the zone's daylight boundary.
+   *
+   * Separate from `stats` rather than a flag on it, so the response shape does
+   * not change with a query parameter and a caller cannot be handed a body it
+   * did not expect.
+   */
+  @Get('stats/day-night')
+  dayNightStats(@Query() query: StatsQueryDto): Promise<DayNightStats> {
+    return this.readings.dayNightStats(query);
   }
 }

@@ -124,7 +124,36 @@ delaying the data the burner is controlled from.
   than slowing it.
 - **A window is not a zone.** These endpoints are global; nothing here filters by zone yet.
 
+## Day and night, not 24 hours
+
+`GET /api/readings/stats/day-night` returns the last three **contiguous** daylight and night
+periods, oldest first, ending with the one still running. By day that reads previous day, last
+night, today so far; by night, previous night, yesterday's daylight, tonight so far.
+
+There is deliberately **no combined 24-hour figure**, and this is not a display choice. The burner
+is CO2 enrichment by day and the greenhouse's heat source by night, so a window spanning both
+averages two different jobs together and describes neither. A 4 °C minimum is the night rule
+working or a midday fault; only the period it belongs to says which.
+
+It is equally deliberately not "all daylight readings in the last 24 hours". That would put this
+morning and yesterday afternoon in the same average.
+
+Three things it must keep doing, each with a test:
+
+- **The boundary is the zone's own `thresholds.startTime`/`endTime`** — the pair the rules engine
+  branches on. `daylight-segments.spec.ts` asserts the running period's kind against
+  `isWithinWindow` at every half hour, for four window shapes, so the screen cannot start
+  explaining a decision the controller never made.
+- **Boundaries are SET in the zone, never added as minutes to midnight.** On a spring-forward day
+  the clock skips an hour, so midnight plus 390 minutes is 07:30 local, not 06:30 — every period
+  then lands an hour out. This was written wrong first and the DST test caught it.
+- **A midnight-crossing window needs no special case.** Boundaries are listed and sorted, so
+  18:30–06:30 behaves like any other shape. A zero-length window returns no periods rather than
+  guessing "always daytime".
+
 ## When to update this file
+
+- The day/night split changes shape, or stops agreeing with the rules engine
 
 - A readings endpoint is added, or a default or cap changes
 - The window rules change
