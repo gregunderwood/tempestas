@@ -1,8 +1,13 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  computed,
+  inject,
+} from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatButtonModule } from '@angular/material/button';
-import { MatIconModule } from '@angular/material/icon';
 import { RealtimeService } from './core/realtime.service';
 
 @Component({
@@ -13,7 +18,6 @@ import { RealtimeService } from './core/realtime.service';
     RouterLinkActive,
     MatToolbarModule,
     MatButtonModule,
-    MatIconModule,
   ],
   templateUrl: './app.html',
   styleUrl: './app.scss',
@@ -36,7 +40,9 @@ export class App implements OnInit {
    */
   readonly sensorStale = computed(() => this.status()?.sensorStale === true);
 
-  readonly staleRoles = computed(() => this.status()?.staleRoles.join(', ') ?? '');
+  readonly staleRoles = computed(
+    () => this.status()?.staleRoles.join(', ') ?? '',
+  );
 
   ngOnInit(): void {
     this.realtime.connect();
