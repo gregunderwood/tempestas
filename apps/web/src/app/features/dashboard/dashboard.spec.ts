@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection, signal } from '@angular/core';
+import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import type { Device, Reading } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
@@ -48,6 +49,7 @@ function setup(readings: Reading[], devices: Device[] = []): HTMLElement {
     imports: [Dashboard],
     providers: [
       provideZonelessChangeDetection(),
+      provideRouter([]),
       {
         provide: ApiService,
         useValue: {

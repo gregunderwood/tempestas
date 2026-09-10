@@ -1,7 +1,13 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  inject,
+  signal,
+} from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
+import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { NodeStatus, type Node } from '@tempestas/domain';
 
@@ -13,7 +19,7 @@ import { NodeStatus, type Node } from '@tempestas/domain';
  */
 @Component({
   selector: 'temp-nodes-page',
-  imports: [MatCardModule, MatButtonModule, MatChipsModule],
+  imports: [MatCardModule, MatButtonModule, MatChipsModule, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <h1>Nodes</h1>
@@ -21,21 +27,29 @@ import { NodeStatus, type Node } from '@tempestas/domain';
       @for (node of nodes(); track node.id) {
         <mat-card appearance="outlined">
           <mat-card-header>
-            <mat-card-title>{{ node.displayName }}</mat-card-title>
-            <mat-card-subtitle>{{ node.slug }} · {{ node.kind }}</mat-card-subtitle>
+            <mat-card-title>
+              <a [routerLink]="['/nodes', node.slug]">{{ node.displayName }}</a>
+            </mat-card-title>
+            <mat-card-subtitle
+              >{{ node.slug }} · {{ node.kind }}</mat-card-subtitle
+            >
           </mat-card-header>
           <mat-card-content>
             <mat-chip-set>
-              <mat-chip [highlighted]="node.status === pending">{{ node.status }}</mat-chip>
+              <mat-chip [highlighted]="node.status === pending">{{
+                node.status
+              }}</mat-chip>
               <mat-chip>{{ node.online ? 'online' : 'offline' }}</mat-chip>
             </mat-chip-set>
             @if (node.status === pending) {
               <p class="temp-warn">
-                Receiving no commands, and its readings are discarded, until it is admitted.
+                Receiving no commands, and its readings are discarded, until it
+                is admitted.
               </p>
             }
             <p class="temp-muted">
-              {{ node.deviceCount }} device(s) · agent {{ node.agentVersion ?? 'unknown' }}
+              {{ node.deviceCount }} device(s) · agent
+              {{ node.agentVersion ?? 'unknown' }}
             </p>
           </mat-card-content>
           <mat-card-actions>
@@ -50,9 +64,18 @@ import { NodeStatus, type Node } from '@tempestas/domain';
     </div>
   `,
   styles: `
-    .temp-cards { display: flex; flex-wrap: wrap; gap: 1rem; }
-    .temp-muted { opacity: 0.7; font-size: 0.85rem; }
-    .temp-warn { color: var(--mat-sys-error); }
+    .temp-cards {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .temp-muted {
+      opacity: 0.7;
+      font-size: 0.85rem;
+    }
+    .temp-warn {
+      color: var(--mat-sys-error);
+    }
   `,
 })
 export class NodesPage {
@@ -65,11 +88,15 @@ export class NodesPage {
   }
 
   admit(node: Node): void {
-    this.api.admitNode(node.id).subscribe({ next: () => this.refresh(), error: () => undefined });
+    this.api
+      .admitNode(node.id)
+      .subscribe({ next: () => this.refresh(), error: () => undefined });
   }
 
   disable(node: Node): void {
-    this.api.disableNode(node.id).subscribe({ next: () => this.refresh(), error: () => undefined });
+    this.api
+      .disableNode(node.id)
+      .subscribe({ next: () => this.refresh(), error: () => undefined });
   }
 
   private refresh(): void {
