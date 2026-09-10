@@ -393,6 +393,34 @@ This is also why **"reads cold and damp together" is one fault, not two**: a sin
 error produces both symptoms, so a large RH discrepancy is evidence _about temperature_ rather than
 a second problem to chase.
 
+### Direct sun makes a cheap reference meter useless
+
+The trap that nearly produced a 6 °C correction instead of a 3 °C one. Two paired readings 38
+minutes apart disagreed completely, and what settled which to believe was **the raw die
+temperature**, backed out as `reported + offset`:
+
+|                      | 21:05, meters shaded | 21:43, meter held in bright sun |
+| -------------------- | -------------------- | ------------------------------- |
+| Implied error        | 3.36 °C              | 6.05 °C                         |
+| Humidity cross-check | **+0.1 pts**         | −4.9 pts                        |
+| Implied self-heating | 3.2 °C               | 0.5 °C                          |
+
+Across that window the SCD41's raw die sat at **26.5 → 27.0 °C**, essentially flat, while the meters
+beside it climbed 23.8 → 26.4 °C. A bare breakout cannot hold within half a degree while its air
+rises 2.5 °C, so the meters were reading sun rather than air.
+
+Three checks, each of which catches this on its own:
+
+- **Back out the raw die temperature** and confirm it moves with the reference. A flat die under a
+  climbing reference means the reference is being heated by something the sensor is not in.
+- **Run the humidity cross-check.** Sun on a meter raises its temperature without changing the air's
+  water content, so the predicted RH stops matching.
+- **Compare the implied self-heating with Sensirion's 4 °C default.** A figure near zero, or far
+  above 4, is usually the measurement rather than the sensor.
+
+Measure in stable shade or after sunset. A greenhouse under direct solar gain is the worst condition
+for this, and it is exactly when somebody is most likely to be out there looking at it.
+
 ## When to update this file
 
 - A device is added, moved, rewired, or its polarity or pin changes
