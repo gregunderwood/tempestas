@@ -97,6 +97,20 @@ There is no combined 24-hour row, deliberately: the burner is enrichment by day 
 so a figure spanning both describes neither. See
 [Readings](Infrastructure/Readings.md#day-and-night-not-24-hours).
 
+### These figures are a query, not a push
+
+The gauges arrive over the socket; the statistics do not. Left alone the table freezes while the
+gauges keep moving — and the running period is by definition still accumulating, so it drifts
+further the longer the page is open. So it re-queries **every 60 s**, and again **the moment the
+running period ends**, when every row shifts.
+
+Slow on purpose: a min or max a minute old is not misleading, and each refresh is three periods of
+aggregate queries against the readings table on an SD card. Refreshing on every `reading:latest`
+would be a round trip every 10 s per open browser.
+
+**The boundary instant comes from the server** as `nextBoundary`. A client that worked it out
+itself would be a second definition of night, free to disagree with the one driving the relay.
+
 Rows are labelled by **kind** — "Day", "Night", "Day so far" — and identified by a dated span, not
 by "last night". Which night is "last" depends on whether it is currently night, and a label that
 is right half the time is worse than one that never claims it.

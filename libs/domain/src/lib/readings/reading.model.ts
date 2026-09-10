@@ -82,6 +82,13 @@ export interface SegmentStats {
 export interface DayNightStats {
   /** Oldest first. The last entry is the period still running. */
   periods: SegmentStats[];
+  /**
+   * ISO-8601: when the running period ends and these figures are superseded.
+   *
+   * Sent so a client can refresh exactly then without carrying its own copy of
+   * the day/night boundary logic. Null when there are no periods.
+   */
+  nextBoundary: string | null;
   daylight: {
     /** Local wall-clock, inclusive. */
     startTime: string;

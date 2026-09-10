@@ -78,6 +78,7 @@ function dayNight(over: Partial<DayNightStats> = {}): DayNightStats {
       segment('night', false, emptyStats()),
       segment('day', true, statsOf()),
     ],
+    nextBoundary: '2026-09-11T01:30:00.000Z',
     daylight: {
       startTime: '06:30',
       endTime: '18:30',
@@ -98,6 +99,8 @@ function node(): Node {
   } as unknown as Node;
 }
 
+let statsCalls = 0;
+
 function setup(
   opts: {
     stats?: DayNightStats;
@@ -105,6 +108,7 @@ function setup(
     live?: Record<string, Reading>;
   } = {},
 ): HTMLElement {
+  statsCalls = 0;
   TestBed.configureTestingModule({
     imports: [NodeDetail],
     providers: [
@@ -115,7 +119,10 @@ function setup(
         useValue: {
           nodes: () => of([node()]),
           latestReadings: () => of(opts.latest ?? [reading()]),
-          dayNightStats: () => of(opts.stats ?? dayNight()),
+          dayNightStats: () => {
+            statsCalls++;
+            return of(opts.stats ?? dayNight());
+          },
         },
       },
       {
@@ -229,5 +236,43 @@ describe('NodeDetail', () => {
   it('says so plainly when there are no periods to show', () => {
     const el = setup({ stats: dayNight({ periods: [] }) });
     expect(el.textContent).toContain('No day or night period to show');
+  });
+
+  // The gauges are pushed over the socket; these figures are a query. Left
+  // alone the table freezes while the gauges keep moving, and the running
+  // period is still accumulating so it drifts further the longer you watch.
+  describe('keeping the figures current', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('re-queries on a slow timer', () => {
+      setup();
+      expect(statsCalls).toBe(1);
+      vi.advanceTimersByTime(60_000);
+      expect(statsCalls).toBe(2);
+      vi.advanceTimersByTime(60_000);
+      expect(statsCalls).toBe(3);
+    });
+
+    // Every row shifts the moment the running period ends.
+    it('re-queries when the period boundary passes', () => {
+      vi.setSystemTime(new Date('2026-09-11T01:29:00.000Z'));
+      setup();
+      expect(statsCalls).toBe(1);
+      // One minute to the boundary, plus the second of slack.
+      vi.advanceTimersByTime(61_500);
+      expect(statsCalls).toBeGreaterThanOrEqual(2);
+    });
+
+    // Asserted on the timers themselves, not on the request count: the
+    // subscription is torn down separately, so counting requests passes even
+    // when the interval is left running for the life of the page.
+    it('clears its timers once the screen is gone', () => {
+      setup();
+      // Two: the slow refresh interval and the boundary timeout.
+      expect(vi.getTimerCount()).toBe(2);
+      TestBed.resetTestingModule();
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 });

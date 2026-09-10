@@ -15,7 +15,11 @@ import { Clock } from '../common/clock';
 import { ZoneEntity } from '../zones/models';
 import { NodeEntity } from '../nodes/models';
 import { SensorReadingEntity } from './models';
-import { resolveSegments, type Segment } from './daylight-segments';
+import {
+  nextBoundary,
+  resolveSegments,
+  type Segment,
+} from './daylight-segments';
 import { resolveReadingWindow, type ReadingWindow } from './reading-window';
 
 const DEFAULT_LIMIT = 500;
@@ -72,14 +76,15 @@ export class ReadingsService {
    */
   async dayNightStats(query: ReadingsQuery): Promise<DayNightStats> {
     const daylight = await this.daylightFor(query.nodeId);
+    const now = this.clock.now();
     const segments = resolveSegments(
-      this.clock.now(),
+      now,
       daylight.startTime,
       daylight.endTime,
       daylight.timezone,
     );
     if (!segments) {
-      return { periods: [], daylight };
+      return { periods: [], nextBoundary: null, daylight };
     }
 
     const periods = await Promise.all(
@@ -87,7 +92,17 @@ export class ReadingsService {
         this.segmentStats(query, segment, i === segments.length - 1),
       ),
     );
-    return { periods, daylight };
+    const boundary = nextBoundary(
+      now,
+      daylight.startTime,
+      daylight.endTime,
+      daylight.timezone,
+    );
+    return {
+      periods,
+      nextBoundary: boundary?.toISOString() ?? null,
+      daylight,
+    };
   }
 
   private async segmentStats(

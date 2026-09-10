@@ -35,6 +35,70 @@ export interface Segment {
 /** The most recent period is last, and it is the one still running. */
 export type Segments = Segment[];
 
+function localNow(now: Date, timezone: string): DateTime {
+  const local = DateTime.fromJSDate(now, { zone: timezone });
+  if (!local.isValid) {
+    // A bad IANA name must not silently fall back to the host zone.
+    throw new Error(
+      `Invalid timezone "${timezone}": ${local.invalidReason ?? 'unknown'}`,
+    );
+  }
+  return local;
+}
+
+function buildBoundaries(
+  local: DateTime,
+  startMinutes: number,
+  endMinutes: number,
+  count: number,
+): { at: DateTime; begins: SegmentKind }[] {
+  // SET the wall clock, never ADD minutes to midnight. On a spring-forward day
+  // the clock skips an hour, so midnight plus 390 minutes is 07:30 local, not
+  // 06:30 - the boundary lands an hour late and every period is mislabelled.
+  const boundaryAt = (day: DateTime, minutes: number): DateTime =>
+    day.set({
+      hour: Math.floor(minutes / 60),
+      minute: minutes % 60,
+      second: 0,
+      millisecond: 0,
+    });
+
+  // Each local day contributes two boundaries, so this reaches further than
+  // `count` periods whatever the window shape, and it is cheap.
+  const boundaries: { at: DateTime; begins: SegmentKind }[] = [];
+  for (let dayOffset = -(count + 2); dayOffset <= 1; dayOffset++) {
+    const day = local.startOf('day').plus({ days: dayOffset });
+    boundaries.push({ at: boundaryAt(day, startMinutes), begins: 'day' });
+    boundaries.push({ at: boundaryAt(day, endMinutes), begins: 'night' });
+  }
+  return boundaries.sort((a, b) => a.at.toMillis() - b.at.toMillis());
+}
+
+/**
+ * When the running period ends.
+ *
+ * Returned to the client so a screen can refresh exactly when the periods
+ * change, without carrying its own copy of the day/night boundary logic - a
+ * second definition would eventually disagree with the one driving the relay.
+ */
+export function nextBoundary(
+  now: Date,
+  startTime: string,
+  endTime: string,
+  timezone: string,
+): Date | null {
+  const startMinutes = wallClockMinutes(startTime);
+  const endMinutes = wallClockMinutes(endTime);
+  if (startMinutes === endMinutes) {
+    return null;
+  }
+  const local = localNow(now, timezone);
+  const future = buildBoundaries(local, startMinutes, endMinutes, 1).find(
+    (b) => b.at.toMillis() > local.toMillis(),
+  );
+  return future ? future.at.toJSDate() : null;
+}
+
 /** Minutes since local midnight. Mirrors `parseWallClock` in the rules engine. */
 export function wallClockMinutes(value: string): number {
   const match = /^(\d{1,2}):(\d{2})$/.exec(value);
@@ -75,36 +139,8 @@ export function resolveSegments(
     return null;
   }
 
-  const local = DateTime.fromJSDate(now, { zone: timezone });
-  if (!local.isValid) {
-    // A bad IANA name must not silently fall back to the host zone.
-    throw new Error(
-      `Invalid timezone "${timezone}": ${local.invalidReason ?? 'unknown'}`,
-    );
-  }
-
-  // Each local day contributes two boundaries, so this reaches back further
-  // than `count` periods whatever the window shape, and it is cheap.
-  // SET the wall clock, never ADD minutes to midnight. On a spring-forward day
-  // the clock skips an hour, so midnight plus 390 minutes is 07:30 local, not
-  // 06:30 - the boundary lands an hour late and the period is mislabelled.
-  // `set` resolves the intended local time instead.
-  const boundaryAt = (day: DateTime, minutes: number): DateTime =>
-    day.set({
-      hour: Math.floor(minutes / 60),
-      minute: minutes % 60,
-      second: 0,
-      millisecond: 0,
-    });
-
-  const boundaries: { at: DateTime; begins: SegmentKind }[] = [];
-  for (let dayOffset = -(count + 2); dayOffset <= 1; dayOffset++) {
-    const day = local.startOf('day').plus({ days: dayOffset });
-    boundaries.push({ at: boundaryAt(day, startMinutes), begins: 'day' });
-    boundaries.push({ at: boundaryAt(day, endMinutes), begins: 'night' });
-  }
-  boundaries.sort((a, b) => a.at.toMillis() - b.at.toMillis());
-
+  const local = localNow(now, timezone);
+  const boundaries = buildBoundaries(local, startMinutes, endMinutes, count);
   const past = boundaries.filter((b) => b.at.toMillis() <= local.toMillis());
   const starts = past.slice(-count);
 
