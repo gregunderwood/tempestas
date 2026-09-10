@@ -78,7 +78,7 @@ interface MetricBlock {
             <temp-gauge metricKey="humidity" [value]="r.humidity" />
             <temp-gauge metricKey="co2" [value]="r.co2" />
           </div>
-          <p class="sub">Taken {{ r.createdAt | date: 'medium' }}</p>
+          <p class="sub taken">Taken {{ r.createdAt | date: 'medium' }}</p>
         } @else {
           <p>No readings from this node.</p>
         }
@@ -185,6 +185,12 @@ interface MetricBlock {
       /* Three 9rem gauges plus gaps. Left alone they stretch across the card
          and the reading stops looking like one grouped measurement. */
       max-width: 30rem;
+    }
+    /* The gauge captions sit tight to the bottom of the arc, so without this
+       the timestamp reads as part of the CO2 label. */
+    .taken {
+      margin-top: 1rem;
+      margin-bottom: 0;
     }
     .table-scroll {
       overflow-x: auto;
