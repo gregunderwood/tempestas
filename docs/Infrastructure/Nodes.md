@@ -167,7 +167,45 @@ reject operation, and it keeps the history.
 - **A node's `online` stays `true` after the server stops** in `fake` mode — there is no broker and
   no LWT. With a real broker the retained status resolves it on reconnect.
 
+## `online` is derived, not just stored
+
+The stored flag is set by a node's retained status and cleared by its last will. That is not
+enough on its own: **a node that vanishes while the controller is down is never corrected**,
+because nobody is connected to receive the will. Observed with three nodes still reported online
+28 hours after they were last heard from.
+
+So the flag is ANDed with evidence of life — `isNodeOnline` in
+[../../apps/server/src/app/nodes/node-registry.ts](../../apps/server/src/app/nodes/node-registry.ts):
+
+```
+online = stored.online AND max(lastSeenAt, latestReadingAt) is within 5 minutes
+```
+
+Two things about it are easy to get wrong:
+
+- **`lastSeenAt` alone will not do.** It only advances on an ONLINE transition, so for a node that
+  has been connected all day it is the time it _connected_, not the time it was last heard. An age
+  check on it alone marks a perfectly healthy node offline. A reading is the per-sample evidence,
+  and unlike an in-memory timestamp it survives a restart.
+- **It only ever narrows.** A node the registry already believes offline stays offline. Stale is
+  not online.
+
+`NodesService.counts()` applies the same rule in SQL, with `EXISTS` over the
+`(node_id, created_at)` index rather than a `MAX()` across the table. The two must agree or the
+health endpoint contradicts the nodes screen.
+
+The window is 5 minutes: generous next to a 10 s sample interval and a ~45 s broker will, so a
+WiFi blip does not flap the dashboard, while a node that genuinely vanished shows as gone within
+minutes.
+
+> [!note] Still open: an admitted node cannot be deleted
+> `DELETE /api/nodes/:id` refuses anything that is not `pending`, and disabling does not make a
+> node deletable either. The guard is right — deleting an admitted node would take its devices
+> with it — but there is no supported path to retire one.
+
 ## When to update this file
+
+- The rule for deriving `online` changes, or its window does
 
 - A status is added, or a transition changes
 - `NodeCapabilities` gains a field

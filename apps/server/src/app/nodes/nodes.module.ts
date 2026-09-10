@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { Clock, SystemClock } from '../common/clock';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DeviceEntity } from '../devices/models';
 import { SensorReadingEntity } from '../readings/models';
@@ -17,7 +18,7 @@ import { NodeEntity } from './models';
     ]),
   ],
   controllers: [NodesController],
-  providers: [NodesService],
+  providers: [NodesService, { provide: Clock, useClass: SystemClock }],
   exports: [NodesService],
 })
 export class NodesModule {}

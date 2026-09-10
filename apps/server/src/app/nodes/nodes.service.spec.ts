@@ -1,4 +1,5 @@
 import { ConflictException } from '@nestjs/common';
+import { SystemClock } from '../common/clock';
 import type { Repository } from 'typeorm';
 import { NodeKind, NodeStatus, type NodeCapabilities } from '@tempestas/domain';
 import type { HardwareService, NodeHello } from '../hardware/hardware.service';
@@ -114,6 +115,7 @@ function makeService(initial: NodeEntity[] = [], zones: ZoneEntity[] = []) {
     readingRepo,
     zoneRepo,
     hardware,
+    new SystemClock(),
   );
   return { service, rows, nodeRepo };
 }
