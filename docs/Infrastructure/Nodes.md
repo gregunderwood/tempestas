@@ -198,10 +198,23 @@ The window is 5 minutes: generous next to a 10 s sample interval and a ~45 s bro
 WiFi blip does not flap the dashboard, while a node that genuinely vanished shows as gone within
 minutes.
 
-> [!note] Still open: an admitted node cannot be deleted
+> [!note] Wanted: a retire / decommission flow
 > `DELETE /api/nodes/:id` refuses anything that is not `pending`, and disabling does not make a
-> node deletable either. The guard is right — deleting an admitted node would take its devices
-> with it — but there is no supported path to retire one.
+> node deletable either, so there is no supported way to take a node out of service. The guard
+> itself is right — deleting an admitted node would take its devices with it, and one of those
+> could be driving a relay.
+>
+> Agreed as wanted, deliberately deferred (2026-09-10). It is a design question rather than a
+> missing endpoint, and the questions to answer first are:
+>
+> - What happens to the node's **devices**? Deleted, or orphaned and hidden? A device row is what
+>   the interlock and the rules engine read.
+> - What happens to its **readings**? They are the history behind every average on the node screen,
+>   and retention already expires them on its own schedule.
+> - Does retiring **drive its pins to their failsafe first**? Retiring a node that is holding a
+>   burner on is the case that decides the whole shape.
+> - Is it reversible? A node that re-announces after being retired should probably return as
+>   `pending` rather than silently resuming.
 
 ## When to update this file
 

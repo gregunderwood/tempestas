@@ -62,10 +62,12 @@ never touched.
 
 ### Two gaps the nodes screen surfaced
 
-- **An admitted node can never be deleted.** `DELETE /api/nodes/:id` refuses anything that is not
-  `pending`, and disabling does not make it deletable either, so a decommissioned node stays on the
-  screen forever. The guard is right — deleting an admitted node would take its devices with it —
-  but there is no supported path out. Three dev fixtures had to be removed in SQL.
+- **A node cannot be retired.** `DELETE /api/nodes/:id` refuses anything that is not `pending`,
+  and disabling does not make it deletable either, so there is no supported way to take a node out
+  of service — three dev fixtures had to be removed in SQL. **Agreed as wanted and deferred
+  (2026-09-10):** it is a design question, not a missing endpoint, and the open decisions are
+  listed in [Nodes](Infrastructure/Nodes.md#online-is-derived-not-just-stored). The one that
+  shapes the rest is whether retiring drives the node's pins to their failsafe first.
 - ~~**`online` never decays.**~~ **Fixed.** It is now derived: the stored flag ANDed with evidence
   of life within 5 minutes. A plain `lastSeenAt` age check would have been wrong — that field only
   advances on an online transition, so it would mark a healthy long-connected node offline. See
