@@ -229,6 +229,27 @@ Which suggests a better sequence than the plan's, and it is strictly less work:
 Step 4 is a better instrument than the plan's step 4, because "different rooms, so expect an offset"
 stops being a caveat and becomes a measurement.
 
+### The two boards are not in the same air
+
+Worth knowing before anyone compares their sensors again. Both boards are in the greenhouse and
+their readings still differ by several degrees, because they are at opposite ends of it:
+
+| Board                    | Position                                          | Reads                                           |
+| ------------------------ | ------------------------------------------------- | ----------------------------------------------- |
+| **elantris** (tempestas) | by the **entrance, propped open** for circulation | cooler, better mixed, CO2 near outdoor baseline |
+| **legacy Flask**         | far end, **under the plant canopy**               | warmer, more humid, higher CO2                  |
+
+Measured 2026-09-10: elantris ~20 °C while the legacy sensor read ~26 °C at the same moment, with
+the gap wandering between 4.6 and 6.0 °C over twenty minutes as both drifted. So **the legacy
+sensor cannot calibrate the SCD41** — most of that difference is location, not sensor error.
+Calibration needs a reference meter placed beside the SCD41, which is how it is now being done.
+
+Two consequences beyond calibration. A **threshold tuned on legacy numbers does not mean the same
+thing on elantris** — the fan at 30 °C and night heat below 3 °C were chosen against a sensor
+under the canopy. And it is a real, if mild, argument about zoning: a rule reading a sensor at one
+end and actuating at the other is intended by [Architecture](Architecture.md), but the two ends are
+demonstrably not interchangeable, so which sensor a role reads is a decision rather than a detail.
+
 ### Stage C, partially done
 
 The bench sequence is further along than the phase table suggests, because the panel arrived built:
