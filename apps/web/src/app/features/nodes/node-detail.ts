@@ -288,7 +288,10 @@ export class NodeDetail {
   );
 
   protected readonly blocks = computed<MetricBlock[]>(() => {
-    const segments = this.stats()?.periods ?? [];
+    // Newest first on screen. The API returns them chronologically, which is
+    // the sane order for a caller, but the period running now is the one being
+    // looked for and it belongs at the top.
+    const segments = [...(this.stats()?.periods ?? [])].reverse();
     if (segments.length === 0) return [];
     return (['temperature', 'humidity', 'co2'] as GaugeMetricKey[]).map(
       (key) => {
