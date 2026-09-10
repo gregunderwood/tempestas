@@ -87,13 +87,18 @@ figure inside it, and an inline host will not shrink below its content.
 
 ## The node screen
 
-`/nodes/:slug` is the drill-in: live gauges, then min, max and average for each metric over the
-last 24 hours, with **the clock time of each extreme**. A 38 °C peak at 14:00 is the greenhouse
-working; the same peak at 03:00 is a fault, and the value alone cannot tell them apart.
+`/nodes/:slug` is the drill-in: live gauges, then min, max and average per metric across the last
+three **day and night periods**, oldest first, ending with the one still running — with **the clock
+time of each extreme**. A 38 °C peak at 14:00 is the greenhouse working; the same peak at 03:00 is
+a fault, and the value alone cannot tell them apart.
 
-The window is a **rolling 24 hours**, which is what the readings API returns when given no `days`.
-A calendar day would leave the first reading after midnight standing alone against an empty min and
-max.
+There is no combined 24-hour row, deliberately: the burner is enrichment by day and heat by night,
+so a figure spanning both describes neither. See
+[Readings](Infrastructure/Readings.md#day-and-night-not-24-hours).
+
+Rows are labelled by **kind** — "Day", "Night", "Day so far" — and identified by a dated span, not
+by "last night". Which night is "last" depends on whether it is currently night, and a label that
+is right half the time is worse than one that never claims it.
 
 Two mechanics worth knowing:
 

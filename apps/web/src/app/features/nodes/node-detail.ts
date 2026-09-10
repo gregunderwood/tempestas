@@ -14,25 +14,32 @@ import { RouterLink } from '@angular/router';
 import {
   GAUGE_METRICS,
   type GaugeMetricKey,
+  type DayNightStats,
   type Node,
   type Reading,
-  type ReadingStats,
+  type SegmentStats,
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import { Gauge } from '../../shared/gauge/gauge';
 
-interface MetricRow {
-  key: GaugeMetricKey;
-  label: string;
-  unit: string;
-  digits: string;
-  now: number | null;
+interface PeriodRow {
+  period: string;
+  span: string;
+  inProgress: boolean;
   min: number | null;
   minAt: string | null;
   max: number | null;
   maxAt: string | null;
   average: number | null;
+}
+
+interface MetricBlock {
+  key: GaugeMetricKey;
+  label: string;
+  unit: string;
+  digits: string;
+  periods: PeriodRow[];
 }
 
 /**
@@ -80,53 +87,63 @@ interface MetricRow {
 
     <mat-card appearance="outlined">
       <mat-card-header>
-        <mat-card-title>Last 24 hours</mat-card-title>
+        <mat-card-title>Day and night</mat-card-title>
         @if (stats(); as s) {
           <mat-card-subtitle>
-            {{ s.from | date: 'short' }} — {{ s.to | date: 'short' }}
+            Daylight {{ s.daylight.startTime }}–{{ s.daylight.endTime }} ·
+            {{ s.daylight.timezone }}
           </mat-card-subtitle>
         }
       </mat-card-header>
       <mat-card-content>
-        @if (rows().length === 0) {
-          <p>No readings in this window.</p>
+        @if (blocks().length === 0) {
+          <p>No day or night period to show.</p>
         } @else {
           <div class="table-scroll">
             <table>
               <thead>
                 <tr>
-                  <th scope="col">Metric</th>
-                  <th scope="col">Now</th>
+                  <th scope="col">Period</th>
                   <th scope="col">Min</th>
                   <th scope="col">Max</th>
                   <th scope="col">Average</th>
                 </tr>
               </thead>
-              <tbody>
-                @for (row of rows(); track row.key) {
-                  <tr>
-                    <th scope="row">
-                      {{ row.label }} <span class="unit">{{ row.unit }}</span>
+              @for (block of blocks(); track block.key) {
+                <tbody>
+                  <tr class="metric">
+                    <th scope="rowgroup" colspan="4">
+                      {{ block.label }}
+                      <span class="unit">{{ block.unit }}</span>
                     </th>
-                    <td class="num strong">
-                      {{ fmt(row.now, row.digits) }}
-                    </td>
-                    <td class="num">
-                      {{ fmt(row.min, row.digits) }}
-                      @if (row.minAt) {
-                        <span class="at">{{ row.minAt | date: 'HH:mm' }}</span>
-                      }
-                    </td>
-                    <td class="num">
-                      {{ fmt(row.max, row.digits) }}
-                      @if (row.maxAt) {
-                        <span class="at">{{ row.maxAt | date: 'HH:mm' }}</span>
-                      }
-                    </td>
-                    <td class="num">{{ fmt(row.average, row.digits) }}</td>
                   </tr>
-                }
-              </tbody>
+                  @for (row of block.periods; track row.period) {
+                    <tr [class.running]="row.inProgress">
+                      <th scope="row" class="period">
+                        {{ row.period }}
+                        <span class="span">{{ row.span }}</span>
+                      </th>
+                      <td class="num">
+                        {{ fmt(row.min, block.digits) }}
+                        @if (row.minAt) {
+                          <span class="at">{{
+                            row.minAt | date: 'HH:mm'
+                          }}</span>
+                        }
+                      </td>
+                      <td class="num">
+                        {{ fmt(row.max, block.digits) }}
+                        @if (row.maxAt) {
+                          <span class="at">{{
+                            row.maxAt | date: 'HH:mm'
+                          }}</span>
+                        }
+                      </td>
+                      <td class="num">{{ fmt(row.average, block.digits) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              }
             </table>
           </div>
         }
@@ -195,6 +212,33 @@ interface MetricRow {
     thead th:first-child {
       text-align: left;
     }
+    .metric th {
+      text-align: left;
+      padding-top: 1rem;
+      font-size: 1rem;
+      border-bottom: 2px solid var(--mat-sys-outline-variant);
+    }
+    tbody:first-of-type .metric th {
+      padding-top: 0.35rem;
+    }
+    .period {
+      font-weight: 400;
+      opacity: 0.85;
+      padding-left: 1rem;
+      white-space: normal;
+    }
+    .span {
+      display: block;
+      font-size: 0.7rem;
+      opacity: 0.6;
+    }
+    /* The period still running reads differently from the completed one, and
+       mistaking a part-day average for a full one is the whole point of the
+       split. */
+    .running .period {
+      font-weight: 600;
+      opacity: 1;
+    }
     tbody tr:last-child th,
     tbody tr:last-child td {
       border-bottom: none;
@@ -229,7 +273,7 @@ export class NodeDetail {
 
   private readonly latest = signal<Reading[]>([]);
   private readonly nodes = signal<Node[]>([]);
-  protected readonly stats = signal<ReadingStats | null>(null);
+  protected readonly stats = signal<DayNightStats | null>(null);
 
   protected readonly node = computed(
     () => this.nodes().find((n) => n.slug === this.slug()) ?? null,
@@ -243,10 +287,9 @@ export class NodeDetail {
       null,
   );
 
-  protected readonly rows = computed<MetricRow[]>(() => {
-    const s = this.stats();
-    const now = this.reading();
-    if (!s) return [];
+  protected readonly blocks = computed<MetricBlock[]>(() => {
+    const segments = this.stats()?.periods ?? [];
+    if (segments.length === 0) return [];
     return (['temperature', 'humidity', 'co2'] as GaugeMetricKey[]).map(
       (key) => {
         const metric = GAUGE_METRICS[key];
@@ -255,12 +298,16 @@ export class NodeDetail {
           label: metric.label,
           unit: metric.unit,
           digits: `1.${metric.decimals}-${metric.decimals}`,
-          now: now?.[key] ?? null,
-          min: s.min[key]?.[key] ?? null,
-          minAt: s.min[key]?.createdAt ?? null,
-          max: s.max[key]?.[key] ?? null,
-          maxAt: s.max[key]?.createdAt ?? null,
-          average: s.average[key],
+          periods: segments.map((seg) => ({
+            period: periodLabel(seg),
+            span: periodSpan(seg),
+            inProgress: seg.inProgress,
+            min: seg.stats.min[key]?.[key] ?? null,
+            minAt: seg.stats.min[key]?.createdAt ?? null,
+            max: seg.stats.max[key]?.[key] ?? null,
+            maxAt: seg.stats.max[key]?.createdAt ?? null,
+            average: seg.stats.average[key],
+          })),
         };
       },
     );
@@ -287,9 +334,43 @@ export class NodeDetail {
     // rolling 24 hours, which is the window this screen claims to show.
     toObservable(this.slug)
       .pipe(
-        switchMap((slug) => this.api.stats({ nodeId: slug })),
+        switchMap((slug) => this.api.dayNightStats({ nodeId: slug })),
         takeUntilDestroyed(),
       )
       .subscribe((stats) => this.stats.set(stats));
   }
+}
+
+/**
+ * Kind plus a marker for the one still running.
+ *
+ * Deliberately not "last night" or "previous day": with three periods on
+ * screen, which night is "last" depends on whether it is currently night, and
+ * a label that is right half the time is worse than one that never says. The
+ * dated span underneath carries the identity.
+ */
+function periodLabel(segment: SegmentStats): string {
+  if (segment.inProgress) {
+    return segment.kind === 'day' ? 'Day so far' : 'Night so far';
+  }
+  return segment.kind === 'day' ? 'Day' : 'Night';
+}
+
+/** Dated, because two rows can be the same kind on different days. */
+function periodSpan(segment: SegmentStats): string {
+  const from = new Date(segment.from);
+  const started = from.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  if (segment.inProgress) {
+    return `${started} – now`;
+  }
+  const to = new Date(segment.to).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  return `${started} – ${to}`;
 }

@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import type {
   AdmitNodePayload,
+  DayNightStats,
   Device,
   Node,
   Reading,
@@ -56,7 +57,9 @@ export class ApiService {
   }
 
   setRulesEnabled(id: string, rulesEnabled: boolean): Observable<Device> {
-    return this.http.patch<Device>(`${this.base}/devices/${id}`, { rulesEnabled });
+    return this.http.patch<Device>(`${this.base}/devices/${id}`, {
+      rulesEnabled,
+    });
   }
 
   // --------------------------------------------------------------- readings
@@ -66,18 +69,34 @@ export class ApiService {
   }
 
   readings(query: ReadingsQuery = {}): Observable<Reading[]> {
-    return this.http.get<Reading[]>(`${this.base}/readings`, { params: toParams(query) });
+    return this.http.get<Reading[]>(`${this.base}/readings`, {
+      params: toParams(query),
+    });
   }
 
   stats(query: ReadingsQuery = {}): Observable<ReadingStats> {
-    return this.http.get<ReadingStats>(`${this.base}/readings/stats`, { params: toParams(query) });
+    return this.http.get<ReadingStats>(`${this.base}/readings/stats`, {
+      params: toParams(query),
+    });
+  }
+
+  /** The same window split at the zone's own daylight boundary. */
+  dayNightStats(query: ReadingsQuery = {}): Observable<DayNightStats> {
+    return this.http.get<DayNightStats>(
+      `${this.base}/readings/stats/day-night`,
+      {
+        params: toParams(query),
+      },
+    );
   }
 
   // ------------------------------------------------------------------ rules
 
   /** Every input alongside every decision. The debugging endpoint. */
   lastEvaluation(): Observable<RulesEvaluation[]> {
-    return this.http.get<RulesEvaluation[]>(`${this.base}/rules/last-evaluation`);
+    return this.http.get<RulesEvaluation[]>(
+      `${this.base}/rules/last-evaluation`,
+    );
   }
 }
 
