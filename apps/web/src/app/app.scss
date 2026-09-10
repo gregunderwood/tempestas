@@ -13,20 +13,109 @@
 .temp-nav {
   display: flex;
   gap: 0.25rem;
-  /* Scrolls rather than widening the page. This is read on a phone, and a
-     toolbar that cannot fit used to push the whole body sideways - which put
-     the third gauge on every card off-screen. */
-  overflow-x: auto;
-  scrollbar-width: none;
   min-width: 0;
-}
-
-.temp-nav::-webkit-scrollbar {
-  display: none;
 }
 
 .temp-nav a {
   flex: 0 0 auto;
+}
+
+/* The menu button only exists below the breakpoint; above it the links are
+   always shown and the button is not rendered to a screen reader either. */
+.temp-menu-button {
+  display: none;
+}
+
+.temp-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* 42rem is where four links plus the brand and the live indicator stop fitting
+   on one line, not a device size. */
+@media (max-width: 42rem) {
+  .temp-menu-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .temp-menu-button:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
+
+  /* Three bars drawn in CSS. An icon font would be a network fetch this
+     LAN-only app cannot rely on. */
+  .temp-menu-bars,
+  .temp-menu-bars::before,
+  .temp-menu-bars::after {
+    display: block;
+    width: 1.25rem;
+    height: 2px;
+    background: currentColor;
+    border-radius: 2px;
+  }
+
+  .temp-menu-bars {
+    position: relative;
+  }
+
+  .temp-menu-bars::before,
+  .temp-menu-bars::after {
+    content: '';
+    position: absolute;
+    left: 0;
+  }
+
+  .temp-menu-bars::before {
+    top: -6px;
+  }
+
+  .temp-menu-bars::after {
+    top: 6px;
+  }
+
+  /* `display: none` rather than opacity or height: a hidden link must leave
+     the tab order and the accessibility tree, not just the screen. */
+  .temp-nav {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 0.5rem;
+    background: var(--mat-sys-surface-container);
+    color: var(--mat-sys-on-surface);
+    border-bottom: 1px solid var(--mat-sys-outline-variant);
+    box-shadow: var(--mat-sys-level2);
+  }
+
+  .temp-nav-open {
+    display: flex;
+  }
+
+  .temp-nav a {
+    width: 100%;
+    justify-content: flex-start;
+    /* Comfortably tappable with wet hands. */
+    min-height: 3rem;
+  }
 }
 
 .temp-active {
