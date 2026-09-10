@@ -23,6 +23,7 @@ import {
   HardwareService,
   type NodeAvailability,
   type NodeHello,
+  type PinStateReport,
   type PinCommand,
   type SensorSample,
 } from './hardware.service';
@@ -91,8 +92,11 @@ export class MqttHardwareService
   private readonly samples = new Subject<SensorSample>();
   private readonly availability = new Subject<NodeAvailability>();
   private readonly hello = new Subject<NodeHello>();
+  private readonly pinStates = new Subject<PinStateReport>();
 
   readonly samples$: Observable<SensorSample> = this.samples.asObservable();
+  readonly pinStates$: Observable<PinStateReport> =
+    this.pinStates.asObservable();
   readonly availability$: Observable<NodeAvailability> =
     this.availability.asObservable();
   readonly hello$: Observable<NodeHello> = this.hello.asObservable();
@@ -402,6 +406,13 @@ export class MqttHardwareService
         this.pins.set(`${parsed.nodeId}:${decoded.value.pin}`, {
           level: decoded.value.level,
           known: decoded.value.known,
+        });
+        this.pinStates.next({
+          nodeId: parsed.nodeId,
+          pin: decoded.value.pin,
+          level: decoded.value.level,
+          known: decoded.value.known,
+          observedAt: decoded.value.observedAt,
         });
         return;
       }

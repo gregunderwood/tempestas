@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CommonModule } from './common/common.module';
 import { DevicesModule } from './devices/devices.module';
 import { DeviceEntity } from './devices/models';
 import { HardwareModule } from './hardware/hardware.module';
@@ -22,6 +23,7 @@ import { HealthModule } from './health/health.module';
       isGlobal: true,
       envFilePath: ['apps/server/.env', '.env'],
     }),
+    CommonModule,
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

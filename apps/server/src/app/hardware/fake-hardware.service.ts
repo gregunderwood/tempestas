@@ -17,6 +17,7 @@ import {
   type NodeAvailability,
   type NodeHello,
   type PinCommand,
+  type PinStateReport,
   type SensorSample,
 } from './hardware.service';
 
@@ -56,6 +57,7 @@ export class FakeHardwareService
   private readonly samples = new Subject<SensorSample>();
   private readonly availability = new Subject<NodeAvailability>();
   private readonly hello = new Subject<NodeHello>();
+  private readonly pinStates = new Subject<PinStateReport>();
   private readonly pinState = new Map<string, number>();
   private readonly seq = new Map<NodeId, number>();
   private timer: NodeJS.Timeout | null = null;
@@ -76,6 +78,8 @@ export class FakeHardwareService
   readonly availability$: Observable<NodeAvailability> =
     this.availability.asObservable();
   readonly hello$: Observable<NodeHello> = this.hello.asObservable();
+  readonly pinStates$: Observable<PinStateReport> =
+    this.pinStates.asObservable();
 
   /**
    * Announcing happens here, not in the provider factory, and the distinction
@@ -165,6 +169,16 @@ export class FakeHardwareService
       );
     }
     this.pinState.set(`${nodeId}:${command.pin}`, command.level);
+    // A real node reports every line change, so the fake does too - otherwise
+    // the reconciliation path has no coverage in local dev, which is where the
+    // whole point of this driver is that it behaves like the real one.
+    this.pinStates.next({
+      nodeId,
+      pin: command.pin,
+      level: command.level,
+      known: true,
+      observedAt: new Date(),
+    });
   }
 
   async syncPins(nodeId: NodeId, commands: PinCommand[]): Promise<void> {
