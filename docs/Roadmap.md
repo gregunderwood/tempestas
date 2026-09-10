@@ -240,13 +240,23 @@ taken with a meter held in direct sun. The raw die temperature settled it: it wa
 26.5–27.0 °C while the reference meters climbed 2.5 °C. Method and the three ways to catch that are
 in [Hardware](Hardware.md#direct-sun-makes-a-cheap-reference-meter-useless).
 
-**Still to confirm after sunset**, when there is no solar gain on either the meters or the panel.
-3.2 °C is an improvement under either reading of the data, which is why it went in now rather than
-waiting: the alternative was leaving a known-wrong 6.56 °C in place.
+**Confirmed once settled, by a reference the calibration never used.** After the restart transient
+the sensor came to rest at **23.73 °C / 62.0 %** (raw die 26.93, so 3.2 °C of self-heating, matching
+the offset). A meter at the _far_ end of the greenhouse, beside the legacy board, read
+**23.9 °C / 59 %** — 0.17 °C and 3 points apart, from an instrument at the other end that played no
+part in deriving the number. A post-sunset check is still worth doing, but the figure is no longer
+resting on a single pair.
 
-The legacy controller's own sensor looks about **2.5 °C warm** against meters beside it (26.16 °C
-against 23.9/~23.4), but that pairing was taken in the same sunlit conditions, so treat it as a
-hint rather than a figure. It matters when its thresholds move over.
+**That inverts an earlier conclusion.** The 6 °C spread between the two boards was read here as
+microclimate. Some of it is, but most of it was two miscalibrated sensors pointing opposite ways:
+corrected elantris and the legacy end's reference meters agree to within 0.2 °C, so the two ends
+are much closer than the raw numbers suggested.
+
+The **legacy controller's own sensor reads about 2.5 °C warm** — 26.16 °C against 23.9/~23.4 beside
+it, and its humidity cross-check misses by 7 points, so it is likely off in its own right rather
+than just displaced. That matters directly: the fan at 30 °C and night heat below 3 °C were tuned
+against that sensor, so those numbers do not mean what they appear to when a corrected sensor reads
+them. Re-derive the thresholds before `exhaust_fan` and `lights` move over.
 
 ### The two boards are not in the same air
 
