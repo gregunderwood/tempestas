@@ -4,13 +4,18 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, type SelectQueryBuilder } from 'typeorm';
 import {
   ApiErrorCode,
+  type DayNightStats,
   type Reading,
   type ReadingAverages,
   type ReadingStats,
   type ReadingsQuery,
+  type SegmentStats,
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
+import { ZoneEntity } from '../zones/models';
+import { NodeEntity } from '../nodes/models';
 import { SensorReadingEntity } from './models';
+import { resolveSegments, type Segment } from './daylight-segments';
 import { resolveReadingWindow, type ReadingWindow } from './reading-window';
 
 const DEFAULT_LIMIT = 500;
@@ -27,6 +32,8 @@ export class ReadingsService {
   constructor(
     @InjectRepository(SensorReadingEntity)
     private readonly readings: Repository<SensorReadingEntity>,
+    @InjectRepository(NodeEntity)
+    private readonly nodes: Repository<NodeEntity>,
     private readonly clock: Clock,
     private readonly config: ConfigService,
   ) {}
@@ -52,6 +59,86 @@ export class ReadingsService {
     return rows
       .map(toDto)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  /**
+   * The last few alternating daylight and night periods, oldest first.
+   *
+   * No combined figure: a window spanning both averages two different jobs
+   * together and describes neither. Split at the ZONE's own
+   * `startTime`/`endTime`, because that pair is what the rules engine branches
+   * on - a screen drawing the line elsewhere would explain a decision the
+   * controller never made.
+   */
+  async dayNightStats(query: ReadingsQuery): Promise<DayNightStats> {
+    const daylight = await this.daylightFor(query.nodeId);
+    const segments = resolveSegments(
+      this.clock.now(),
+      daylight.startTime,
+      daylight.endTime,
+      daylight.timezone,
+    );
+    if (!segments) {
+      return { periods: [], daylight };
+    }
+
+    const periods = await Promise.all(
+      segments.map((segment, i) =>
+        this.segmentStats(query, segment, i === segments.length - 1),
+      ),
+    );
+    return { periods, daylight };
+  }
+
+  private async segmentStats(
+    query: ReadingsQuery,
+    segment: Segment,
+    inProgress: boolean,
+  ): Promise<SegmentStats> {
+    // The segment's own bounds, not the caller's: `days`, `from` and `to` would
+    // otherwise widen a period that is defined by where the boundaries fell.
+    const stats = await this.stats({
+      nodeId: query.nodeId,
+      from: segment.from.toISOString(),
+      to: segment.to.toISOString(),
+    });
+    return {
+      kind: segment.kind,
+      from: segment.from.toISOString(),
+      to: segment.to.toISOString(),
+      inProgress,
+      stats,
+    };
+  }
+
+  /**
+   * The daylight boundary a node's readings should be split at.
+   *
+   * A node with no zone gets the deployment default rather than an error: this
+   * is a presentation of history, and refusing to show any statistics because a
+   * node has not been assigned yet helps nobody.
+   */
+  private async daylightFor(
+    nodeId: string | undefined,
+  ): Promise<DayNightStats['daylight']> {
+    const fallback = {
+      startTime: '06:30',
+      endTime: '18:30',
+      timezone: this.defaultTimezone(),
+    };
+    if (!nodeId) return fallback;
+
+    const node = await this.nodes.findOne({
+      where: { slug: nodeId },
+      relations: { zone: true },
+    });
+    const config = (node?.zone as ZoneEntity | null | undefined)?.rulesConfig;
+    if (!config) return fallback;
+    return {
+      startTime: config.thresholds.startTime,
+      endTime: config.thresholds.endTime,
+      timezone: config.timezone,
+    };
   }
 
   async stats(query: ReadingsQuery): Promise<ReadingStats> {
@@ -126,6 +213,11 @@ export class ReadingsService {
       builder.andWhere('n.slug = :slug', { slug: query.nodeId });
     }
     return builder;
+  }
+
+  /** Never the host locale - that was the old DST bug. */
+  private defaultTimezone(): string {
+    return this.config.get<string>('TEMPESTAS_TZ', 'America/Vancouver');
   }
 
   private window(query: ReadingsQuery): ReadingWindow {

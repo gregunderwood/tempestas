@@ -6,10 +6,14 @@ import { ReadingsController } from './readings.controller';
 import { ReadingsIngestService } from './readings-ingest.service';
 import { ReadingsService } from './readings.service';
 import { RetentionService } from './retention.service';
+import { NodeEntity } from '../nodes/models';
 import { SensorReadingEntity } from './models';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([SensorReadingEntity]), NodesModule],
+  imports: [
+    TypeOrmModule.forFeature([SensorReadingEntity, NodeEntity]),
+    NodesModule,
+  ],
   controllers: [ReadingsController],
   providers: [
     ReadingsIngestService,
