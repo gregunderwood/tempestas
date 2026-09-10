@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
+import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import { Gauge } from '../../shared/gauge/gauge';
@@ -40,7 +41,7 @@ interface NodeCard {
  */
 @Component({
   selector: 'temp-dashboard',
-  imports: [MatCardModule, DatePipe, Gauge],
+  imports: [MatCardModule, RouterLink, DatePipe, Gauge],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <h1>Dashboard</h1>
@@ -60,7 +61,9 @@ interface NodeCard {
       @for (card of cards(); track card.nodeId) {
         <mat-card appearance="outlined" [class.card--stale]="card.stale">
           <mat-card-header>
-            <mat-card-title>{{ card.nodeId }}</mat-card-title>
+            <mat-card-title>
+              <a [routerLink]="['/nodes', card.nodeId]">{{ card.nodeId }}</a>
+            </mat-card-title>
             <mat-card-subtitle>
               @if (card.stale) {
                 <span class="stale">
@@ -126,6 +129,11 @@ interface NodeCard {
     }
     .muted {
       opacity: 0.7;
+    }
+    mat-card-title a {
+      color: inherit;
+      text-decoration-color: var(--mat-sys-outline);
+      text-underline-offset: 4px;
     }
     .card--stale {
       border-color: var(--temp-gauge-orange);

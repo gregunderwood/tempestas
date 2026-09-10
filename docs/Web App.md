@@ -17,6 +17,7 @@ sometimes with wet hands. Angular 20 standalone components, Angular Material M3,
 - [../apps/web/src/app/core/realtime.service.ts](../apps/web/src/app/core/realtime.service.ts) — the socket feed, as signals
 - [../apps/web/src/app/shared/gauge/gauge.ts](../apps/web/src/app/shared/gauge/gauge.ts) — one reading, as an arc
 - [../apps/web/src/app/features/dashboard/dashboard.ts](../apps/web/src/app/features/dashboard/dashboard.ts) — the dashboard
+- [../apps/web/src/app/features/nodes/node-detail.ts](../apps/web/src/app/features/nodes/node-detail.ts) — one node, with its 24-hour statistics
 - [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme and the gauge band colours
 - [../apps/web/proxy.conf.json](../apps/web/proxy.conf.json) — `/api` and `/socket.io` to `:7000` in dev
 
@@ -83,6 +84,27 @@ Three properties are load-bearing rather than cosmetic:
 
 `:host` sets `display: block; min-width: 0` because the grid item is the host element, not the
 figure inside it, and an inline host will not shrink below its content.
+
+## The node screen
+
+`/nodes/:slug` is the drill-in: live gauges, then min, max and average for each metric over the
+last 24 hours, with **the clock time of each extreme**. A 38 °C peak at 14:00 is the greenhouse
+working; the same peak at 03:00 is a fault, and the value alone cannot tell them apart.
+
+The window is a **rolling 24 hours**, which is what the readings API returns when given no `days`.
+A calendar day would leave the first reading after midnight standing alone against an empty min and
+max.
+
+Two mechanics worth knowing:
+
+- **The route must be declared before `nodes`.** Angular matches in order and `nodes` is a prefix
+  match, so it swallows `/nodes/elantris` if it comes first.
+- **A required `input()` has no value in the constructor.** The stats query is driven off
+  `toObservable(this.slug)` rather than read once, which also handles moving between two nodes —
+  the router reuses the component instead of building a new one.
+
+Every figure on it can legitimately be absent and renders as an em-dash. A window with no valid CO2
+has no CO2 average.
 
 ## The dashboard shows a reading's age
 
