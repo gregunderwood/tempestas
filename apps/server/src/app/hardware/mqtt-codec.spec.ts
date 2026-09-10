@@ -302,18 +302,42 @@ describe('decodeStatus', () => {
 });
 
 describe('decodeGpioState', () => {
-  it('records a known level', () => {
+  const TS = '2026-09-10T20:50:00.000Z';
+
+  it("records a known level and the node's own timestamp", () => {
     const raw = {
       schema: MQTT_SCHEMAS.gpioState,
       node: 'e',
-      ts: '',
+      ts: TS,
       pin: 16,
       level: 0,
       known: true,
     };
     expect(decodeGpioState(raw, 16)).toEqual({
       ok: true,
-      value: { pin: 16, level: 0, known: true },
+      value: { pin: 16, level: 0, known: true, observedAt: new Date(TS) },
+    });
+  });
+
+  // The node's timestamp ends up in a device's `offAt`, which decides when the
+  // minimum-off window started. Defaulting a bad one to our clock would restart
+  // a burner's cooldown from whenever we happened to receive the message, so it
+  // is refused instead.
+  it.each([
+    ['', 'empty'],
+    ['not-a-date', 'garbage'],
+  ])('refuses an unparseable ts (%s)', (ts) => {
+    const raw = {
+      schema: MQTT_SCHEMAS.gpioState,
+      node: 'e',
+      ts,
+      pin: 16,
+      level: 0,
+      known: true,
+    };
+    expect(decodeGpioState(raw, 16)).toMatchObject({
+      ok: false,
+      reason: /unparseable ts/,
     });
   });
 
@@ -322,14 +346,19 @@ describe('decodeGpioState', () => {
     const raw = {
       schema: MQTT_SCHEMAS.gpioState,
       node: 'e',
-      ts: '',
+      ts: TS,
       pin: 16,
       level: null,
       known: false,
     };
     expect(decodeGpioState(raw, 16)).toEqual({
       ok: true,
-      value: { pin: 16, level: null, known: false },
+      value: {
+        pin: 16,
+        level: null,
+        known: false,
+        observedAt: new Date(TS),
+      },
     });
   });
 

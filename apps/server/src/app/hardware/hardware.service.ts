@@ -68,6 +68,23 @@ export interface NodeAvailability {
   at: Date;
 }
 
+/**
+ * A line's state as the node reports it, unsolicited.
+ *
+ * `observedAt` is the node's own timestamp, not our receive time, because it is
+ * written into a device's `offAt` and so decides when the minimum-off window
+ * started. A node that fails safe while the controller is dead reports the real
+ * moment the relay opened.
+ */
+export interface PinStateReport {
+  nodeId: NodeId;
+  pin: number;
+  /** `null` with `known: false` means unknown. Unknown is NOT off. */
+  level: GpioLevel | null;
+  known: boolean;
+  observedAt: Date;
+}
+
 export interface PinCommand {
   pin: number;
   level: GpioLevel;
@@ -89,4 +106,14 @@ export abstract class HardwareService {
   abstract readonly samples$: Observable<SensorSample>;
   abstract readonly availability$: Observable<NodeAvailability>;
   abstract readonly hello$: Observable<NodeHello>;
+
+  /**
+   * Every line-state report a node sends, including ones we did not ask for.
+   *
+   * A node changes lines on its own when its dead-man trips or when it sees the
+   * controller's last will, and it is the only party that knows. Without this
+   * the driver held the correct level in memory and nothing consumed it, so a
+   * device row stayed wrong until somebody noticed.
+   */
+  abstract readonly pinStates$: Observable<PinStateReport>;
 }

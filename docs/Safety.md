@@ -84,12 +84,35 @@ reacting to the alarm already has the truth — and in the agent's `on_connect`,
 state of every managed line, since after an agent restart the retained value is otherwise the level
 from before the restart rather than the failsafe the claim just applied.
 
-> [!warning] Still open: nothing on the server consumes it
-> `MqttHardwareService.pinState()` is maintained from the retained `gpio/state` and **has no
-> callers**. The server holds the correct level in memory and never uses it to correct a device row
-> or to tell the browser. The node no longer lies; the server still ignores the truth. Deciding what
-> wins — a retained hardware state or the database — is a policy call for a burner and is not made
-> yet.
+### 3c. The hardware wins, and the disagreement alarms
+
+The decided policy for a divergence, and the other half of 3b. `DevicesService` subscribes to
+`HardwareService.pinStates$` and corrects the row from what the node reports.
+
+- **The level comes from the hardware.** It is the only party that knows.
+- **A correction records the node's own timestamp**, not our receive time, so `offAt` is the moment
+  the relay really opened and the minimum-off window is never shorter than reality. A forward-dated
+  observation is clamped to now, because a node with a fast clock would otherwise park a heater's
+  cooldown in the future.
+- **`onAt` is never rewritten when correcting to off.** The timestamps are the audit trail.
+- **A correction only ever applies when the observation is newer than the row's last transition.**
+  `gpio/state` is retained, so a controller gets one replayed on subscribe; believing one that
+  predates a command we have since sent would undo a command that succeeded. This ordering guard is
+  also what guarantees a correction always flips the derived state.
+- **An unknown level changes nothing.** Stale is not off.
+- **It alarms.** ERROR to the log, a `device:state` push so any connected browser is immediately
+  right, and an entry in `GET /api/health`'s `problems` for 24 h — long enough that an overnight
+  failsafe is still reported in the morning. A divergence means something upstream already failed,
+  so it is never corrected quietly.
+
+Verified against the real panel: relay energised, controller `kill -9`ed, node failed safe, and on
+restart the server logged the divergence, wrote `offAt` at the node's observed time nine seconds
+after `onAt` rather than at the much later moment it found out, and reported it as degraded. The
+turn-on that had returned **409** then returned **200** and switched the relay.
+
+> [!note] Deliberately not done
+> The row is corrected; the hardware is **not** re-driven to match the database. A controller
+> restart must not energise a burner with no human involved.
 
 ### 4. A null CO2 means unknown, never zero
 
