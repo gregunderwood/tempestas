@@ -10,9 +10,9 @@ It lives in this repository on purpose: a change to the contract touches both si
 commit rather than becoming a two-repo dance that will eventually be done wrong at 2 a.m.
 
 > [!note] Status
-> Stage C. Deployed on elantris under systemd, owning the SCD41 and the three wired relay lines.
-> It has not yet driven a relay from an MQTT command end to end — see
-> [The GPIO backend](#the-gpio-backend).
+> Stage C, end to end. Deployed on elantris under systemd, owning the SCD41 and the three wired
+> relay lines, and driving a relay from an MQTT command issued by the server. No burner connected
+> yet.
 
 ## Key files
 
@@ -162,6 +162,25 @@ The node binds to whichever controller heartbeats at it. Before the first heartb
 nothing to compare against, so any issuer is accepted — refusing everything would mean a node
 could never be commanded at all.
 
+## Announcing line state
+
+`gpio/state` is **retained**, which makes it the value a controller reads to reconcile after a
+restart. So every path that changes a line publishes it, through one method — `publish_gpio_state`:
+
+- **after a command**, per pin in the command;
+- **on every connect**, for every managed line. Without this, a controller that restarts reads the
+  level from _before_ the agent's last restart rather than the failsafe its claim just applied;
+- **on entering the failsafe**, via `enter_failsafe`, which orders it deliberately: **hardware,
+  then state, then alarm**, so anything reacting to the alarm already has the truth.
+
+The level published is read back from the pad, never from intent, and an unreadable pad is published
+as `known: false` with a null level. Unknown is not off.
+
+This exists because it was missing, and the miss was only visible on real hardware: the node failed
+safe on the server's LWT, de-energised the relay, and left a retained message on the bus saying a
+burner relay was energised. See
+[rule 3b in Safety](../Safety.md#3b-a-node-that-changes-a-line-on-its-own-must-say-so).
+
 ## The dead-man
 
 Enforced locally, counting server heartbeats, with no server involvement — it has to work when
@@ -211,6 +230,9 @@ later. `tests/test_sensor.py` pins that ordering with a fake bus that records co
   entrypoint appear differently. Kill by PID.
 - **A graceful stop publishes `status: offline` explicitly.** MQTT suppresses the will on a
   clean disconnect, so without that the node is left looking online forever.
+- **`hello` is not retained,** so a node announces only on its own MQTT connect. A controller that
+  starts while the node is already connected sees the retained `status` but never the capabilities,
+  and cannot admit it. Restart the agent to make it re-announce.
 - **`systemctl stop` is a clean exit and does NOT trigger `Restart=on-failure`.** Stopping the
   agent therefore leaves the pads holding whatever they last drove, with nothing supervising them.
   Drive the failsafe before a long stop, or expect `relay-check.py` to be what turns things off.

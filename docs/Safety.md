@@ -62,6 +62,35 @@ database silently drifted from the hardware and the UI showed a heater as runnin
 `DevicesService.drive()` is the single choke point — every path (`turnOn`, `forceOn`, `turnOff`,
 and the rules engine) funnels through it.
 
+### 3b. A node that changes a line on its own must say so
+
+Found end to end on real hardware, and it is the same drift arriving from the other direction. The
+node failed safe on the server's LWT, de-energised the relay, and **published nothing**. The result:
+
+| Source                    | Said                        |
+| ------------------------- | --------------------------- |
+| The pad                   | de-energised — relay OFF    |
+| The retained `gpio/state` | `level: 0` — relay **ON**   |
+| The `devices` row         | `isOn: true` — relay **ON** |
+
+Only the hardware was telling the truth, and `gpio/state` is retained precisely so a controller can
+read it to reconcile after a restart — so the one value designed to correct the drift was the one
+lying. The concrete harm showed up immediately: with the row still saying ON, the anti-short-cycle
+guard returned **409 on the next attempt to turn it on**. On a cold night that is a burner that
+stays off because the database believes it is already running.
+
+Fixed in `Agent.enter_failsafe()`, which now goes **hardware, then state, then alarm** — so anything
+reacting to the alarm already has the truth — and in the agent's `on_connect`, which republishes the
+state of every managed line, since after an agent restart the retained value is otherwise the level
+from before the restart rather than the failsafe the claim just applied.
+
+> [!warning] Still open: nothing on the server consumes it
+> `MqttHardwareService.pinState()` is maintained from the retained `gpio/state` and **has no
+> callers**. The server holds the correct level in memory and never uses it to correct a device row
+> or to tell the browser. The node no longer lies; the server still ignores the truth. Deciding what
+> wins — a retained hardware state or the database — is a policy call for a burner and is not made
+> yet.
+
 ### 4. A null CO2 means unknown, never zero
 
 The node reports validity honestly and **never substitutes a last-known-good value**. A null

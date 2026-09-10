@@ -73,6 +73,13 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
             qos=hqos,
             retain=hretain,
         )
+        # The retained gpio/state is what a controller reads to reconcile, so it
+        # has to be republished on every connect. Without this, a controller
+        # that restarts reads whatever was last retained - which after an agent
+        # restart is the level from BEFORE the restart, not the failsafe the
+        # claim just applied.
+        agent.publish_gpio_state(cfg.gpio.lines)
+
         client.subscribe(
             [
                 (contract.topic_gpio_set(cfg.node_id), 1),
@@ -101,23 +108,7 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
                 qos=rqos,
                 retain=rretain,
             )
-            for line in result["lines"]:
-                sqos, sretain = contract.QOS["gpioState"]
-                client.publish(
-                    contract.topic_gpio_state(cfg.node_id, line["pin"]),
-                    json.dumps(
-                        {
-                            "schema": contract.SCHEMAS["gpioState"],
-                            "node": cfg.node_id,
-                            "ts": result["ts"],
-                            "pin": line["pin"],
-                            "level": line["readback"],
-                            "known": line["readback"] in (0, 1),
-                        }
-                    ),
-                    qos=sqos,
-                    retain=sretain,
-                )
+            agent.publish_gpio_state(line["pin"] for line in result["lines"])
 
     client.on_connect = on_connect
     client.on_message = on_message
@@ -131,10 +122,7 @@ def _on_server_status(agent: Agent, payload: bytes) -> None:
         return
     if body.get("state") == "offline":
         log.error("the server reported itself OFFLINE - entering failsafe now")
-        agent.gpio.failsafe()
-        agent.publish_alarm(
-            contract.AlarmCode.SAFE_STATE_ENTERED, "critical", "server published offline"
-        )
+        agent.enter_failsafe(contract.AlarmCode.SAFE_STATE_ENTERED, "server published offline")
 
 
 def main() -> int:

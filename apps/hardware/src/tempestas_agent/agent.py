@@ -168,6 +168,19 @@ class Agent:
             "sensorStatus": {"ok": True, "consecutiveFailures": 0, "lastSuccessTs": now_iso()},
         }
 
+    def gpio_state_payload(self, pin: int) -> dict:
+        """What this line IS, read from the pad rather than from intent."""
+        level = self.gpio.level(pin)
+        return {
+            "schema": contract.SCHEMAS["gpioState"],
+            "node": self.config.node_id,
+            "ts": now_iso(),
+            "pin": pin,
+            "level": level,
+            # An unreadable pad is UNKNOWN, and unknown is not off.
+            "known": level in (0, 1),
+        }
+
     def alarm_payload(self, code: str, severity: str, message: str) -> dict:
         return {
             "schema": contract.SCHEMAS["alarm"],
@@ -248,6 +261,24 @@ class Agent:
             self.deadman_tripped = False
             self.publish_alarm(contract.AlarmCode.DEADMAN_CLEARED, "info", "heartbeats resumed")
 
+    def enter_failsafe(self, code: str, message: str) -> None:
+        """Drive every managed line safe, then TELL the bus what the lines are.
+
+        The order is the point. Hardware first, then the retained `gpio/state`,
+        then the alarm - so anything reacting to the alarm already has the truth.
+
+        Publishing the state is not bookkeeping. `gpio/state` is retained, which
+        makes it the value a controller reads to reconcile after a restart.
+        Failing safe without republishing leaves a retained message on the bus
+        saying a burner relay is energised when it is not, and the controller
+        then trusts it. Found end to end on real hardware: after the node failed
+        safe on the server's LWT, the pad was de-energised while the retained
+        state and the device row both still said ON.
+        """
+        self.gpio.failsafe()
+        self.publish_gpio_state(self.config.gpio.lines)
+        self.publish_alarm(code, "critical", message)
+
     def check_deadman(self) -> bool:
         """Fail safe locally when the brain goes quiet. Returns True if it trips.
 
@@ -261,15 +292,29 @@ class Agent:
 
         self.deadman_tripped = True
         log.error("no heartbeat for %.0fs - entering failsafe", self.config.deadman_s)
-        self.gpio.failsafe()
-        self.publish_alarm(
+        self.enter_failsafe(
             contract.AlarmCode.DEADMAN_TRIPPED,
-            "critical",
             f"no controller heartbeat for {self.config.deadman_s:.0f}s",
         )
         return True
 
     # ----------------------------------------------------------------- publish
+
+    def publish_gpio_state(self, pins) -> None:
+        """Publish the retained `gpio/state` for each pin. Never skipped.
+
+        Retained, so this is what a controller reads on subscribe to find out
+        what the lines are doing. Every path that changes a line has to come
+        through here or the bus keeps a stale answer indefinitely.
+        """
+        qos, retain = contract.QOS["gpioState"]
+        for pin in pins:
+            self.client.publish(
+                contract.topic_gpio_state(self.config.node_id, pin),
+                json.dumps(self.gpio_state_payload(pin)),
+                qos=qos,
+                retain=retain,
+            )
 
     def publish_alarm(self, code: str, severity: str, message: str) -> None:
         qos, retain = contract.QOS["alarm"]
