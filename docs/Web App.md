@@ -88,8 +88,9 @@ figure inside it, and an inline host will not shrink below its content.
 ## The node screen
 
 `/nodes/:slug` is the drill-in: live gauges, then min, max and average per metric across the last
-three **day and night periods**, oldest first, ending with the one still running — with **the clock
-time of each extreme**. A 38 °C peak at 14:00 is the greenhouse working; the same peak at 03:00 is
+three **day and night periods**, most recent first, so the one still running is at the top — with
+**the clock time of each extreme**. The API returns them chronologically, which is the sane order
+for any other caller; reversing them is a presentation choice made in the component. A 38 °C peak at 14:00 is the greenhouse working; the same peak at 03:00 is
 a fault, and the value alone cannot tell them apart.
 
 There is no combined 24-hour row, deliberately: the burner is enrichment by day and heat by night,

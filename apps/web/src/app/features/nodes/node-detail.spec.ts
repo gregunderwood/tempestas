@@ -163,12 +163,12 @@ describe('NodeDetail', () => {
     expect(el.textContent).not.toContain('24 hours');
   });
 
-  // Oldest first, so the table reads forwards in time and ends with now.
-  it('puts the running period last and marks it', () => {
+  // The period running now is what somebody opens this screen to see.
+  it('puts the running period at the top and marks it', () => {
     const rows = firstBlockRows(setup());
-    expect(rows[2].classList.contains('running')).toBe(true);
-    expect(rows[0].classList.contains('running')).toBe(false);
-    expect(rows[2].textContent).toContain('Day so far');
+    expect(rows[0].classList.contains('running')).toBe(true);
+    expect(rows[0].textContent).toContain('Day so far');
+    expect(rows[2].classList.contains('running')).toBe(false);
   });
 
   it('says night so far when the running period is night', () => {
@@ -202,6 +202,7 @@ describe('NodeDetail', () => {
   // Every figure here can legitimately be absent. Zero would read as extremely
   // low CO2, which is the one direction that runs the burner.
   it('renders an empty period as em-dashes, never zeros', () => {
+    // The night between the two days, which the fixture leaves empty.
     const empty = firstBlockRows(setup())[1];
     expect(empty.textContent).toContain('—');
     expect(empty.textContent).not.toMatch(/\b0\b/);
