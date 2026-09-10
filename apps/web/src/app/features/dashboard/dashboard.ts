@@ -108,7 +108,11 @@ interface NodeCard {
   styles: `
     .cards {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(min(100%, 23rem), 1fr));
+      /* auto-FILL with a capped track, not auto-fit with 1fr: a single node
+         would otherwise stretch one card the full width of the page and leave
+         three small gauges marooned in it. */
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 30rem));
+      justify-content: start;
       gap: 1rem;
       align-items: start;
     }

@@ -72,20 +72,23 @@ import {
       display: block;
       min-width: 0;
     }
+    /* The width cap lives on the FIGURE, not the svg, because the figure is the
+       container the cqw units below resolve against. Capping the svg instead
+       let a wide column keep a wide container, and the caption's pull-up -
+       being a share of that width - dragged the caption above the arc's bottom
+       so the arc overflowed its own box and was clipped. */
     .gauge {
-      margin: 0;
+      margin: 0 auto;
       display: flex;
       flex-direction: column;
       align-items: center;
-      /* No min-width: a fixed one makes the figure wider than its grid column
-         and the reading spills across the arc. */
       min-width: 0;
+      max-width: 9rem;
       container-type: inline-size;
     }
     svg {
       display: block;
       width: 100%;
-      max-width: 9rem;
       height: auto;
     }
     .gauge__track,
