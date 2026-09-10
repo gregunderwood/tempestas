@@ -21,6 +21,7 @@ import {
   type NodeAvailability,
   type NodeHello,
 } from '../hardware/hardware.service';
+import { Clock } from '../common/clock';
 import { DeviceEntity } from '../devices/models';
 import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';
@@ -33,6 +34,8 @@ import {
   patchFromHello,
   pinsWithdrawn,
   type HelloFacts,
+  isNodeOnline,
+  NODE_OFFLINE_AFTER_MS,
 } from './node-registry';
 
 /** Why a sample was refused. Carried so the log line can say which it was. */
@@ -67,6 +70,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(ZoneEntity)
     private readonly zones: Repository<ZoneEntity>,
     private readonly hardware: HardwareService,
+    private readonly clock: Clock,
   ) {}
 
   onModuleInit(): void {
@@ -231,11 +235,29 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
    * only need the counts, and they run every 10 s and on every curl.
    */
   async counts(): Promise<{ total: number; online: number; pending: number }> {
+    // The same rule as `isNodeOnline`, in SQL. If these two disagree the health
+    // endpoint contradicts the nodes screen, which is exactly the kind of
+    // divergence this system keeps having to hunt down.
+    //
+    // EXISTS over the (node_id, created_at) index rather than MAX() over the
+    // table: we only need to know whether anything landed since the cutoff, and
+    // this stays cheap as the readings table grows.
+    const cutoff = new Date(this.clock.now().getTime() - NODE_OFFLINE_AFTER_MS);
     const row = await this.nodes
       .createQueryBuilder('n')
       .select('COUNT(*)', 'total')
-      .addSelect('COUNT(*) FILTER (WHERE n.online)', 'online')
+      .addSelect(
+        `COUNT(*) FILTER (WHERE n.online AND (
+           n.last_seen_at >= :cutoff
+           OR EXISTS (
+             SELECT 1 FROM sensor_readings sr
+             WHERE sr.node_id = n.id AND sr.created_at >= :cutoff
+           )
+         ))`,
+        'online',
+      )
       .addSelect(`COUNT(*) FILTER (WHERE n.status = 'pending')`, 'pending')
+      .setParameter('cutoff', cutoff)
       .getRawOne<{ total: string; online: string; pending: string }>();
 
     return {
@@ -374,9 +396,8 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       .getRawMany<{ nodeId: string; latest: Date | string }>();
 
     const countBy = new Map(counts.map((c) => [c.nodeId, Number(c.count)]));
-    const latestBy = new Map(
-      latest.map((l) => [l.nodeId, new Date(l.latest).toISOString()]),
-    );
+    const latestBy = new Map(latest.map((l) => [l.nodeId, new Date(l.latest)]));
+    const now = this.clock.now();
 
     return rows.map((row) => ({
       id: row.id,
@@ -385,13 +406,20 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       location: row.location,
       kind: row.kind,
       status: row.status,
-      online: row.online,
+      online: isNodeOnline(
+        {
+          online: row.online,
+          lastSeenAt: row.lastSeenAt,
+          latestReadingAt: latestBy.get(row.id) ?? null,
+        },
+        now,
+      ),
       lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
       agentVersion: row.agentVersion,
       capabilities: row.capabilities,
       zoneId: row.zoneId,
       deviceCount: countBy.get(row.id) ?? 0,
-      latestReadingAt: latestBy.get(row.id) ?? null,
+      latestReadingAt: latestBy.get(row.id)?.toISOString() ?? null,
     }));
   }
 }
