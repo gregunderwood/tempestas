@@ -229,6 +229,25 @@ Which suggests a better sequence than the plan's, and it is strictly less work:
 Step 4 is a better instrument than the plan's step 4, because "different rooms, so expect an offset"
 stops being a caveat and becomes a measurement.
 
+### The SCD41 offset, as measured
+
+Applied 2026-09-10: **6.56 °C → 3.2 °C**, in `etc/agent.toml` so it is re-applied at every start.
+Readings were running roughly 3.4 °C cold, and the rules engine reads temperature to decide whether
+to run a propane burner as night heat.
+
+Two paired measurements 38 minutes apart disagreed — 3.36 °C against 6.05 °C — and the second was
+taken with a meter held in direct sun. The raw die temperature settled it: it was flat at
+26.5–27.0 °C while the reference meters climbed 2.5 °C. Method and the three ways to catch that are
+in [Hardware](Hardware.md#direct-sun-makes-a-cheap-reference-meter-useless).
+
+**Still to confirm after sunset**, when there is no solar gain on either the meters or the panel.
+3.2 °C is an improvement under either reading of the data, which is why it went in now rather than
+waiting: the alternative was leaving a known-wrong 6.56 °C in place.
+
+The legacy controller's own sensor looks about **2.5 °C warm** against meters beside it (26.16 °C
+against 23.9/~23.4), but that pairing was taken in the same sunlit conditions, so treat it as a
+hint rather than a figure. It matters when its thresholds move over.
+
 ### The two boards are not in the same air
 
 Worth knowing before anyone compares their sensors again. Both boards are in the greenhouse and
