@@ -216,3 +216,90 @@ def _heartbeat(controller: str = "ctl") -> bytes:
     return json.dumps(
         {"schema": "heartbeat/1", "node": "bench", "ts": "", "controller": controller, "epoch": 1}
     ).encode()
+
+
+# The defect this class exists for was found end to end on real hardware, not
+# in a test: after the node failed safe on the server's LWT, the pad was
+# de-energised while the RETAINED gpio/state and the device row both still said
+# the burner relay was on. Only the hardware was telling the truth, and
+# gpio/state is precisely the value a restarting controller reads to reconcile.
+class TestFailsafePublishesState:
+    def _agent(self):
+        config = AgentConfig(
+            node_id="bench",
+            sensor=SensorConfig(kind="simulated"),
+            gpio=GpioConfig(lines=(5, 6), failsafe={5: 1, 6: 1}),
+            deadman_s=30.0,
+        )
+        gpio = gpio_mod.SimulatedGpio()
+        gpio.claim(config.gpio.lines, config.gpio.failsafe)
+        client = _RecordingClient()
+        agent = Agent(config, client=client, sensor=None, gpio=gpio, clock=_FakeClock())
+        return agent, gpio, client
+
+    def test_the_deadman_republishes_every_line(self):
+        agent, gpio, client = self._agent()
+        agent.on_heartbeat(json.dumps({"controller": "ctl", "epoch": 1}).encode())
+        gpio.write(5, 0)  # burner energised
+        agent._clock.advance(31)
+        assert agent.check_deadman() is True
+
+        states = client.states()
+        assert {s["pin"] for s in states} == {5, 6}
+        # The point: the bus is told level 1, matching the pad, not level 0.
+        assert next(s for s in states if s["pin"] == 5)["level"] == 1
+        assert all(s["known"] for s in states)
+
+    def test_the_server_lwt_path_republishes_too(self):
+        agent, gpio, client = self._agent()
+        gpio.write(5, 0)
+        agent.enter_failsafe(contract.AlarmCode.SAFE_STATE_ENTERED, "server published offline")
+        assert next(s for s in client.states() if s["pin"] == 5)["level"] == 1
+
+    # Hardware, then state, then alarm. Anything reacting to the alarm must
+    # already be able to read the truth.
+    def test_state_is_published_before_the_alarm(self):
+        agent, _gpio, client = self._agent()
+        agent.enter_failsafe(contract.AlarmCode.SAFE_STATE_ENTERED, "x")
+        kinds = [
+            contract.schema_major(json.loads(p)["schema"]) and json.loads(p)["schema"]
+            for _t, p in client.published
+        ]
+        assert kinds.index("gpioState/1") < kinds.index("alarm/1")
+
+    # An unreadable pad must reach the bus as unknown, never as a level.
+    def test_an_unreadable_pad_is_published_as_unknown(self):
+        agent, gpio, client = self._agent()
+        gpio.level = lambda _pin: None
+        agent.enter_failsafe(contract.AlarmCode.SAFE_STATE_ENTERED, "x")
+        states = client.states()
+        # Asserted first: `all()` over an empty list is True, so without this
+        # the test passes when nothing is published at all.
+        assert {s["pin"] for s in states} == {5, 6}
+        assert all(s["level"] is None and s["known"] is False for s in states)
+
+
+class _RecordingClient:
+    def __init__(self):
+        self.published: list[tuple[str, str]] = []
+
+    def publish(self, topic, payload, qos=0, retain=False):
+        self.published.append((topic, payload))
+
+    def states(self) -> list[dict]:
+        return [
+            json.loads(p)
+            for _t, p in self.published
+            if json.loads(p)["schema"] == contract.SCHEMAS["gpioState"]
+        ]
+
+
+class _FakeClock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += seconds
