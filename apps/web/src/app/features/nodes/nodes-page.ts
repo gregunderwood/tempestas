@@ -73,6 +73,11 @@ import { NodeStatus, type Node } from '@tempestas/domain';
       opacity: 0.7;
       font-size: 0.85rem;
     }
+    mat-card-title a {
+      color: inherit;
+      text-decoration-color: var(--mat-sys-outline);
+      text-underline-offset: 4px;
+    }
     .temp-warn {
       color: var(--mat-sys-error);
     }
