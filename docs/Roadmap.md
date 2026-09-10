@@ -60,6 +60,18 @@ file at the lowest priority is a backstop against the OOM killer reaching the bu
 because zram sits at priority 100 the kernel exhausts that first, so in normal running the file is
 never touched.
 
+### Two gaps the nodes screen surfaced
+
+- **An admitted node can never be deleted.** `DELETE /api/nodes/:id` refuses anything that is not
+  `pending`, and disabling does not make it deletable either, so a decommissioned node stays on the
+  screen forever. The guard is right — deleting an admitted node would take its devices with it —
+  but there is no supported path out. Three dev fixtures had to be removed in SQL.
+- **`online` never decays.** It is set from a node's retained MQTT status and cleared by its LWT, so
+  a node that vanishes while the controller is down stays `online: true` indefinitely. Observed on
+  those same fixtures: last seen 28 hours earlier, still shown as online. Same shape as the
+  hardware/database divergence — a stored flag nothing reconciles against reality. A `lastSeenAt`
+  age check would close it.
+
 ### Still open on this box
 
 - ~~**The Mosquitto listener is loopback-only.**~~ **Done (2026-09-09).** Opened to the LAN with
