@@ -283,11 +283,41 @@ foreground.
 Samples now reach the Mac over the LAN listener, verified by subscribing as `tempestas-observer`
 from the Mac and reading live `status` and `sample` payloads off `192.168.2.70:1883`.
 
-What remains for the end-to-end loop is a deliberate flip, not a missing piece: `apps/server/.env`
-carries the working `tempestas-server` credential but still has `HARDWARE_DRIVER=fake`. Setting it
-to `mqtt` makes the Mac the **controller** of a live node - it starts heartbeating, elantris binds
-to it, and its commands drive real relays. Only one controller may hold the heartbeat, so that step
-belongs with the handover script rather than with a config edit.
+### The end-to-end loop is closed
+
+`HARDWARE_DRIVER=mqtt`, the Mac as controller, elantris driving real relays. Done 2026-09-10 with
+no burner connected. What was verified, in order:
+
+| Step                                           | Result                                                                |
+| ---------------------------------------------- | --------------------------------------------------------------------- |
+| Server connects as `tempestas-server`          | Connected to the LAN broker, subscribed                               |
+| Unregistered node publishes                    | `pending`, readings **discarded**, logged loudly — the gate works     |
+| Admit, then readings                           | Real SCD41 rows in Postgres, `boot_id` stamped on each                |
+| Create a device on pin 5                       | Accepted — the pin check read the node's real advertised capabilities |
+| `POST /api/devices/:id/on`                     | Relay 6 energised. First command from server to real hardware         |
+| A command with a foreign `issuedBy`            | Refused, relay held, `CONTROLLER_CONFLICT` reached the server         |
+| `kill -9` the controller **with the relay on** | LWT fired, node failed safe, relay de-energised in ~3 s               |
+| The dead-man, independently                    | Tripped 30 s after the last heartbeat, as the backstop                |
+| Anti-short-cycle                               | 409 on a second turn-on inside the 300 s window                       |
+
+Two layers firing in the right order - the LWT at 3 s and the dead-man 27 s later - is the design
+working, not redundancy.
+
+**It also found a real defect, which is why the checkpoint exists.** The node failed safe and told
+nobody: the pad was de-energised while the retained `gpio/state` and the device row both still said
+the burner relay was ON. Written up as
+[rule 3b in Safety](Safety.md#3b-a-node-that-changes-a-line-on-its-own-must-say-so) - including the
+part still open, that `MqttHardwareService.pinState()` is maintained and has no callers, so the
+server holds the correct level and ignores it.
+
+A second, smaller gap: **`hello` is not retained**, so a controller that starts while a node is
+already connected never learns the node exists - only its retained `status`, which carries no
+capabilities. Restarting the agent is the current workaround. A `hello` request topic, or the server
+treating a retained `status` from an unknown node as a prompt to ask, would close it.
+
+One operational note: `npx nx serve server` holds a lock, so a killed server leaves the nx parent
+behind and the next `serve` waits on it forever. Running `node dist/apps/server/main.js` directly is
+the right way to test controller death.
 
 ## Hardware bring-up and cutover
 
