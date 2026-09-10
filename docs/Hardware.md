@@ -353,6 +353,46 @@ and python3-dev are already present. Verified working: `import board` reports bo
 - **Wi-Fi-only nodes are a reliability factor.** The existing `wifi_monitor.sh` watchdog exists for
   exactly this reason and should carry over per node.
 
+## Calibrating the SCD41's temperature offset
+
+The SCD4x **subtracts** its stored offset from the raw internal temperature, so a sensor reading
+**cold means the offset is too big** — reduce it by the measured error. It is set from
+`temperature_offset_c` in the node's `agent.toml` at every startup and never trusted to persist,
+because the chip's value has almost certainly been reset by some power cycle since anyone set it.
+
+Tune it at the **installed self-heating equilibrium**, never in open air and never while the box is
+still warming. After the panel was mounted the SCD41 climbed ~19.1 → 21.8 °C over twenty minutes
+while the greenhouse itself was also warming, so a single snapshot was worthless. Take two or three
+**simultaneous** pairs — a co-located reference meter plus the sensor at that timestamp — spaced
+about 30 minutes apart; when the derived error stops changing, it has equilibrated.
+
+Two rules that come out of doing it wrong once:
+
+- **Pair only with a co-located reference.** The legacy controller's sensor is at the other end of
+  the greenhouse in different air — see [Roadmap](Roadmap.md#the-two-boards-are-not-in-the-same-air).
+- **Under-correcting is the safer error.** A sensor reading cold makes the heater run _more_.
+
+### The humidity cross-check
+
+Relative humidity is temperature-compensated, so the temperature error can be confirmed
+**independently** — without using the reference hygrometers to derive it. Take the vapour pressure
+the SCD41's own T and RH imply, then ask what RH that same air would read at the reference
+temperature:
+
+```
+es(T) = 6.112 * exp(17.62 * T / (243.12 + T))       # hPa, Magnus
+e     = (sensor_rh / 100) * es(sensor_t)            # what the sensor implies is in the air
+rh    = 100 * e / es(reference_t)                   # what that air reads at the true temperature
+```
+
+On 2026-09-10 the SCD41 read 20.07 °C / 78.1 % against references averaging 23.43 °C / 63.5 %. A
+3.36 °C correction predicts **63.6 %** — 0.1 of a point off the meters. Two independent
+measurements agreeing on one number.
+
+This is also why **"reads cold and damp together" is one fault, not two**: a single temperature
+error produces both symptoms, so a large RH discrepancy is evidence _about temperature_ rather than
+a second problem to chase.
+
 ## When to update this file
 
 - A device is added, moved, rewired, or its polarity or pin changes
