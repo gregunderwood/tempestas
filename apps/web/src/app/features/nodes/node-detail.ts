@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   computed,
   inject,
   input,
@@ -8,7 +9,7 @@ import {
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { switchMap } from 'rxjs';
+import { BehaviorSubject, combineLatest, switchMap } from 'rxjs';
 import { MatCardModule } from '@angular/material/card';
 import { RouterLink } from '@angular/router';
 import {
@@ -22,6 +23,16 @@ import {
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import { Gauge } from '../../shared/gauge/gauge';
+
+/**
+ * How often the statistics are re-queried. Slow on purpose: a min or max a
+ * minute old is not misleading, and each refresh is three periods of
+ * aggregate queries against the readings table on an SD card.
+ */
+const REFRESH_MS = 60_000;
+
+/** setTimeout overflows past this and fires immediately. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 interface PeriodRow {
   period: string;
@@ -277,6 +288,10 @@ export class NodeDetail {
   /** Bound from the route, so the component works from a deep link. */
   readonly slug = input.required<string>();
 
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly reload = new BehaviorSubject<void>(undefined);
+  private boundaryTimer: ReturnType<typeof setTimeout> | undefined;
+
   private readonly latest = signal<Reading[]>([]);
   private readonly nodes = signal<Node[]>([]);
   protected readonly stats = signal<DayNightStats | null>(null);
@@ -338,15 +353,41 @@ export class NodeDetail {
     // Driven off the route parameter rather than read once: a required input
     // has no value during construction, and moving between two nodes reuses
     // this component instead of building a new one.
-    //
-    // No `days` in the query - the readings API treats its absence as a
-    // rolling 24 hours, which is the window this screen claims to show.
-    toObservable(this.slug)
+    combineLatest([toObservable(this.slug), this.reload])
       .pipe(
-        switchMap((slug) => this.api.dayNightStats({ nodeId: slug })),
+        switchMap(([slug]) => this.api.dayNightStats({ nodeId: slug })),
         takeUntilDestroyed(),
       )
-      .subscribe((stats) => this.stats.set(stats));
+      .subscribe((stats) => {
+        this.stats.set(stats);
+        this.armBoundaryRefresh(stats.nextBoundary);
+      });
+
+    // The gauges above are pushed over the socket, but these figures are a
+    // query. Without this the table silently freezes while the gauges keep
+    // moving - and the running period is by definition still accumulating, so
+    // it drifts further from the truth the longer the page is left open.
+    const slow = setInterval(() => this.reload.next(), REFRESH_MS);
+    this.destroyRef.onDestroy(() => {
+      clearInterval(slow);
+      clearTimeout(this.boundaryTimer);
+    });
+  }
+
+  /**
+   * Refresh the moment the running period ends, when every row shifts.
+   *
+   * The instant comes from the server, which owns the day/night boundary. A
+   * client that worked it out itself would be a second definition of night,
+   * free to disagree with the one driving the relay.
+   */
+  private armBoundaryRefresh(iso: string | null): void {
+    clearTimeout(this.boundaryTimer);
+    if (!iso) return;
+    // A second past it, so the server's own clock has certainly crossed too.
+    const delay = new Date(iso).getTime() - Date.now() + 1000;
+    if (delay <= 0 || delay > MAX_TIMEOUT_MS) return;
+    this.boundaryTimer = setTimeout(() => this.reload.next(), delay);
   }
 }
 
