@@ -13,6 +13,20 @@
 .temp-nav {
   display: flex;
   gap: 0.25rem;
+  /* Scrolls rather than widening the page. This is read on a phone, and a
+     toolbar that cannot fit used to push the whole body sideways - which put
+     the third gauge on every card off-screen. */
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-width: 0;
+}
+
+.temp-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.temp-nav a {
+  flex: 0 0 auto;
 }
 
 .temp-active {
@@ -52,4 +66,29 @@
   border-bottom: 4px solid var(--mat-sys-error);
   font-size: 1rem;
   line-height: 1.4;
+}
+
+/* Drawn as text and a shape rather than an icon font. Angular Material's
+   `mat-icon` renders its ligature name as literal text when the Material
+   Symbols font is missing, so the banner's warning showed the word "warning"
+   clipped to "wa" - the one element the safety design calls required. Nothing
+   here needs a network fetch to be legible. */
+.temp-banner-mark {
+  font-size: 1.6rem;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.temp-link-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+/* Not colour alone: the label beside it already says live or offline. */
+.temp-link-down .temp-link-dot {
+  background: none;
+  border: 2px solid currentColor;
 }

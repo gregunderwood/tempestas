@@ -6,9 +6,8 @@
 sometimes with wet hands. Angular 20 standalone components, Angular Material M3, no SSR.
 
 > [!note] Status
-> Phase 9: the shell, routing, API services, the error interceptor, the socket feed and the
-> stale-sensor banner. The screens are deliberately thin — gauges and the real dashboard are
-> phase 10, the devices and nodes screens are phase 11.
+> Phase 10: the shell, the gauge component and the dashboard. The devices and nodes screens are
+> still thin — phase 11.
 
 ## Key files
 
@@ -16,7 +15,9 @@ sometimes with wet hands. Angular 20 standalone components, Angular Material M3,
 - [../apps/web/src/app/core/api-error.interceptor.ts](../apps/web/src/app/core/api-error.interceptor.ts) — the only error handling in the app
 - [../apps/web/src/app/core/api.service.ts](../apps/web/src/app/core/api.service.ts) — every call, typed from `@tempestas/domain`
 - [../apps/web/src/app/core/realtime.service.ts](../apps/web/src/app/core/realtime.service.ts) — the socket feed, as signals
-- [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme
+- [../apps/web/src/app/shared/gauge/gauge.ts](../apps/web/src/app/shared/gauge/gauge.ts) — one reading, as an arc
+- [../apps/web/src/app/features/dashboard/dashboard.ts](../apps/web/src/app/features/dashboard/dashboard.ts) — the dashboard
+- [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme and the gauge band colours
 - [../apps/web/proxy.conf.json](../apps/web/proxy.conf.json) — `/api` and `/socket.io` to `:7000` in dev
 
 ## Errors happen in exactly one place
@@ -51,6 +52,43 @@ which the server caches and replays on connect so a browser opening mid-cycle se
 
 Treat it as a required part of the feature. A change that makes it easier to miss is a safety
 change, not a styling one.
+
+## No icon font, and why
+
+**`mat-icon` is not used anywhere, and adding it back is a regression.** Angular Material renders an
+icon as a _ligature_, so without the Material Symbols font loaded it prints the ligature name as
+plain text — the stale-sensor banner showed the word "warning" clipped by the icon's 24 px box to
+"wa", and the connection indicator showed "wi". It had been that way since the shell was built.
+
+Icons are Unicode glyphs and CSS shapes instead. That fixes it offline too, which matters: this is a
+LAN-only app and a Google Fonts link is a network fetch that a greenhouse Pi cannot always make.
+Dropping `MatIconModule` also took **19 kB off the initial bundle** — more than the whole gauge
+feature added.
+
+## The gauge
+
+Ranges, bands and `gaugeColorFor` come from `@tempestas/domain`, not from the component, because the
+rules engine and the gauge have to agree about what "orange" means. What each band _looks_ like is
+this app's business and lives as `--temp-gauge-*` custom properties in `styles.scss`, picked darker
+and more saturated than Material's defaults — a pale amber and a pale green are the same colour on a
+washed-out phone screen in sunlight.
+
+Three properties are load-bearing rather than cosmetic:
+
+- **A null value renders an em-dash and the word "unknown", and draws no arc at all.** Never a zero.
+  "0 ppm" reads as extremely low, which is the one direction that runs the burner.
+- **Nothing is conveyed by colour alone.** Unknown says "unknown"; an energised relay says "ON".
+- **The arc is clamped**, so a reading outside the configured range fills or empties it rather than
+  drawing past the track.
+
+`:host` sets `display: block; min-width: 0` because the grid item is the host element, not the
+figure inside it, and an inline host will not shrink below its content.
+
+## The dashboard shows a reading's age
+
+The shell banner fires only when an **owned role** goes stale. A node can go quiet without that, so
+each card carries its own age and marks itself after two minutes. A confident number with nothing
+saying how old it is is how somebody trusts a reading from an hour ago.
 
 ## Realtime is a patch, never the source
 

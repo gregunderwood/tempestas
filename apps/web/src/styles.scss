@@ -19,6 +19,33 @@ html {
   );
 }
 
+// The gauge band colours. `@tempestas/domain` names them ('blue', 'green',
+// 'orange', 'red', 'purple') because the rules engine and the gauge have to
+// agree about what a band MEANS; what each name looks like is this app's
+// problem alone.
+//
+// Chosen for a phone held in a greenhouse in direct sunlight, so they are
+// darker and more saturated than Material's defaults - a pale amber on a
+// washed-out LCD is indistinguishable from a pale green, and these bands are
+// how somebody sees at a glance that it is 40 °C in there.
+:root {
+  --temp-gauge-blue: #0b6bcb;
+  --temp-gauge-green: #1a7f37;
+  --temp-gauge-orange: #b45309;
+  --temp-gauge-red: #b3261e;
+  --temp-gauge-purple: #6d28d9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --temp-gauge-blue: #6cb6ff;
+    --temp-gauge-green: #4ac26b;
+    --temp-gauge-orange: #f0a35e;
+    --temp-gauge-red: #ff6b60;
+    --temp-gauge-purple: #b794f6;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
