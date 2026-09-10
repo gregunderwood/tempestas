@@ -1,7 +1,9 @@
 import { NodeKind, NodeStatus, type NodeCapabilities } from '@tempestas/domain';
 import {
+  NODE_OFFLINE_AFTER_MS,
   acceptsCommands,
   acceptsSamples,
+  isNodeOnline,
   newNodeFromHello,
   patchFromHello,
   pinsWithdrawn,
@@ -243,5 +245,105 @@ describe('pinsWithdrawn', () => {
       gpio: { pins: [16, 20], supportsReadback: true },
     });
     expect(pinsWithdrawn(before, after)).toEqual([]);
+  });
+});
+
+/**
+ * The stored flag is set by a retained status and cleared by the last will, so
+ * a node that vanishes while the CONTROLLER is down is never corrected -
+ * nobody is connected to receive the will. Three fake nodes sat on the screen
+ * as "online" 28 hours after they were last heard from.
+ */
+describe('isNodeOnline', () => {
+  const NOW = new Date('2026-09-10T22:00:00.000Z');
+  const ago = (ms: number) => new Date(NOW.getTime() - ms);
+  const MINUTE = 60_000;
+
+  it('is offline when nothing has been heard for longer than the window', () => {
+    expect(
+      isNodeOnline(
+        {
+          online: true,
+          lastSeenAt: ago(28 * 60 * MINUTE),
+          latestReadingAt: null,
+        },
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  // The case a naive age check on lastSeenAt alone gets wrong: it only advances
+  // on an ONLINE transition, so for a node connected all day it is the time it
+  // connected. A reading is the per-sample evidence.
+  it('is online on recent readings even when it connected hours ago', () => {
+    expect(
+      isNodeOnline(
+        {
+          online: true,
+          lastSeenAt: ago(9 * 60 * MINUTE),
+          latestReadingAt: ago(10_000),
+        },
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  it('is online on a recent connection even with no readings at all', () => {
+    expect(
+      isNodeOnline(
+        { online: true, lastSeenAt: ago(MINUTE), latestReadingAt: null },
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  // Only ever narrows. A node the registry saw drop stays down whatever its
+  // history says - stale is not online.
+  it('never revives a node the registry believes offline', () => {
+    expect(
+      isNodeOnline(
+        { online: false, lastSeenAt: NOW, latestReadingAt: NOW },
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  it('has never been seen at all', () => {
+    expect(
+      isNodeOnline(
+        { online: true, lastSeenAt: null, latestReadingAt: null },
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  it('treats the cutoff instant itself as still online', () => {
+    expect(
+      isNodeOnline(
+        {
+          online: true,
+          lastSeenAt: ago(NODE_OFFLINE_AFTER_MS),
+          latestReadingAt: null,
+        },
+        NOW,
+      ),
+    ).toBe(true);
+    expect(
+      isNodeOnline(
+        {
+          online: true,
+          lastSeenAt: ago(NODE_OFFLINE_AFTER_MS + 1),
+          latestReadingAt: null,
+        },
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  // Long enough that a WiFi blip does not flap the dashboard, short enough that
+  // a vanished node shows as gone within minutes.
+  it('allows far more than a sample interval or a broker will', () => {
+    expect(NODE_OFFLINE_AFTER_MS).toBeGreaterThan(60_000);
+    expect(NODE_OFFLINE_AFTER_MS).toBeLessThanOrEqual(10 * MINUTE);
   });
 });

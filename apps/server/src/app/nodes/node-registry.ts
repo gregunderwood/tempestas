@@ -200,3 +200,46 @@ function deepEquals(a: unknown, b: unknown): boolean {
   if (ka.some((k, i) => k !== kb[i])) return false;
   return ka.every((k) => deepEquals(left[k], right[k]));
 }
+
+/**
+ * How long a node may go unheard before it stops counting as online.
+ *
+ * Generous next to a 10 s sample interval and a ~45 s broker will, so a WiFi
+ * blip does not flap the dashboard, while a node that genuinely vanished shows
+ * as offline within minutes.
+ */
+export const NODE_OFFLINE_AFTER_MS = 5 * 60_000;
+
+/**
+ * Whether a node counts as online, given what we last heard from it.
+ *
+ * The stored flag alone is not enough. It is set by a retained status and
+ * cleared by the last will, so a node that vanishes while the CONTROLLER is
+ * down is never corrected - nobody is connected to receive the will. Observed:
+ * three nodes last heard from 28 hours earlier, all still reported online.
+ *
+ * So the flag is ANDed with evidence of life. `lastSeenAt` alone will not do:
+ * it only advances on an online transition, so for a node that has been
+ * connected all day it is the time it connected, not the time it was last
+ * heard. A reading is the durable, per-sample evidence, and it survives a
+ * restart in a way an in-memory timestamp would not.
+ *
+ * Only ever narrows: a node the registry already believes offline stays
+ * offline. Stale is not online.
+ */
+export function isNodeOnline(
+  node: {
+    online: boolean;
+    lastSeenAt: Date | null;
+    latestReadingAt: Date | null;
+  },
+  now: Date,
+): boolean {
+  if (!node.online) {
+    return false;
+  }
+  const cutoff = now.getTime() - NODE_OFFLINE_AFTER_MS;
+  const seen = node.lastSeenAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const read = node.latestReadingAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+  return Math.max(seen, read) >= cutoff;
+}

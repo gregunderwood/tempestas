@@ -66,11 +66,10 @@ never touched.
   `pending`, and disabling does not make it deletable either, so a decommissioned node stays on the
   screen forever. The guard is right — deleting an admitted node would take its devices with it —
   but there is no supported path out. Three dev fixtures had to be removed in SQL.
-- **`online` never decays.** It is set from a node's retained MQTT status and cleared by its LWT, so
-  a node that vanishes while the controller is down stays `online: true` indefinitely. Observed on
-  those same fixtures: last seen 28 hours earlier, still shown as online. Same shape as the
-  hardware/database divergence — a stored flag nothing reconciles against reality. A `lastSeenAt`
-  age check would close it.
+- ~~**`online` never decays.**~~ **Fixed.** It is now derived: the stored flag ANDed with evidence
+  of life within 5 minutes. A plain `lastSeenAt` age check would have been wrong — that field only
+  advances on an online transition, so it would mark a healthy long-connected node offline. See
+  [Nodes](Infrastructure/Nodes.md#online-is-derived-not-just-stored).
 
 ### Still open on this box
 
