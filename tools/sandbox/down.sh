@@ -2,7 +2,7 @@
 # Stop everything the sandbox started, and nothing else.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUN="${TEMPESTAS_SANDBOX_RUN:-$HERE/.run}"
+RUN="${TEMPESTAS_SANDBOX_RUN:-$HERE/run}"
 [[ -f "$RUN/pids" ]] || { echo "nothing recorded in $RUN/pids"; exit 0; }
 while read -r name pid; do
   if kill -0 "$pid" 2>/dev/null; then

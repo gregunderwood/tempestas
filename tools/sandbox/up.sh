@@ -8,7 +8,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-RUN="${TEMPESTAS_SANDBOX_RUN:-$HERE/.run}"
+RUN="${TEMPESTAS_SANDBOX_RUN:-$HERE/run}"
 SPEED="${SPEED:-60}"          # sim minutes per real minute
 CO2="${CO2:-700}"
 TEMP="${TEMP:-18}"
@@ -92,6 +92,11 @@ if [[ "${WITH_SERVERS:-1}" == "1" ]]; then
   # - flattening `browser` away. Running straight out of dist/ would leave
   # index.html one directory deeper than the server looks, so the UI would 404
   # in the sandbox while working in production. Mirror the layout instead.
+  # NOT under a dot directory. Express's res.sendFile - which the SPA fallback
+  # uses with an absolute path - applies its `dotfiles: ignore` rule across the
+  # WHOLE path, so a root under `.run/` makes every deep link 404 while `/`
+  # still works (that goes through the static middleware with a root-relative
+  # `index.html`, which has no dot segment). Cost me a bisect.
   APP="$RUN/app"
   rm -rf "$APP"; mkdir -p "$APP/server" "$APP/web"
   cp -R "$ROOT/dist/apps/server/." "$APP/server/"
