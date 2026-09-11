@@ -57,3 +57,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+
+# Sandbox runtime state: pids, logs, generated broker credentials.
+tools/sandbox/.run/

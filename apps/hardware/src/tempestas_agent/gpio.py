@@ -298,6 +298,66 @@ class LgpioBackend:
         return f"lgpio {self._chip_label} (/dev/gpiochip{self._chip})"
 
 
+class WorldGpio:
+    """Simulated lines that also drive the SHARED greenhouse.
+
+    Composes SimulatedGpio rather than reimplementing it, so claim-once,
+    unknown-until-written, failsafe-on-close and refuse-unmanaged-pin all
+    behave exactly as they do on real hardware. Only the side effect differs:
+    a write also lands in the world every other agent is reading from.
+    """
+
+    def __init__(self, node_id: str, client) -> None:
+        self._node_id = node_id
+        self._client = client
+        self._local = SimulatedGpio()
+
+    def claim(self, lines: tuple[int, ...], failsafe: dict[int, int]) -> None:
+        self._local.claim(lines, failsafe)
+        # Claiming at the failsafe level is what real hardware does, so the
+        # world must see it too - otherwise the sandbox starts every run with
+        # lines the agent thinks are safe and the world thinks are unknown.
+        for pin, level in failsafe.items():
+            self._push(pin, level)
+            self._local.write(pin, level)
+
+    def _push(self, pin: int, level: int) -> None:
+        from .world_client import WorldUnreachable
+
+        try:
+            self._client.set_level(self._node_id, pin, level)
+        except WorldUnreachable as exc:
+            raise GpioUnavailable(f"world rejected {self._node_id}:{pin}={level}: {exc}") from exc
+
+    def write(self, pin: int, level: int) -> None:
+        self._local.write(pin, level)
+        self._push(pin, level)
+
+    def level(self, pin: int) -> int | None:
+        return self._local.level(pin)
+
+    def failsafe(self) -> None:
+        self._local.failsafe()
+        for pin, level in self._local._failsafe.items():
+            try:
+                self._push(pin, level)
+            except GpioUnavailable as exc:
+                # Never raise out of failsafe. It runs on dead-man expiry and
+                # on shutdown, and a crash there is strictly worse than a log.
+                log.error("failsafe could not reach the world for pin %s: %s", pin, exc)
+
+    def close(self) -> None:
+        self.failsafe()
+        self._local.close()
+
+    @property
+    def closed(self) -> bool:
+        return self._local.closed
+
+    def describe(self) -> str:
+        return f"world gpio for {self._node_id} ({len(self._local._levels)} lines)"
+
+
 def build(lines: tuple[int, ...], chip_label: str, simulated: bool):
     """Pick a backend. No lines means no GPIO, whatever else is configured."""
     if not lines:

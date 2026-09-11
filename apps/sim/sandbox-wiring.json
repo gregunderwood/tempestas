@@ -1,0 +1,23 @@
+{
+  "$comment": [
+    "The sandbox's wiring, mirroring the two real boxes exactly as verified on",
+    "2026-09-10. If this drifts from docs/Hardware.md the sandbox stops being",
+    "evidence about production.",
+    "",
+    "on_level is the electrical level that means ON. Four of greenhouse's",
+    "channels are active-LOW through the relay board; BCM 26 is active-HIGH",
+    "through its own module. That asymmetry is the point."
+  ],
+  "fixtures": [
+    { "node_id": "elantris",   "pin": 5,  "role": "co2_generator", "on_level": 0, "note": "relay 6, propane generator" },
+    { "node_id": "greenhouse", "pin": 21, "role": "hps_lights",    "on_level": 0, "note": "via contactor, 2 fixtures" },
+    { "node_id": "greenhouse", "pin": 20, "role": "exhaust_fan",   "on_level": 0, "note": "switched directly by the board" },
+    { "node_id": "greenhouse", "pin": 26, "role": "mh_light",      "on_level": 1, "note": "ACTIVE-HIGH, own relay module" },
+    { "node_id": "greenhouse", "pin": 16, "role": "none",          "on_level": 0, "note": "dark - CO2 moved to elantris" },
+    { "node_id": "greenhouse", "pin": 12, "role": "none",          "on_level": 0, "note": "spare, drives no load" }
+  ],
+  "sensors": [
+    { "node_id": "elantris",   "sensor_id": "scd4x-0", "position": "entrance" },
+    { "node_id": "greenhouse", "sensor_id": "scd4x-0", "position": "canopy" }
+  ]
+}

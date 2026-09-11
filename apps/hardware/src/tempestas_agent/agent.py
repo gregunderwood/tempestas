@@ -335,10 +335,25 @@ def _measurement(m: sensor_mod.Measurement) -> dict:
 
 def build_backends(config: AgentConfig, simulated: bool):
     """Wire the sensor and GPIO backends the configuration asks for."""
-    gpio = gpio_mod.build(config.gpio.lines, config.gpio.chip_label, simulated)
+    world_client = None
+    if config.world.url:
+        from .world_client import WorldClient
+
+        world_client = WorldClient(config.world.url)
+
+    if world_client is not None and config.gpio.lines:
+        gpio = gpio_mod.WorldGpio(config.node_id, world_client)
+    else:
+        gpio = gpio_mod.build(config.gpio.lines, config.gpio.chip_label, simulated)
     gpio.claim(config.gpio.lines, config.gpio.failsafe)
 
-    if config.sensor.kind == "simulated" or simulated:
+    if world_client is not None and config.sensor.kind == "world":
+        sensor = sensor_mod.WorldSensor(
+            world_client,
+            config.world.position,
+            offset_c=config.sensor.temperature_offset_c,
+        )
+    elif config.sensor.kind == "simulated" or simulated:
         sensor = sensor_mod.SimulatedSensor(gpio=gpio if config.has_gpio else None)
     else:
         sensor = sensor_mod.Scd4xSensor(

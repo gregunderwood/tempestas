@@ -263,3 +263,53 @@ class SimulatedSensor:
 
     def describe(self) -> str:
         return "simulated scd4x (closed loop)"
+
+
+class WorldSensor:
+    """Reads one position in the shared greenhouse.
+
+    The position is the whole point. `entrance` and `canopy` are the same air
+    but not the same measurement, and a rule tuned against the wrong one is
+    wrong by ~143 ppm of CO2 - which is most of the dead band.
+    """
+
+    def __init__(self, client, position: str, offset_c: float | None = None) -> None:
+        self._client = client
+        self._position = position
+        # Applied here rather than in the world, because on real hardware the
+        # offset lives in the sensor. Modelling it agent-side keeps the
+        # calibration path identical in the sandbox and in the greenhouse.
+        self._offset_c = offset_c
+
+    def start(self) -> None:
+        return None
+
+    def read(self) -> Reading | None:
+        from .world_client import WorldUnreachable
+
+        try:
+            body = self._client.read_site(self._position)
+        except WorldUnreachable as exc:
+            # A sensor that cannot be reached has NO reading. Returning a
+            # fabricated one is the failure mode Safety rule 4 exists for.
+            return Reading(
+                co2_ppm=invalid("ppm", f"world unreachable: {exc}"),
+                temperature_c=invalid("C", "world unreachable"),
+                humidity_pct=invalid("%", "world unreachable"),
+            )
+
+        temp = float(body["temperature_c"])
+        if self._offset_c is not None:
+            temp -= self._offset_c
+        return Reading(
+            co2_ppm=Measurement(value=float(body["co2_ppm"]), valid=True, unit="ppm"),
+            temperature_c=Measurement(value=round(temp, 2), valid=True, unit="C"),
+            humidity_pct=Measurement(value=float(body["humidity_pct"]), valid=True, unit="%"),
+        )
+
+    def stop(self) -> None:
+        return None
+
+    def describe(self) -> str:
+        return f"world sensor at {self._position}"
+
