@@ -48,10 +48,21 @@ echo "==> greenhouse simulator (speed ${SPEED}x)"
 ) >"$RUN/sim.log" 2>&1 &
 echo "sim $!" >> "$RUN/pids"
 
+SIM_PID=$!
 for _ in $(seq 1 40); do
   curl -sf localhost:7100/health >/dev/null 2>&1 && break
   sleep 0.25
 done
+# Health alone is NOT proof the sim we just started is the one answering. An
+# orphan from a previous run holds the port, the new process exits with
+# "address already in use", and the sandbox quietly runs against a world with
+# different constants and a different clock.
+if ! kill -0 "$SIM_PID" 2>/dev/null; then
+  echo "the simulator exited immediately - most likely port 7100 is still held"
+  echo "by an orphan from a previous run. Check: lsof -ti tcp:7100"
+  echo "See $RUN/sim.log"
+  exit 1
+fi
 curl -sf localhost:7100/health >/dev/null || { echo "sim did not start; see $RUN/sim.log"; exit 1; }
 
 # ---------------------------------------------------------------- databases
