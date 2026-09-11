@@ -17,7 +17,8 @@ const THRESHOLDS: RulesThresholds = {
   co2NightOnTemp: 3,
   exhaustOnTemp: 30,
   exhaustOffTemp: 29.5,
-  co2ThresholdPpm: 1500,
+  co2OnPpm: 1400,
+  co2OffPpm: 1500,
 };
 
 const NOON = 12 * 60;
@@ -184,11 +185,20 @@ describe('the day window - start inclusive, end exclusive', () => {
 });
 
 describe('CO2 generator - enrichment by day, heat by night', () => {
+  // A dead band, as lights and the exhaust fan have. Measured with a real
+  // burner: a single setpoint cut at 1509 ppm and wanted back on at 1494, so
+  // every cycle would have been an ignition for seconds of burn.
   it.each([
     [25, 800, 'on', 'co2-below-threshold'],
-    [25, 1499, 'on', 'co2-below-threshold'],
+    [25, 1399, 'on', 'co2-below-threshold'],
+    // Inside the band it HOLDS. Forcing off here is what produced the chatter.
+    [25, 1400, 'noop', 'dead-band'],
+    [25, 1450, 'noop', 'dead-band'],
+    [25, 1499, 'noop', 'dead-band'],
     [25, 1500, 'off', 'co2-at-threshold'],
+    [25, 2000, 'off', 'co2-at-threshold'],
     [25.9, 800, 'on', 'co2-below-threshold'],
+    // Temperature is checked first, so it wins even deep in the on region.
     [26, 100, 'off', 'temp-above-setpoint'],
   ])(
     'by day at %s °C and %s ppm is %s (%s)',

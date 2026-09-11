@@ -153,7 +153,41 @@ six-month-old reading resolving with _its own_ offset.
   it includes the future, almost certainly by accident. Default to `now - 24h → now`, keeping
   end-of-day only when an explicit `?days=n` is given.
 
+## The CO2 dead band, and why it is not one setpoint
+
+`co2OnPpm: 1400` / `co2OffPpm: 1500`. Below 1400 the burner runs, at or above 1500 it stops, and
+**between them it holds** — the same shape as the lights and exhaust-fan bands, which the CO2 rule
+originally lacked.
+
+The numbers are measured, not chosen. Watching a real burner in the greenhouse:
+
+|                                          |                |
+| ---------------------------------------- | -------------- |
+| Charge rate from baseline (~520 ppm)     | ~88 ppm/min    |
+| Charge rate near 1450 ppm                | ~15–20 ppm/min |
+| Decay with the burner off, near 1550 ppm | ~28 ppm/min    |
+| Overshoot after cut-out                  | ~65–105 ppm    |
+| Lag before output shows at the sensor    | ~2.5 min       |
+
+Leak rate scales with the gradient to outside air, so the burner barely out-runs it near the
+setpoint and easily beats it at baseline. That is why a single threshold was untenable: the rule cut
+at 1509 ppm and wanted the burner back on at 1494 — a **15 ppm band**. Ignition cycling is the main
+wear mechanism on a propane appliance, and the gas spent lighting it dwarfs a few seconds of burn.
+The device's 300 s minimum-off was doing all the damping, which it was never meant to do; it is a
+floor, not a control law.
+
+With the band, expect roughly six minutes climbing and three and a half falling. Because of the
+overshoot the real oscillation is nearer **1360–1610** than 1400–1500.
+
+> [!note] A person at the panel trips it
+> Exhaled breath is ~40,000 ppm. Someone working next to the SCD41 spikes it past 1500 within
+> seconds and it decays a minute later — a sharp spike and collapse, quite unlike the slow
+> monotonic rise of real combustion. It only ever turns the burner _off_, so it is harmless, but
+> readings taken while somebody is at the panel cannot be trusted.
+
 ## When to update this file
+
+- A threshold gains or loses a dead band
 
 - A threshold changes (and it changes in the zone's `rules_config`, not in code)
 - A rule body changes, or a fourth rule appears

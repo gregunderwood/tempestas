@@ -9,3 +9,4 @@
 export { InitialSchema1788917132521 } from './1788917132521-InitialSchema';
 export { AddNodeBootId1788923106173 } from './1788923106173-AddNodeBootId';
 export { ScopeReadingDedupeToBoot1788925934987 } from './1788925934987-ScopeReadingDedupeToBoot';
+export { AddCo2DeadBand1789087500000 } from './1789087500000-AddCo2DeadBand';
