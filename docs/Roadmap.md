@@ -383,6 +383,14 @@ One operational note: `npx nx serve server` holds a lock, so a killed server lea
 behind and the next `serve` waits on it forever. Running `node dist/apps/server/main.js` directly is
 the right way to test controller death.
 
+## Running on both boxes
+
+Migrating the far-end Pi 5 off the legacy Flask app means two controllers, and the design for that
+— fencing, what does and does not need replicating, and why the broker is the real single point of
+failure — is in [Multi-Controller](Multi-Controller.md). The prerequisite is small and not yet
+built: the agent logs the heartbeat `epoch` and never compares it, so a node binds to whichever
+controller spoke last.
+
 ## Hardware bring-up and cutover
 
 Software phases and hardware stages are independent; nothing below needs phases beyond 8.
