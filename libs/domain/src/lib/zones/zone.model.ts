@@ -35,7 +35,16 @@ export interface RulesThresholds {
   co2NightOnTemp: number;
   exhaustOnTemp: number;
   exhaustOffTemp: number;
-  co2ThresholdPpm: number;
+  /**
+   * A dead band, like every other role here, rather than one setpoint.
+   *
+   * A single threshold on a combustion appliance chatters: measured in the
+   * greenhouse, the burner cut at 1509 ppm and the rule wanted it back on at
+   * 1494 - a 15 ppm band, so every cycle would have been an ignition for a few
+   * seconds of burn, gated only by the minimum-off time.
+   */
+  co2OnPpm: number;
+  co2OffPpm: number;
 }
 
 export interface ZoneRulesConfig {

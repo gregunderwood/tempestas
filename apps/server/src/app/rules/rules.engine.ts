@@ -145,9 +145,17 @@ function co2Generator(
   // otherwise run it indefinitely on a phantom "CO2 is low".
   const co2 =
     climate.co2Ppm === null ? Number.POSITIVE_INFINITY : climate.co2Ppm;
-  return co2 < t.co2ThresholdPpm
-    ? { desired: 'on', reason: 'co2-below-threshold' }
-    : { desired: 'off', reason: 'co2-at-threshold' };
+
+  // A dead band, as the other two roles have. Between the setpoints the
+  // burner HOLDS rather than being forced off: that is what turns a few
+  // seconds of burn per ignition into a useful run.
+  if (co2 >= t.co2OffPpm) {
+    return { desired: 'off', reason: 'co2-at-threshold' };
+  }
+  if (co2 < t.co2OnPpm) {
+    return { desired: 'on', reason: 'co2-below-threshold' };
+  }
+  return { desired: 'noop', reason: 'dead-band' };
 }
 
 /** Time-independent: an overheating greenhouse needs venting at 3am too. */
