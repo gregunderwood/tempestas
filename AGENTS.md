@@ -15,6 +15,7 @@ every list below, and why "it compiles and the tests pass" is not the bar here.
 - Node registration, admission, capabilities, `pending` → Read [./docs/Infrastructure/Nodes.md](./docs/Infrastructure/Nodes.md)
 - The Python agent on a node (`apps/hardware`) → Read [./docs/Infrastructure/Node Agent.md](./docs/Infrastructure/Node%20Agent.md)
 - Home Assistant, external automation, or "could HA run the rules instead?" → Read [./docs/Infrastructure/Home Assistant.md](./docs/Infrastructure/Home%20Assistant.md)
+- Smart plugs, vendor sensors, pumps, "can we just plug it in?" → Read [./docs/Infrastructure/Off-the-shelf devices.md](./docs/Infrastructure/Off-the-shelf%20devices.md)
 - Entities, schema decisions, queries → Read [./docs/Infrastructure/Database.md](./docs/Infrastructure/Database.md)
 - Reading queries, stats, time windows, retention → Read [./docs/Infrastructure/Readings.md](./docs/Infrastructure/Readings.md)
 - Socket events to the browser → Read [./docs/Infrastructure/Realtime.md](./docs/Infrastructure/Realtime.md)
@@ -23,6 +24,7 @@ every list below, and why "it compiles and the tests pass" is not the bar here.
 - Pins, polarity, relays, the SCD4x sensor, the boot window → Read [./docs/Hardware.md](./docs/Hardware.md)
 - The Angular dashboard, error handling, the banner → Read [./docs/Web App.md](./docs/Web%20App.md)
 - Tests (`*.spec.ts`) → Read [./docs/Testing.md](./docs/Testing.md)
+- Two controllers, failover, running on both greenhouse boxes → Read [./docs/Multi-Controller.md](./docs/Multi-Controller.md)
 - "What's next" / "where were we" → Read [./docs/Roadmap.md](./docs/Roadmap.md)
 - First time in the repo, or nothing runs → Read [./docs/Getting Started/Development setup.md](./docs/Getting%20Started/Development%20setup.md)
 
