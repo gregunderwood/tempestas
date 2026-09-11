@@ -9,7 +9,8 @@
     "  burn-2026-09-10   elantris, four burner cycles observed 17:21-18:31 local",
     "  history-2025      greenhouse Pi 5, 620k readings 2025-08-23..2025-11-01,",
     "                    the last season the burner ran the same scenario",
-    "  paired-2026-09-10 one 2-second-apart sample from both sensors"
+    "  paired-2026-09-10 one 2-second-apart sample from both sensors",
+    "  fit-2026-09-11     refit from fit/fit_envelope.py and fit/fit_burner.py"
   ],
   "air": {
     "outdoor_co2_ppm": {
@@ -18,9 +19,9 @@
       "note": "winter baseline settles ~465 raw; 420 outdoor after sensor bias"
     },
     "leak_fraction_per_minute": {
-      "value": 0.027,
-      "source": "burn-2026-09-10",
-      "note": "fraction of the gradient to outside, never a flat rate"
+      "value": 0.034,
+      "source": "fit-2026-09-11",
+      "note": "Raised from 0.027. Duty cycle is sink/gross and nothing else - the transport lag stretches a cycle but cannot change its ratio - so 44% measured against 88 ppm/min gross requires ~37 ppm/min of removal at the setpoint. Slightly above the 22-32 ppm/min measured directly after a peak; see known_gaps."
     },
     "thermal_coupling_per_minute": {
       "value": 0.02,
@@ -30,9 +31,9 @@
   },
   "burner": {
     "co2_ppm_per_minute": {
-      "value": 91,
-      "source": "burn-2026-09-10",
-      "note": "gross once alight; ~88 net at baseline where leakage is small"
+      "value": 88,
+      "source": "fit-2026-09-11",
+      "note": "Least-squares against elantris's own labelled trace, and consistent with the one long burn: 387->1454 ppm in 14.8 min is +72 ppm/min net, plus ~14 ppm/min of sink at that level."
     },
     "deg_c_per_minute": {
       "value": 0.067,
@@ -40,9 +41,9 @@
       "note": "~1 C per 15 min of run time"
     },
     "transport_lag_minutes": {
-      "value": 2.5,
-      "source": "burn-2026-09-10",
-      "note": "ignition PLUS mixing: time constant between the flame producing CO2 and the sensor seeing it. One constant, two observed behaviours - nothing happens for ~2.5 min after ON, and it keeps climbing ~2.5 min after OFF (the measured +46..+103 ppm overshoot)."
+      "value": 4.5,
+      "source": "fit-2026-09-11",
+      "note": "Was 2.5, and that was the single biggest error. Near the setpoint a 7-minute burn nets only +4..+16 ppm/min because most of the output is still in transit when the burner is commanded off - it then arrives as the overshoot, which peaks 2-3 min AFTER the command. 4.5 min reproduces the on-duration exactly (7.2 sim vs 7.0 measured)."
     }
   },
   "fan": {
@@ -98,10 +99,12 @@
   },
   "known_gaps": {
     "$comment": "Where the model is knowingly wrong. Recorded so nobody mistakes a fitted number for a measured one, or trusts the simulator past what it has earned.",
-    "duty_cycle": "Simulated 5 min on / 12 min off (29%) against 7 on / 9 off (44%) measured 2026-09-10. The PERIOD is right (~17 min); the split is not. The field numbers cannot be reconciled by one linear leak plus one constant burner rate - gross output looks ~81 ppm/min from baseline but ~45 ppm/min near setpoint. Refit both from history-2025 rather than hand-tuning from five points.",
+    "duty_cycle": "Now 37% simulated against 44% measured, up from 29%. On-duration matches (7.2 vs 7.0 min); OFF-duration is still long (12.1 vs 9.0). Closing it entirely would need decay faster than the 22-32 ppm/min measured directly, so the field numbers are not fully self-consistent and the remainder is left as error rather than tuned away.",
     "fan_and_lights": "Every fan and lights constant is an ESTIMATE. Neither has ever run under tempestas, so nothing has been measured. Do not tune a ventilation or lighting rule against this model until it has.",
     "thermal": "thermal_coupling_per_minute is provisional. history-2025 temperatures carry the canopy sensor's uncalibrated offset, so fit time constants and rates from it - never absolute values.",
     "outdoor": "The diurnal curve is a sine, not real weather. Use replay mode when the question depends on actual outdoor conditions.",
-    "humidity": "Transpiration is a flat +0.02 hPa/min with no plant, light or temperature dependence, and vapour is clamped at saturation. Overnight the model therefore parks at 100% RH rather than condensing out. Fine for exercising control paths; not a basis for any humidity rule."
+    "humidity": "Transpiration is a flat +0.02 hPa/min with no plant, light or temperature dependence, and vapour is clamped at saturation. Overnight the model therefore parks at 100% RH rather than condensing out. Fine for exercising control paths; not a basis for any humidity rule.",
+    "identifiability": "Gross output, transport lag and sink cannot be identified simultaneously from 70 minutes of data whose relay transitions are only known to +-30 s - the grid search moved G between 88 and 118 depending on how the trajectory was anchored. The fix is logged relay transitions alongside readings, which tempestas can now produce and the legacy system never did.",
+    "sink_shape": "The 2025 season (16,744 decay points) cannot distinguish a proportional sink from a constant one - residuals differ by 0.5%. Decay there averages 18.4 ppm/min with a p10-p90 of 3.5-37.7, so the shape is assumed, not measured. Note that spread is real physics: vents, wind, light and crop stage, not noise."
   }
 }
