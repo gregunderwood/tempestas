@@ -174,8 +174,14 @@ def test_golden_burn_cycle_matches_2026_09_10(model: Model) -> None:
 
     on_durations = [off[0] - on[0] for on, off in zip(ons, offs, strict=False)]
     off_durations = [on[0] - off[0] for off, on in zip(offs, ons[1:], strict=False)]
-    assert 4 <= sum(on_durations) / len(on_durations) <= 11, on_durations
-    assert 5 <= sum(off_durations) / len(off_durations) <= 14, off_durations
+    # Refit 2026-09-11 puts the on-duration on the measured 7 minutes. The
+    # off-duration is still long (see known_gaps.duty_cycle), so the bound is
+    # honest about that rather than asserting a number the model does not hit.
+    mean_on = sum(on_durations) / len(on_durations)
+    mean_off = sum(off_durations) / len(off_durations)
+    assert 6 <= mean_on <= 9, on_durations
+    assert 8 <= mean_off <= 14, off_durations
+    assert 0.30 <= mean_on / (mean_on + mean_off) <= 0.45, (mean_on, mean_off)
 
 
 def test_overshoot_past_the_cutoff_is_reproduced(model: Model) -> None:
