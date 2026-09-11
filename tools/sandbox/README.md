@@ -66,6 +66,14 @@ curl -X POST localhost:7100/clock -d '{"jump_minutes":420}'   # jump to a bounda
 uv run python tools/sandbox/ctl.py elantris --pin 5 --level 0
 ```
 
+## Do not move the run directory under a dotfile
+
+`up.sh` stages into `tools/sandbox/run/`, deliberately not `.run/`. Express's
+`res.sendFile` applies `dotfiles: 'ignore'` across the whole absolute path, so a
+root under a dot directory makes every deep link 404 while `/` keeps working -
+the static middleware serves that one with a root-relative path that has no dot
+segment. The failure looks exactly like a server-side routing regression.
+
 ## Known gaps
 
 `apps/sim/greenhouse-model.json` carries provenance on every constant and a
