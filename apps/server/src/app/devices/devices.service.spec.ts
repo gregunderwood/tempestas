@@ -1,4 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { Subject } from 'rxjs';
+import { DivergenceLog } from '../common/divergence-log';
+import type { PinStateReport } from '../hardware/hardware.service';
 import type { Repository } from 'typeorm';
 import { ApiErrorCode, DeviceRole, NodeStatus } from '@tempestas/domain';
 import { FixedClock } from '../common/clock';
@@ -399,5 +402,85 @@ describe('DevicesService hardware failure translation', () => {
       .mockRejectedValue(new TypeError('undefined is not a function'));
     const { service } = makeService(burner(), setPin);
     await expect(service.turnOn('dev-1')).rejects.toBeInstanceOf(TypeError);
+  });
+});
+
+/**
+ * A commanded change reaches the server twice: once as the node's `gpio/state`,
+ * once as `drive()`'s own save. The node answers in milliseconds, so the state
+ * report routinely arrives while the row still holds the old value - and
+ * reconciliation called that a divergence on every commanded off.
+ *
+ * Seen live the first time the rules engine cut the burner at 1500 ppm: the
+ * DIVERGENCE line was logged one line before the `-> off` that caused it.
+ * Harmless to the data, corrosive to the alarm - one that fires every time
+ * teaches whoever reads the log to skip the line that matters.
+ */
+describe('DevicesService reconciliation during its own command', () => {
+  const report = (): PinStateReport => ({
+    nodeId: NODE.slug,
+    pin: burner().gpio,
+    // 1 == de-energised on this active-LOW relay.
+    level: 1,
+    known: true,
+    observedAt: NOW,
+  });
+
+  /**
+   * `onReport` decides WHEN the node speaks. Passing it into `setPin` models
+   * the real sequence - the node answers the command in milliseconds, while the
+   * server is still awaiting its own save.
+   */
+  function armed(onReport: 'answers-the-command' | 'unprompted') {
+    const pinStates = new Subject<PinStateReport>();
+    const setPin = vi.fn(async () => {
+      if (onReport === 'answers-the-command') pinStates.next(report());
+    });
+    const hardware = {
+      setPin,
+      syncPins: vi.fn(),
+      pinStates$: pinStates.asObservable(),
+    } as unknown as HardwareService;
+    const divergences = new DivergenceLog();
+    const repo = {
+      // A fresh row each load, as a real repository gives.
+      findOne: vi.fn(async () =>
+        burner({ onAt: new Date(NOW.getTime() - 60_000), offAt: null }),
+      ),
+      save: vi.fn(async (d: DeviceEntity) => d),
+    } as unknown as Repository<DeviceEntity>;
+    const service = new DevicesService(
+      repo,
+      {
+        findOne: vi.fn().mockResolvedValue(NODE),
+      } as unknown as Repository<NodeEntity>,
+      hardware,
+      new FixedClock(NOW),
+      { publishDeviceState: vi.fn() } as unknown as RealtimeGateway,
+      divergences,
+    );
+    service.onModuleInit();
+    return { service, pinStates, divergences };
+  }
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it('does not call its own command a divergence', async () => {
+    const { service, divergences } = armed('answers-the-command');
+    await service.turnOff('dev-1');
+    await settle();
+    expect(divergences.since(new Date(0))).toHaveLength(0);
+    service.onModuleDestroy();
+  });
+
+  // The guard must not swallow a real one. A report with nothing in flight is
+  // the node acting alone - a dead-man trip or a failsafe - which is precisely
+  // what the alarm exists for.
+  it('still reports a divergence when no command is in flight', async () => {
+    const { service, pinStates, divergences } = armed('unprompted');
+    pinStates.next(report());
+    await settle();
+    expect(divergences.since(new Date(0))).toHaveLength(1);
+    service.onModuleDestroy();
   });
 });
