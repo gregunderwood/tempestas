@@ -441,6 +441,13 @@ Then one role at a time, each rollback a single config edit: add the legacy syst
 node so vent state is visible to the burner rule → reflash the Pi 5 to arm64 and admit it as a node
 → move `exhaust_fan` into `enabledRoles`, verify a full day, then `lights`.
 
+**There is a second route for `exhaust_fan`.** A smart plug is a relay channel anywhere there is an
+outlet, and the fan's declared safe state is `off` — the only safe state cheap firmware can hold on
+its own. The fan can therefore move to tempestas **without being wired to elantris at all**,
+decoupling this step from the relay panel and from the two channels that energise but deliver no
+power. It does not extend cleanly to `lights`, whose safe state includes a hold, and never to the
+burner. See [Off-the-shelf devices](Infrastructure/Off-the-shelf%20devices.md).
+
 **Rollback:** the old Pi is untouched and one wire-swap away — target under 15 minutes. **Rehearse
 it once in daylight before the real cutover**; a rollback first performed at 1 a.m. in a cold
 greenhouse is not a rollback procedure. Keep a printed card in the greenhouse with the commands and
@@ -566,6 +573,17 @@ Answer each before its stage, not before starting.
 7. ~~**Stats default window.**~~ **Answered in phase 6:** a rolling 24 hours by default, `days=n`
    aligned to local midnight, and `to` clamped so it is never in the future. See
    [Readings](Infrastructure/Readings.md#how-a-query-becomes-a-window).
+8. **Irrigation is not climate-shaped — what config does it get?** `RulesThresholds` is setpoints,
+   hysteresis and a time window; watering is dose, interval and veto. Forcing one into the other
+   produces config that needs a paragraph to explain itself. It wants its own shape and its own pure
+   evaluator — the same pattern, not the same struct. See
+   [Off-the-shelf devices](Infrastructure/Off-the-shelf%20devices.md).
+   _(Blocks a `pump` role, and cheap to decide before there are rows.)_
+9. **What does watering scope to, given a zone is an airspace?** A zone is deliberately "one
+   airspace, one temperature, one CO2 concentration", which is why rules scope to it. Two benches in
+   one airspace need independent watering, so `zoneId` does not provide the scoping. Either a
+   smaller unit exists, or a pump and its probe scope themselves.
+   _(Blocks a `pump` role.)_
 
 ## Known platform risks
 
