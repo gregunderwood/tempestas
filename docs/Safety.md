@@ -100,6 +100,11 @@ The decided policy for a divergence, and the other half of 3b. `DevicesService` 
   predates a command we have since sent would undo a command that succeeded. This ordering guard is
   also what guarantees a correction always flips the derived state.
 - **An unknown level changes nothing.** Stale is not off.
+- **A pin this server is mid-command on is skipped.** A commanded change arrives twice — as the
+  node's `gpio/state`, and as `drive()`'s own save — and the node answers in milliseconds while the
+  save is still in flight, so the row legitimately still holds the old value. Without the guard
+  every commanded off was reported as a divergence. An alarm that fires each time teaches whoever
+  reads the log to skip the line that matters.
 - **It alarms.** ERROR to the log, a `device:state` push so any connected browser is immediately
   right, and an entry in `GET /api/health`'s `problems` for 24 h — long enough that an overnight
   failsafe is still reported in the morning. A divergence means something upstream already failed,

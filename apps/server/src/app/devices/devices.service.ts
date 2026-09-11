@@ -39,6 +39,20 @@ import { correctionPatch, reconcilePinState } from './reconcile-pin-state';
 export class DevicesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DevicesService.name);
   private pinStates?: Subscription;
+  /**
+   * Pins this service is mid-command on, as `node:pin`.
+   *
+   * A commanded change reaches us twice: once as the node's `gpio/state`, and
+   * once as our own write when `drive()` finishes. The state report routinely
+   * wins, because the node answers in milliseconds while we are still awaiting
+   * the save - so reconciliation saw a row that still said "on" for a relay the
+   * node had just opened ON OUR INSTRUCTION and called it a divergence.
+   *
+   * That fired on every commanded off. An alarm that cries wolf each time is
+   * worse than no alarm: it teaches whoever reads the log to skip the line that
+   * matters.
+   */
+  private readonly inFlight = new Set<string>();
 
   constructor(
     @InjectRepository(DeviceEntity)
@@ -81,6 +95,10 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
    * left alone - the timestamps are the audit trail.
    */
   private async reconcile(report: PinStateReport): Promise<void> {
+    // Our own command, still completing. The node has already acted and said
+    // so; the row catches up a moment later in `drive()`.
+    if (this.inFlight.has(`${report.nodeId}:${report.pin}`)) return;
+
     const device = await this.devices.findOne({
       where: { gpio: report.pin, node: { slug: report.nodeId } },
       relations: { node: true },
@@ -269,6 +287,10 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       });
     }
 
+    // Held across the write AND the save below. Releasing it any earlier
+    // reopens the race it exists to close.
+    const key = `${device.node.slug}:${device.gpio}`;
+    this.inFlight.add(key);
     try {
       await this.hardware.setPin(device.node.slug, {
         pin: device.gpio,
@@ -276,6 +298,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
         label: device.name,
       });
     } catch (err: unknown) {
+      this.inFlight.delete(key);
       // A known hardware condition is not a 500. An offline node, an
       // unacknowledged command and a readback mismatch are all expected states
       // with distinct remedies, and the client - browser or rules engine - has
@@ -290,7 +313,11 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     } else {
       device.offAt = now;
     }
-    await this.devices.save(device);
+    try {
+      await this.devices.save(device);
+    } finally {
+      this.inFlight.delete(key);
+    }
     this.logger.log(
       `${device.name} -> ${direction} (node ${device.node.slug} pin ${device.gpio})`,
     );
