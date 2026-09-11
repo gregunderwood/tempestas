@@ -84,13 +84,13 @@ This is why the rest of the design can be simple.
 The instinct is to replicate Postgres so either box can take over. Don't — that turns one hard
 problem into two. Ask instead what **control** actually needs, and where it already lives:
 
-| What                                  | Where it belongs                                                       |
-| ------------------------------------- | ---------------------------------------------------------------------- |
-| Zones, thresholds, device definitions | **config in the repo**, provisioned to both boxes. Reviewed, versioned |
-| Current relay state                   | already on the bus — retained `gpio/state`                             |
-| Latest readings                       | already on the bus                                                     |
-| Anti-short-cycle timestamps           | the only genuinely shared operational state — see below                |
-| Reading history, stats                | per box, and needs no agreement at all                                 |
+| What                                  | Where it belongs                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Zones, thresholds, device definitions | **replicated config** — see [Configuration](#configuration-two-tiers-split-by-who-can-know) |
+| Current relay state                   | already on the bus — retained `gpio/state`                                                  |
+| Latest readings                       | already on the bus                                                                          |
+| Anti-short-cycle timestamps           | the only genuinely shared operational state — see below                                     |
+| Reading history, stats                | per box, and needs no agreement at all                                                      |
 
 The far-end box has **2.89 million readings going back to 2025-08-23**, a full season of the actual
 greenhouse. That is not a cache to be rebuilt from a leader — it is the only copy, and it belongs to
@@ -110,6 +110,106 @@ order:
 1. **Derive it from the retained `gpio/state` timestamp** — the node already publishes when the
    line changed, and that is the truth the interlock cares about.
 2. Publish device state on its own retained topic, making it explicit rather than inferred.
+
+## Configuration: two tiers, split by who can know
+
+> [!note] This replaces an earlier answer
+> This document used to say config lived **in the repo**, provisioned to both boxes. That was
+> dodging the problem, not solving it: it means a deploy to two machines to change a CO2 setpoint
+> from 1500 to 1450 ppm, for a value that wants tuning seasonally. The intent is a UI that creates
+> zones, assigns nodes, configures devices and writes rules.
+
+The difficulty is that config then has **two legitimate writers with different rights**, and the
+split is not a preference — it follows from what each box is physically able to know.
+
+| Tier          | Holds                                      | Written by                           | Why it must be that way                                                                  |
+| ------------- | ------------------------------------------ | ------------------------------------ | ---------------------------------------------------------------------------------------- |
+| **Inventory** | What exists and how to reach it            | **Each box, for what it can reach**  | Only the box holding a Zigbee dongle can enumerate its own paired devices                |
+| **Policy**    | Zones, roles, thresholds, schedules, rules | **The leader only**, fenced by epoch | Anything that can energise something needs one writer, and the epoch already provides it |
+
+Both tiers are published as **versioned retained documents** and materialised by every box into its
+own Postgres. Neither is merged: ownership partitions the keyspace, so there is no conflict to
+resolve and no merge semantics to define.
+
+### Single writer, not single holder
+
+The point that is easy to misread. **Every box holds a complete, current copy of the policy at all
+times** — the leader is merely the only one allowed to _change_ it. Promotion therefore involves no
+setup and no catch-up: the successor already has the policy, in two independent places.
+
+1. **Retained on its own broker.** Brokers are bridged, so the document sits on the local mosquitto.
+2. **Materialised in its own Postgres**, applied version by version as it arrived.
+
+A follower's UI shows policy read-only and says so — _"following elantris — promote this box to
+edit"_ — rather than silently accepting edits it cannot publish.
+
+### Publish the whole document, not per-entity topics
+
+Config is a referential graph: a rule references a role, a device references a node and a zone.
+Per-entity topics let a follower observe a rule before the device it names. One document per tier,
+published atomically, carrying `{epoch, version, schemaVersion, updatedAt, updatedBy}`, removes that
+failure entirely. It is kilobytes; there is nothing to optimise.
+
+A follower applies a policy document only if `epoch >=` its highest seen **and** `version >` its
+current — the same fencing rule as commands, doing a second job. It refuses a `schemaVersion` it
+does not understand rather than partially applying it.
+
+### Discovery proposes; a human adopts
+
+Off-the-shelf devices announce themselves, and Home Assistant will find them whether or not anyone
+asked (see [Off-the-shelf devices](Infrastructure/Off-the-shelf%20devices.md)). So discovery writes
+**inventory** and nothing else. Turning an inventory entry into a device with a role is a policy
+write, performed by a person, on the leader.
+
+**No machine ever creates a row that can energise something.** That also makes the doc's _"one owner
+per device"_ a schema constraint rather than a rule somebody has to remember.
+
+### Policy transfers for free; reachability does not
+
+Promoting the far end hands over every rule and threshold intact. It does **not** hand over:
+
+- **Devices wired to the box that is gone.** The CO2 generator is on elantris's relay 6 / BCM 5.
+  A successor has authority over it and no copper to it.
+- **A pinned sensor source.** `"byRole": { "co2_generator": { "source": "node:elantris" } }` dangles.
+  [Safety](Safety.md) rule 4 turns the missing reading into `+Infinity`, so the burner stays off —
+  it fails safe, but it fails _silently useless_. Make that degrade loudly.
+- **Radio-bound devices.** Paired to one box's dongle, gone with it.
+
+Which is why the device row should record its **reachability class**, because it decides what
+failover can even mean:
+
+| Class                | Example                   | Commandable by                 | On failover                                                         |
+| -------------------- | ------------------------- | ------------------------------ | ------------------------------------------------------------------- |
+| **Pin**              | relay 6 · BCM 5           | only its own node              | Node keeps driving it; control moves, wiring does not               |
+| **Broker-reachable** | Tasmota / ESPHome plug    | any box that reaches a broker  | Clean — but `issuedBy` does not exist, so the ACL is the only guard |
+| **Radio-bound**      | Zigbee / BLE via a dongle | only the box holding the radio | **None.** A per-device single point of failure                      |
+
+With that recorded, promotion can state plainly which devices the operator is _not_ getting.
+
+### Foundations to lay before there are rows
+
+Cheap now, expensive later, and all of them matter even with a single box:
+
+1. **Split config from runtime state on `devices`.** `onAt`/`offAt` change every cycle and sit on the
+   same row as `gpio`, `onLevel` and `role`. Config cannot be replicated until they are separated.
+2. **Make the address re-bindable.** Identity is the uuid; `(nodeId, gpio)` is a mutable attribute.
+   A plug that is factory reset or replaced then keeps its role binding and its history instead of
+   being deleted and recreated.
+3. **Record reachability class and owner** per device, per the table above.
+4. **Treat a device's own safe-state timer as _verified_ config.** Tasmota's `PulseTime` is the only
+   layer that survives a partition, and a factory reset clears it silently. Config must be reconciled
+   against the device, not merely replicated between boxes.
+5. **Inventory is not devices.** A discovered thing is a proposal until adopted.
+6. **Verify `onLevel` by driving it, not by typing it.** It is the field that lights the MH lamp if
+   wrong. A device with `supportsReadback` can confirm itself, so the config discovery wrote is also
+   the config that can be auto-verified.
+
+### Persist the epoch high-water mark on the node
+
+The fencing token is only as good as the node's memory of it. A node that forgets its highest-seen
+epoch across a restart will accept a rebuilt controller starting fresh at a low epoch — and then two
+controllers are both being obeyed, which is the failure this entire document exists to prevent.
+**Write it to disk, read it at startup.**
 
 ## Leadership is deliberate, not automatic
 
@@ -175,15 +275,22 @@ Two consequences:
    testable with no hardware, and it unblocks everything else.
 2. **Calibrate the canopy SCD41**, a prerequisite for trusting anything the far end reports — it
    has never had an offset set. No software needed.
-3. **Config as code** for zones and devices, so a second box is _provisioned_ rather than replicated.
-4. **Follower ingest** — a non-leader still persists readings and tracks pin state.
-5. **Promote / demote**, with the epoch bumped on promotion and a refusal if a higher one is seen.
-6. **Broker bridging**, once there is a second box to bridge to.
-7. Automatic failover with a witness — only if still wanted by then.
+3. **Schema foundations** — split config from runtime state, make the address re-bindable, record
+   reachability and owner. Single box, no distribution, but everything below depends on it.
+4. **Policy as a versioned document** with an append-only change log, written through the UI. Still
+   one box; this is where the repo-config answer is actually replaced.
+5. **Explicit "sync config from leader"** with a visible diff — the manual form of replication, worth
+   shipping before the automatic one because it is a few hours' work and the same mental model.
+6. **Follower ingest** — a non-leader still persists readings and tracks pin state.
+7. **Promote / demote**, with the epoch bumped on promotion and a refusal if a higher one is seen.
+8. **Replicate both config tiers as retained documents**; follower UI goes read-only for policy.
+9. **Broker bridging**, once there is a second box to bridge to.
+10. Automatic failover with a witness — only if still wanted by then.
 
 ## When to update this file
 
 - Fencing, promotion or the epoch rule changes
 - The broker topology changes
 - The unit of leadership changes (greenhouse-wide vs per-zone)
+- The config tiers, their ownership, or the reachability classes change
 - Any of this stops being a plan and becomes something that runs
