@@ -438,24 +438,89 @@ it once in daylight before the real cutover**; a rollback first performed at 1 a
 greenhouse is not a rollback procedure. Keep a printed card in the greenhouse with the commands and
 wiring, and don't reformat the Pi 5's SD card for at least a month.
 
-## Deployment (phases 8+, not yet built)
+## Deployment
 
-| Component               | Runtime                                                       | Why                                                                                                                                                                      |
-| ----------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Python node agent       | **native systemd**                                            | Needs `/dev/gpiochip0`, `/dev/i2c-1`, group membership — and must start even if dockerd is broken. Never put a container runtime in front of the safety-critical process |
-| Mosquitto               | **native systemd**                                            | The agent depends on it; keep the whole safety path Docker-free (~8 MiB)                                                                                                 |
-| Postgres 17             | **native apt**                                                | One canonical data directory managed by `pg_ctlcluster`, no bind-mount path to typo. Saves ~200 MiB of duplicated page cache on a 3.7 GiB box                            |
-| NestJS + Angular bundle | **Docker**, built on the Mac, pushed to GHCR, pulled over SSH | The Mac is arm64, so images build natively with no QEMU                                                                                                                  |
+**Everything runs bare metal under systemd. No containers anywhere on this box.**
 
-Other decisions already made: **Caddy** over nginx (automatic WebSocket upgrade — the
-`map $http_upgrade` footgun is sitting in the current greenhouse nginx.conf; SPA fallback in one
-line). **Tailscale** rather than ngrok. Plain HTTP on the LAN; never exposed to the internet.
-Hardware watchdog on. Nightly `pg_dump -Fc` **pushed off-box** to the Mac — a backup living only on
-the same SD card is not a backup — plus one restore drill, because an untested backup is a
-hypothesis. Keep `/etc/tempestas/`, the Mosquitto config, the Caddyfile and all units **in the
-repo**, installed by a `provision.sh`, so Postgres is the only stateful thing.
+| Component               | Runtime            | Why                                                                                                                                                                  |
+| ----------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Python node agent       | **native systemd** | Needs `/dev/gpiochip0`, `/dev/i2c-1`, group membership — and must start even if anything else is broken. Never put a runtime in front of the safety-critical process |
+| Mosquitto               | **native systemd** | The agent depends on it; keep the whole safety path free of extra layers (~8 MiB)                                                                                    |
+| Postgres 17             | **native apt**     | One canonical data directory managed by `pg_ctlcluster`, no bind-mount path to typo. Saves ~200 MiB of duplicated page cache on a 3.7 GiB box                        |
+| NestJS + Angular bundle | **native systemd** | One Node process serving both the API and the SPA. See below                                                                                                         |
 
-The app and agent write JSON to **stdout and own no files**; journald caps itself
+> [!note] Live since 2026-09-10
+> `tempestas-server.service` runs on elantris against native Postgres, serving the Angular bundle
+> on `:7000`. Verified end to end: SPA at `/`, deep links falling back to `index.html`, `/api/nope`
+> returning **404 rather than index.html**, and a real WebSocket (`transport=websocket`, no
+> polling) carrying `reading:latest` every ~10 s with no proxy in front. All four units are
+> `enabled`, so it comes back on boot.
+
+### Why not Docker, having planned it
+
+The plan called for the app in Docker, built on the Mac and pulled from GHCR. The justification was
+"the Mac is arm64, so images build natively with no QEMU" — which argues that Docker _works_ here,
+not that it earns its place. Against that: dockerd plus containerd is a couple of hundred MiB of
+RSS and another daemon that can fail, on the box whose own safety doc calls the OOM killer a
+hazard, and it puts a registry round-trip over the internet in the path of deploying to a LAN-only
+machine. Everything safety-critical was already native; this makes the app match.
+
+### And no Caddy either
+
+Caddy was in the plan for SPA fallback and the WebSocket upgrade. **NestJS serves the Angular
+bundle itself**, and it already owns the socket.io upgrade — so the `map $http_upgrade` footgun
+Caddy was chosen to avoid stops existing rather than being handled in one line. One process, and
+nothing in front of the API.
+
+### Four things this gets wrong if you are not careful
+
+- **systemd cannot use nvm.** nvm is a shell function sourced from `.bashrc`, which does not run
+  non-interactively — `ssh elantris 'node -v'` finds nothing even with nvm installed. Its binary
+  path also embeds the version, so upgrading Node silently breaks the unit. Install with nvm, then
+  point the unit at a stable symlink:
+
+  ```bash
+  sudo ln -sfn "$(nvm which 22)" /usr/local/bin/node
+  sudo ln -sfn "$(dirname "$(nvm which 22)")/npm" /usr/local/bin/npm
+  ```
+
+  It has to be named `node`. A prefixed name like `tempestas-node` looks tidier and breaks npm,
+  which starts `#!/usr/bin/env node` and finds nothing on a non-interactive PATH. Upgrading Node is
+  then: install, repoint both, restart — the same shape as the agent's absolute venv path.
+
+- **Never build on the Pi.** An Angular production build is 1.5–2.5 GiB on a 3.7 GiB box, which
+  puts Postgres and the burner controller in reach of the OOM killer. Build on the Mac and ship
+  `dist/`. The server bundle sets `generatePackageJson: true`, so `npm ci --omit=dev` against the
+  generated manifest installs only runtime dependencies.
+
+- **The OOM ordering matters more than the numbers.** The agent is killed last: it enforces the
+  dead-man locally and is the only thing still running when the server is gone. The **server is the
+  least protected** of the four, not equal to the agent.
+
+- **A deploy turns the burner off.** Stopping the server fires its last will, the node fails safe
+  within ~3 s, and the relay opens for the length of the deploy. Downtime is acceptable by
+  decision, but do it in daylight rather than on a January night.
+
+### Deploying
+
+No zero-downtime machinery, by decision — a few minutes offline is fine.
+
+1. Build on the Mac, `rsync` `dist/` and the units to the Pi.
+2. `npm ci --omit=dev` in the server's dist folder if its manifest changed.
+3. Run any migrations **manually**, and check `migration:show` first.
+4. `systemctl restart` the units.
+
+**Only one controller may hold the heartbeat.** With the server on the Pi, starting
+`nx serve server` on the Mac against the same broker puts two controllers on one relay. That
+handover belongs in one script so it cannot be half-done.
+
+Keep `/etc/tempestas/`, the Mosquitto config and every unit **in the repo**, installed by a
+provision script, so Postgres stays the only stateful thing on the box. Nightly `pg_dump -Fc`
+**pushed off-box** to the Mac — a backup living on the same SD card is not a backup — plus one
+restore drill, because an untested backup is a hypothesis. Tailscale rather than a port-forward if
+remote access is ever wanted. Hardware watchdog on, but only after the firmware `gpio=` defaults.
+
+The app and agent write to **stdout and own no files**; journald caps itself
 (`SystemMaxUse=200M`, `MaxRetentionSec=14day`). That is the structural fix for the old system's
 5.4 GB log — it grew unbounded because the app owned its own file and nothing capped it.
 
