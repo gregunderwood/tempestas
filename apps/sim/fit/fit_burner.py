@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import math
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # Observed live, local time, +-30 s (the watcher polled every 30 s).
 ON_WINDOWS_LOCAL = [
@@ -38,12 +38,15 @@ ON_WINDOWS_LOCAL = [
 LOCAL_OFFSET_H = 7  # America/Vancouver, PDT
 
 
-def to_utc(s: str) -> datetime:
-    return datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timestamp() + LOCAL_OFFSET_H * 3600
+def to_utc(s: str) -> float:
+    """Local wall-clock string -> POSIX seconds. Returns a timestamp, not a datetime."""
+    naive = datetime.fromisoformat(s).replace(tzinfo=UTC)
+    return naive.timestamp() + LOCAL_OFFSET_H * 3600
 
 
 def load(path: str) -> list[tuple[float, float]]:
-    rows = json.load(open(path))
+    with open(path) as fh:
+        rows = json.load(fh)
     out = []
     for r in rows:
         if r.get("co2") is None:
@@ -106,8 +109,8 @@ def main(path: str) -> int:
     end = on_spans[-1][1] + 8 * 60
     series = [p for p in series if start <= p[0] <= end]
     print(f"samples in the labelled window: {len(series)}")
-    print(f"  {datetime.fromtimestamp(series[0][0], timezone.utc)} .. "
-          f"{datetime.fromtimestamp(series[-1][0], timezone.utc)}")
+    print(f"  {datetime.fromtimestamp(series[0][0], UTC)} .. "
+          f"{datetime.fromtimestamp(series[-1][0], UTC)}")
 
     best = None
     for gi in range(20, 141, 2):                  # 20..140 ppm/min

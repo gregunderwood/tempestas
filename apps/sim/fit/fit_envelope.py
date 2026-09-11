@@ -175,8 +175,10 @@ def main(path: str) -> int:
         if len(g) < 50:
             continue
         m = len(g)
-        gsx = sum(p[0] for p in g); gsy = sum(p[1] for p in g)
-        gsxx = sum(p[0] * p[0] for p in g); gsxy = sum(p[0] * p[1] for p in g)
+        gsx = sum(p[0] for p in g)
+        gsy = sum(p[1] for p in g)
+        gsxx = sum(p[0] * p[0] for p in g)
+        gsxy = sum(p[0] * p[1] for p in g)
         gd = m * gsxx - gsx * gsx
         if gd == 0:
             continue
