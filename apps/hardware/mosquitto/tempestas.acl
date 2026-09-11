@@ -44,6 +44,24 @@ topic read tempestas/v1/node/elantris/control/heartbeat
 # rather than waiting out its dead-man when the brain dies.
 topic read tempestas/v1/server/status
 
+# ------------------------------------------------------------ greenhouse
+#
+# The far-end Pi 5. Same shape as elantris and for the same reasons - own
+# subtree only, no write on gpio/set. It drives more lines than elantris does
+# (HPS via a contactor, the exhaust fans, and the MH light on its own
+# active-HIGH module), which makes the scoping matter more here, not less.
+user greenhouse
+topic write tempestas/v1/node/greenhouse/hello
+topic write tempestas/v1/node/greenhouse/status
+topic write tempestas/v1/node/greenhouse/sensor/+/sample
+topic write tempestas/v1/node/greenhouse/gpio/result
+topic write tempestas/v1/node/greenhouse/gpio/state/+
+topic write tempestas/v1/node/greenhouse/alarm
+topic read tempestas/v1/node/greenhouse/gpio/set
+topic read tempestas/v1/node/greenhouse/gpio/sync
+topic read tempestas/v1/node/greenhouse/control/heartbeat
+topic read tempestas/v1/server/status
+
 # ------------------------------------------------------------ observers
 #
 # Read-only across the whole tree, for the soak logger and anything else that

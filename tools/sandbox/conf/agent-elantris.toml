@@ -1,0 +1,26 @@
+# Sandbox elantris. Mirrors /etc/tempestas/agent.toml on the real box, with
+# only the backends swapped for the shared world.
+node_id = "elantris"
+kind = "rpi"
+agent_version = "0.1.0"
+deadman_s = 30.0
+
+[mqtt]
+url = "mqtt://127.0.0.1:1883"
+
+[world]
+url = "http://127.0.0.1:7100"
+position = "entrance"      # by the door, ventilated, calibrated
+
+[sensor]
+kind = "world"
+sensor_id = "scd4x-0"
+sample_interval_s = 10.0
+
+[gpio]
+# BCM 5 -> In6, the propane CO2 generator. Seven channels spare.
+lines = [5]
+chip_label = "pinctrl-bcm2711"
+
+[gpio.failsafe]
+5 = 1   # active-LOW: 1 is de-energised

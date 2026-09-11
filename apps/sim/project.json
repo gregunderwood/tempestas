@@ -1,0 +1,24 @@
+{
+  "name": "sim",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["type:app", "scope:sim"],
+  "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": { "command": "uv run ruff check .", "cwd": "apps/sim" }
+    },
+    "format": {
+      "executor": "nx:run-commands",
+      "options": { "command": "uv run ruff format .", "cwd": "apps/sim" }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": { "command": "uv run pytest -q", "cwd": "apps/sim" }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": { "command": "uv run tempestas-sim", "cwd": "apps/sim" }
+    }
+  }
+}
