@@ -193,22 +193,93 @@ This is a cheap additional layer, **not** a replacement for the measurement. The
 what a high-impedance input actually does depends on the relay board's own circuit. Choose these
 pins anyway - it costs nothing and removes one way to be wrong.
 
+## The greenhouse Pi 5's relay board
+
+A different board from elantris's, with a different channel count and a **contactor in the lights
+path**. Confirmed against the running system 2026-09-10.
+
+**4 channels, 10 A each**
+([B07DN8DTRW](https://www.amazon.ca/dp/B07DN8DTRW)) — not the 8-channel board elantris uses. Four
+channels is the whole budget, and all four are already spoken for. A fifth load — the MH light —
+hangs off a separate relay module on its own pin.
+
+| BCM | Drives             | Switched by                                              |
+| --- | ------------------ | -------------------------------------------------------- |
+| 21  | **HPS lights** (2) | 4-ch board → **contactor** — the board carries no load   |
+| 20  | Exhaust fans       | 4-ch board directly — the only load it switches itself   |
+| 16  | CO2 generator      | 4-ch board — **going dark**, CO2 moves to elantris       |
+| 12  | nothing            | 4-ch board, no outlet on the other end                   |
+| 26  | **MH light** (1)   | **Its own relay module**, not the 4-ch board — see below |
+
+That is five loads across four board channels, which is the thing to get straight: **the MH light
+does not use the 4-channel board at all.**
+
+### The lights run through a contactor, not the relay board
+
+The two HPS lights' load comes through a separate higher-current relay
+([B08JHPKBKB](https://www.amazon.ca/dp/B08JHPKBKB)), and the 10 A board channel only drives that
+relay's coil. So BCM 21 switches a **coil**, not a ballast.
+
+This matters for more than wiring accuracy:
+
+- **Two HPS ballasts are not a 10 A load you want on a hobby relay board.** The inrush on a magnetic
+  ballast dwarfs its running current, and the contactor exists precisely so that surge lands on a
+  part rated for it. Do not "simplify" this by moving the lights onto a board channel directly.
+- **There is a second device between the pin and the light.** A stuck contactor looks exactly like a
+  working relay from the Pi's side. Pin state is not proof the lights changed — which is the same
+  argument [Safety](Safety.md) makes for reading state back rather than assuming it.
+
+### `Extra Relay` (BCM 12) is identified — it drives nothing
+
+Resolved 2026-09-10: the channel is connected to the board and **has no outlet or load on the other
+end**. It is a spare, not a mystery, and the old ⚠ against it is withdrawn.
+
+That makes it the obvious channel for the first far-end device that needs one, and the safest
+possible target for a live bench test, since energising it cannot switch anything.
+
+### The MH light is on its own relay module
+
+There are two light fixtures and they are wired differently, which is why there are two light rows:
+
+|             | **HPS lights**                                                             | **MH light**                                                             |
+| ----------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Count       | 2 fixtures                                                                 | 1 fixture                                                                |
+| Pin         | BCM 21                                                                     | BCM 26                                                                   |
+| Switched by | 4-ch board → contactor ([B08JHPKBKB](https://www.amazon.ca/dp/B08JHPKBKB)) | its own relay module ([B00WV7GMA2](https://www.amazon.ca/dp/B00WV7GMA2)) |
+| On level    | **LOW** (active-low)                                                       | **HIGH** (active-high)                                                   |
+
+**The two fixtures have opposite polarity**, because they are switched by different hardware. This
+is the single best argument in the system for `onLevel` being per-device data rather than a board
+constant — one greenhouse, one Pi, two lights, two conventions. A migration that assumed "the
+greenhouse board is active-low" would light the MH lamp the moment the pin was claimed.
+
+Read live, BCM 26 is the only one of the five pins resting LOW:
+
+```
+12: op dh pd | hi     16: op dh pd | hi     20: op dh pd | hi
+21: op dh pd | hi     26: op dl pd | lo   ← active-HIGH, so this is OFF
+```
+
+That is **correct and expected**, not an anomaly: LOW on an active-high line is off, exactly as HIGH
+on the four active-low lines is off. All five loads are currently de-energised. The inverse is the
+trap — a pin resting HIGH would mean the MH lamp is lit.
+
 ## The devices
 
 Verified live from the greenhouse Postgres. These get re-entered by hand into the fresh database.
 
-| name          | gpio | on_delay (s) | on level               | rules today | goes where                   |
-| ------------- | ---- | ------------ | ---------------------- | ----------- | ---------------------------- |
-| CO2 Generator | 16   | 300          | **LOW** (active-low)   | disabled    | → **elantris / tempestas**   |
-| Exhaust Fan   | 20   | 60           | LOW                    | enabled     | stays on the Pi 5 for now    |
-| Lights        | 21   | 900          | LOW                    | enabled     | stays on the Pi 5 for now    |
-| Single Light  | 26   | 900          | **HIGH** (active-high) | enabled     | stays on the Pi 5 for now    |
-| Extra Relay   | 12   | 0            | LOW                    | disabled    | spare — **unknown function** |
+| name          | gpio | on_delay (s) | on level               | rules today | goes where                                |
+| ------------- | ---- | ------------ | ---------------------- | ----------- | ----------------------------------------- |
+| CO2 Generator | 16   | 300          | **LOW** (active-low)   | disabled    | → **elantris**; channel goes dark         |
+| Exhaust Fan   | 20   | 60           | LOW                    | enabled     | stays at the far end                      |
+| Lights        | 21   | 900          | LOW                    | enabled     | stays at the far end, via contactor       |
+| Single Light  | 26   | 900          | **HIGH** (active-high) | enabled     | ⚠ **no channel** — trace before migrating |
+| Extra Relay   | 12   | 0            | LOW                    | disabled    | spare, drives nothing                     |
 
 Two things this table settles:
 
 - **Active-high vs active-low is per-device data, not a constant.** Four relays are active-LOW
-  (standard opto-isolated boards); `Single Light` is active-HIGH. That is why `onLevel` is a column
+  (the 4-channel opto-isolated board); `MH Light` is active-HIGH on its own module. That is why `onLevel` is a column
   and why a node receives explicit electrical levels rather than "on"/"off".
 - **The CO2 handover is clean.** `CO2 Generator` already has automation disabled on the old system,
   so moving it is a wiring change plus enabling the rule here — not two controllers contending for
@@ -228,9 +299,9 @@ not the relay channel:
 | `onDelayDuration` | 300 (the anti-short-cycle minimum-off)          |
 | `role`            | `co2_generator`                                 |
 
-⚠ **`Extra Relay` (BCM 12) is unidentified and active-LOW.** `on_delay_duration = 0` suggests
-something benign, but until somebody traces the wire, treat it as hazardous and do not wire it to
-elantris.
+`Extra Relay` (BCM 12) is **no longer unidentified** — it is a board channel with nothing on the
+far end. See [above](#extra-relay-bcm-12-is-identified--it-drives-nothing). The open question has
+closed too: `MH Light` (BCM 26) is the single Metal Halide fixture on its own relay module.
 
 ## Select the GPIO chip by label, not by number
 
@@ -255,6 +326,52 @@ mitigated. Full detail, the measurement that gates it, and the three required mi
 
 **SCD-4x (Adafruit SCD-41, STEMMA QT)** on I²C, `/dev/i2c-1`, address `0x62`. Currently one per node;
 the capability model allows several.
+
+### The far-end sensor is the one over the plants
+
+There are two SCD41s, and they are **not interchangeable**:
+
+|        | `elantris`                     | `greenhouse`                         |
+| ------ | ------------------------------ | ------------------------------------ |
+| Where  | By the greenhouse **entrance** | **Directly under the plant canopy**  |
+| Air    | Ventilated, near the door      | Sheltered, at the grow site          |
+| Offset | Tuned: **3.2 °C** (see below)  | **Never set** — factory default only |
+
+The canopy sensor measures **what the plants are actually in**. The entrance sensor measures the
+airspace nearest the door, which is the first air disturbed whenever the greenhouse is opened and
+the first to track outdoor temperature. For a question like "is the canopy too hot" or "did the
+enrichment reach the plants", the far-end sensor is the better instrument and the entrance one is a
+proxy — even though the entrance box is the one with the calibrated sensor and the CO2 generator.
+
+That inverts the obvious reading of the [Multi-Controller](Multi-Controller.md) design. The leader is
+whichever box holds the heartbeat, but **the best measurement of the growing environment lives on the
+follower**, so a leader at the entrance is controlling partly on a proxy. Two consequences worth
+holding onto:
+
+- **Readings must cross the bus regardless of who leads.** This is already how the design works —
+  both boxes ingest everything — but it is load-bearing, not merely tidy.
+- **Calibrate the canopy sensor before trusting it for control.** It is running on the SCD4x factory
+  default offset with no compensation for its mounting or self-heating, which is the same state
+  elantris was in when it was reading ~3 °C warm.
+
+#### One paired sample, 2 s apart (2026-09-10 18:43)
+
+|      | entrance (corrected) | canopy (**uncalibrated**) |
+| ---- | -------------------- | ------------------------- |
+| Temp | 20.97 °C             | 24.93 °C                  |
+| RH   | 64.9 %               | 52.4 %                    |
+| CO2  | 1181 ppm             | 1038 ppm                  |
+
+Do not read the 4 °C gap as a 4 °C gradient. Run both through Magnus and the **water vapour
+pressure agrees to ~2.5 %** (16.08 vs 16.48 hPa) — which is what two sensors in _well-mixed air_
+look like when one has an uncorrected temperature offset, because the SCD4x derives RH from the same
+internal temperature it is reporting. The temperature difference is mostly instrument, not climate.
+
+**CO2 is the honest tracer**, because it is injected at the entrance rather than being a derived
+quantity: ~143 ppm higher at the entrance than at the canopy, in the same minute. That gap is a real
+mixing gradient, and it is the measurement that says enrichment at the entrance arrives thinner
+where the plants are. One paired sample is not a result — confirm it across a burn cycle before
+sizing anything on it.
 
 Measured on elantris (2026-09-09), with `scd4x_healthcheck.py`:
 
@@ -424,7 +541,7 @@ for this, and it is exactly when somebody is most likely to be out there looking
 ## When to update this file
 
 - A device is added, moved, rewired, or its polarity or pin changes
-- `Extra Relay` is finally identified
+- A light fixture is rewired, or either the contactor or the MH relay module is changed
 - A node is added to the LAN, or an IP/hostname changes
 - A sensor is replaced, or its offset is re-tuned
 - A new build dependency is discovered on a fresh OS image
