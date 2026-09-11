@@ -120,20 +120,47 @@ def main(path: str) -> int:
                 rms = simulate(series, on_spans, g, tau, s)
                 if best is None or rms < best[0]:
                     best = (rms, g, tau, s)
+    # Segment rates first, because they are model-free and they are what
+    # actually decided the constants. The grid search below is reported for
+    # completeness and should NOT be read as an answer - see the warning.
+    print()
+    print("observed rates per segment (no model)")
+    print(f"  {'state':5} {'window':13} {'ppm/min':>8}  {'peak':>6}")
+    bounds = boundaries(on_spans)
+    edges = [series[0][0], *bounds, series[-1][0]]
+    for i in range(len(edges) - 1):
+        seg = [p for p in series if edges[i] <= p[0] <= edges[i + 1]]
+        if len(seg) < 3:
+            continue
+        mins = (seg[-1][0] - seg[0][0]) / 60.0
+        state = "ON " if any(a <= seg[0][0] < b for a, b in on_spans) else "OFF"
+        when = datetime.fromtimestamp(seg[0][0] - LOCAL_OFFSET_H * 3600, UTC).strftime("%H:%M")
+        rate = (seg[-1][1] - seg[0][1]) / mins
+        print(f"  {state:5} {when} +{mins:4.1f}m   {rate:>+8.1f}  {max(c for _, c in seg):>6.0f}")
+
     rms, g, tau, s = best
     print()
-    print("best fit (grid search, all three together)")
-    print(f"  G   gross production = {g:.0f} ppm/min   (model today: 91)")
-    print(f"  tau transport lag    = {tau:.1f} min     (model today: 2.5)")
-    print(f"  S   total removal    = {s:.1f} ppm/min  (model today: 29 at 1500 ppm)")
+    print("grid search - NOT IDENTIFIABLE, read the caveat below")
+    print(f"  G   gross production = {g:.0f} ppm/min   (model now: 88)")
+    print(f"  tau transport lag    = {tau:.1f} min     (model now: 4.5)")
+    print(f"  S   total removal    = {s:.1f} ppm/min  (model now: 37 at 1500 ppm)")
     print(f"  RMS error            = {rms:.1f} ppm")
 
     print()
-    print("what that implies")
-    print(f"  net charge while alight = {g - s:.0f} ppm/min")
-    print(f"  in-flight at steady state = {g * tau:.0f} ppm  (the overshoot after OFF)")
-    duty = s / g
-    print(f"  duty cycle to hold a setpoint = {100 * duty:.0f}%  (measured that night: 44%)")
+    print("  CAVEAT: these three trade off against each other and 70 minutes of")
+    print("  data with +-30 s transition times cannot separate them. Re-anchoring")
+    print("  the trajectory moves gross output between 88 and 118 ppm/min. Treat")
+    print("  this block as a consistency check, not as the source of a constant.")
+
+    print()
+    print("what the segment rates give, which is what the model uses")
+    print("  gross output  88 ppm/min   the one long burn, 387->1454 in 14.8 min")
+    print("  transport lag 4.5 min      near-setpoint burns net only +4..+16 ppm/min,")
+    print("                             and the peak lands 2-3 min AFTER the OFF")
+    print("  removal@1500  37 ppm/min   duty cycle is sink/gross and nothing else:")
+    print("                             44% measured x 88 gross")
+    print()
+    print("  To do better, log relay transitions alongside readings.")
     return 0
 
 
