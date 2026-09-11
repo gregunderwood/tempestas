@@ -1,6 +1,7 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app/app.module';
+import { runMigrationCommand } from './migrate';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -36,4 +37,22 @@ async function bootstrap() {
   Logger.log(`tempestas API listening on http://localhost:${port}/api`);
 }
 
-bootstrap();
+/**
+ * `main.js migrate:run` applies migrations and exits without starting the API.
+ *
+ * Shipped in the same artifact because the TypeORM CLI needs the TypeScript
+ * source and the whole devDependency tree, which is not something to install on
+ * the box that runs the burner. Never automatic - deployment restarts the
+ * service, and a schema change is a separate deliberate command.
+ */
+const [, , command] = process.argv;
+if (command?.startsWith('migrate:')) {
+  void runMigrationCommand(command.slice('migrate:'.length))
+    .then((code) => process.exit(code))
+    .catch((err: unknown) => {
+      Logger.error(`Migration failed: ${String(err)}`);
+      process.exit(1);
+    });
+} else {
+  bootstrap();
+}

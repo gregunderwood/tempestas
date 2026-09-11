@@ -1,0 +1,62 @@
+# Install to /etc/systemd/system/tempestas-server.service
+#
+# Kept in the repository rather than hand-edited on the box: everything under
+# /etc that this system needs should be installable by a provision script, so
+# Postgres stays the only stateful thing on the node.
+
+[Unit]
+Description=tempestas controller (API, rules engine, Angular bundle)
+Documentation=https://github.com/gregunderwood/tempestas/blob/main/docs/Roadmap.md
+After=network-online.target postgresql.service mosquitto.service
+Wants=network-online.target
+Requires=postgresql.service
+
+# Same placement as the agent's: under [Service] systemd logs `Unknown key` and
+# silently falls back to the 10s default.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=gunderwood
+Group=gunderwood
+
+WorkingDirectory=/home/gunderwood/tempestas
+# A stable symlink, NOT an nvm path. nvm is a shell function that a unit never
+# sources, and its real path embeds the version - `~/.nvm/versions/node/v22.x`
+# - so upgrading Node would silently break this line.
+#
+# It has to be named `node`, not something prefixed: npm and every other tool
+# starts `#!/usr/bin/env node`, which finds nothing on a non-interactive PATH.
+# Repoint both on upgrade:
+#   sudo ln -sfn "$(nvm which 22)" /usr/local/bin/node
+#   sudo ln -sfn "$(dirname "$(nvm which 22)")/npm" /usr/local/bin/npm
+ExecStart=/usr/local/bin/node /home/gunderwood/tempestas/dist/apps/server/main.js
+EnvironmentFile=/etc/tempestas/server.env
+Environment=NODE_ENV=production
+
+Restart=on-failure
+RestartSec=5
+
+# LESS protected than the agent deliberately. The agent enforces the dead-man
+# locally and is the only thing still running when this process is gone, so if
+# the OOM killer has to choose, it takes this one. Ordering, not magic numbers:
+#   agent -900  <  mosquitto -700  <  postgres -500  <  server -300
+OOMScoreAdjust=-300
+
+# Owns no files; journald caps itself. The old system's 5.4GB log grew because
+# the app wrote its own file and nothing capped it.
+StandardOutput=journal
+StandardError=journal
+
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/gunderwood/tempestas
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
