@@ -15,6 +15,13 @@ export enum ApiErrorCode {
   NodeNotDeletable = 'NODE_NOT_DELETABLE',
   PinNotAvailable = 'PIN_NOT_AVAILABLE',
   HardwareUnreachable = 'HARDWARE_UNREACHABLE',
+  /**
+   * This server is a follower, so it may not command anything. Distinct from
+   * every other refusal here: nothing is wrong with the request, the device or
+   * the node - the operator is simply on the wrong box, and the fix is to
+   * promote it. The UI needs to say that rather than show a hardware fault.
+   */
+  ControllerIsFollower = 'CONTROLLER_IS_FOLLOWER',
   ValidationFailed = 'VALIDATION_FAILED',
   NotFound = 'NOT_FOUND',
 }

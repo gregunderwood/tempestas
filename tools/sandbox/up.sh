@@ -15,6 +15,9 @@ TEMP="${TEMP:-18}"
 
 mkdir -p "$RUN"
 : > "$RUN/pids"
+# A lock left by a killed agent blocks the next run, and the failure is quiet
+# enough to look like something else.
+rm -f "$RUN"/*.lock
 
 cleanup_note() { echo "  (stop everything with $HERE/down.sh)"; }
 
@@ -51,7 +54,83 @@ for _ in $(seq 1 40); do
 done
 curl -sf localhost:7100/health >/dev/null || { echo "sim did not start; see $RUN/sim.log"; exit 1; }
 
+# ---------------------------------------------------------------- databases
+# Two SEPARATE Postgres instances, not two schemas. Per-box databases are the
+# design, not an implementation detail, so the sandbox must not quietly share
+# one and make takeover look easier than it is.
+if [[ "${WITH_SERVERS:-1}" == "1" ]]; then
+  for pair in "elantris 5442" "greenhouse 5443"; do
+    set -- $pair; NODE=$1; PGPORT=$2
+    NAME="tempestas-sandbox-$NODE"
+    if ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
+      docker rm -f "$NAME" >/dev/null 2>&1 || true
+      echo "==> postgres $NODE (:$PGPORT)"
+      # Same major as elantris runs. The official image publishes linux/arm/v7,
+      # so the greenhouse Pi can run this exact version too.
+      docker run -d --rm --name "$NAME" \
+        -e POSTGRES_PASSWORD=sandbox -e POSTGRES_USER=tempestas -e POSTGRES_DB=tempestas \
+        -p "$PGPORT:5432" postgres:17 >/dev/null
+    fi
+  done
+
+  echo "==> waiting for postgres"
+  for PGPORT in 5442 5443; do
+    for _ in $(seq 1 60); do
+      docker exec "tempestas-sandbox-$([[ $PGPORT == 5433 ]] && echo elantris || echo greenhouse)" \
+        pg_isready -U tempestas >/dev/null 2>&1 && break
+      sleep 0.5
+    done
+  done
+
+  # ---------------------------------------------------------------- servers
+  echo "==> building the server once, then running it twice"
+  ( cd "$ROOT" && npx nx build server ) >"$RUN/build.log" 2>&1 || {
+    echo "build failed; see $RUN/build.log"; exit 1; }
+
+  for pair in "elantris 5442 7010 leader" "greenhouse 5443 7011 follower"; do
+    set -- $pair; NODE=$1; PGPORT=$2; HTTP=$3; ROLE=$4
+    echo "==> server $NODE ($ROLE, :$HTTP)"
+    env NODE_ENV=production PORT="$HTTP" \
+        DATABASE_HOST=127.0.0.1 DATABASE_PORT="$PGPORT" \
+        DATABASE_USER=tempestas DATABASE_PASSWORD=sandbox DATABASE_NAME=tempestas \
+        HARDWARE_DRIVER=mqtt CONTROLLER_ROLE="$ROLE" \
+        MQTT_URL=mqtt://127.0.0.1:1883 \
+        MQTT_USERNAME=tempestas-server MQTT_PASSWORD=sandbox \
+        TEMPESTAS_TZ=America/Vancouver \
+        node "$ROOT/dist/apps/server/main.js" migrate:run \
+        >"$RUN/migrate-$NODE.log" 2>&1 || {
+          echo "migrations failed for $NODE; see $RUN/migrate-$NODE.log"; exit 1; }
+
+    env NODE_ENV=production PORT="$HTTP" \
+        DATABASE_HOST=127.0.0.1 DATABASE_PORT="$PGPORT" \
+        DATABASE_USER=tempestas DATABASE_PASSWORD=sandbox DATABASE_NAME=tempestas \
+        HARDWARE_DRIVER=mqtt CONTROLLER_ROLE="$ROLE" \
+        MQTT_URL=mqtt://127.0.0.1:1883 \
+        MQTT_USERNAME=tempestas-server MQTT_PASSWORD=sandbox \
+        TEMPESTAS_TZ=America/Vancouver \
+        node "$ROOT/dist/apps/server/main.js" >"$RUN/server-$NODE.log" 2>&1 &
+    echo "server-$NODE $!" >> "$RUN/pids"
+  done
+fi
+
 # ---------------------------------------------------------------- agents
+# Started LAST, and only once the servers ANSWER. `hello` is QoS 1 and not
+# retained, so an agent that announces before the server has finished
+# subscribing is never seen and the node is never created. Production
+# self-heals because nodes persist in its database; a sandbox with a fresh
+# database would simply never discover them.
+if [[ "${WITH_SERVERS:-1}" == "1" ]]; then
+  echo "==> waiting for the servers to subscribe"
+  for HTTP in 7010 7011; do
+    for _ in $(seq 1 60); do
+      curl -sf "http://127.0.0.1:$HTTP/api/nodes" >/dev/null 2>&1 && break
+      sleep 0.5
+    done
+  done
+  # The API answering means Nest is up; the MQTT subscribe completes just after.
+  sleep 1
+fi
+
 for NODE in elantris greenhouse; do
   echo "==> agent $NODE"
   ( cd "$ROOT/apps/hardware" && \
@@ -67,5 +146,9 @@ echo
 echo "sandbox up:"
 echo "  world     http://127.0.0.1:7100/world"
 echo "  broker    mqtt://127.0.0.1:1883  (pw 'sandbox' for every identity)"
+if [[ "${WITH_SERVERS:-1}" == "1" ]]; then
+  echo "  leader    http://127.0.0.1:7010  (elantris,   postgres :5442)"
+  echo "  follower  http://127.0.0.1:7011  (greenhouse, postgres :5443)"
+fi
 echo "  logs      $RUN/"
 cleanup_note

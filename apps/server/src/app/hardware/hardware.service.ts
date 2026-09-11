@@ -93,6 +93,15 @@ export interface PinCommand {
 
 export abstract class HardwareService {
   /**
+   * Whether this server is the one allowed to command.
+   *
+   * On the seam rather than only on the MQTT driver, because the rules engine
+   * asks it and must not know which driver is behind it. The fake driver is
+   * always the leader: it drives nothing real, so there is nothing to contend.
+   */
+  abstract readonly isLeader: boolean;
+
+  /**
    * Drive one pin on one node. Resolves only once the node acknowledges with a
    * successful readback; rejects on readback mismatch, timeout, or a node that
    * is offline. Callers MUST NOT persist a state change when this rejects -
