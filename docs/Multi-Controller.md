@@ -9,6 +9,37 @@ own history, serves its own UI, and can take over the other's job.
 > [!note] Status
 > Designed, not built. The one prerequisite — epoch fencing — is a gap in the agent today.
 
+## What is actually at each end
+
+Not hypothetical. This is the running inventory as of 2026-09-10 — see
+[Hardware](Hardware.md#the-greenhouse-pi-5s-relay-board) for the wiring detail.
+
+|             | `elantris` — entrance              | `greenhouse` — far end                                                             |
+| ----------- | ---------------------------------- | ---------------------------------------------------------------------------------- |
+| Board       | Pi 4B, trixie arm64                | Pi 5, 32-bit userland, legacy Flask                                                |
+| Relay board | 8 channel                          | **4 channel, 10 A**, plus a standalone module for the MH light                     |
+| Drives      | CO2 generator (relay 6 / BCM 5)    | HPS lights via contactor (21), MH light via its own module (26), exhaust fans (20) |
+| Spare       | five unwired channels              | one channel wired to nothing (12)                                                  |
+| Sensor      | SCD41, **calibrated**, by the door | SCD41, uncalibrated, **under the canopy**                                          |
+| History     | days                               | **2.89 M readings since 2025-08-23**, still logging every 10 s                     |
+
+Three things fall out of that table, and each one shapes the design:
+
+- **The far end has no spare capacity worth planning around.** Four board channels, three in use,
+  one empty — plus a fifth load, the MH light, already off-board on its own relay module. A failover story in which elantris's CO2 generator gets re-driven from the far end is not
+  physically available — nothing is wired between them. Failover means _the other box keeps running
+  its own loads_, not that either can assume the other's wiring.
+- **The CO2 channel at the far end goes dark, and stays wired.** CO2 moves to elantris, so BCM 16
+  keeps its relay and loses its job. Leaving a de-energised channel in place is cheaper than
+  rewiring, but it is exactly the sort of thing that gets rediscovered in two years by somebody
+  who assumes it still works.
+- **The year of history lives on the box that is not the leader.** Which is the strongest argument
+  in this document for per-box databases.
+- **The far end mixes relay polarities.** Its HPS lights are active-LOW through the board, its MH
+  light active-HIGH through a separate module. Device rows carry `onLevel` individually for exactly
+  this reason, and provisioning config as code has to preserve it per device — a board-wide default
+  would light a lamp.
+
 ## The shape of the problem
 
 Two controllers on one relay is the failure this whole system is built to prevent.
@@ -61,6 +92,12 @@ problem into two. Ask instead what **control** actually needs, and where it alre
 | Anti-short-cycle timestamps           | the only genuinely shared operational state — see below                |
 | Reading history, stats                | per box, and needs no agreement at all                                 |
 
+The far-end box has **2.89 million readings going back to 2025-08-23**, a full season of the actual
+greenhouse. That is not a cache to be rebuilt from a leader — it is the only copy, and it belongs to
+the box that holds it. Any design that makes one database authoritative has to answer what happens
+to a year of history when the authoritative box is the other one. Per-box historians make the
+question disappear.
+
 **Both boxes ingest everything, always. Only the leader commands.** A follower is fully subscribed,
 persisting every reading and tracking every `gpio/state`, so it is never behind — takeover is
 instant because there is nothing to catch up on. Two independent historians that happen to agree,
@@ -99,14 +136,29 @@ prevention, and that is the main new operational risk this design introduces.
 
 ## Locality: the reframe worth considering
 
-A zone is an airspace, and we measured that the two ends of this greenhouse are **not the same air**
-— corrected sensors still differ, and the entrance end is ventilated while the far end sits under
-canopy (see [Roadmap](Roadmap.md#the-two-boards-are-not-in-the-same-air)).
+A zone is an airspace, and the two ends of this greenhouse are not measuring the same thing. The
+entrance sensor sits by the door, in the first air disturbed whenever anyone opens it. The far-end
+sensor sits **directly under the plant canopy**, which is the environment the entire system exists
+to control.
 
-So the unit of leadership may not be the greenhouse at all. Each box owns its own zone and its own
-relays by default, and can **assume the other's zone** when asked. The normal case then involves no
-election whatsoever, the failure case is a deliberate widening of scope, and it matches both the
-physical layout and the wiring.
+So the best instrument is on the box that is not the leader, and **the leader is partly controlling
+on a proxy**. A paired sample taken two seconds apart put the entrance ~143 ppm richer in CO2 than
+the canopy (1181 vs 1038) while their water vapour pressure agreed to within 2.5 % — see
+[Hardware](Hardware.md#the-far-end-sensor-is-the-one-over-the-plants). Read carefully, that pair
+says the air is fairly well mixed for moisture but **enrichment injected at the entrance arrives
+thinner where the plants are**. It also says the raw 4 °C temperature gap between the two is mostly
+an uncalibrated offset, not a gradient — the canopy sensor has never had one set.
+
+Two consequences:
+
+- **Calibrate the canopy sensor before any rule is allowed to depend on it.** It is in the state
+  elantris was in when it read ~3 °C warm, and a CO2 or temperature threshold read off it today
+  would be enforcing the wrong number.
+- **The unit of leadership may not be the greenhouse at all.** Each box owns its own zone and its
+  own relays by default, and can **assume the other's zone** when asked. The normal case then
+  involves no election whatsoever, the failure case is a deliberate widening of scope, and it
+  matches both the physical layout and the wiring — which, given that nothing is cross-wired
+  between the two boxes, is the only kind of takeover the hardware actually permits.
 
 ## What this does not replace
 
@@ -121,11 +173,13 @@ physical layout and the wiring.
 
 1. **Epoch fencing in the agent** — monotonic, refuse lower, alarm on an attempted takeover. Small,
    testable with no hardware, and it unblocks everything else.
-2. **Config as code** for zones and devices, so a second box is _provisioned_ rather than replicated.
-3. **Follower ingest** — a non-leader still persists readings and tracks pin state.
-4. **Promote / demote**, with the epoch bumped on promotion and a refusal if a higher one is seen.
-5. **Broker bridging**, once there is a second box to bridge to.
-6. Automatic failover with a witness — only if still wanted by then.
+2. **Calibrate the canopy SCD41**, a prerequisite for trusting anything the far end reports — it
+   has never had an offset set. No software needed.
+3. **Config as code** for zones and devices, so a second box is _provisioned_ rather than replicated.
+4. **Follower ingest** — a non-leader still persists readings and tracks pin state.
+5. **Promote / demote**, with the epoch bumped on promotion and a refusal if a higher one is seen.
+6. **Broker bridging**, once there is a second box to bridge to.
+7. Automatic failover with a witness — only if still wanted by then.
 
 ## When to update this file
 
