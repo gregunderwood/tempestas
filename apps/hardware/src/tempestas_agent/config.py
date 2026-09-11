@@ -65,6 +65,22 @@ class GpioConfig:
 
 
 @dataclass(frozen=True)
+class WorldConfig:
+    """Points the agent at the shared greenhouse simulator instead of hardware.
+
+    A sandbox concern only - `url` unset means this is a real node and neither
+    backend is ever constructed. It sits beside sensor/gpio rather than inside
+    them because ONE simulator serves both: the burner a node drives and the
+    CO2 its sensor then reads are the same greenhouse.
+    """
+
+    url: str | None = None
+    # Which point in the greenhouse this node's sensor occupies. Not cosmetic:
+    # entrance and canopy differ by ~143 ppm, most of a dead band.
+    position: str = "entrance"
+
+
+@dataclass(frozen=True)
 class AgentConfig:
     node_id: str
     kind: str = "rpi"
@@ -72,6 +88,7 @@ class AgentConfig:
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     sensor: SensorConfig = field(default_factory=SensorConfig)
     gpio: GpioConfig = field(default_factory=GpioConfig)
+    world: WorldConfig = field(default_factory=WorldConfig)
     # No heartbeat for this long and the node fails safe by itself, with no
     # server involvement. See docs/Safety.md - the burner's hold is longer at
     # night because it is also the heater.
@@ -116,12 +133,23 @@ def load(path: str | Path | None = None, env: dict[str, str] | None = None) -> A
         temperature_offset_c=sensor_raw.get("temperature_offset_c"),
         altitude_m=sensor_raw.get("altitude_m"),
     )
-    if sensor.kind not in {"scd4x", "simulated"}:
-        raise ConfigError(f'sensor.kind must be "scd4x" or "simulated", not "{sensor.kind}"')
+    if sensor.kind not in {"scd4x", "simulated", "world"}:
+        raise ConfigError(
+            f'sensor.kind must be "scd4x", "simulated" or "world", not "{sensor.kind}"'
+        )
     if sensor.sample_interval_s < 5:
         # The SCD4x produces a reading every 5s in periodic mode; asking faster
         # just returns the same one and burns I2C traffic.
         raise ConfigError("sensor.sample_interval_s below 5s is pointless for an SCD4x")
+
+    world_raw = raw.get("world", {})
+    world = WorldConfig(
+        url=env.get("TEMPESTAS_WORLD_URL") or world_raw.get("url"),
+        position=env.get("TEMPESTAS_WORLD_POSITION")
+        or world_raw.get("position", WorldConfig.position),
+    )
+    if sensor.kind == "world" and not world.url:
+        raise ConfigError('sensor.kind = "world" needs world.url (or TEMPESTAS_WORLD_URL)')
 
     gpio_raw = raw.get("gpio", {})
     lines = tuple(int(p) for p in gpio_raw.get("lines", ()))
@@ -148,5 +176,6 @@ def load(path: str | Path | None = None, env: dict[str, str] | None = None) -> A
         mqtt=mqtt,
         sensor=sensor,
         gpio=gpio,
+        world=world,
         deadman_s=float(raw.get("deadman_s", 30.0)),
     )
