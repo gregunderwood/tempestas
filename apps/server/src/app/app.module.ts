@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -24,6 +27,16 @@ import { HealthModule } from './health/health.module';
       envFilePath: ['apps/server/.env', '.env'],
     }),
     CommonModule,
+    // The Angular bundle, served by the API itself rather than by a reverse
+    // proxy. One process on the box, and the socket.io upgrade stays inside
+    // Nest - the `map $http_upgrade` mistake sitting in the old greenhouse's
+    // nginx.conf cannot be made if there is no proxy.
+    //
+    // Conditional because the bundle is only present on a deployed box: in dev
+    // the Angular dev server serves it and proxies /api here, and registering a
+    // static root that does not exist makes every unmatched route a 500 instead
+    // of a 404.
+    ...staticBundle(),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -57,3 +70,24 @@ import { HealthModule } from './health/health.module';
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}
+
+/**
+ * The built Angular bundle, when there is one next to the server bundle.
+ *
+ * `exclude` keeps the API and the socket out of the SPA fallback. Without it
+ * an unknown /api path returns index.html with a 200, which is exactly the
+ * shape of error this project exists to stop producing - a client cannot tell
+ * a missing route from a working one.
+ */
+function staticBundle() {
+  const root = join(__dirname, '..', 'web');
+  if (!existsSync(root)) {
+    return [];
+  }
+  return [
+    ServeStaticModule.forRoot({
+      rootPath: root,
+      exclude: ['/api/{*path}', '/socket.io/{*path}'],
+    }),
+  ];
+}

@@ -1,0 +1,30 @@
+# Install to /etc/systemd/system/tempestas-migrate@.service
+#
+#   sudo systemctl start tempestas-migrate@show   # read this first
+#   sudo systemctl start tempestas-migrate@run
+#   journalctl -u tempestas-migrate@run -n 50
+#
+# A unit rather than a shell command so it reuses the SAME environment file the
+# server does. That file is 0600 root because it holds the database and broker
+# passwords; systemd reads it as root before dropping privileges, which a
+# hand-typed command cannot do without putting a password in the shell history
+# or in `ps`.
+#
+# Never wired into the deploy. Applying a schema change to the only copy of the
+# greenhouse's history is a deliberate act with a human reading `show` first.
+
+[Unit]
+Description=tempestas migrations (%i)
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=gunderwood
+Group=gunderwood
+WorkingDirectory=/home/gunderwood/tempestas
+EnvironmentFile=/etc/tempestas/server.env
+Environment=NODE_ENV=production
+ExecStart=/usr/local/bin/node /home/gunderwood/tempestas/dist/apps/server/main.js migrate:%i
+StandardOutput=journal
+StandardError=journal

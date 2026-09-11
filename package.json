@@ -26,11 +26,13 @@
     "@nestjs/platform-express": "^11.1.8",
     "@nestjs/platform-socket.io": "^11.1.8",
     "@nestjs/schedule": "^6.0.0",
+    "@nestjs/serve-static": "^5.0.5",
     "@nestjs/throttler": "^6.4.0",
     "@nestjs/typeorm": "^11.0.0",
     "@nestjs/websockets": "^11.1.8",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
+    "dotenv": "^16.4.5",
     "luxon": "^3.5.0",
     "mqtt": "^5.10.0",
     "pg": "^8.16.3",
@@ -39,8 +41,7 @@
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "typeorm": "^0.3.27",
-    "zone.js": "~0.15.0",
-    "dotenv": "^16.4.5"
+    "zone.js": "~0.15.0"
   },
   "devDependencies": {
     "@analogjs/vite-plugin-angular": "~1.19.1",
