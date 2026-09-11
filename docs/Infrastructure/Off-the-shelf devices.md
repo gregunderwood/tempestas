@@ -193,6 +193,17 @@ Keep vendor traffic in its own tree and out of `tempestas/v1/#`, and give the br
 credential that can write to vendor command topics. With `issuedBy` unavailable on the vendor side,
 the ACL is the guard.
 
+Ownership now has a shape to live in. [Multi-Controller](../Multi-Controller.md#configuration-two-tiers-split-by-who-can-know)
+splits config into **inventory** — what exists and how to reach it, written by whichever box can
+physically reach the device — and **policy**, written only by the leader. Discovery writes inventory;
+promoting an entry into a device with a role is a human act on the leader. So a device HA finds
+cannot become something tempestas commands without somebody adopting it, which is this section's
+rule enforced by the schema rather than by remembering.
+
+That doc also carries the **reachability classes** the bridge introduces: a broker-reachable plug can
+be commanded by any box that reaches a broker, while a Zigbee device is reachable only through the
+box holding its dongle — a per-device single point of failure with no failover at all.
+
 ## Where it fits
 
 After the agent's backend seam is stable, and not before phase 7. The bridge is a second backend
