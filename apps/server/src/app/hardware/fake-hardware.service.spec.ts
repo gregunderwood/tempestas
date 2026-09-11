@@ -6,8 +6,9 @@ import {
 } from './fake-hardware.service';
 import type { SensorSample } from './hardware.service';
 
-const BURNER = { pin: 16, level: 0 as const }; // active-LOW: 0 == energised
-const FAN = { pin: 20, level: 0 as const };
+// elantris's own wiring: BCM 5 is the CO2 generator. Active-LOW, so 0 is on.
+const BURNER = { pin: 5, level: 0 as const };
+const FAN = { pin: 6, level: 0 as const };
 
 describe('FakeHardwareService', () => {
   let hw: FakeHardwareService;
@@ -34,6 +35,36 @@ describe('FakeHardwareService', () => {
     );
   });
 
+  // Leakage is a fraction of the gradient to outside air, so the burner easily
+  // out-runs it at baseline and barely beats it near the setpoint. That shape
+  // is why a single CO2 threshold chattered on the real greenhouse; a flat
+  // decay rate would hide it and make the dead band look unnecessary.
+  it('gains CO2 far more slowly near the setpoint than at baseline', async () => {
+    const atBaseline = await gainOverTicks(hw, 600, 5);
+
+    const high = new FakeHardwareService(DEFAULT_FAKE_NODES, 10_000);
+    const nearSetpoint = await gainOverTicks(high, 1450, 5);
+    high.onModuleDestroy();
+
+    expect(atBaseline).toBeGreaterThan(0);
+    // The SHAPE is the point, not a fitted ratio. The field numbers are
+    // internally inconsistent - decay with the burner off implies a smaller
+    // leak coefficient than the observed near-setpoint gain does, most likely
+    // mixing lag - so the simulator takes its constants from the cleanest
+    // measurements and does not pretend to more precision than that.
+    expect(nearSetpoint).toBeLessThan(atBaseline * 0.8);
+  });
+
+  // On the real burner CO2 kept falling for over two minutes after ignition
+  // before it turned around - long enough to read as a failed light.
+  it('ramps its output in rather than producing at full rate immediately', async () => {
+    await hw.setPin('sim-pi', BURNER);
+    const first = await sampleAfterTicks(hw, 1);
+    const second = await sampleAfterTicks(hw, 1);
+    const third = await sampleAfterTicks(hw, 1);
+    expect(second.co2! - first.co2!).toBeLessThan(third.co2! - second.co2!);
+  });
+
   it('rejects an unknown node', async () => {
     await expect(hw.setPin('nope', BURNER)).rejects.toThrow(
       /Unknown simulated node/,
@@ -52,7 +83,7 @@ describe('FakeHardwareService', () => {
   it('lowers CO2 while the fan runs and the burner is off', async () => {
     await hw.setPin('sim-pi', BURNER);
     const peak = await sampleAfterTicks(hw, 5);
-    await hw.setPin('sim-pi', { pin: 16, level: 1 }); // burner off
+    await hw.setPin('sim-pi', { pin: 5, level: 1 }); // burner off
     await hw.setPin('sim-pi', FAN);
     const after = await sampleAfterTicks(hw, 5);
     expect(after.co2!).toBeLessThan(peak.co2!);
@@ -108,3 +139,18 @@ describe('FakeHardwareService failure codes', () => {
     });
   });
 });
+
+/** Net CO2 gained over `ticks` with the burner running, from a given start. */
+async function gainOverTicks(
+  hw: FakeHardwareService,
+  startCo2: number,
+  ticks: number,
+): Promise<number> {
+  (hw as unknown as { co2: number }).co2 = startCo2;
+  // Past the warm-up, so this measures steady output against leakage.
+  (hw as unknown as { burnerMinutes: number }).burnerMinutes = 10;
+  await hw.setPin('sim-pi', BURNER);
+  const before = await sampleAfterTicks(hw, 1);
+  const after = await sampleAfterTicks(hw, ticks);
+  return after.co2! - before.co2!;
+}

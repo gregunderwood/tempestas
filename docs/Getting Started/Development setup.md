@@ -9,6 +9,30 @@ Everything up to phase 7 runs on the Mac with **no Pi, no broker and no relays**
 - Docker (local Postgres only; production Postgres on the Pi is native apt)
 - `mosquitto-clients` for phase 7 onward (`brew install mosquitto`)
 
+## Develop against the simulator, not the greenhouse
+
+`HARDWARE_DRIVER=fake` is the local default, and with the controller now living on elantris that is
+a safety property rather than a convenience: **only one controller may hold the heartbeat**, so a
+dev server pointed at the real broker would be a second writer on a relay holding a propane burner.
+The fake driver cannot reach any hardware at all.
+
+It is a closed loop, not a random number generator, and its constants come from the real greenhouse:
+
+|               |                                                                                     |
+| ------------- | ----------------------------------------------------------------------------------- |
+| Leakage       | a **fraction of the gradient** to outside air (~420 ppm), never a flat rate         |
+| Burner output | ~91 ppm/min gross, ramping in over ~2.5 min                                         |
+| Burner heat   | ~1 °C per 15 min of run time                                                        |
+| Humidity      | derived from water content and temperature, so RH falls as the burner warms the air |
+
+The gradient-proportional leak is the part that matters. It is why the burner easily out-runs
+leakage at baseline and barely beats it near the setpoint — the behaviour that made a single CO2
+threshold chatter on the real hardware and forced a dead band. **A simulator with a flat decay rate
+hides exactly that**, and would have made the fix look unnecessary.
+
+The fake node is wired like elantris — BCM 5 is the CO2 generator — so a device created against the
+simulator works unchanged against the real panel.
+
 ## Setup
 
 ```bash
