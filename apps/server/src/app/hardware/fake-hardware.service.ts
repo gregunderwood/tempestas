@@ -81,6 +81,9 @@ export class FakeHardwareService
   extends HardwareService
   implements OnApplicationBootstrap, OnModuleDestroy
 {
+  /** Nothing real is contended, so the fake driver always commands. */
+  readonly isLeader = true;
+
   private readonly logger = new Logger(FakeHardwareService.name);
   private readonly samples = new Subject<SensorSample>();
   private readonly availability = new Subject<NodeAvailability>();

@@ -10,3 +10,7 @@ while read -r name pid; do
   fi
 done < "$RUN/pids"
 : > "$RUN/pids"
+
+for NAME in tempestas-sandbox-elantris tempestas-sandbox-greenhouse; do
+  docker rm -f "$NAME" >/dev/null 2>&1 && echo "stopped $NAME"
+done

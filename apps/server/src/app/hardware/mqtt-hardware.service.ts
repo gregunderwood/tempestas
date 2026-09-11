@@ -19,6 +19,10 @@ import {
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
 import {
+  type ControllerRole,
+  resolveControllerRole,
+} from '../common/controller-role';
+import {
   HardwareError,
   HardwareService,
   type NodeAvailability,
@@ -117,12 +121,24 @@ export class MqttHardwareService
   private readonly controllerId = `nestjs-${process.pid}`;
   private readonly epoch: number;
 
+  /**
+   * A follower ingests everything and commands nothing. It does not heartbeat,
+   * so no node ever binds to it, and it does not register a server LWT - a
+   * follower dying must not tell every node to fail safe.
+   */
+  private readonly role: ControllerRole;
+
   constructor(
     private readonly config: ConfigService,
     private readonly clock: Clock,
   ) {
     super();
     this.epoch = this.clock.now().getTime();
+    this.role = resolveControllerRole(this.config.get<string>('CONTROLLER_ROLE'), true);
+  }
+
+  get isLeader(): boolean {
+    return this.role === 'leader';
   }
 
   /**
@@ -147,14 +163,22 @@ export class MqttHardwareService
       ...(username ? { username } : {}),
       ...(password ? { password } : {}),
       // The server's own dead-man. Every node fails safe when the brain dies.
-      will: {
-        topic: mqttTopics.serverStatus,
-        payload: Buffer.from(
-          JSON.stringify(buildStatus('server', 'offline', this.clock.now())),
-        ),
-        qos: mqttQos.serverStatus.qos,
-        retain: mqttQos.serverStatus.retain,
-      },
+      //
+      // Only the LEADER registers it. A follower crashing is not a reason for
+      // the greenhouse to shut down, and its retained "offline" would sit on
+      // the topic telling nodes exactly that.
+      ...(this.isLeader
+        ? {
+            will: {
+              topic: mqttTopics.serverStatus,
+              payload: Buffer.from(
+                JSON.stringify(buildStatus('server', 'offline', this.clock.now())),
+              ),
+              qos: mqttQos.serverStatus.qos,
+              retain: mqttQos.serverStatus.retain,
+            },
+          }
+        : {}),
     };
 
     const client = connect(url, options);
@@ -220,7 +244,24 @@ export class MqttHardwareService
   }
 
   async setPin(nodeId: NodeId, command: PinCommand): Promise<void> {
+    this.refuseIfFollower('set a pin');
     return this.dispatch(nodeId, [command]);
+  }
+
+  /**
+   * Refuse locally rather than publishing something the node will reject.
+   *
+   * A follower's command would be denied at the actuator anyway - its
+   * `issuedBy` is not the bound controller - but that arrives as a
+   * CONTROLLER_CONFLICT alarm, which is a real incident signal. Manual clicks
+   * on a follower's UI must not manufacture one.
+   */
+  private refuseIfFollower(action: string): void {
+    if (this.isLeader) return;
+    throw new HardwareError(
+      ApiErrorCode.ControllerIsFollower,
+      `This server is a follower and cannot ${action}. Promote it first.`,
+    );
   }
 
   /**
@@ -232,6 +273,7 @@ export class MqttHardwareService
    * the retained `gpio/state` topics.
    */
   async syncPins(nodeId: NodeId, commands: PinCommand[]): Promise<void> {
+    this.refuseIfFollower('sync pins');
     const client = this.requireClient();
     const payload = buildGpioSync(
       { nodeId, now: this.clock.now() },
@@ -590,6 +632,12 @@ export class MqttHardwareService
    */
   private startHeartbeat(): void {
     if (this.heartbeat) return;
+    if (!this.isLeader) {
+      // The binding a heartbeat creates is the right to command. A follower
+      // must never create one, or the node starts obeying two controllers.
+      this.logger.log('Follower: not heartbeating, so no node will bind to this server');
+      return;
+    }
     this.heartbeat = setInterval(() => {
       const client = this.client;
       if (!client) return;
