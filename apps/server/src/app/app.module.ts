@@ -9,7 +9,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CommonModule } from './common/common.module';
 import { DevicesModule } from './devices/devices.module';
-import { DeviceEntity } from './devices/models';
+import { DeviceEntity, PinTransitionEntity } from './devices/models';
 import { HardwareModule } from './hardware/hardware.module';
 import { NodesModule } from './nodes/nodes.module';
 import { NodeEntity } from './nodes/models';
@@ -52,7 +52,13 @@ import { HealthModule } from './health/health.module';
         synchronize: false,
         logging: config.get<string>('NODE_ENV') === 'development',
         // Explicit list, not globs: a webpack bundle has no directory to scan.
-        entities: [ZoneEntity, NodeEntity, DeviceEntity, SensorReadingEntity],
+        entities: [
+          ZoneEntity,
+          NodeEntity,
+          DeviceEntity,
+          PinTransitionEntity,
+          SensorReadingEntity,
+        ],
       }),
     }),
     ScheduleModule.forRoot(),
