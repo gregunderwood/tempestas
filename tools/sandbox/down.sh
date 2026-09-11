@@ -11,6 +11,12 @@ while read -r name pid; do
 done < "$RUN/pids"
 : > "$RUN/pids"
 
+# Sweep anything the pid file missed. An agent or sim orphaned by a crash
+# outlives down.sh otherwise, and the next up.sh silently runs against it.
+for PAT in "tempestas-sim" "tempestas-agent" "sandbox/run/app/server/main.js"; do
+  pkill -f "$PAT" 2>/dev/null && echo "swept stray $PAT"
+done
+
 for NAME in tempestas-sandbox-elantris tempestas-sandbox-greenhouse; do
   docker rm -f "$NAME" >/dev/null 2>&1 && echo "stopped $NAME"
 done
