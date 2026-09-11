@@ -61,6 +61,40 @@ from `on_at > off_at`, and the anti-short-cycle interlock from `off_at + on_dela
   decision, each still filtered by its own `rules_enabled`.
 - `on_level` is a per-device column, not a constant: four relays are active-LOW, one active-HIGH.
 
+### `pin_transitions`
+
+Every observed change of a relay line, as the **node** saw it.
+
+`devices` carries only the current `onAt`/`offAt`, so each change erases the one
+before it. That is fine for the interlock, which only ever asks "how long since
+this stopped" - but it meant the climate model had to be fitted by inferring
+relay state from the CO2 curve that state was supposed to explain. Gross output,
+transport lag and removal then could not be separated: the fit moved gross
+between 88 and 118 ppm/min depending only on how the trajectory was anchored.
+
+| column                         | why                                                                                                                                                                                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `node_id`, `pin`               | The physical fact. **Not** a foreign key: a device row can be renamed, re-bound or deleted, and the copper it pointed at still moved.                                                                                                |
+| `level`, `known`               | `null` + `known = false` is unknown, which is not off.                                                                                                                                                                               |
+| `energised`                    | What the level **meant**, resolved at write time. `onLevel` is editable per device - the MH light is active-HIGH on a board whose other four channels are active-LOW - so deriving this later would let an edit rewrite old history. |
+| `device_id`, `role`            | The interpretation at the time. Nullable: BCM 12 drives nothing and BCM 16 is going dark, and both still report.                                                                                                                     |
+| `observed_at` vs `recorded_at` | The node's clock, then ours. Aligning relay changes to 10-second readings needs the moment the relay moved, not when we heard.                                                                                                       |
+
+Two things it does deliberately:
+
+- **Written by its own subscription**, not by reconciliation. `DevicesService`
+  returns early for pins it is mid-command on, so a logger wired in there would
+  miss every _commanded_ change and keep only the autonomous ones.
+- **Seeded from the table before deciding.** Retained `gpio/state` is
+  republished by every node on every connect; without reading the last row
+  first, a restart would write a transition where no relay moved.
+
+Not covered by the readings retention job. A reading is a measurement the
+greenhouse will make again tomorrow; a transition happened once.
+
+Read it back with `GET /api/devices/transitions?from=&to=&nodeId=&limit=`, which
+is what `apps/sim/fit/fit_burner.py` consumes.
+
 ### `sensor_readings`
 
 - `INDEX (created_at)` and `INDEX (node_id, created_at)`. The old schema had **no index on

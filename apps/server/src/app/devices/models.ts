@@ -86,3 +86,75 @@ export class DeviceEntity {
   @UpdateDateColumn({ type: 'timestamptz', name: 'updated_at' })
   updatedAt!: Date;
 }
+
+/**
+ * Every observed change of a relay line, as the node saw it.
+ *
+ * The gap this fills: `devices` carries only the CURRENT `onAt`/`offAt`, so the
+ * moment a relay changes, the previous change is gone. Fitting the burner model
+ * therefore had to infer relay state from the CO2 curve it was supposed to
+ * explain, and three constants that trade off against each other could not be
+ * separated - see apps/sim/fit/README.md.
+ *
+ * Keyed on `(nodeId, pin)` rather than on a device, because that pair is the
+ * physical fact. A device row can be renamed, re-bound to another pin, or
+ * deleted; the copper it used to point at still moved when it moved.
+ */
+@Entity({ name: 'pin_transitions' })
+// The query this table exists for: "what did this line do between these times".
+@Index('ix_pin_transitions_line_time', ['nodeId', 'pin', 'observedAt'])
+// And the one the fitting scripts use: a whole window across every line.
+@Index('ix_pin_transitions_time', ['observedAt'])
+export class PinTransitionEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  /** The node slug - the MQTT topic segment, not a foreign key. */
+  @Column({ type: 'text', name: 'node_id' })
+  nodeId!: string;
+
+  @Column({ type: 'integer' })
+  pin!: number;
+
+  /** `null` with `known = false` means the line's state is not known. */
+  @Column({ type: 'smallint', nullable: true })
+  level!: GpioLevel | null;
+
+  @Column({ type: 'boolean' })
+  known!: boolean;
+
+  /**
+   * What this level MEANT, resolved when the row was written.
+   *
+   * Stored rather than derived later, because `onLevel` is editable per device
+   * - the MH light is active-HIGH on a board whose other four channels are
+   * active-LOW - so editing a device next month would otherwise rewrite what
+   * last month's history meant.
+   */
+  @Column({ type: 'boolean', nullable: true })
+  energised!: boolean | null;
+
+  /** The device that claimed this pin at the time, if any. Nullable, no FK. */
+  @Column({ type: 'uuid', name: 'device_id', nullable: true })
+  deviceId!: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  role!: string | null;
+
+  /** Why the row exists: first-sight, level-changed, became-unknown. */
+  @Column({ type: 'text' })
+  reason!: string;
+
+  /**
+   * When the NODE observed the line - not when we heard about it.
+   *
+   * The distinction is the whole value of the table for fitting: a command
+   * round trip and a reconnect both add delay, and aligning relay changes to
+   * 10-second readings needs the moment the relay actually moved.
+   */
+  @Column({ type: 'timestamptz', name: 'observed_at' })
+  observedAt!: Date;
+
+  @CreateDateColumn({ type: 'timestamptz', name: 'recorded_at' })
+  recordedAt!: Date;
+}

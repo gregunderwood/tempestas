@@ -9,9 +9,12 @@ import {
   Patch,
   Post,
   Put,
+  Query,
 } from '@nestjs/common';
 import type { Device } from '@tempestas/domain';
 import { DevicesService } from './devices.service';
+import { PinTransitionLog } from './pin-transition-log.service';
+import type { PinTransitionEntity } from './models';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { PatchDeviceRulesDto, UpdateDeviceDto } from './dto/update-device.dto';
 
@@ -23,11 +26,36 @@ import { PatchDeviceRulesDto, UpdateDeviceDto } from './dto/update-device.dto';
  */
 @Controller('devices')
 export class DevicesController {
-  constructor(private readonly devices: DevicesService) {}
+  constructor(
+    private readonly devices: DevicesService,
+    private readonly transitions: PinTransitionLog,
+  ) {}
 
   @Get()
   findAll(): Promise<Device[]> {
     return this.devices.findAll();
+  }
+
+  /**
+   * Relay history, for fitting the climate model against real behaviour.
+   *
+   * Declared BEFORE `:id`, or Express matches "transitions" as a device id and
+   * the UUID pipe rejects it with a validation error that looks like a bug in
+   * the caller.
+   */
+  @Get('transitions')
+  transitionHistory(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('nodeId') nodeId?: string,
+    @Query('limit') limit?: string,
+  ): Promise<PinTransitionEntity[]> {
+    return this.transitions.query({
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      nodeId,
+      limit: limit ? Number(limit) : undefined,
+    });
   }
 
   @Post()

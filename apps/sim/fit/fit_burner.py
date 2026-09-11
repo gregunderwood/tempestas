@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """Fit the burner against elantris's own trace, where relay state is KNOWN.
 
-    uv run python fit/fit_burner.py <readings.json>
+    uv run python fit/fit_burner.py <readings.json> [transitions.json]
+
+With a transitions file the on/off windows come from the recorded relay
+history; without one it falls back to the four windows typed in below, which
+were observed by eye at 30-second resolution. The difference matters: the
+hand-typed windows are why gross output, transport lag and removal could not be
+separated.
 
 Why not the 2025 export: that is a different appliance at a different point in
 the greenhouse, and it carries no relay history at all - burner state there can
@@ -28,7 +34,10 @@ import math
 import sys
 from datetime import UTC, datetime
 
-# Observed live, local time, +-30 s (the watcher polled every 30 s).
+# FALLBACK ONLY. Observed by eye on 2026-09-10 at 30-second polling, which is
+# the uncertainty that made the three constants non-identifiable. Prefer a
+# transitions file:
+#   curl '.../api/devices/transitions?nodeId=elantris&from=...&to=...'
 ON_WINDOWS_LOCAL = [
     ("2026-09-10 17:26", "2026-09-10 17:41"),
     ("2026-09-10 17:48", "2026-09-10 17:54"),
@@ -42,6 +51,36 @@ def to_utc(s: str) -> float:
     """Local wall-clock string -> POSIX seconds. Returns a timestamp, not a datetime."""
     naive = datetime.fromisoformat(s).replace(tzinfo=UTC)
     return naive.timestamp() + LOCAL_OFFSET_H * 3600
+
+
+def load_on_spans(path: str, node_id: str, pin: int) -> list[tuple[float, float]]:
+    """On-windows from the recorded relay history.
+
+    Uses `energised` rather than `level`, because the level that means ON is
+    per device: four of the greenhouse's channels are active-LOW and BCM 26 is
+    active-HIGH. Reading raw levels here would invert one of them.
+    """
+    with open(path) as fh:
+        rows = json.load(fh)
+    events = sorted(
+        (
+            datetime.fromisoformat(r["observedAt"].replace("Z", "+00:00")).timestamp(),
+            r["energised"],
+        )
+        for r in rows
+        if r["nodeId"] == node_id and r["pin"] == pin and r["energised"] is not None
+    )
+    spans: list[tuple[float, float]] = []
+    opened: float | None = None
+    for ts, energised in events:
+        if energised and opened is None:
+            opened = ts
+        elif not energised and opened is not None:
+            spans.append((opened, ts))
+            opened = None
+    # A burn still running at the end of the window is deliberately dropped
+    # rather than closed at an invented time.
+    return spans
 
 
 def load(path: str) -> list[tuple[float, float]]:
@@ -100,9 +139,19 @@ def simulate(series, on_spans, g: float, tau: float, s: float) -> float:
     return math.sqrt(err2 / n) if n else float("inf")
 
 
-def main(path: str) -> int:
+def main(path: str, transitions: str | None = None) -> int:
     series = load(path)
-    on_spans = [(to_utc(a), to_utc(b)) for a, b in ON_WINDOWS_LOCAL]
+    if transitions:
+        on_spans = load_on_spans(transitions, "elantris", 5)
+        print(f"relay history: {len(on_spans)} burns, from the recorded log")
+    else:
+        on_spans = [(to_utc(a), to_utc(b)) for a, b in ON_WINDOWS_LOCAL]
+        print("relay history: NONE - falling back to windows observed by eye at")
+        print("  30-second resolution. Expect the three constants to stay")
+        print("  non-identifiable; see fit/README.md.")
+    if not on_spans:
+        print("no burns in the window")
+        return 1
     # Start at the first commanded ON; everything before it is the tail of an
     # earlier event and has no known relay state.
     start = on_spans[0][0] - 60
@@ -165,4 +214,4 @@ def main(path: str) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1]))
+    raise SystemExit(main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None))
