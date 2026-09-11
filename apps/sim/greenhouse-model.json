@@ -70,29 +70,29 @@
     }
   },
   "sites": {
-    "$comment": "Offsets from the bulk air. CO2 is a real mixing gradient; temperature is mostly instrument, since the canopy sensor has never had an offset set.",
+    "$comment": "CO2 is a real mixing gradient, expressed as a FRACTION of the enrichment above outdoor so it vanishes when nothing is running. Temperature is mostly instrument - the canopy sensor has never had an offset set.",
     "entrance": {
-      "co2_offset_ppm": {
-        "value": 71,
+      "co2_gradient_fraction": {
+        "value": 0.104,
         "source": "paired-2026-09-10",
-        "note": "half the observed 143 ppm entrance-to-canopy gap; enrichment is injected here"
+        "note": "half the 143 ppm gap over 690 ppm of enrichment; the generator injects here"
       },
       "temp_offset_c": {
         "value": 0.0,
         "source": "paired-2026-09-10",
-        "note": "elantris is the calibrated one, so it defines the reference"
+        "note": "elantris is the calibrated sensor, so it defines the reference"
       }
     },
     "canopy": {
-      "co2_offset_ppm": {
-        "value": -72,
+      "co2_gradient_fraction": {
+        "value": -0.104,
         "source": "paired-2026-09-10",
         "note": "the other half of the gap"
       },
       "temp_offset_c": {
         "value": 3.96,
         "source": "paired-2026-09-10",
-        "note": "INSTRUMENT bias, not climate - vapour pressure agrees to 2.5%. Set to 0 once the sensor is calibrated."
+        "note": "INSTRUMENT bias, not climate - vapour pressure agrees to 2.5%. Set to 0 once calibrated."
       }
     }
   },

@@ -58,7 +58,9 @@ class Site:
     """Where a sensor sits, and how that spot differs from the bulk air."""
 
     position: str
-    co2_offset_ppm: float
+    # Fraction of the enrichment above outdoor, +/-. Derived from the paired
+    # sample: 143 ppm apart at ~690 ppm of enrichment, so +-10.4%.
+    co2_gradient_fraction: float
     temp_offset_c: float
 
 
@@ -106,7 +108,7 @@ class Model:
         sites = {
             name: Site(
                 position=name,
-                co2_offset_ppm=_v(cfg, "co2_offset_ppm"),
+                co2_gradient_fraction=_v(cfg, "co2_gradient_fraction"),
                 temp_offset_c=_v(cfg, "temp_offset_c"),
             )
             for name, cfg in raw["sites"].items()
@@ -248,7 +250,12 @@ class World:
     def read(self, position: str) -> SiteReading:
         site = self.model.sites[position]
         temp_c = self.air.temp_c + site.temp_offset_c
-        co2 = max(0.0, self.air.co2_ppm + site.co2_offset_ppm)
+        # The CO2 gradient scales with ENRICHMENT, not as a flat offset. A
+        # constant +-72 ppm is only valid near the operating point it was
+        # measured at (~1110 ppm bulk); applied at rest it drove the canopy to
+        # 348 ppm - below outdoor air, which cannot happen with nothing running.
+        enrichment = max(0.0, self.air.co2_ppm - self.model.outdoor_co2_ppm)
+        co2 = self.model.outdoor_co2_ppm + enrichment * (1.0 + site.co2_gradient_fraction)
         rh = 100.0 * self.air.vapour_hpa / saturation_pressure(temp_c)
         return SiteReading(
             co2_ppm=round(co2, 1),

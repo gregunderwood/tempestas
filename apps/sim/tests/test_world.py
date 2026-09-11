@@ -96,11 +96,28 @@ def test_the_burner_arrives_at_the_sensor_gradually(world: World) -> None:
     assert late_minute > first_minute * 3, (first_minute, late_minute)
 
 
-def test_the_entrance_reads_richer_than_the_canopy(world: World) -> None:
-    """The measured gradient: enrichment is injected at the entrance."""
+def test_the_entrance_reads_richer_than_the_canopy(model: Model) -> None:
+    """The measured gradient, at the level it was measured at.
+
+    Paired sample: 1181 vs 1038 ppm, so ~143 ppm apart around 1110 bulk.
+    """
+    world = World(model, WIRING, air=Air(co2_ppm=1110.0, temp_c=23.0, vapour_hpa=16.0))
     entrance = world.read("entrance")
     canopy = world.read("canopy")
-    assert entrance.co2_ppm - canopy.co2_ppm == pytest.approx(143, abs=2)
+    assert entrance.co2_ppm - canopy.co2_ppm == pytest.approx(143, abs=3)
+
+
+def test_the_gradient_vanishes_with_nothing_running(model: Model) -> None:
+    """No enrichment, no gradient - and never a site below outdoor air.
+
+    A flat offset put the canopy at 348 ppm against 420 outdoor, which cannot
+    happen: there is nothing to be leaner than the air coming in.
+    """
+    world = World(model, WIRING, air=Air(co2_ppm=420.0, temp_c=15.0, vapour_hpa=12.0))
+    for position in ("entrance", "canopy"):
+        reading = world.read(position)
+        assert reading.co2_ppm == pytest.approx(420, abs=1)
+        assert reading.co2_ppm >= model.outdoor_co2_ppm
 
 
 def test_same_air_different_rh(world: World) -> None:
@@ -163,7 +180,9 @@ def test_golden_burn_cycle_matches_2026_09_10(model: Model) -> None:
 
 def test_overshoot_past_the_cutoff_is_reproduced(model: Model) -> None:
     """Turning off AT the threshold still overshoots, because heat is in flight."""
-    world = World(model, WIRING, air=Air(co2_ppm=1400.0, temp_c=23.0, vapour_hpa=16.0))
+    # Start well below the cut-off so the burner actually runs, and the
+    # in-flight reservoir has filled by the time it is commanded off.
+    world = World(model, WIRING, air=Air(co2_ppm=1150.0, temp_c=23.0, vapour_hpa=16.0))
     world.set_level("elantris", 5, 0)
     while world.read("entrance").co2_ppm < 1500:
         world.step(minutes=1, minute_of_day=1050)
