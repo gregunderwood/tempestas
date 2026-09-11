@@ -4,6 +4,7 @@ import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import type {
   DayNightStats,
+  Device,
   Node,
   Reading,
   ReadingStats,
@@ -101,14 +102,39 @@ function node(): Node {
 
 let statsCalls = 0;
 
+function device(over: Partial<Device> = {}): Device {
+  return {
+    id: 'dev-1',
+    nodeId: 'elantris',
+    zoneId: 'z1',
+    name: 'CO2 Generator',
+    description: null,
+    gpio: 5,
+    onDelayDuration: 300,
+    onAt: null,
+    offAt: null,
+    onLevel: 0,
+    rulesEnabled: true,
+    role: 'co2_generator',
+    isOn: false,
+    canTurnOn: true,
+    canTurnOnAt: null,
+    ...over,
+  } as Device;
+}
+
 function setup(
   opts: {
     stats?: DayNightStats;
     latest?: Reading[];
     live?: Record<string, Reading>;
+    devices?: Device[];
   } = {},
 ): HTMLElement {
   statsCalls = 0;
+  // Some tests render twice to compare two inputs, and TestBed refuses to be
+  // reconfigured once it has been instantiated.
+  TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     imports: [NodeDetail],
     providers: [
@@ -123,6 +149,7 @@ function setup(
             statsCalls++;
             return of(opts.stats ?? dayNight());
           },
+          devices: () => of(opts.devices ?? []),
         },
       },
       {
@@ -274,5 +301,66 @@ describe('NodeDetail', () => {
       TestBed.resetTestingModule();
       expect(vi.getTimerCount()).toBe(0);
     });
+  });
+});
+
+describe('NodeDetail relays', () => {
+  it('lists the relays on this node with their pin and role', () => {
+    const text = setup({ devices: [device()] }).textContent ?? '';
+    expect(text).toContain('CO2 Generator');
+    expect(text).toContain('BCM 5');
+    expect(text).toContain('co2_generator');
+  });
+
+  // Colour is not readable on a phone in sunlight, and this one means a
+  // propane burner is alight.
+  it('states an energised relay in words', () => {
+    const el = setup({ devices: [device({ isOn: true })] });
+    expect(el.querySelector('.relay__state')?.textContent?.trim()).toBe('ON');
+    expect(el.querySelector('.relay--on')).not.toBeNull();
+  });
+
+  // An idle relay under manual control and one the rules engine is deciding
+  // about look identical otherwise.
+  it('says whether anything is driving it', () => {
+    expect(setup({ devices: [device()] }).textContent).toContain('automatic');
+    expect(
+      setup({ devices: [device({ rulesEnabled: false })] }).textContent,
+    ).toContain('manual');
+  });
+
+  // The interlock is invisible otherwise, and "why is it not coming on?" is
+  // exactly the question it produces.
+  it('shows the minimum-off hold when one is in force', () => {
+    const el = setup({
+      devices: [
+        device({
+          isOn: false,
+          canTurnOn: false,
+          canTurnOnAt: '2026-09-10T22:05:00.000Z',
+        }),
+      ],
+    });
+    expect(el.textContent).toContain('held off until');
+    expect(el.textContent).toContain('300s minimum off');
+  });
+
+  it('does not claim a hold when the device is free to turn on', () => {
+    expect(setup({ devices: [device()] }).textContent).not.toContain(
+      'held off until',
+    );
+  });
+
+  it('only lists relays belonging to this node', () => {
+    const el = setup({
+      devices: [
+        device({ id: 'other', nodeId: 'elsewhere', name: 'Other Relay' }),
+      ],
+    });
+    expect(el.textContent).not.toContain('Other Relay');
+  });
+
+  it('shows no relay card at all when the node has none', () => {
+    expect(setup().querySelector('.relays')).toBeNull();
   });
 });

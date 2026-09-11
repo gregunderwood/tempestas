@@ -16,6 +16,7 @@ import {
   GAUGE_METRICS,
   type GaugeMetricKey,
   type DayNightStats,
+  type Device,
   type Node,
   type Reading,
   type SegmentStats,
@@ -95,6 +96,52 @@ interface MetricBlock {
         }
       </mat-card-content>
     </mat-card>
+
+    @if (devices().length > 0) {
+      <mat-card appearance="outlined">
+        <mat-card-header
+          ><mat-card-title>Relays</mat-card-title></mat-card-header
+        >
+        <mat-card-content>
+          <ul class="relays">
+            @for (d of devices(); track d.id) {
+              <li class="relay" [class.relay--on]="d.isOn">
+                <div class="relay__head">
+                  <span class="relay__name">{{ d.name }}</span>
+                  <!-- In words, not colour: read on a phone in sunlight, and
+                       this one means a propane burner is alight. -->
+                  <span class="relay__state">{{ d.isOn ? 'ON' : 'off' }}</span>
+                </div>
+                <div class="relay__facts">
+                  <span>BCM {{ d.gpio }}</span>
+                  @if (d.role) {
+                    <span>{{ d.role }}</span>
+                  }
+                  <!-- Whether anything is driving it is as important as its
+                       state: an idle relay under manual control and one the
+                       rules engine is deciding about look identical otherwise. -->
+                  <span>{{ d.rulesEnabled ? 'automatic' : 'manual' }}</span>
+                  @if (d.isOn && d.onAt) {
+                    <span>since {{ d.onAt | date: 'HH:mm' }}</span>
+                  } @else if (d.offAt) {
+                    <span>since {{ d.offAt | date: 'HH:mm' }}</span>
+                  }
+                </div>
+                <!-- The interlock is invisible otherwise, and "why is it not
+                     coming on?" is the question it produces. -->
+                @if (!d.isOn && !d.canTurnOn && d.canTurnOnAt) {
+                  <div class="relay__hold">
+                    held off until {{ d.canTurnOnAt | date: 'HH:mm:ss' }} ({{
+                      d.onDelayDuration
+                    }}s minimum off)
+                  </div>
+                }
+              </li>
+            }
+          </ul>
+        </mat-card-content>
+      </mat-card>
+    }
 
     <mat-card appearance="outlined">
       <mat-card-header>
@@ -203,6 +250,54 @@ interface MetricBlock {
       margin-top: 1rem;
       margin-bottom: 0;
     }
+    .relays {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .relay {
+      border: 1px solid var(--mat-sys-outline-variant);
+      border-radius: 0.5rem;
+      padding: 0.6rem 0.8rem;
+    }
+    .relay--on {
+      border-color: var(--temp-gauge-orange);
+      background: color-mix(in srgb, var(--temp-gauge-orange) 12%, transparent);
+    }
+    .relay__head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .relay__name {
+      font-weight: 500;
+    }
+    .relay__state {
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      opacity: 0.7;
+    }
+    .relay--on .relay__state {
+      color: var(--temp-gauge-orange);
+      opacity: 1;
+    }
+    .relay__facts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      font-size: 0.8rem;
+      opacity: 0.75;
+      margin-top: 0.15rem;
+    }
+    .relay__hold {
+      font-size: 0.8rem;
+      margin-top: 0.35rem;
+      color: var(--temp-gauge-orange);
+    }
     .table-scroll {
       overflow-x: auto;
     }
@@ -293,6 +388,7 @@ export class NodeDetail {
   private boundaryTimer: ReturnType<typeof setTimeout> | undefined;
 
   private readonly latest = signal<Reading[]>([]);
+  private readonly fetchedDevices = signal<Device[]>([]);
   private readonly nodes = signal<Node[]>([]);
   protected readonly stats = signal<DayNightStats | null>(null);
 
@@ -307,6 +403,14 @@ export class NodeDetail {
       this.latest().find((r) => r.nodeId === this.slug()) ??
       null,
   );
+
+  /** The socket patches what the API established, never replaces it. */
+  protected readonly devices = computed<Device[]>(() => {
+    const pushed = this.realtime.deviceState();
+    return this.fetchedDevices()
+      .map((d) => (pushed && d.id === pushed.id ? pushed : d))
+      .filter((d) => d.nodeId === this.slug());
+  });
 
   protected readonly blocks = computed<MetricBlock[]>(() => {
     // Newest first on screen. The API returns them chronologically, which is
@@ -349,6 +453,7 @@ export class NodeDetail {
   constructor() {
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
     this.api.latestReadings().subscribe((all) => this.latest.set(all));
+    this.api.devices().subscribe((all) => this.fetchedDevices.set(all));
 
     // Driven off the route parameter rather than read once: a required input
     // has no value during construction, and moving between two nodes reuses
