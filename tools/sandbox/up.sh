@@ -83,9 +83,21 @@ if [[ "${WITH_SERVERS:-1}" == "1" ]]; then
   done
 
   # ---------------------------------------------------------------- servers
-  echo "==> building the server once, then running it twice"
-  ( cd "$ROOT" && npx nx build server ) >"$RUN/build.log" 2>&1 || {
+  echo "==> building server + web once, then running the pair twice"
+  ( cd "$ROOT" && npx nx build server && npx nx build web ) >"$RUN/build.log" 2>&1 || {
     echo "build failed; see $RUN/build.log"; exit 1; }
+
+  # Stage the PRODUCTION layout. The server serves `../web` relative to its own
+  # bundle, and tools/deploy.sh rsyncs dist/apps/web/browser/ INTO dist/apps/web/
+  # - flattening `browser` away. Running straight out of dist/ would leave
+  # index.html one directory deeper than the server looks, so the UI would 404
+  # in the sandbox while working in production. Mirror the layout instead.
+  APP="$RUN/app"
+  rm -rf "$APP"; mkdir -p "$APP/server" "$APP/web"
+  cp -R "$ROOT/dist/apps/server/." "$APP/server/"
+  cp -R "$ROOT/dist/apps/web/browser/." "$APP/web/"
+  ( cd "$APP/server" && npm ci --omit=dev --no-audit --no-fund ) >>"$RUN/build.log" 2>&1 || {
+    echo "npm ci failed; see $RUN/build.log"; exit 1; }
 
   for pair in "elantris 5442 7010 leader" "greenhouse 5443 7011 follower"; do
     set -- $pair; NODE=$1; PGPORT=$2; HTTP=$3; ROLE=$4
@@ -97,7 +109,7 @@ if [[ "${WITH_SERVERS:-1}" == "1" ]]; then
         MQTT_URL=mqtt://127.0.0.1:1883 \
         MQTT_USERNAME=tempestas-server MQTT_PASSWORD=sandbox \
         TEMPESTAS_TZ=America/Vancouver \
-        node "$ROOT/dist/apps/server/main.js" migrate:run \
+        node "$APP/server/main.js" migrate:run \
         >"$RUN/migrate-$NODE.log" 2>&1 || {
           echo "migrations failed for $NODE; see $RUN/migrate-$NODE.log"; exit 1; }
 
@@ -108,7 +120,7 @@ if [[ "${WITH_SERVERS:-1}" == "1" ]]; then
         MQTT_URL=mqtt://127.0.0.1:1883 \
         MQTT_USERNAME=tempestas-server MQTT_PASSWORD=sandbox \
         TEMPESTAS_TZ=America/Vancouver \
-        node "$ROOT/dist/apps/server/main.js" >"$RUN/server-$NODE.log" 2>&1 &
+        node "$APP/server/main.js" >"$RUN/server-$NODE.log" 2>&1 &
     echo "server-$NODE $!" >> "$RUN/pids"
   done
 fi
