@@ -79,6 +79,7 @@ interface Setup {
   turnOn?: ReturnType<typeof vi.fn>;
   turnOff?: ReturnType<typeof vi.fn>;
   now?: Date;
+  isLeader?: boolean;
 }
 
 function makeService(setup: Setup = {}) {
@@ -131,6 +132,9 @@ function makeService(setup: Setup = {}) {
     nodes,
     realtime,
     new FixedClock(setup.now ?? NOW),
+    // These cases are all about what a LEADER decides. Follower behaviour has
+    // its own test below, where the assertion is that nothing is evaluated.
+    { isLeader: setup.isLeader ?? true } as HardwareService,
   );
   return { service, turnOn, turnOff, findByRole, publishSystemStatus };
 }
@@ -495,5 +499,25 @@ describe('system status fan-out', () => {
     expect(publishSystemStatus).toHaveBeenCalledWith(
       expect.objectContaining({ lastEvaluationAt: null }),
     );
+  });
+});
+
+describe('a follower evaluates nothing', () => {
+  it('does not dispatch, even where a leader plainly would', async () => {
+    // Identical inputs. The ONLY difference between the two cases is the role,
+    // which is what makes this evidence rather than a tautology.
+    const leader = makeService({
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    await leader.service.tick();
+    expect(leader.turnOn).toHaveBeenCalledWith('dev-burner');
+
+    const follower = makeService({
+      isLeader: false,
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    await follower.service.tick();
+    expect(follower.turnOn).not.toHaveBeenCalled();
+    expect(follower.turnOff).not.toHaveBeenCalled();
   });
 });

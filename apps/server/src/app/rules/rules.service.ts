@@ -17,6 +17,7 @@ import {
   type RulesEvaluation,
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
+import { HardwareService } from '../hardware/hardware.service';
 import { DevicesService } from '../devices/devices.service';
 import { NodesService } from '../nodes/nodes.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -57,6 +58,7 @@ export class RulesService implements OnApplicationBootstrap {
     private readonly nodes: NodesService,
     private readonly realtime: RealtimeGateway,
     private readonly clock: Clock,
+    private readonly hardware: HardwareService,
   ) {}
 
   /** Ownership is logged once at startup, and after that only when it changes. */
@@ -68,6 +70,10 @@ export class RulesService implements OnApplicationBootstrap {
 
   @Interval(EVALUATION_INTERVAL_MS)
   async tick(): Promise<void> {
+    // A follower evaluates nothing. Not because its decisions would be wrong,
+    // but because acting on them is the leader's job alone - and a rules engine
+    // that runs and then fails to dispatch just fills the log with refusals.
+    if (!this.hardware.isLeader) return;
     // A slow database must not queue evaluations behind each other; the next
     // tick is 10 s away and level-triggered dispatch means nothing is lost.
     if (this.running) {
