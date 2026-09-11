@@ -21,11 +21,36 @@ import {
   type SensorSample,
 } from './hardware.service';
 
-/** Pins as wired on the real greenhouse hardware, so the sim behaves like it. */
-const BURNER_PIN = 16;
-const FAN_PIN = 20;
-/** Four of the five relays are active-LOW, so 0 means energised. */
+/** Pins as wired on elantris, so a device created in dev works in production. */
+const BURNER_PIN = 5;
+const FAN_PIN = 6;
+/** The relay board is active-LOW, so 0 means energised. */
 const ON_LEVEL_ACTIVE_LOW = 0;
+
+/**
+ * Constants from the greenhouse on 2026-09-10 with the real generator, not
+ * invented - but a shape model, not a fitted one. The field numbers are
+ * internally inconsistent (decay with the burner off implies a smaller leak
+ * coefficient than the observed gain near the setpoint does, most likely
+ * mixing lag between the burner and the sensor), so these come from the
+ * cleanest measurements and claim no more precision than that.
+ */
+const OUTDOOR_CO2_PPM = 420;
+/** Leakage is a FRACTION of the gradient to outside air, never a flat rate. */
+const LEAK_FRACTION_PER_MINUTE = 0.027;
+/** Gross output once alight: ~88 ppm/min net at baseline, where leakage is small. */
+const BURNER_CO2_PPM_PER_MINUTE = 91;
+/** Output takes this long to show at the sensor - mixing plus warm-up. */
+const BURNER_WARMUP_MINUTES = 2.5;
+/** ~1 °C per 15 minutes of run time. */
+const BURNER_DEG_C_PER_MINUTE = 0.067;
+/** A fan clears a good share of the excess each minute. */
+const FAN_CLEAR_FRACTION_PER_MINUTE = 0.25;
+
+/** Saturation vapour pressure, hPa. Magnus, the same form the docs use. */
+function saturationPressure(tempC: number): number {
+  return 6.112 * Math.exp((17.62 * tempC) / (243.12 + tempC));
+}
 
 export interface FakeNodeSpec {
   nodeId: NodeId;
@@ -34,7 +59,10 @@ export interface FakeNodeSpec {
 }
 
 export const DEFAULT_FAKE_NODES: FakeNodeSpec[] = [
-  { nodeId: 'sim-pi', pins: [12, 16, 20, 21, 26], sensorId: 'scd4x-0' },
+  // elantris's own wiring: BCM 5 -> In6 (the CO2 generator), 6 -> In7, 4 -> In8.
+  // Matching it means a device created against the sim works unchanged against
+  // the real panel.
+  { nodeId: 'sim-pi', pins: [5, 6, 4], sensorId: 'scd4x-0' },
   // Deliberately different shape: sensor-only, no GPIO. Proves the multi-node
   // path and the capability model with zero hardware.
   { nodeId: 'sim-esp32', pins: [], sensorId: 'scd4x-1' },
@@ -65,6 +93,10 @@ export class FakeHardwareService
   private temperature = 18;
   private co2 = 600;
   private humidity = 55;
+  /** Water in the air, hPa. Humidity is derived from this and temperature. */
+  private vapourPressure = 11.3;
+  /** Consecutive minutes the burner has been alight, for the warm-up ramp. */
+  private burnerMinutes = 0;
   private minutes = 6 * 60;
 
   constructor(
@@ -189,10 +221,30 @@ export class FakeHardwareService
     return this.pinState.get(`${nodeId}:${pin}`);
   }
 
-  /** Advance the simulation one step. Exposed so tests can drive it directly. */
+  /** Small measurement noise, so a gauge moves the way a real one does. */
+  private jitter(amplitude: number): number {
+    return (Math.random() - 0.5) * 2 * amplitude;
+  }
+
+  /**
+   * Advance the simulation one minute. Exposed so tests can drive it directly.
+   *
+   * The behaviour that matters for development is the SHAPE, and the shape is
+   * set by one fact: leakage is proportional to the gradient to outside air. So
+   * the burner easily out-runs it near baseline and barely beats it near the
+   * setpoint, which is why a single CO2 threshold chattered on the real
+   * greenhouse and a dead band was needed. A simulator with a flat decay rate
+   * hides exactly that, and would have made the fix look unnecessary.
+   */
   tick(): void {
     const burnerOn = this.getPin('sim-pi', BURNER_PIN) === ON_LEVEL_ACTIVE_LOW;
     const fanOn = this.getPin('sim-pi', FAN_PIN) === ON_LEVEL_ACTIVE_LOW;
+
+    // Output ramps in rather than appearing at full rate: on the real burner
+    // CO2 kept FALLING for over two minutes after ignition before it turned
+    // around, which is long enough to read as a failed light if unmodelled.
+    this.burnerMinutes = burnerOn ? this.burnerMinutes + 1 : 0;
+    const output = Math.min(1, this.burnerMinutes / BURNER_WARMUP_MINUTES);
 
     this.minutes = (this.minutes + 1) % (24 * 60);
     // Diurnal baseline, coldest around 05:00 and warmest around 17:00.
@@ -200,18 +252,33 @@ export class FakeHardwareService
       18 + 7 * Math.sin(((this.minutes - 300) / 1440) * 2 * Math.PI);
 
     let delta = (diurnal - this.temperature) * 0.05;
-    if (burnerOn) delta += 0.25;
+    if (burnerOn) delta += BURNER_DEG_C_PER_MINUTE * output;
     if (fanOn) delta -= 0.4;
     this.temperature = Math.round((this.temperature + delta) * 100) / 100;
 
-    let co2Delta = -8;
-    if (burnerOn) co2Delta += 45;
-    if (fanOn) co2Delta -= 30;
-    this.co2 = Math.max(400, Math.min(2500, Math.round(this.co2 + co2Delta)));
+    const excess = this.co2 - OUTDOOR_CO2_PPM;
+    let co2Delta = -excess * LEAK_FRACTION_PER_MINUTE;
+    if (burnerOn) co2Delta += BURNER_CO2_PPM_PER_MINUTE * output;
+    if (fanOn) co2Delta -= excess * FAN_CLEAR_FRACTION_PER_MINUTE;
+    this.co2 = Math.max(
+      OUTDOOR_CO2_PPM,
+      Math.min(2500, Math.round(this.co2 + co2Delta + this.jitter(4))),
+    );
 
+    // Humidity is derived from the water in the air and the temperature, not
+    // tracked directly. That reproduces the relationship the real sensor
+    // showed - RH falling as the burner warms the air even though combustion
+    // is ADDING water - and it is the same physics the offset calibration
+    // leans on.
+    if (burnerOn) this.vapourPressure += 0.12 * output;
+    if (fanOn) this.vapourPressure -= 0.5;
+    this.vapourPressure = Math.max(4, Math.min(28, this.vapourPressure));
     this.humidity = Math.max(
       20,
-      Math.min(95, this.humidity + (fanOn ? -0.5 : 0.2)),
+      Math.min(
+        99,
+        (100 * this.vapourPressure) / saturationPressure(this.temperature),
+      ),
     );
 
     for (const node of this.nodes) {
