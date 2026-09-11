@@ -24,5 +24,8 @@ export default new DataSource({
   synchronize: false,
   logging: process.env['NODE_ENV'] === 'development',
   entities: [join(__dirname, 'app/**/models{.ts,.js}')],
-  migrations: [join(__dirname, 'migrations/**/*{.ts,.js}')],
+  // Only the timestamped files. A plain `**/*` also matches `migrations/index.ts`,
+  // the barrel the bundled runner needs, and every migration is then seen twice:
+  // "Duplicate migrations: ...".
+  migrations: [join(__dirname, 'migrations/[0-9]*{.ts,.js}')],
 });
