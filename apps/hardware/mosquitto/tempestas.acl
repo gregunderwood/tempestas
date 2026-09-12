@@ -62,6 +62,22 @@ topic read tempestas/v1/node/greenhouse/gpio/sync
 topic read tempestas/v1/node/greenhouse/control/heartbeat
 topic read tempestas/v1/server/status
 
+# ------------------------------------------------------------ greenhouse-server
+#
+# The FOLLOWER's server. Read-only across the tree and nothing else.
+#
+# A follower ingests everything and commands nothing. CONTROLLER_ROLE=follower
+# already stops it heartbeating, registering an LWT, or dispatching - this is
+# the same statement made by the broker, so the flag does not have to be
+# trusted alone. Promotion then means a deliberate credential change as well as
+# a config change, which is the right amount of friction for handing over a
+# burner.
+#
+# Its own identity rather than sharing `tempestas-observer`, so one box's
+# credential can be revoked without silencing every watcher.
+user greenhouse-server
+topic read tempestas/v1/#
+
 # ------------------------------------------------------------ patji
 #
 # Sensor only, east wall mid-greenhouse. A node with `lines = []` advertises no

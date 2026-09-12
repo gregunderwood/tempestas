@@ -115,6 +115,39 @@ with a comment saying why. Re-installing those units from the repo will undo it,
 and the symptom is a service that refuses to start with "Unit
 postgresql.service not found".
 
+## ⚠ Broker credentials: generate the hash ON the broker
+
+`mosquitto_passwd` writes a PBKDF2 iteration count into the hash, and the
+default changed between releases: the Mac's **2.1.2 writes 1000**, the Pi's
+**2.0.x writes 101**, and the 2.0 broker rejects the 1000-iteration entries. It
+presents as `Connection Refused: not authorised`, which reads like a wrong
+password rather than a format mismatch.
+
+So build entries with the broker's own tool:
+
+```bash
+sudo mosquitto_passwd -b /etc/mosquitto/tempestas.passwd <user> '<password>'
+sudo chown root:root /etc/mosquitto/tempestas.passwd    # 2.0 warns, future versions refuse
+sudo systemctl reload mosquitto                          # keeps existing connections
+```
+
+### ⚠ Verify with MQTT v5, never 3.1.1
+
+**A denied publish over MQTT 3.1.1 is silent.** The broker drops the message and
+still returns a PUBACK, so `mosquitto_pub` reports `RC:0` for a publish that
+never happened. Testing that way makes a broken ACL look like a working one -
+it has now cost us twice.
+
+Use `-V mqttv5`, where a denial is `RC:135`:
+
+```bash
+mosquitto_pub -h HOST -V mqttv5 -u greenhouse -P '...' -q 1 \
+  -t tempestas/v1/node/elantris/gpio/set -m '{}' -d     # expect PUBACK RC:135
+```
+
+Check both directions. An ACL that denies everything also passes a
+denial-only test.
+
 ## Still outstanding for greenhouse
 
 - **Broker credentials on elantris.** Its mosquitto needs the `greenhouse` and
