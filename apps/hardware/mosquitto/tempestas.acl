@@ -62,6 +62,26 @@ topic read tempestas/v1/node/greenhouse/gpio/sync
 topic read tempestas/v1/node/greenhouse/control/heartbeat
 topic read tempestas/v1/server/status
 
+# ------------------------------------------------------------ sensor-only nodes
+#
+# A node with `lines = []` advertises no GPIO capability, so the server cannot
+# create a device on it and it has nothing to command. Its ACL says the same
+# thing from the other side: no read on gpio/set or gpio/sync at all, and no
+# write on gpio/state or gpio/result - topics a sensor-only node has no
+# business on even by accident.
+#
+# It still reads the server LWT, because a node that cannot actuate can still
+# usefully know the brain is gone.
+#
+# Copy this block per node and substitute the slug.
+#user monitor-1
+#topic write tempestas/v1/node/monitor-1/hello
+#topic write tempestas/v1/node/monitor-1/status
+#topic write tempestas/v1/node/monitor-1/sensor/+/sample
+#topic write tempestas/v1/node/monitor-1/alarm
+#topic read tempestas/v1/node/monitor-1/control/heartbeat
+#topic read tempestas/v1/server/status
+
 # ------------------------------------------------------------ observers
 #
 # Read-only across the whole tree, for the soak logger and anything else that
