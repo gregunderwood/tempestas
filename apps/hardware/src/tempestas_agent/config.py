@@ -49,6 +49,16 @@ class SensorConfig:
     # certainly been reset by every power cycle since somebody set it.
     temperature_offset_c: float | None = None
     altitude_m: int | None = None
+    # Outside these, a word is treated as the sensor having no answer rather
+    # than as a measurement. Config rather than constants because they describe
+    # THIS greenhouse as much as the chip: 400 is about outdoor air, and this
+    # structure leaks toward it fast enough that a sustained lower reading is
+    # not physically available to it. A sealed house with a heavy crop can
+    # genuinely deplete below 400 and would want a lower floor.
+    co2_min_ppm: int = 400
+    # The SCD4x's specified range ends at 5000. It can EMIT up to 40000, which
+    # is how a failing one produced 15,723 ppm and had it stored as real.
+    co2_max_ppm: int = 5000
 
 
 @dataclass(frozen=True)
@@ -132,10 +142,17 @@ def load(path: str | Path | None = None, env: dict[str, str] | None = None) -> A
         ),
         temperature_offset_c=sensor_raw.get("temperature_offset_c"),
         altitude_m=sensor_raw.get("altitude_m"),
+        co2_min_ppm=int(sensor_raw.get("co2_min_ppm", SensorConfig.co2_min_ppm)),
+        co2_max_ppm=int(sensor_raw.get("co2_max_ppm", SensorConfig.co2_max_ppm)),
     )
     if sensor.kind not in {"scd4x", "simulated", "world"}:
         raise ConfigError(
             f'sensor.kind must be "scd4x", "simulated" or "world", not "{sensor.kind}"'
+        )
+    if sensor.co2_min_ppm >= sensor.co2_max_ppm:
+        raise ConfigError(
+            f"sensor.co2_min_ppm ({sensor.co2_min_ppm}) must be below "
+            f"co2_max_ppm ({sensor.co2_max_ppm})"
         )
     if sensor.sample_interval_s < 5:
         # The SCD4x produces a reading every 5s in periodic mode; asking faster
