@@ -115,6 +115,47 @@ with a comment saying why. Re-installing those units from the repo will undo it,
 and the symptom is a service that refuses to start with "Unit
 postgresql.service not found".
 
+## A sensor-only node on ARMv6 (`patji`, Pi Zero W v1.1)
+
+Cheaper than it looks. With `lines = []` the agent opens no chip, so the `gpio`
+extra is not installed and **nothing compiles** - both remaining dependencies
+are `py3-none-any`:
+
+```
+paho-mqtt 2.1.0   smbus2 0.6.1   tempestas-agent 0.1.0
+```
+
+That matters on a 1 GHz single core, where building `lgpio` would be an
+afternoon.
+
+Two deviations from the other boxes:
+
+- **No `uv`.** There is no ARMv6 build, so use `python3 -m venv .venv` and
+  `pip install -e .` against the system Python. Bookworm ships 3.11.2, which
+  satisfies `requires-python = ">=3.11"`; Bullseye ships 3.9 and does not.
+- **No Node, no Postgres, no server.** A sensor-only node is the agent alone.
+
+### ⚠ `dtparam=i2c_arm=on` is not enough on its own
+
+It enables the bus in the device tree, but `/dev/i2c-1` needs the **`i2c-dev`
+module**, which is a separate `/etc/modules` entry. Setting only the dtparam and
+rebooting leaves no `/dev/i2c-*` at all, which reads like a wiring fault.
+
+Use the supported path, which does both:
+
+```bash
+sudo raspi-config nonint do_i2c 0
+```
+
+Also note `i2cdetect` lives in **`/usr/sbin`**, which is not on the PATH of a
+non-login SSH session - `which i2cdetect` comes back empty on a box that has it.
+
+### Order matters
+
+Do not enable the unit before the sensor is attached. `start()` reads the
+serial number, so with an empty bus the agent fails at startup and systemd
+crash-loops it.
+
 ## ⚠ Broker credentials: generate the hash ON the broker
 
 `mosquitto_passwd` writes a PBKDF2 iteration count into the hash, and the
