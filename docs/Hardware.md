@@ -327,6 +327,38 @@ mitigated. Full detail, the measurement that gates it, and the three required mi
 **SCD-4x (Adafruit SCD-41, STEMMA QT)** on I²C, `/dev/i2c-1`, address `0x62`. Currently one per node;
 the capability model allows several.
 
+### Where the three sensors sit
+
+The greenhouse runs roughly north-south. Not surveyed, but close enough that
+the compass points mean something.
+
+| Node         | Position                    | Air                                                     |
+| ------------ | --------------------------- | ------------------------------------------------------- |
+| `elantris`   | **North end**, the entrance | Ventilated. First air disturbed whenever the door opens |
+| `greenhouse` | **West wall, south end**    | Under canopy, at the grow site                          |
+| `patji`      | **East wall, middle**       | Under canopy, mid-house                                 |
+
+That is a triangle rather than a line, and it is the first arrangement able to
+answer a question the design has been carrying unresolved: **is this one zone or
+two?**
+
+A zone is defined as one airspace - one temperature, one CO2 concentration -
+and two sensors 143 ppm apart can only tell you they disagree. A third point
+between them distinguishes the two explanations:
+
+- **A gradient.** patji reads between the other two, roughly in proportion to
+  distance. One airspace that is simply not well mixed, and a zone mean is a
+  fair summary of it.
+- **A step.** patji reads close to `greenhouse` and both sit far from
+  `elantris`. Then the entrance is a different airspace from the growing area,
+  the zone mean is an average of two unlike things, and the zone wants
+  splitting.
+
+Worth resisting the urge to decide this early. The reading that settles it is
+patji against `greenhouse` across a burn cycle, once patji has an offset - and
+`elantris`'s sensor was failing when patji was installed, so the north point is
+untrustworthy until it is replaced.
+
 ### The far-end sensor is the one over the plants
 
 There are two SCD41s, and they are **not interchangeable**:

@@ -62,25 +62,25 @@ topic read tempestas/v1/node/greenhouse/gpio/sync
 topic read tempestas/v1/node/greenhouse/control/heartbeat
 topic read tempestas/v1/server/status
 
-# ------------------------------------------------------------ sensor-only nodes
+# ------------------------------------------------------------ patji
 #
-# A node with `lines = []` advertises no GPIO capability, so the server cannot
-# create a device on it and it has nothing to command. Its ACL says the same
-# thing from the other side: no read on gpio/set or gpio/sync at all, and no
-# write on gpio/state or gpio/result - topics a sensor-only node has no
-# business on even by accident.
+# Sensor only, east wall mid-greenhouse. A node with `lines = []` advertises no
+# GPIO capability, so the server cannot create a device on it. The ACL says the
+# same thing from the other side, which is the point: no read on gpio/set or
+# gpio/sync at all, and no write on gpio/state or gpio/result. Two independent
+# reasons it cannot actuate, so neither one has to be trusted alone.
 #
-# It still reads the server LWT, because a node that cannot actuate can still
-# usefully know the brain is gone.
+# It still reads the server LWT - a node that cannot actuate can still usefully
+# know the brain has gone.
 #
-# Copy this block per node and substitute the slug.
-#user monitor-1
-#topic write tempestas/v1/node/monitor-1/hello
-#topic write tempestas/v1/node/monitor-1/status
-#topic write tempestas/v1/node/monitor-1/sensor/+/sample
-#topic write tempestas/v1/node/monitor-1/alarm
-#topic read tempestas/v1/node/monitor-1/control/heartbeat
-#topic read tempestas/v1/server/status
+# Copy this block per sensor-only node and substitute the slug.
+user patji
+topic write tempestas/v1/node/patji/hello
+topic write tempestas/v1/node/patji/status
+topic write tempestas/v1/node/patji/sensor/+/sample
+topic write tempestas/v1/node/patji/alarm
+topic read tempestas/v1/node/patji/control/heartbeat
+topic read tempestas/v1/server/status
 
 # ------------------------------------------------------------ observers
 #
