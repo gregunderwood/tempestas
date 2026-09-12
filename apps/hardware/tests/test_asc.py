@@ -6,7 +6,6 @@ exactly like a greenhouse getting leaner, so nothing in the data can catch it.
 
 from __future__ import annotations
 
-
 from tempestas_agent.sensor import _GET_ASC, _SET_ASC, _START_PERIODIC, Scd4xSensor
 
 
