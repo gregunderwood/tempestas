@@ -94,13 +94,53 @@ def convert_humidity(raw_word: int) -> float:
     return 100 * raw_word / 65535
 
 
+def judge_co2(raw: int, lo: int, hi: int) -> Measurement:
+    """Is this word a measurement, or the sensor failing to have an answer?
+
+    The guard used to be `0 < raw < 40000` - the chip's whole output width - and
+    a dying SCD41 walked straight through it. Observed on elantris on
+    2026-09-12: 293 ppm (below outdoor air) and 15,723 ppm (three times the
+    sensor's own ceiling), both stored as genuine measurements.
+
+    Low readings are the dangerous direction. The rules engine resolves
+    `node:<slug>` to a SINGLE sample with no averaging, so one spurious 293 ppm
+    is a command to light a propane burner. A rejected reading is merely absent,
+    and Safety rule 4 turns absent into +Infinity, which keeps it off.
+
+    The bounds are config, not constants, because they are a statement about
+    this greenhouse as much as about the chip. 400 ppm is roughly outdoor air
+    and this structure leaks toward it at ~3% of the gradient per minute, so a
+    sustained lower reading is not something it can physically do. A SEALED
+    greenhouse with a heavy crop genuinely can deplete below 400, and would want
+    a lower floor - see `sensor.co2_min_ppm`.
+    """
+    if raw == 0:
+        # The SCD4x's own way of saying it has no answer. Not 0 ppm.
+        return invalid("ppm", "ZERO_READING")
+    if raw < lo:
+        return invalid("ppm", f"BELOW_RANGE ({raw} < {lo})")
+    if raw > hi:
+        return invalid("ppm", f"ABOVE_RANGE ({raw} > {hi})")
+    return Measurement(float(raw), True, "ppm")
+
+
 class Scd4xSensor:
     """Raw I2C SCD4x. One sensor per bus address; all SCD4x share 0x62."""
 
-    def __init__(self, bus: int, address: int, offset_c: float | None, altitude_m: int | None):
+    def __init__(
+        self,
+        bus: int,
+        address: int,
+        offset_c: float | None,
+        altitude_m: int | None,
+        co2_min: int = 400,
+        co2_max: int = 5000,
+    ):
         self._bus_no = bus
         self._addr = address
         self._offset_c = offset_c
+        self._co2_min = co2_min
+        self._co2_max = co2_max
         self._altitude_m = altitude_m
         self._bus = None
         self.serial: str | None = None
@@ -140,17 +180,8 @@ class Scd4xSensor:
         if not (self._read_words(_GET_DATA_READY, 1)[0] & _DATA_READY_MASK):
             return None
         co2_raw, t_raw, rh_raw = self._read_words(_READ_MEASUREMENT, 3)
-
-        # A zero CO2 is the sensor's way of saying it has no answer. Reporting
-        # it as 0 ppm would read as "extremely low", which is the one direction
-        # that runs the burner.
-        co2 = (
-            Measurement(float(co2_raw), True, "ppm")
-            if 0 < co2_raw < 40000
-            else invalid("ppm", "ZERO_READING" if co2_raw == 0 else "OUT_OF_RANGE")
-        )
         return Reading(
-            co2_ppm=co2,
+            co2_ppm=judge_co2(co2_raw, self._co2_min, self._co2_max),
             temperature_c=Measurement(round(convert_temperature(t_raw), 2), True, "C"),
             humidity_pct=Measurement(round(convert_humidity(rh_raw), 1), True, "%"),
         )
