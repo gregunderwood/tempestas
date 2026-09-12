@@ -24,6 +24,20 @@ sample_interval_s = 10.0
 # temperature_offset_c = 6.0
 # altitude_m = 600
 
+# Outside these a word is treated as the sensor having no answer, not as a
+# measurement. A dying SCD41 on elantris emitted 293 ppm and 15,723 ppm on
+# 2026-09-12 and the old guard - the chip's whole 0..40000 output width - stored
+# both as real. Low is the dangerous direction: the rules engine resolves
+# `node:<slug>` to a SINGLE sample, so one spurious low reading is a command to
+# light a burner.
+#
+# 400 is about outdoor air, and this greenhouse leaks toward it at ~3% of the
+# gradient per minute, so it cannot sit below that for long. A SEALED house with
+# a heavy crop genuinely can deplete lower, and should lower the floor rather
+# than widen it back out.
+# co2_min_ppm = 400
+# co2_max_ppm = 5000   # the SCD4x's specified ceiling; it can EMIT up to 40000
+
 [gpio]
 # EMPTY MEANS NO GPIO AT ALL: no capability is advertised, no chip is opened,
 # and the server cannot create a device on this node. That is the right posture

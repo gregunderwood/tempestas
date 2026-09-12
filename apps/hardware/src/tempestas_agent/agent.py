@@ -361,5 +361,7 @@ def build_backends(config: AgentConfig, simulated: bool):
             address=config.sensor.address,
             offset_c=config.sensor.temperature_offset_c,
             altitude_m=config.sensor.altitude_m,
+            co2_min=config.sensor.co2_min_ppm,
+            co2_max=config.sensor.co2_max_ppm,
         )
     return sensor, gpio
