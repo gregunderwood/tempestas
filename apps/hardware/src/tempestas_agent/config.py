@@ -59,6 +59,13 @@ class SensorConfig:
     # The SCD4x's specified range ends at 5000. It can EMIT up to 40000, which
     # is how a failing one produced 15,723 ppm and had it stored as real.
     co2_max_ppm: int = 5000
+    # Sensirion ship ASC enabled. It assumes the space returns to ~400 ppm
+    # regularly, which an enriched greenhouse never does, so it revises the
+    # baseline toward a number the air never reaches and the sensor reads
+    # progressively low - silently, and in the direction that calls for more
+    # CO2. Off by default here; a sensor-only node in unenriched air may want
+    # it on, and then it needs no manual recalibration.
+    automatic_self_calibration: bool = False
 
 
 @dataclass(frozen=True)
@@ -144,6 +151,11 @@ def load(path: str | Path | None = None, env: dict[str, str] | None = None) -> A
         altitude_m=sensor_raw.get("altitude_m"),
         co2_min_ppm=int(sensor_raw.get("co2_min_ppm", SensorConfig.co2_min_ppm)),
         co2_max_ppm=int(sensor_raw.get("co2_max_ppm", SensorConfig.co2_max_ppm)),
+        automatic_self_calibration=bool(
+            sensor_raw.get(
+                "automatic_self_calibration", SensorConfig.automatic_self_calibration
+            )
+        ),
     )
     if sensor.kind not in {"scd4x", "simulated", "world"}:
         raise ConfigError(

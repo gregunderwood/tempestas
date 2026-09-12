@@ -363,5 +363,6 @@ def build_backends(config: AgentConfig, simulated: bool):
             altitude_m=config.sensor.altitude_m,
             co2_min=config.sensor.co2_min_ppm,
             co2_max=config.sensor.co2_max_ppm,
+            asc_enabled=config.sensor.automatic_self_calibration,
         )
     return sensor, gpio

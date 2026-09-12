@@ -38,6 +38,19 @@ sample_interval_s = 10.0
 # co2_min_ppm = 400
 # co2_max_ppm = 5000   # the SCD4x's specified ceiling; it can EMIT up to 40000
 
+# Automatic Self-Calibration. Sensirion ship it ENABLED, and nothing here
+# touched it before 2026-09-12, so every reading this system has taken was on a
+# sensor quietly recalibrating itself.
+#
+# ASC treats the lowest reading of the past week as 400 ppm outdoor air. An
+# ENRICHED greenhouse never returns there, so it revises the baseline toward a
+# number the air never reaches and the sensor reads progressively low - the
+# direction that calls for more CO2. Off by default for that reason.
+#
+# A sensor-only node in UNENRICHED air is the opposite case: leave it on and it
+# needs no manual recalibration at all.
+# automatic_self_calibration = false
+
 [gpio]
 # EMPTY MEANS NO GPIO AT ALL: no capability is advertised, no chip is opened,
 # and the server cannot create a device on this node. That is the right posture

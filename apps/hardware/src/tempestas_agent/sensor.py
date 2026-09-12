@@ -30,6 +30,8 @@ _READ_MEASUREMENT = 0xEC05
 _GET_TEMP_OFFSET = 0x2318
 _SET_TEMP_OFFSET = 0x241D
 _SET_ALTITUDE = 0x2427
+_SET_ASC = 0x2416
+_GET_ASC = 0x2313
 _PERSIST_SETTINGS = 0x3615
 
 # The datasheet's data_ready test: the low 11 bits, not the whole word.
@@ -135,12 +137,15 @@ class Scd4xSensor:
         altitude_m: int | None,
         co2_min: int = 400,
         co2_max: int = 5000,
+        asc_enabled: bool = False,
     ):
         self._bus_no = bus
         self._addr = address
         self._offset_c = offset_c
         self._co2_min = co2_min
         self._co2_max = co2_max
+        self._asc_enabled = asc_enabled
+        self.applied_asc: bool | None = None
         self._altitude_m = altitude_m
         self._bus = None
         self.serial: str | None = None
@@ -169,10 +174,27 @@ class Scd4xSensor:
         if self._altitude_m is not None:
             self._send(_SET_ALTITUDE, arg=self._altitude_m)
 
+        # Automatic Self-Calibration, set every startup for the same reason the
+        # offset is.
+        #
+        # ASC assumes the space returns to ~400 ppm outdoor air regularly and
+        # treats the lowest reading it has seen over about a week as that
+        # baseline. An ENRICHED greenhouse never returns there, so ASC keeps
+        # revising the baseline down toward a number the air never reaches, and
+        # the sensor reads progressively low - with no error, no flag, and
+        # nothing downstream able to tell. A sensor reading low is the direction
+        # that calls for more CO2.
+        #
+        # It ships from Sensirion ENABLED, and nothing here touched it before,
+        # so every reading this system has taken was on a sensor quietly
+        # recalibrating itself against an assumption that does not hold.
+        self._send(_SET_ASC, arg=1 if self._asc_enabled else 0)
+
         # Read the offset back BEFORE measurement starts: this is the only
         # window the chip will answer in, and an offset that silently failed to
         # apply is exactly the failure this re-applying exists to catch.
         self.applied_offset_c = round(175 * self._read_words(_GET_TEMP_OFFSET, 1)[0] / 65535, 2)
+        self.applied_asc = bool(self._read_words(_GET_ASC, 1)[0])
 
         self._send(_START_PERIODIC)
 
@@ -202,9 +224,13 @@ class Scd4xSensor:
 
     def describe(self) -> str:
         offset = "unknown" if self.applied_offset_c is None else f"{self.applied_offset_c:.2f}C"
+        # ASC is in the startup line on purpose. It is invisible in the data -
+        # a sensor drifting under ASC looks exactly like a greenhouse getting
+        # leaner - so the log is the only place it can be caught.
+        asc = "?" if self.applied_asc is None else ("ON" if self.applied_asc else "off")
         return (
             f"scd4x @ i2c-{self._bus_no}:0x{self._addr:02x} "
-            f"serial={self.serial or 'unknown'} offset={offset}"
+            f"serial={self.serial or 'unknown'} offset={offset} asc={asc}"
         )
 
     @staticmethod
