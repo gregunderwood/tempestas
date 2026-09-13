@@ -95,10 +95,26 @@ def main() -> int:
         print(f"  spread {spread:.0f} ppm is too wide - the air has not settled. Wait longer.")
         return 1
 
+    # Spread alone is not enough, and this cost a calibration on 2026-09-12:
+    # readings fell 599 -> 571 across the settle, a steady 1.5 ppm/min, while
+    # the last six sat within 11 ppm of each other and passed. Air still on its
+    # way somewhere is not a reference, however smooth it looks.
+    drift_per_min = (readings[-1] - readings[0]) / (args.settle / 60.0)
+    print(f"  trend: {drift_per_min:+.1f} ppm/min across the settle")
+    if abs(drift_per_min) > 0.5:
+        print("  The air is still MOVING. Calibrating now bakes in wherever it")
+        print("  happened to be, not where it is going. Ventilate and wait for")
+        print("  it to flatten, then re-run.")
+        return 1
+
     print(f"applying forced recalibration to {args.target} ppm ...")
     correction = sensor.forced_recalibration(args.target)
     print(f"  correction applied: {correction:+d} ppm")
-    print(f"  (it was reading {'high' if correction > 0 else 'low'} by {abs(correction)})")
+    # The chip reports the ADJUSTMENT it made, so the sign is the opposite of
+    # the error it was carrying. Getting this backwards in a calibration log is
+    # how a future reader concludes the wrong thing about the sensor.
+    was = "high" if correction < 0 else "low"
+    print(f"  (it had been reading {was} by {abs(correction)} ppm)")
     if abs(correction) > 250:
         print("  A correction this large is a reason to DISTRUST the sensor, not to")
         print("  trust the calibration. Check the reference was right.")
