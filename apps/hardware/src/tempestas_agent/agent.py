@@ -364,5 +364,6 @@ def build_backends(config: AgentConfig, simulated: bool):
             co2_min=config.sensor.co2_min_ppm,
             co2_max=config.sensor.co2_max_ppm,
             asc_enabled=config.sensor.automatic_self_calibration,
+            max_ppm_per_min=config.sensor.co2_max_change_ppm_per_min,
         )
     return sensor, gpio

@@ -51,6 +51,19 @@ sample_interval_s = 10.0
 # needs no manual recalibration at all.
 # automatic_self_calibration = false
 
+# Refuse readings that CHANGE faster than the greenhouse physically can. The
+# range guard above sees impossible VALUES; this sees impossible CHANGES, which
+# is how a degrading sensor produces plausible numbers at impossible speeds - on
+# 2026-09-13 elantris emitted jumps of 154, 184 and 489 ppm between consecutive
+# 10-second samples, every one inside 400-5000 and invisible to the range check.
+#
+# Calibrated against a known-good day, not from theory. Per-sample rates on a
+# HEALTHY sensor reach 285 ppm/min at p99 and peak near 390, because a
+# 10-second window amplifies quantisation noise - so 200 refused 2.8% of a clean
+# day, MORE than it refused of a degraded one. 400 refuses nothing clean and
+# 1.1% degraded. Zero disables it.
+# co2_max_change_ppm_per_min = 400
+
 [gpio]
 # EMPTY MEANS NO GPIO AT ALL: no capability is advertised, no chip is opened,
 # and the server cannot create a device on this node. That is the right posture
