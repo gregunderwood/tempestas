@@ -127,6 +127,80 @@ def judge_co2(raw: int, lo: int, hi: int) -> Measurement:
     return Measurement(float(raw), True, "ppm")
 
 
+class RateGuard:
+    """Refuse readings that arrive faster than the greenhouse can actually move.
+
+    The range guard catches impossible VALUES. This catches impossible
+    CHANGES, which is the failure the range guard cannot see: on 2026-09-13 the
+    sensor emitted jumps of 154, 184 and 489 ppm between consecutive 10-second
+    samples. Every one of those was inside 400-5000 and sailed through, while
+    being physically impossible - the worst was 2933 ppm/min.
+
+    The threshold is calibrated against a KNOWN-GOOD day, not against theory.
+    100 ppm/min is the fastest the greenhouse has genuinely moved, but that is a
+    net rate over minutes; per-sample rates carry the sensor's quantisation
+    noise over a 10-second window and routinely reach 285 ppm/min (p99) on a
+    healthy sensor, peaking at 390. A 200 ppm/min limit therefore refused 2.8%
+    of a clean day - MORE than it refused of a degraded one. 400 separates them:
+    nothing on the clean day, 1.1% on the degraded one.
+
+    Three cases have to be handled or the guard is worse than nothing:
+
+    - **A gap.** After a restart or a stretch of refusals there is no basis for
+      comparison, so accept and re-baseline rather than reject on a stale
+      reference.
+    - **A genuine step.** Forced recalibration moves the whole scale at once,
+      and a guard that never re-baselines would reject everything afterwards
+      forever. So after `resync_after` consecutive refusals it accepts and
+      starts again.
+    - **Never re-baseline on a refusal.** A spike must not become the reference
+      the next reading is judged against, or one bad sample drags the guard
+      along behind it.
+    """
+
+    def __init__(
+        self,
+        max_ppm_per_min: float = 400.0,
+        max_gap_s: float = 120.0,
+        resync_after: int = 3,
+    ) -> None:
+        self.max_ppm_per_min = max_ppm_per_min
+        self.max_gap_s = max_gap_s
+        self.resync_after = resync_after
+        self._prev: tuple[float, float] | None = None  # (value, monotonic seconds)
+        self._rejected = 0
+
+    def judge(self, value: float, at: float) -> tuple[bool, str | None]:
+        prev = self._prev
+        if prev is None:
+            self._prev = (value, at)
+            return True, None
+
+        dt = at - prev[1]
+        if dt <= 0 or dt > self.max_gap_s:
+            # No usable reference. Accepting is the safe choice: the range
+            # guard still applies, and refusing here would blank the sensor
+            # after every restart.
+            self._prev = (value, at)
+            self._rejected = 0
+            return True, None
+
+        rate = abs(value - prev[0]) / (dt / 60.0)
+        if rate <= self.max_ppm_per_min:
+            self._prev = (value, at)
+            self._rejected = 0
+            return True, None
+
+        self._rejected += 1
+        if self._rejected >= self.resync_after:
+            # Persistently "impossible" means the scale moved, not that every
+            # reading is wrong. Re-baseline rather than blank the sensor.
+            self._prev = (value, at)
+            self._rejected = 0
+            return True, None
+        return False, f"RATE_IMPLAUSIBLE ({rate:.0f} ppm/min > {self.max_ppm_per_min:.0f})"
+
+
 class Scd4xSensor:
     """Raw I2C SCD4x. One sensor per bus address; all SCD4x share 0x62."""
 
@@ -139,6 +213,8 @@ class Scd4xSensor:
         co2_min: int = 400,
         co2_max: int = 5000,
         asc_enabled: bool = False,
+        max_ppm_per_min: float = 400.0,
+        monotonic=None,
     ):
         self._bus_no = bus
         self._addr = address
@@ -147,6 +223,12 @@ class Scd4xSensor:
         self._co2_max = co2_max
         self._asc_enabled = asc_enabled
         self.applied_asc: bool | None = None
+        import time as _time
+
+        self._monotonic = monotonic or _time.monotonic
+        # Zero disables it, for a deployment that genuinely changes faster than
+        # this greenhouse can.
+        self._rate_guard = RateGuard(max_ppm_per_min) if max_ppm_per_min > 0 else None
         self._altitude_m = altitude_m
         self._bus = None
         self.serial: str | None = None
@@ -203,8 +285,17 @@ class Scd4xSensor:
         if not (self._read_words(_GET_DATA_READY, 1)[0] & _DATA_READY_MASK):
             return None
         co2_raw, t_raw, rh_raw = self._read_words(_READ_MEASUREMENT, 3)
+
+        co2 = judge_co2(co2_raw, self._co2_min, self._co2_max)
+        # Only rate-check a value that is otherwise credible. Feeding a rejected
+        # one to the guard would let it poison the baseline.
+        if co2.valid and self._rate_guard is not None:
+            ok, reason = self._rate_guard.judge(co2.value, self._monotonic())
+            if not ok:
+                co2 = invalid("ppm", reason or "RATE_IMPLAUSIBLE")
+
         return Reading(
-            co2_ppm=judge_co2(co2_raw, self._co2_min, self._co2_max),
+            co2_ppm=co2,
             temperature_c=Measurement(round(convert_temperature(t_raw), 2), True, "C"),
             humidity_pct=Measurement(round(convert_humidity(rh_raw), 1), True, "%"),
         )

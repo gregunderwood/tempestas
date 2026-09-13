@@ -66,6 +66,16 @@ class SensorConfig:
     # CO2. Off by default here; a sensor-only node in unenriched air may want
     # it on, and then it needs no manual recalibration.
     automatic_self_calibration: bool = False
+    # Refuse readings that CHANGE faster than the greenhouse physically can.
+    # The range guard sees impossible values; this sees impossible changes,
+    # which is how a degrading sensor produces plausible numbers at impossible
+    # speeds.
+    #
+    # Calibrated against a known-good day rather than from theory: per-sample
+    # rates on a HEALTHY sensor reach 285 ppm/min at p99 and peak near 390,
+    # because a 10-second window amplifies quantisation noise. 400 refuses
+    # nothing on the clean day and 1.1% on a degraded one. Zero disables it.
+    co2_max_change_ppm_per_min: float = 400.0
 
 
 @dataclass(frozen=True)
@@ -154,6 +164,11 @@ def load(path: str | Path | None = None, env: dict[str, str] | None = None) -> A
         automatic_self_calibration=bool(
             sensor_raw.get(
                 "automatic_self_calibration", SensorConfig.automatic_self_calibration
+            )
+        ),
+        co2_max_change_ppm_per_min=float(
+            sensor_raw.get(
+                "co2_max_change_ppm_per_min", SensorConfig.co2_max_change_ppm_per_min
             )
         ),
     )
