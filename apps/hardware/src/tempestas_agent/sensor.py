@@ -30,6 +30,7 @@ _READ_MEASUREMENT = 0xEC05
 _GET_TEMP_OFFSET = 0x2318
 _SET_TEMP_OFFSET = 0x241D
 _SET_ALTITUDE = 0x2427
+_PERFORM_FRC = 0x362F
 _SET_ASC = 0x2416
 _GET_ASC = 0x2313
 _PERSIST_SETTINGS = 0x3615
@@ -212,6 +213,42 @@ class Scd4xSensor:
         """0x0000 is a pass. Takes about 10 seconds."""
         return self._read_words(_SELF_TEST, 1, exec_ms=10_000)[0]
 
+    def forced_recalibration(self, target_ppm: int) -> int:
+        """Tell the sensor what it SHOULD be reading, and return the correction.
+
+        The repair for a baseline that has gone wrong. ASC assumes the lowest
+        reading of its window is fresh air at 400 ppm; on elantris a failing
+        sensor emitted a cluster of spurious lows around 300 ppm, ASC took those
+        for fresh air, and everything afterwards read about 115 ppm high.
+        Disabling ASC stops that drifting further but FREEZES the bad
+        correction - only an FRC undoes it.
+
+        Requirements the datasheet is strict about, because a bad FRC is worse
+        than the drift it repairs:
+
+        - The sensor must have been in periodic measurement for **at least 3
+          minutes** in the reference environment. The caller enforces this;
+          this method cannot tell how long it has been sitting there.
+        - Measurement must be STOPPED before the command. The chip rejects
+          configuration while sampling.
+
+        Returns the applied correction in ppm - a number worth logging, because
+        it says how far out the sensor was, and a large one is a reason to
+        distrust the sensor rather than to celebrate the fix.
+        """
+        self._send(_STOP_PERIODIC, exec_ms=500, tolerate=True)
+        raw = self._read_words(_PERFORM_FRC, 1, exec_ms=400, arg=target_ppm)[0]
+        self._send(_START_PERIODIC)
+        if raw == 0xFFFF:
+            raise OSError(
+                "forced recalibration REJECTED by the sensor. The usual cause is "
+                "too little time in the reference environment - it needs 3+ "
+                "minutes of periodic measurement there first."
+            )
+        # The chip returns the correction offset by 0x8000 so it can express a
+        # negative one in an unsigned word.
+        return raw - 0x8000
+
     def persist_settings(self) -> None:
         self._send(_PERSIST_SETTINGS, exec_ms=800)
 
@@ -253,10 +290,14 @@ class Scd4xSensor:
                 raise
         time.sleep(exec_ms / 1000.0)
 
-    def _read_words(self, cmd: int, nwords: int, exec_ms: int = 1) -> list[int]:
+    def _read_words(
+        self, cmd: int, nwords: int, exec_ms: int = 1, arg: int | None = None
+    ) -> list[int]:
         from smbus2 import i2c_msg
 
-        self._send(cmd, exec_ms=exec_ms)
+        # `arg` is for the few commands that take a parameter AND answer -
+        # forced recalibration is the only one today.
+        self._send(cmd, arg=arg, exec_ms=exec_ms)
         msg = i2c_msg.read(self._addr, nwords * 3)
         self._bus.i2c_rdwr(msg)
         return decode_words(list(msg))
