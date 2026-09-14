@@ -51,11 +51,18 @@ class SensorConfig:
     altitude_m: int | None = None
     # Outside these, a word is treated as the sensor having no answer rather
     # than as a measurement. Config rather than constants because they describe
-    # THIS greenhouse as much as the chip: 400 is about outdoor air, and this
-    # structure leaks toward it fast enough that a sustained lower reading is
-    # not physically available to it. A sealed house with a heavy crop can
-    # genuinely deplete below 400 and would want a lower floor.
-    co2_min_ppm: int = 400
+    # THIS greenhouse as much as the chip.
+    #
+    # 300, not 400. A floor at outdoor air is too aggressive in both directions:
+    # a crop in a closed house genuinely depletes below 400 - that is the reason
+    # to enrich at all - and a sensor reading somewhat low then goes silent
+    # instead of merely inaccurate, which is a worse failure to diagnose. On
+    # 2026-09-14 elantris converged on exactly 400 and everything beneath it
+    # vanished, leaving no way to tell a dead sensor from a miscalibrated one.
+    #
+    # Below 300 stays refused: that is not a greenhouse reading by any mechanism
+    # here, and a spuriously low value is the direction that calls for CO2.
+    co2_min_ppm: int = 300
     # The SCD4x's specified range ends at 5000. It can EMIT up to 40000, which
     # is how a failing one produced 15,723 ppm and had it stored as real.
     co2_max_ppm: int = 5000
