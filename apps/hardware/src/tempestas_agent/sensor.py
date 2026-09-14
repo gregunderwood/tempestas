@@ -111,11 +111,13 @@ def judge_co2(raw: int, lo: int, hi: int) -> Measurement:
     and Safety rule 4 turns absent into +Infinity, which keeps it off.
 
     The bounds are config, not constants, because they are a statement about
-    this greenhouse as much as about the chip. 400 ppm is roughly outdoor air
-    and this structure leaks toward it at ~3% of the gradient per minute, so a
-    sustained lower reading is not something it can physically do. A SEALED
-    greenhouse with a heavy crop genuinely can deplete below 400, and would want
-    a lower floor - see `sensor.co2_min_ppm`.
+    this greenhouse as much as about the chip. The floor is 300 rather than
+    outdoor air: a crop in a closed house genuinely depletes below 400, and a
+    sensor drifting low should read inaccurately rather than fall silent - on
+    2026-09-14 elantris converged on exactly 400 and everything beneath it
+    vanished, which made a miscalibrated sensor indistinguishable from a dead
+    one. Below 300 is refused, because no mechanism here produces that and low
+    is the direction that calls for CO2.
     """
     if raw == 0:
         # The SCD4x's own way of saying it has no answer. Not 0 ppm.
@@ -210,7 +212,7 @@ class Scd4xSensor:
         address: int,
         offset_c: float | None,
         altitude_m: int | None,
-        co2_min: int = 400,
+        co2_min: int = 300,
         co2_max: int = 5000,
         asc_enabled: bool = False,
         max_ppm_per_min: float = 400.0,

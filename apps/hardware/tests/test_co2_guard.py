@@ -10,7 +10,7 @@ import pytest
 
 from tempestas_agent.sensor import judge_co2
 
-LO, HI = 400, 5000
+LO, HI = 300, 5000
 
 
 def test_a_normal_greenhouse_reading_is_a_measurement() -> None:
@@ -29,12 +29,23 @@ def test_zero_is_no_answer_not_zero_ppm() -> None:
     assert m.reason == "ZERO_READING"
 
 
-def test_below_outdoor_air_is_refused() -> None:
-    # 293 ppm, observed. Below outdoor air, and this greenhouse leaks toward
-    # ~420 fast enough that it cannot physically sit there.
+def test_a_reading_somewhat_below_outdoor_is_KEPT() -> None:
+    # The floor is 300, not outdoor air. A crop in a closed house genuinely
+    # depletes below 400, and a sensor drifting low should read inaccurately
+    # rather than fall silent: on 2026-09-14 elantris converged on exactly 400
+    # and everything beneath vanished, which made a miscalibrated sensor
+    # impossible to tell from a dead one.
+    assert judge_co2(350, LO, HI).valid is True
+    assert judge_co2(399, LO, HI).valid is True
+
+
+def test_an_impossibly_low_reading_is_still_refused() -> None:
+    # 293 ppm, observed while failing. No mechanism here produces that, and low
+    # is the direction that calls for CO2.
     m = judge_co2(293, LO, HI)
     assert m.valid is False
     assert "BELOW_RANGE" in (m.reason or "")
+    assert judge_co2(196, LO, HI).valid is False   # the worst seen
 
 
 def test_above_the_sensors_own_ceiling_is_refused() -> None:
