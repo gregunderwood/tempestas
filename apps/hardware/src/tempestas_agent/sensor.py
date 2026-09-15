@@ -153,8 +153,12 @@ class RateGuard:
       reference.
     - **A genuine step.** Forced recalibration moves the whole scale at once,
       and a guard that never re-baselines would reject everything afterwards
-      forever. So after `resync_after` consecutive refusals it accepts and
-      starts again.
+      forever. So after `resync_after` consecutive refusals it re-baselines -
+      but only on CORROBORATION. Accepting the next reading unconditionally is
+      what let 3647 ppm through on 2026-09-15 while the sensor was spewing: a
+      failing sensor produces refusals just as persistently as a real step does.
+      A genuine step settles at a new level, so the candidate must be confirmed
+      by a following reading close to it before either is believed.
     - **Never re-baseline on a refusal.** A spike must not become the reference
       the next reading is judged against, or one bad sample drags the guard
       along behind it.
@@ -165,12 +169,18 @@ class RateGuard:
         max_ppm_per_min: float = 400.0,
         max_gap_s: float = 120.0,
         resync_after: int = 3,
+        corroborate_within_ppm: float = 60.0,
     ) -> None:
         self.max_ppm_per_min = max_ppm_per_min
         self.max_gap_s = max_gap_s
         self.resync_after = resync_after
+        # How close a confirming reading must be for a candidate step to be
+        # believed. Wide enough for a real setpoint move plus normal noise,
+        # far tighter than the scatter a failing sensor produces.
+        self.corroborate_within_ppm = corroborate_within_ppm
         self._prev: tuple[float, float] | None = None  # (value, monotonic seconds)
         self._rejected = 0
+        self._candidate: float | None = None
 
     def judge(self, value: float, at: float) -> tuple[bool, str | None]:
         prev = self._prev
@@ -195,11 +205,22 @@ class RateGuard:
 
         self._rejected += 1
         if self._rejected >= self.resync_after:
-            # Persistently "impossible" means the scale moved, not that every
-            # reading is wrong. Re-baseline rather than blank the sensor.
-            self._prev = (value, at)
-            self._rejected = 0
-            return True, None
+            # Persistent refusals mean EITHER the scale moved or the sensor is
+            # spewing, and those need opposite responses. Wait for corroboration
+            # to tell them apart: a real step settles, garbage scatters.
+            if (
+                self._candidate is not None
+                and abs(value - self._candidate) <= self.corroborate_within_ppm
+            ):
+                self._prev = (value, at)
+                self._rejected = 0
+                self._candidate = None
+                return True, None
+            self._candidate = value
+            return False, (
+                f"RATE_IMPLAUSIBLE ({rate:.0f} ppm/min > {self.max_ppm_per_min:.0f}), "
+                f"awaiting corroboration"
+            )
         return False, f"RATE_IMPLAUSIBLE ({rate:.0f} ppm/min > {self.max_ppm_per_min:.0f})"
 
 

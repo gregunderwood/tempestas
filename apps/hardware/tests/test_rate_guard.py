@@ -52,15 +52,51 @@ def test_a_spike_does_not_become_the_new_reference() -> None:
     assert g.judge(1070, 40.0)[0] is True     # back to normal, still fine
 
 
-def test_a_genuine_step_resyncs_rather_than_blanking_the_sensor() -> None:
-    # A forced recalibration moves the whole scale at once. A guard that never
-    # re-baselines would refuse every reading afterwards, forever.
+def test_a_genuine_step_is_accepted_within_a_few_samples() -> None:
+    """A forced recalibration moves the whole scale, and must not blank the sensor.
+
+    Note it is the rate limit's own time-scaling that admits this, not the
+    resync path: the limit is ppm per MINUTE, so the further the last accepted
+    reading recedes the larger a legal step becomes. A real move is back inside
+    the limit within a few samples on its own.
+    """
     g = RateGuard(400.0, resync_after=3)
     g.judge(1500, 0.0)
     assert g.judge(1350, 10.0)[0] is False
-    assert g.judge(1352, 20.0)[0] is False
-    assert g.judge(1351, 30.0)[0] is True, "third consecutive refusal re-baselines"
-    assert g.judge(1353, 40.0)[0] is True, "and it carries on from the new scale"
+    assert g.judge(1348, 20.0)[0] is False
+    assert g.judge(1352, 30.0)[0] is True, "a real step is back inside the limit"
+    assert g.judge(1349, 40.0)[0] is True
+    assert g.judge(1351, 50.0)[0] is True
+
+
+def test_a_spewing_sensor_never_gets_its_garbage_believed() -> None:
+    """THE failure this exists for.
+
+    On 2026-09-15 elantris overheated past 29 C and emitted 3647 ppm thirty
+    seconds after 322. It reached the rules engine, because the guard then
+    re-baselined UNCONDITIONALLY after three refusals - and a failing sensor
+    produces refusals just as persistently as a real step does. Now a candidate
+    has to be corroborated, and garbage never corroborates itself.
+    """
+    g = RateGuard(400.0, resync_after=3)
+    g.judge(378, 0.0)
+    for i, v in enumerate([3600, 3400, 3647, 2900, 3100], start=1):
+        ok, _ = g.judge(v, i * 10.0)
+        assert ok is False, f"{v} ppm must never be believed"
+
+    # Returning to the real level IS believed - it is 2 ppm from where the
+    # sensor was before it started spewing.
+    assert g.judge(380, 60.0)[0] is True
+
+
+def test_corroboration_believes_a_candidate_that_repeats() -> None:
+    # A step large enough to stay outside the limit does get in, but only once
+    # a following reading confirms the new level.
+    g = RateGuard(400.0, resync_after=2, corroborate_within_ppm=60)
+    g.judge(2000, 0.0)
+    assert g.judge(500, 5.0)[0] is False     # far outside, even over 5 s
+    assert g.judge(505, 10.0)[0] is False    # candidate proposed
+    assert g.judge(495, 15.0)[0] is True     # corroborated within 60 ppm
 
 
 def test_a_long_gap_re_baselines_instead_of_refusing() -> None:
