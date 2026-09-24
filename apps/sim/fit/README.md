@@ -74,3 +74,82 @@ between 88 and 118 depending on how the trajectory was anchored.
 `pin_transitions` in [Database](../../../docs/Infrastructure/Database.md) - so
 the next fit can pass a transitions file and stop guessing. One properly logged
 night should settle all three.
+
+## `fit_vpd_response.py` — what VPD this greenhouse actually likes
+
+Two stages, because the second is meaningless without the first.
+
+**Stage 1, calibration.** Dark, sealed, burner off: `dC/dt = k(C_out − C) + R`.
+Regress `dC/dt` against `C` and the leak coefficient and respiration both drop
+out. This has to be measured, not borrowed — see below.
+
+**Stage 2, measurement.** Lit and sealed, burner quiet:
+`N = k(C_out − C) − dC/dt`, binned against leaf VPD. `N` is **net** uptake
+(photosynthesis less respiration). Night `R` is deliberately not added back;
+daytime respiration is not the night figure, so doing so would trade a measured
+quantity for a guessed one.
+
+```sh
+python fit/export_legacy.py --from 2026-09-23 --to 2026-09-25 -o canopy.json
+python fit/fit_vpd_response.py canopy.json --transitions trans.json \
+    --after '2026-10-03 07:00' --before '2026-10-03 12:00'
+```
+
+### Use the canopy sensor, not elantris
+
+The first run of this used elantris and failed: overnight CO2 sat flat at
+730 ppm with no trend, so every window slope was ~0 and the regression was
+degenerate. The canopy sensor over the very same night traced a clean approach
+to equilibrium, 574 → 808 ppm, flattening by 03:00. elantris is by the north
+entrance in its own microclimate with a degrading SCD4x; the canopy sensor is in
+the air the plants are in. Its history lives in the legacy Flask Postgres on
+`greenhouse` (`econ.sensor_reading`, one sensor, `sensor_id` null) back to
+2025-08-23, which `export_legacy.py` pulls.
+
+### The leak coefficient is two numbers, not one
+
+| regime                          | k /min     |
+| ------------------------------- | ---------- |
+| daytime, ventilating, live crop | 0.034      |
+| **sealed night, measured**      | **0.0045** |
+
+A factor of 7.6, and not a contradiction: the 0.034 is an _effective_ removal
+rate with photosynthesis and open vents folded into it. It is fine for
+simulating a normal day and the simulator is tuned against it. It is useless
+here, because subtracting it to recover what the plants are doing would assume
+the answer. Enrichment economics also differ by nearly an order of magnitude
+between the two regimes.
+
+### Two estimator bugs worth not repeating
+
+**Median of consecutive-sample differences reads exactly zero.** The SCD41
+reports every 10 s as an integer; overnight drift of 0.5 ppm/min is 0.08 ppm per
+sample, so nearly every adjacent pair differs by 0 and the median is 0 no matter
+how long the window. Fixed by collapsing to minute-medians and running Theil–Sen
+over pairs spanning at least a quarter of the window. At 15 and 30 min the old
+version returned small-count noise that merely _looked_ like a fit — worse than
+failing.
+
+**Least squares on 10–20 window points is not safe.** One bad window — an
+unlogged burner span, a door opened at dawn — drags the slope. On a synthetic
+night with ten clean points and one outlier, least squares fitted +0.028 where
+the truth was −0.005: sign-inverted. Theil–Sen recovered −0.00501 and R = 1.99
+against a true 2.00. Fit quality is scored over inliers, and rejected windows
+are printed rather than dropped quietly — a window that does not fit a dark
+sealed house usually means something happened in the greenhouse.
+
+### It refuses more often than it answers, on purpose
+
+Neither 2026-09-23 nor 09-24 could be fitted. Through both photoperiods CO2 sat
+at 450–500 ppm — outdoor air — because the house was open. The mass balance only
+closes when it is shut, so the tool refuses rather than reporting the noise
+around zero as a VPD curve.
+
+Nor can it be fitted while the burner is cycling to hold a setpoint: at ~7.8 min
+on / 7.3 min off, no gap clears the 8-minute transport-lag settle, and the
+07:00–09:00 enriched window yielded **zero** usable windows.
+
+**So the protocol is: seal the house, charge it to ~1400 ppm, then leave the
+burner off and let it draw down under light.** A couple of hours is enough. That
+is the same sealed run already planned for the humidity question — one run
+answers both.

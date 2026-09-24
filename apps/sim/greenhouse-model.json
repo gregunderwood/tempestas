@@ -22,12 +22,17 @@
     "leak_fraction_per_minute": {
       "value": 0.034,
       "source": "fit-2026-09-11",
-      "note": "Raised from 0.027. Duty cycle is sink/gross and nothing else - the transport lag stretches a cycle but cannot change its ratio - so 44% measured against 88 ppm/min gross requires ~37 ppm/min of removal at the setpoint. Slightly above the 22-32 ppm/min measured directly after a peak; see known_gaps."
+      "note": "Raised from 0.027. Duty cycle is sink/gross and nothing else - the transport lag stretches a cycle but cannot change its ratio - so 44% measured against 88 ppm/min gross requires ~37 ppm/min of removal at the setpoint. Slightly above the 22-32 ppm/min measured directly after a peak; see known_gaps. SUPERSEDED FOR SEALED CONDITIONS, see known_gaps.leak_is_two_regimes."
     },
     "thermal_coupling_per_minute": {
       "value": 0.02,
       "source": "history-2025",
       "note": "relaxation toward outdoor; provisional, refit from the export"
+    },
+    "sealed_leak_fraction_per_minute": {
+      "value": 0.0045,
+      "source": "fit_vpd_response.py, canopy sensor, night of 2026-09-23",
+      "note": "Measured in the dark with the house shut: dC/dt regressed against C over 17 hour-long windows as CO2 rose 574 -> 808 ppm and flattened, R2 0.56, Theil-Sen. Respiration came out +1.85 ppm/min from the same fit. This is the first leak figure measured without photosynthesis in it."
     }
   },
   "burner": {
@@ -107,6 +112,7 @@
     "humidity": "Transpiration is a flat +0.02 hPa/min with no plant, light or temperature dependence, and vapour is clamped at saturation. Overnight the model therefore parks at 100% RH rather than condensing out. Fine for exercising control paths; not a basis for any humidity rule.",
     "identifiability": "Gross output, transport lag and sink cannot be identified simultaneously from 70 minutes of data whose relay transitions are only known to +-30 s - the grid search moved G between 88 and 118 depending on how the trajectory was anchored. The fix is logged relay transitions alongside readings, which tempestas can now produce and the legacy system never did.",
     "sink_shape": "The 2025 season (16,744 decay points) cannot distinguish a proportional sink from a constant one - residuals differ by 0.5%. Decay there averages 18.4 ppm/min with a p10-p90 of 3.5-37.7, so the shape is assumed, not measured. Note that spread is real physics: vents, wind, light and crop stage, not noise.",
-    "lag_is_asymmetric": "THE structural error, measured 2026-09-12. Ignition to first effect was 3.7 min (observed three times); cut-out to overshoot peak was 1.6 min. One symmetric transport lag cannot produce both, which is why no value of it ever satisfied the on-duration and the overshoot together. Physically obvious once seen: lighting a burner takes time that extinguishing it does not - the flame stops instantly and only CO2 already in transit keeps arriving. The model wants an ignition DEAD TIME (~2.5-3 min, nothing happens) separate from a mixing lag (~1.5-2 min, first-order). Do not refit the single tau again; change the shape first."
+    "lag_is_asymmetric": "THE structural error, measured 2026-09-12. Ignition to first effect was 3.7 min (observed three times); cut-out to overshoot peak was 1.6 min. One symmetric transport lag cannot produce both, which is why no value of it ever satisfied the on-duration and the overshoot together. Physically obvious once seen: lighting a burner takes time that extinguishing it does not - the flame stops instantly and only CO2 already in transit keeps arriving. The model wants an ignition DEAD TIME (~2.5-3 min, nothing happens) separate from a mixing lag (~1.5-2 min, first-order). Do not refit the single tau again; change the shape first.",
+    "leak_is_two_regimes": "The 0.034 above and the 0.0045 beside it are not a contradiction and one does not replace the other - they are different regimes, and which applies depends on whether the vents are shut. 0.034 was fitted from daytime decay with a live crop and the house ventilating, so it is an effective removal rate with both photosynthesis and air exchange folded in; that is the right number for simulating a normal day and the simulator is tuned against it. 0.0045 is the sealed night rate, the actual fabric leak, 7.6x smaller. Two consequences. First, any analysis that subtracts a leak term to recover what the plants are doing must use the sealed figure, or it assumes its own answer. Second, enrichment economics differ by nearly an order of magnitude between a shut house and a ventilating one, which is worth knowing before sizing anything. Neither figure is validated against the other regime, and the daytime sealed rate - vents shut, fans off, lights on - has never been measured at all. The planned sealed humidity run is the chance to get it."
   }
 }
