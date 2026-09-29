@@ -22,7 +22,7 @@ INSERT INTO zones (slug, display_name, rules_config) VALUES (
      "thresholds": {
        "startTime": "06:30", "endTime": "18:30",
        "lightsOnTemp": 26, "lightsOffTemp": 27,
-       "co2OffTemp": 26, "co2NightOnTemp": 3,
+       "co2OffTemp": 28, "co2NightOnTemp": 3,
        "exhaustOnTemp": 30, "exhaustOffTemp": 29.5,
        "co2OnPpm": 1400, "co2OffPpm": 1500
      },
