@@ -191,9 +191,24 @@ So build entries with the broker's own tool:
 
 ```bash
 sudo mosquitto_passwd -b /etc/mosquitto/tempestas.passwd <user> '<password>'
-sudo chown root:root /etc/mosquitto/tempestas.passwd    # 2.0 warns, future versions refuse
+sudo chown mosquitto:mosquitto /etc/mosquitto/tempestas.passwd /etc/mosquitto/tempestas.acl
+sudo chmod 0600 /etc/mosquitto/tempestas.passwd /etc/mosquitto/tempestas.acl
 sudo systemctl reload mosquitto                          # keeps existing connections
 ```
+
+### ⚠ The broker's files belong to `mosquitto`, not root
+
+`mosquitto_passwd` warns that the file's owner "is not root". **Do not follow that warning.**
+The tool runs as root, but the broker drops to the `mosquitto` user and re-reads both files on
+every reload. Root-owned `0600` files are then unreadable, and the reload rejects **every**
+client: the server, every node, and the observer. Existing connections are dropped and none
+can come back. That happened on 2026-11-17, and the only symptom was `not authorised` for
+credentials that had not changed. `/api/health` still said `ok` for the first two minutes,
+until the newest reading aged out.
+
+The broker's own warning says the opposite ("owner is not mosquitto"), and the broker is the
+one that matters. After any change, check `tail /var/log/mosquitto/mosquitto.log` for
+ownership warnings, and that the server and nodes reconnected.
 
 ### ⚠ Verify with MQTT v5, never 3.1.1
 
