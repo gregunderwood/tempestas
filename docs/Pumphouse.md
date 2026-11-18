@@ -288,11 +288,11 @@ Pi, nothing to forget on a reflash, and one place that lists every host.
 | celestine   | 192.168.2.20     |
 | greenhouse  | 192.168.2.50     |
 | elantris    | 192.168.2.70     |
-| **patji**   | **192.168.2.71** |
+| **patji**   | **192.168.2.80** |
 | silverlight | 192.168.2.200    |
 
-`.71` was free on 2026-11-18 and sits next to elantris. patji used to sit at `.252`; if the
-router still holds a reservation there under its MAC, edit it to `.71` rather than adding a
+`.80` was free on 2026-11-18. patji used to sit at `.252`; if the
+router still holds a reservation there under its MAC, edit it to `.80` rather than adding a
 second one. The Zero W's WiFi MAC starts `b8:27:eb` and is fixed per board, so a reservation
 made now survives every future reflash.
 
@@ -326,7 +326,7 @@ ssh gunderwood@patji.local                 # mDNS, until the reservation exists
 cat /sys/class/net/wlan0/address           # the MAC, for the router
 ```
 
-Make the reservation (`patji`, that MAC, `192.168.2.71`), then `sudo reboot` so the new lease is
+Make the reservation (`patji`, that MAC, `192.168.2.80`), then `sudo reboot` so the new lease is
 taken. From then on `ssh patji` works through the laptop's `~/.ssh/config`. Check
 `date` reads `MST -0700` (Trixie's tzdata knows BC's change, Node's does not; see G).
 
