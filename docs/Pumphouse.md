@@ -252,8 +252,8 @@ refuses to start with until they are read off the bus. The plan as written follo
 - [tempestas.acl](../apps/hardware/mosquitto/tempestas.acl): a `patji` identity scoped like
   `elantris` (its own subtree, never `gpio/set`), replacing its old sensor-only block. The password is
   generated **on elantris** and verified with MQTT v5, both per Provisioning.
-- The agent unit: `SupplementaryGroups=gpio` only. 1-wire sysfs is world-readable, and there is
-  no I²C on this box.
+- The agent unit: the repo's own, unchanged. Its `SupplementaryGroups=i2c gpio` works here
+  because Raspberry Pi OS creates both groups; 1-wire sysfs needs neither.
 - Pumphouse zone, via SQL in a script under `tools/`. There is no zones API, and data for one
   installation does not belong in a migration every dev database runs.
 
@@ -380,7 +380,7 @@ with the router's reservation. Check
   `ssh elantris sudo cat /etc/tempestas/patji-agent.env | ssh patji 'sudo install -d -m 0755 /etc/tempestas && sudo tee /etc/tempestas/agent.env >/dev/null && sudo chmod 0600 /etc/tempestas/agent.env'`
 - [patji.toml](../apps/hardware/nodes/patji.toml) to `~/tempestas/etc/agent.toml`. It will not
   start until the probe ROMs are filled in, which happens when the board is built (F).
-- The agent unit with `SupplementaryGroups=gpio` only, `systemd-analyze verify`ed, and enabled.
+- The agent unit, `systemd-analyze verify`ed. Enabled only once the probe ROMs are in.
 
 **6. Then the board** (relays, contactor, probes). Read each ROM with one probe plugged in at a
 time, fill in `patji.toml`, start the agent, admit `patji` to the `pumphouse` zone, and create
