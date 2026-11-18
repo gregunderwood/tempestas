@@ -2,6 +2,7 @@ import { Injectable, OnDestroy, signal } from '@angular/core';
 import { io, type Socket } from 'socket.io-client';
 import {
   REALTIME_EVENTS,
+  sensorKey,
   type Device,
   type Reading,
   type SystemStatus,
@@ -19,7 +20,7 @@ import {
  */
 @Injectable({ providedIn: 'root' })
 export class RealtimeService implements OnDestroy {
-  /** Latest reading per node slug. */
+  /** Latest reading per sensor, keyed `node/sensor` - a node may carry several probes. */
   readonly readings = signal<Record<string, Reading>>({});
   readonly status = signal<SystemStatus | null>(null);
   readonly connected = signal(false);
@@ -38,7 +39,10 @@ export class RealtimeService implements OnDestroy {
     this.socket.on('disconnect', () => this.connected.set(false));
 
     this.socket.on(REALTIME_EVENTS.readingLatest, (reading: Reading) => {
-      this.readings.update((all) => ({ ...all, [reading.nodeId]: reading }));
+      this.readings.update((all) => ({
+        ...all,
+        [sensorKey(reading)]: reading,
+      }));
     });
     this.socket.on(REALTIME_EVENTS.deviceState, (device: Device) => {
       this.deviceState.set(device);

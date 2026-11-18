@@ -61,8 +61,20 @@ function config(
 /** Two sensors, one at each end of the greenhouse. */
 function bothEnds(observedAt = FRESH): NodeSample[] {
   return [
-    { nodeId: 'elantris', temperatureC: 20, co2Ppm: 500, observedAt },
-    { nodeId: 'north-end', temperatureC: 24, co2Ppm: 700, observedAt },
+    {
+      nodeId: 'elantris',
+      sensorId: 's',
+      temperatureC: 20,
+      co2Ppm: 500,
+      observedAt,
+    },
+    {
+      nodeId: 'north-end',
+      sensorId: 's',
+      temperatureC: 24,
+      co2Ppm: 700,
+      observedAt,
+    },
   ];
 }
 
@@ -152,8 +164,20 @@ describe('sensor sources', () => {
 
   it('reports the OLDEST contributing sample, so provenance cannot look too fresh', () => {
     const samples: NodeSample[] = [
-      { nodeId: 'elantris', temperatureC: 20, co2Ppm: 500, observedAt: FRESH },
-      { nodeId: 'north-end', temperatureC: 24, co2Ppm: 700, observedAt: OLD },
+      {
+        nodeId: 'elantris',
+        sensorId: 's',
+        temperatureC: 20,
+        co2Ppm: 500,
+        observedAt: FRESH,
+      },
+      {
+        nodeId: 'north-end',
+        sensorId: 's',
+        temperatureC: 24,
+        co2Ppm: 700,
+        observedAt: OLD,
+      },
     ];
     const { climateByRole } = resolveClimate(
       samples,
@@ -167,8 +191,20 @@ describe('sensor sources', () => {
 
   it('rounds temperature to two places and CO2 to an integer', () => {
     const samples: NodeSample[] = [
-      { nodeId: 'a', temperatureC: 20.005, co2Ppm: 500, observedAt: FRESH },
-      { nodeId: 'b', temperatureC: 20.004, co2Ppm: 501, observedAt: FRESH },
+      {
+        nodeId: 'a',
+        sensorId: 's',
+        temperatureC: 20.005,
+        co2Ppm: 500,
+        observedAt: FRESH,
+      },
+      {
+        nodeId: 'b',
+        sensorId: 's',
+        temperatureC: 20.004,
+        co2Ppm: 501,
+        observedAt: FRESH,
+      },
     ];
     const { climateByRole } = resolveClimate(
       samples,
@@ -186,8 +222,20 @@ describe('invalid CO2', () => {
   // One broken sensor beside a working one must not blind the zone.
   it('excludes a null CO2 from the aggregate but keeps the node as a source', () => {
     const samples: NodeSample[] = [
-      { nodeId: 'elantris', temperatureC: 20, co2Ppm: null, observedAt: FRESH },
-      { nodeId: 'north-end', temperatureC: 24, co2Ppm: 700, observedAt: FRESH },
+      {
+        nodeId: 'elantris',
+        sensorId: 's',
+        temperatureC: 20,
+        co2Ppm: null,
+        observedAt: FRESH,
+      },
+      {
+        nodeId: 'north-end',
+        sensorId: 's',
+        temperatureC: 24,
+        co2Ppm: 700,
+        observedAt: FRESH,
+      },
     ];
     const { climateByRole } = resolveClimate(
       samples,
@@ -205,9 +253,16 @@ describe('invalid CO2', () => {
   // burner's daytime branch fails safe on.
   it('stays null when no node has a valid CO2', () => {
     const samples: NodeSample[] = [
-      { nodeId: 'elantris', temperatureC: 20, co2Ppm: null, observedAt: FRESH },
+      {
+        nodeId: 'elantris',
+        sensorId: 's',
+        temperatureC: 20,
+        co2Ppm: null,
+        observedAt: FRESH,
+      },
       {
         nodeId: 'north-end',
+        sensorId: 's',
         temperatureC: 24,
         co2Ppm: null,
         observedAt: FRESH,
@@ -252,8 +307,20 @@ describe('staleness', () => {
 
   it('uses only the fresh nodes when one has gone quiet', () => {
     const samples: NodeSample[] = [
-      { nodeId: 'elantris', temperatureC: 20, co2Ppm: 500, observedAt: FRESH },
-      { nodeId: 'north-end', temperatureC: 24, co2Ppm: 700, observedAt: OLD },
+      {
+        nodeId: 'elantris',
+        sensorId: 's',
+        temperatureC: 20,
+        co2Ppm: 500,
+        observedAt: FRESH,
+      },
+      {
+        nodeId: 'north-end',
+        sensorId: 's',
+        temperatureC: 24,
+        co2Ppm: 700,
+        observedAt: OLD,
+      },
     ];
     const { climateByRole, staleRoles } = resolveClimate(
       samples,
@@ -346,5 +413,85 @@ describe('role order', () => {
       DeviceRole.Co2Generator,
       DeviceRole.ExhaustFan,
     ]);
+  });
+});
+
+describe('several sensors on one node - the pumphouse', () => {
+  const pumphouse: ZoneRulesConfig = {
+    enabledRoles: [DeviceRole.HeatTape],
+    sensorPolicy: { default: { source: 'min', maxAgeMs: 60_000 } },
+    rules: {
+      [DeviceRole.HeatTape]: {
+        kind: 'thermostat',
+        mode: 'heat',
+        onAtC: 4,
+        offAtC: 6,
+        onStale: 'on',
+      },
+    },
+    timezone: 'America/Vancouver',
+  };
+
+  function probes(pipesAt = FRESH): NodeSample[] {
+    return [
+      {
+        nodeId: 'pumphouse',
+        sensorId: 'air',
+        temperatureC: 7,
+        co2Ppm: null,
+        observedAt: FRESH,
+      },
+      {
+        nodeId: 'pumphouse',
+        sensorId: 'pipes',
+        temperatureC: 1.5,
+        co2Ppm: null,
+        observedAt: pipesAt,
+      },
+    ];
+  }
+
+  // THE reason for per-sensor resolution. The pipe is the cold one; averaged
+  // or overwritten inside its node, the tape would stay off at 1.5 °C.
+  it('takes the coldest PROBE, not one per node', () => {
+    const { climateByRole } = resolveClimate(probes(), pumphouse, NOW);
+    expect(climateByRole[DeviceRole.HeatTape]).toMatchObject({
+      temperatureC: 1.5,
+      sourceSensorIds: ['pumphouse/air', 'pumphouse/pipes'],
+    });
+  });
+
+  it('names the node once, however many of its probes contributed', () => {
+    const { climateByRole } = resolveClimate(probes(), pumphouse, NOW);
+    expect(climateByRole[DeviceRole.HeatTape]?.sourceNodeIds).toEqual([
+      'pumphouse',
+    ]);
+  });
+
+  it('pins a role to one probe with sensor:<slug>/<id>', () => {
+    const pinned: ZoneRulesConfig = {
+      ...pumphouse,
+      sensorPolicy: { default: { source: 'sensor:pumphouse/air' } },
+    };
+    const { climateByRole } = resolveClimate(probes(), pinned, NOW);
+    expect(climateByRole[DeviceRole.HeatTape]).toMatchObject({
+      temperatureC: 7,
+      sourceSensorIds: ['pumphouse/air'],
+    });
+  });
+
+  // Control carries on with what is left - right, and silent, which is why
+  // the health endpoint names the dead probe.
+  it('carries on with the remaining probe when one goes quiet', () => {
+    const { climateByRole, staleRoles } = resolveClimate(
+      probes(OLD),
+      pumphouse,
+      NOW,
+    );
+    expect(staleRoles).toEqual([]);
+    expect(climateByRole[DeviceRole.HeatTape]).toMatchObject({
+      temperatureC: 7,
+      sourceSensorIds: ['pumphouse/air'],
+    });
   });
 });

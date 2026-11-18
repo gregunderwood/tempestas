@@ -149,7 +149,15 @@ interface ZoneRulesConfig {
 - Docs: [Rules and Climate](Rules%20and%20Climate.md) is rewritten around rule kinds, and the
   "no DSL" reasoning stays: the menu grows by code review, never by config.
 
-### B. Several sensors on one node (server + web)
+### B. Several sensors on one node (server + web) — ✅ built
+
+Built as planned with one simplification: the codec does **not** look up the sensor's capability
+to decide whether humidity is required. Humidity is now treated exactly like CO2, an invalid or
+missing value is stored as null, because no rule reads humidity and the capability lookup would
+have put a database read in the decode path for nothing. The gauges are where the declared metrics
+matter, and they use them. Also found: Section A added `heater` and `heat_tape` to the TypeScript
+enum but not to the Postgres `devices_role_enum`, so a pumphouse device row could not have been
+inserted. `AddHeatingRoles` fixes that. What follows is the plan as written.
 
 Three things in the server assume one sensor per node:
 

@@ -70,6 +70,7 @@ function climate(
     co2Ppm,
     observedAt: '2026-01-10T12:00:00.000Z',
     sourceNodeIds: ['elantris'],
+    sourceSensorIds: ['elantris/scd4x-0'],
   };
 }
 

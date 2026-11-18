@@ -17,10 +17,10 @@ export class ReadingsController {
     return this.readings.findAll(query);
   }
 
-  /** One reading per node. Cheap, unwindowed, and what a dashboard opens with. */
+  /** One reading per sensor. Cheap, unwindowed, and what a dashboard opens with. */
   @Get('latest')
   findLatest(): Promise<Reading[]> {
-    return this.readings.findLatestPerNode();
+    return this.readings.findLatestPerSensor();
   }
 
   @Get('stats')

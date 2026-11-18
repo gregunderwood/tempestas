@@ -47,8 +47,9 @@ export class SensorReadingEntity {
   @Column({ type: 'double precision' })
   temperature!: number;
 
-  @Column({ type: 'double precision' })
-  humidity!: number;
+  /** Null for a temperature-only sensor, or an invalid reading. */
+  @Column({ type: 'double precision', nullable: true })
+  humidity!: number | null;
 
   /**
    * Null when the sensor reported an invalid CO2 value. The node never

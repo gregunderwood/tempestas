@@ -89,7 +89,7 @@ function dayNight(over: Partial<DayNightStats> = {}): DayNightStats {
   };
 }
 
-function node(): Node {
+function node(over: Partial<Node> = {}): Node {
   return {
     id: 'n1',
     slug: 'elantris',
@@ -97,6 +97,7 @@ function node(): Node {
     kind: 'rpi',
     status: NodeStatus.Admitted,
     online: true,
+    ...over,
   } as unknown as Node;
 }
 
@@ -129,6 +130,8 @@ function setup(
     latest?: Reading[];
     live?: Record<string, Reading>;
     devices?: Device[];
+    node?: Node;
+    slug?: string;
   } = {},
 ): HTMLElement {
   statsCalls = 0;
@@ -143,7 +146,7 @@ function setup(
       {
         provide: ApiService,
         useValue: {
-          nodes: () => of([node()]),
+          nodes: () => of([opts.node ?? node()]),
           latestReadings: () => of(opts.latest ?? [reading()]),
           dayNightStats: () => {
             statsCalls++;
@@ -164,7 +167,7 @@ function setup(
     ],
   });
   const fixture = TestBed.createComponent(NodeDetail);
-  fixture.componentRef.setInput('slug', 'elantris');
+  fixture.componentRef.setInput('slug', opts.slug ?? 'elantris');
   fixture.detectChanges();
   return fixture.nativeElement as HTMLElement;
 }
@@ -180,6 +183,44 @@ describe('NodeDetail', () => {
     const el = setup();
     expect(el.querySelectorAll('temp-gauge')).toHaveLength(3);
     expect(el.textContent).toContain('23.8');
+  });
+
+  // The pumphouse: three pipe probes on one node, temperature only.
+  it('shows a gauge row per sensor, and only the metrics it has', () => {
+    const probe = (sensorId: string, temperature: number) =>
+      reading({
+        id: sensorId,
+        nodeId: 'pumphouse',
+        sensorId,
+        temperature,
+        humidity: null,
+        co2: null,
+      });
+    const temperatureOnly = (sensorId: string) => ({
+      sensorId,
+      kind: 'ds18b20',
+      metrics: ['temperature' as const],
+      sampleIntervalMs: 30_000,
+    });
+    const el = setup({
+      slug: 'pumphouse',
+      latest: [probe('28-b', 4.2), probe('28-a', 3.1), reading()],
+      node: node({
+        slug: 'pumphouse',
+        capabilities: {
+          contractVersion: 1,
+          hasRtc: true,
+          sensors: [temperatureOnly('28-a'), temperatureOnly('28-b')],
+        },
+      }),
+    });
+    const names = [...el.querySelectorAll('.sensor__name')].map((n) =>
+      n.textContent?.trim(),
+    );
+    expect(names).toEqual(['28-a', '28-b']);
+    expect(el.querySelectorAll('temp-gauge')).toHaveLength(2);
+    // No humidity or CO2 block of dashes under a node that has neither.
+    expect(el.querySelectorAll('tbody')).toHaveLength(1);
   });
 
   it('shows min, max and average for each metric', () => {
@@ -250,7 +291,9 @@ describe('NodeDetail', () => {
 
   // Same rule as everywhere else: the socket patches what the API established.
   it('prefers a live reading over the fetched one', () => {
-    const el = setup({ live: { elantris: reading({ temperature: 31.4 }) } });
+    const el = setup({
+      live: { 'elantris/scd4x-0': reading({ temperature: 31.4 }) },
+    });
     expect(el.textContent).toContain('31.4');
   });
 

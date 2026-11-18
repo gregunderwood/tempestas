@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import type { HealthReport } from '@tempestas/domain';
+import { NodeStatus, sensorKey, type HealthReport } from '@tempestas/domain';
 import { Clock } from '../common/clock';
 import { DivergenceLog } from '../common/divergence-log';
 
@@ -11,6 +11,13 @@ import { DivergenceLog } from '../common/divergence-log';
  * morning, short enough that it clears on its own.
  */
 const DIVERGENCE_WINDOW_S = 24 * 60 * 60;
+
+/**
+ * How far back a sensor still counts as one that should be reporting. A probe
+ * removed on purpose stops being reported a day later; one that died overnight
+ * is still named in the morning.
+ */
+const SENSOR_MEMORY_S = 24 * 60 * 60;
 import { NodesService } from '../nodes/nodes.service';
 import { SensorReadingEntity } from '../readings/models';
 import { RulesService } from '../rules/rules.service';
@@ -78,6 +85,13 @@ export class HealthService {
       problems.push(`newest reading is ${readingAge}s old`);
     }
 
+    // One probe dying beside a working one is invisible everywhere else: `min`
+    // simply carries on with the probes that remain, which is the right control
+    // behaviour and exactly why it has to be said somewhere.
+    for (const sensor of await this.quietSensors(now)) {
+      problems.push(`sensor ${sensor.key} has not reported for ${sensor.age}s`);
+    }
+
     const evaluations = this.rules.lastEvaluation();
     const evaluatedAt = evaluations[0]
       ? new Date(evaluations[0].evaluatedAt)
@@ -139,6 +153,33 @@ export class HealthService {
       },
       problems,
     };
+  }
+
+  /** Sensors on admitted nodes that reported in the last day and have since stopped. */
+  private async quietSensors(
+    now: Date,
+  ): Promise<{ key: string; age: number }[]> {
+    const rows = await this.readings
+      .createQueryBuilder('r')
+      .innerJoin('r.node', 'n')
+      .select('n.slug', 'slug')
+      .addSelect('r.sensorId', 'sensorId')
+      .addSelect('MAX(r.createdAt)', 'latest')
+      .where('r.createdAt > :since', {
+        since: new Date(now.getTime() - SENSOR_MEMORY_S * 1000),
+      })
+      .andWhere('n.status = :status', { status: NodeStatus.Admitted })
+      .groupBy('n.slug')
+      .addGroupBy('r.sensorId')
+      .getRawMany<{ slug: string; sensorId: string; latest: Date | string }>();
+
+    return rows
+      .map((row) => ({
+        key: sensorKey({ nodeId: row.slug, sensorId: row.sensorId }),
+        age: ageSeconds(new Date(row.latest), now),
+      }))
+      .filter((sensor) => sensor.age > READINGS_STALE_AFTER_SECONDS)
+      .sort((a, b) => a.key.localeCompare(b.key));
   }
 }
 

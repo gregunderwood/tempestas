@@ -6,11 +6,15 @@ import {
 } from '@tempestas/domain';
 import { RealtimeGateway } from './realtime.gateway';
 
-function reading(nodeId: string, temperature = 20): Reading {
+function reading(
+  nodeId: string,
+  temperature = 20,
+  sensorId = 'scd4x-0',
+): Reading {
   return {
-    id: `r-${nodeId}`,
+    id: `r-${nodeId}-${sensorId}`,
     nodeId,
-    sensorId: 'scd4x-0',
+    sensorId,
     temperature,
     humidity: 55,
     co2: 600,
@@ -75,6 +79,25 @@ describe('RealtimeGateway', () => {
     expect(events).toHaveLength(3); // two nodes, newest each, plus the status
     expect(events[0][1]).toMatchObject({ nodeId: 'elantris', temperature: 21 });
     expect(events[2][0]).toBe(REALTIME_EVENTS.systemStatus);
+  });
+
+  // Keyed by node alone, a newly opened dashboard showed one pumphouse probe
+  // until the other next spoke.
+  it('replays the last reading of EVERY sensor on a node', () => {
+    const gateway = new RealtimeGateway();
+    attach(gateway);
+    gateway.publishReading(reading('pumphouse', 7, 'air'));
+    gateway.publishReading(reading('pumphouse', 1.5, 'pipes'));
+
+    const client = fakeClient();
+    gateway.handleConnection(client);
+
+    const events = (client.emit as unknown as { mock: { calls: unknown[][] } })
+      .mock.calls;
+    expect(events.map((e) => (e[1] as Reading).sensorId)).toEqual([
+      'air',
+      'pipes',
+    ]);
   });
 
   // Device state is authoritative from GET /api/devices. A cached copy replayed
