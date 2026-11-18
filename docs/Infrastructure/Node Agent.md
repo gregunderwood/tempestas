@@ -219,7 +219,7 @@ later. `tests/test_sensor.py` pins that ordering with a fake bus that records co
 
 ## DS18B20 probes
 
-The pumphouse node reads two or three waterproof DS18B20s on one 1-Wire bus (BCM4, the
+patji, the pumphouse node, reads two or three waterproof DS18B20s on one 1-Wire bus (BCM4, the
 `w1-gpio` overlay) through `/sys/bus/w1/devices/<rom>/w1_slave`. A backend is a **sensor set**:
 it lists its sensors and returns a reading per sensor, and each probe is published as its own
 `sample` on its own topic. The single-sensor backends are wrapped by `SingleSensor` and did not
