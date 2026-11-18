@@ -1,0 +1,57 @@
+# pumphouse - the Pi Zero W v1.1 that was patji, heating the pumphouse.
+#
+# Agent only. The server, Postgres and the broker are on elantris. See
+# docs/Pumphouse.md for the wiring and the reasoning behind every number here.
+#
+# Deploy to /home/<user>/tempestas/etc/agent.toml on the box.
+# Credentials live in /etc/tempestas/agent.env (0600 root), never here:
+#   MQTT_USERNAME=pumphouse
+#   MQTT_PASSWORD=...        (generated on elantris, see Provisioning)
+
+node_id = "pumphouse"
+kind = "rpi"
+agent_version = "0.1.0"
+
+# "Hold, then on." Both loads hang off the relay board's NC contacts, so both
+# fail to ON, and one node-wide timer gives the hold with no agent change. A
+# WiFi blip shorter than ten minutes changes nothing; a dead elantris means the
+# heater and the tape run until somebody looks. On costs electricity, off costs
+# the pipes.
+deadman_s = 600.0
+
+[mqtt]
+url = "mqtt://192.168.2.70:1883"
+
+[sensor]
+kind = "ds18b20"
+sample_interval_s = 10.0
+
+# Pinned by ROM id, never by bus order. Read each id at bring-up with ONE probe
+# plugged in at a time (`ls /sys/bus/w1/devices/`), and label the cable end
+# with its sensor_id. These placeholders are refused by the config check on
+# purpose: the agent will not start until they are real.
+[[sensor.probes]]
+rom = "28-xxxxxxxxxxxx"
+sensor_id = "pipes"
+
+[[sensor.probes]]
+rom = "28-yyyyyyyyyyyy"
+sensor_id = "air"
+
+# A third, if one turns up. Any number works; the zone takes the coldest.
+# [[sensor.probes]]
+# rom = "28-zzzzzzzzzzzz"
+# sensor_id = "floor"
+
+[gpio]
+# BCM5 -> IN1 -> heater (through the JQX-62F 110VAC contactor)
+# BCM6 -> IN2 -> heat tape
+lines = [5, 6]
+chip_label = "pinctrl-bcm2835"   # Pi Zero W v1.1, BCM2835
+
+[gpio.failsafe]
+# 1 = HIGH = relay de-energised (the board is active-LOW) = NC closed = load
+# ON. config.txt drives both high from boot (`gpio=5,6=op,dh`) so the loads
+# are on before this process exists, too.
+5 = 1
+6 = 1

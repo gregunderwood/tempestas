@@ -222,7 +222,23 @@ time, and each probe is labelled at its cable end with the name it was given.
 - Tests use a fake sysfs tree: good read, CRC `NO`, `85.000`, missing device, unlisted probe.
 - `test_contract_matches_typescript.py` must still pass untouched, which proves the claim above.
 
-### D. The node, the broker, the devices
+### D. The node, the broker, the devices — ✅ done on elantris, devices wait for E
+
+Done on 2026-11-17. The server and the elantris agent were deployed from the `pumphouse` branch,
+and the three migrations ran after a `pg_dump` to `~/backups/` on elantris. The greenhouse zone
+converted number for number. The ACL now has a `pumphouse` block instead of `patji`. The
+credential was generated on elantris and is kept at `/etc/tempestas/pumphouse-agent.env`
+(0600 root), ready to be copied to the Pi as its `agent.env`. It was verified with MQTT v5:
+own topics RC:0, another node's sample and its own `gpio/set` RC:135, and `patji` refused. The
+zone came from [tools/pumphouse-zone.sql](../tools/pumphouse-zone.sql) and evaluates as
+`no-sensor` until the node exists.
+
+Two things were found on the way. `tools/deploy.sh` refused to deploy because a browser tab
+held a client socket on :7000; it now checks listeners only. And the Provisioning advice to
+`chown root:root` the password file took the broker down for every client on reload (see
+Provisioning). **The devices are not created yet:** they need the node admitted, which needs
+the Pi flashed (E). The probe ROM ids in `pumphouse.toml` are placeholders that the agent
+refuses to start with until they are read off the bus. The plan as written follows.
 
 - [apps/hardware/nodes/pumphouse.toml](../apps/hardware/nodes/): `node_id = "pumphouse"`,
   `lines = [5, 6]`, `chip_label = "pinctrl-bcm2835"`, failsafe `5 = 1` and `6 = 1`,

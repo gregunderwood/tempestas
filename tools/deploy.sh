@@ -30,7 +30,9 @@ say "Building the web bundle"
 # --- the controller must be singular ---------------------------------------
 # Two controllers heartbeating at one node is two writers on one relay. If a
 # dev server is up on this Mac it has to go before the Pi's takes over.
-if lsof -ti :7000 >/dev/null 2>&1; then
+# LISTEN only: a browser tab open on the Pi's dashboard also holds a socket on
+# :7000, and that is a client, not a second controller.
+if lsof -ti tcp:7000 -sTCP:LISTEN >/dev/null 2>&1; then
   echo "A server is listening on :7000 here. Stop it first - only one" >&2
   echo "controller may hold the heartbeat. See docs/Safety.md." >&2
   exit 1
