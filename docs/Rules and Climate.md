@@ -65,7 +65,8 @@ Every thermostat comparison is **strict**, so the setpoints themselves sit insid
 - **A zone may carry a rule for a role it does not own.** The greenhouse keeps its lights and fan
   settings across the transition; `enabledRoles` alone says what is controlled.
 - **A per-role sensor override** is the rule's own `sensor`, e.g.
-  `"sensor": { "source": "node:elantris" }`. The zone's `sensorPolicy.default` covers the rest.
+  `"sensor": { "source": "node:elantris" }`, or `sensor:pumphouse/pipes` to pin one probe on a
+  node that has several. The zone's `sensorPolicy.default` covers the rest.
 - They live server-side. Operational policy that controls a heater is never shipped as consts in
   the browser bundle, where a stale cache could disagree about a setpoint.
 
@@ -113,13 +114,14 @@ single most important structural decision in the port.
 ## How a reading becomes a decision
 
 ```
-sample (per node)
+sample (per sensor; a node may carry several)
    │  ReadingsIngestService — admission gate, then persist
    ▼
 parseZoneRulesConfig — refuses the whole zone on any error
    ▼
 ClimateResolver — applies each rule's sensor policy, or the zone default
-   │  mean | max | min | node:<slug>, with maxAgeMs collapsing staleness into "no sensor"
+   │  mean | max | min | node:<slug> | sensor:<slug>/<id>, with maxAgeMs collapsing
+   │  staleness into "no sensor"
    ▼
 evaluateRules(minutesSinceMidnightLocal, config, enabledRoles, climateByRole)
    │  RuleDecision[] — { role, desired, reason, sourceNodeIds }
@@ -131,7 +133,13 @@ HardwareService.setPin — publish, await readback, then persist
 ```
 
 `sourceNodeIds` is carried through so the UI and the logs can say **which sensors a decision came
-from**. A decision whose provenance is unknowable is a decision nobody can debug.
+from**, and the climate sample beside it carries `sourceSensorIds` (`node/sensor`) for the case
+where one node holds several probes. A decision whose provenance is unknowable is a decision
+nobody can debug.
+
+With several probes and `min`, a probe that goes quiet simply drops out and the rule carries on
+with the rest. That is the right control behaviour and exactly why it is said elsewhere:
+`GET /api/health` names any sensor that reported in the last day and has since stopped.
 
 ## Three deliberate behaviour changes
 

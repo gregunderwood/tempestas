@@ -82,6 +82,15 @@ describe('parseZoneRulesConfig accepts', () => {
     expect(errorsOf((c) => (c['enabledRoles'] = ['heater']))).toEqual([]);
   });
 
+  it('a role pinned to one probe', () => {
+    expect(
+      errorsOf(
+        (c) =>
+          (c['rules'].heat_tape.sensor = { source: 'sensor:pumphouse/pipes' }),
+      ),
+    ).toEqual([]);
+  });
+
   it('a per-role sensor override, including a pinned node', () => {
     expect(
       errorsOf(
@@ -221,12 +230,23 @@ describe('parseZoneRulesConfig refuses', () => {
 
   // The sandbox seed had this for months; it worked only because anything
   // unrecognised fell through to "mean".
-  it('a sensor source that is not one of the four', () => {
+  it('a sensor source that is not one of the five', () => {
     expect(
       errorsOf((c) => (c['sensorPolicy'].default.source = 'zone-mean')),
     ).toEqual([
-      'sensorPolicy.default.source "zone-mean" must be mean, max, min or node:<slug>',
+      'sensorPolicy.default.source "zone-mean" must be mean, max, min, node:<slug> or sensor:<slug>/<id>',
     ]);
+  });
+
+  it.each([
+    'sensor:pumphouse',
+    'sensor:pumphouse/',
+    'sensor:/pipes',
+    'sensor:a/b/c',
+  ])('a sensor source %s that does not name exactly one sensor', (source) => {
+    expect(
+      errorsOf((c) => (c['sensorPolicy'].default.source = source)),
+    ).toHaveLength(1);
   });
 
   it('a node source that is not a topic segment', () => {

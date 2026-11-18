@@ -200,8 +200,10 @@ export function decodeStatus(
  * A sample is dropped unless temperature is present and valid.
  *
  * Every rule reads temperature; a sample without it is not a partial reading,
- * it is nothing. CO2 is different - `valid: false` is a legitimate, meaningful
- * state that maps to null and keeps the burner off by day.
+ * it is nothing. CO2 and humidity are different - `valid: false` is a
+ * legitimate state that maps to null. For CO2 it keeps the burner off by day;
+ * for humidity it is simply what a temperature-only probe sends, and no rule
+ * reads humidity, so its absence must not cost the temperature with it.
  */
 export function decodeSample(
   raw: Record<string, unknown>,
@@ -222,11 +224,6 @@ export function decodeSample(
   if (temperature === null) {
     return { ok: false, reason: 'sample without a valid temperature' };
   }
-  const humidity = numeric(m.humidityPct);
-  if (humidity === null) {
-    return { ok: false, reason: 'sample without a valid humidity' };
-  }
-
   return {
     ok: true,
     value: {
@@ -235,7 +232,7 @@ export function decodeSample(
       // Server-stamped: a node's own clock is diagnostic data, never the axis.
       receivedAt,
       temperature,
-      humidity,
+      humidity: numeric(m.humidityPct),
       co2: numeric(m.co2Ppm),
       nodeSeq: Number.isInteger(payload.seq) ? (payload.seq as number) : null,
     },

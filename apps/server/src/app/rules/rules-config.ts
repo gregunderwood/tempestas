@@ -32,8 +32,11 @@ const NEEDS_DAYLIGHT: ReadonlySet<RoleRuleKind> = new Set([
   'daylight-thermostat',
   'co2-burner',
 ]);
-/** A slug is an MQTT topic segment: anything but `/`, `+`, `#` and whitespace. */
-const SOURCE = /^(mean|max|min|node:[^\s/+#]+)$/;
+/**
+ * A slug and a sensor id are each an MQTT topic segment: anything but `/`,
+ * `+`, `#` and whitespace.
+ */
+const SOURCE = /^(mean|max|min|node:[^\s/+#]+|sensor:[^\s/+#]+\/[^\s/+#]+)$/;
 
 const TOP_KEYS = [
   'enabledRoles',
@@ -219,7 +222,7 @@ function checkSensorPolicy(
   const source = policy['source'];
   if (typeof source !== 'string' || !SOURCE.test(source)) {
     errors.push(
-      `${path}.source "${String(source)}" must be mean, max, min or node:<slug>`,
+      `${path}.source "${String(source)}" must be mean, max, min, node:<slug> or sensor:<slug>/<id>`,
     );
   }
   const maxAge = policy['maxAgeMs'];

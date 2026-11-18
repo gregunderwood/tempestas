@@ -12,16 +12,35 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import { Gauge } from '../../shared/gauge/gauge';
-import type { Device, Reading } from '@tempestas/domain';
+import { metricsFor } from '../../shared/metrics';
+import {
+  sensorKey,
+  type Device,
+  type MetricKey,
+  type Node,
+  type Reading,
+} from '@tempestas/domain';
 
 /** Beyond this a reading is old enough to say so on the card. */
 const STALE_AFTER_S = 120;
 
+interface SensorGauge {
+  key: string;
+  metric: MetricKey;
+  value: number | null;
+  /** Only set when the node has several sensors - otherwise it is noise. */
+  caption: string | null;
+}
+
 interface NodeCard {
   nodeId: string;
-  reading: Reading;
-  ageSeconds: number;
+  /** The newest reading of any sensor on the node, for the subtitle. */
+  latestAt: string;
+  gauges: SensorGauge[];
+  /** Sensors that have stopped reporting, with how long ago. */
+  quiet: { sensorId: string; ageSeconds: number }[];
   stale: boolean;
+  severalSensors: boolean;
   devices: Device[];
 }
 
@@ -66,27 +85,31 @@ interface NodeCard {
             </mat-card-title>
             <mat-card-subtitle>
               @if (card.stale) {
-                <span class="stale">
-                  <span aria-hidden="true">&#9888;</span>
-                  no reading for {{ card.ageSeconds }}s
-                </span>
+                @for (q of card.quiet; track q.sensorId) {
+                  <span class="stale">
+                    <span aria-hidden="true">&#9888;</span>
+                    @if (card.severalSensors) {
+                      {{ q.sensorId }}:
+                    }
+                    no reading for {{ q.ageSeconds }}s
+                  </span>
+                }
               } @else {
-                {{ card.reading.createdAt | date: 'shortTime' }}
+                {{ card.latestAt | date: 'shortTime' }}
               }
             </mat-card-subtitle>
           </mat-card-header>
 
           <mat-card-content>
             <div class="gauges">
-              <temp-gauge
-                metricKey="temperature"
-                [value]="card.reading.temperature"
-              />
-              <temp-gauge
-                metricKey="humidity"
-                [value]="card.reading.humidity"
-              />
-              <temp-gauge metricKey="co2" [value]="card.reading.co2" />
+              @for (g of card.gauges; track g.key) {
+                <div class="gauge">
+                  <temp-gauge [metricKey]="g.metric" [value]="g.value" />
+                  @if (g.caption) {
+                    <span class="gauge__sensor">{{ g.caption }}</span>
+                  }
+                </div>
+              }
             </div>
 
             @if (card.devices.length > 0) {
@@ -126,6 +149,18 @@ interface NodeCard {
       grid-template-columns: repeat(3, 1fr);
       gap: 0.25rem;
       margin-bottom: 0.75rem;
+    }
+    .gauge {
+      margin: 0;
+    }
+    .gauge__sensor {
+      display: block;
+      text-align: center;
+      font-size: 0.8rem;
+      opacity: 0.7;
+    }
+    .stale + .stale {
+      margin-left: 0.75rem;
     }
     .muted {
       opacity: 0.7;
@@ -184,15 +219,18 @@ export class Dashboard {
 
   private readonly fetchedReadings = signal<Reading[]>([]);
   private readonly fetchedDevices = signal<Device[]>([]);
+  private readonly nodes = signal<Node[]>([]);
   /** Re-read on every socket tick so ages advance without a poll of our own. */
   private readonly tick = signal(0);
 
   /** The socket patches what the API established, never replaces it. */
   private readonly readings = computed<Reading[]>(() => {
     const live = this.realtime.readings();
-    const merged = new Map(this.fetchedReadings().map((r) => [r.nodeId, r]));
-    for (const [nodeId, reading] of Object.entries(live)) {
-      merged.set(nodeId, reading);
+    const merged = new Map(
+      this.fetchedReadings().map((r) => [sensorKey(r), r]),
+    );
+    for (const [key, reading] of Object.entries(live)) {
+      merged.set(key, reading);
     }
     return [...merged.values()];
   });
@@ -209,18 +247,50 @@ export class Dashboard {
     this.tick();
     const now = Date.now();
     const devices = this.devices();
-    return this.readings()
-      .map((reading) => {
-        const ageSeconds = Math.max(
-          0,
-          Math.round((now - new Date(reading.createdAt).getTime()) / 1000),
+    const nodes = new Map(this.nodes().map((n) => [n.slug, n]));
+
+    const byNode = new Map<string, Reading[]>();
+    for (const reading of this.readings()) {
+      byNode.set(reading.nodeId, [
+        ...(byNode.get(reading.nodeId) ?? []),
+        reading,
+      ]);
+    }
+
+    return [...byNode.entries()]
+      .map(([nodeId, readings]) => {
+        const sorted = [...readings].sort((a, b) =>
+          a.sensorId.localeCompare(b.sensorId),
         );
+        const several = sorted.length > 1;
+        const gauges = sorted.flatMap((reading) =>
+          metricsFor(reading, nodes.get(nodeId)).map((metric) => ({
+            key: `${sensorKey(reading)}:${metric}`,
+            metric,
+            value: reading[metric],
+            caption: several ? reading.sensorId : null,
+          })),
+        );
+        const quiet = sorted
+          .map((reading) => ({
+            sensorId: reading.sensorId,
+            ageSeconds: Math.max(
+              0,
+              Math.round((now - new Date(reading.createdAt).getTime()) / 1000),
+            ),
+          }))
+          .filter((q) => q.ageSeconds > STALE_AFTER_S);
+        const latestAt = sorted
+          .map((r) => r.createdAt)
+          .reduce((a, b) => (new Date(a) > new Date(b) ? a : b));
         return {
-          nodeId: reading.nodeId,
-          reading,
-          ageSeconds,
-          stale: ageSeconds > STALE_AFTER_S,
-          devices: devices.filter((d) => d.nodeId === reading.nodeId),
+          nodeId,
+          latestAt,
+          gauges,
+          quiet,
+          stale: quiet.length > 0,
+          severalSensors: several,
+          devices: devices.filter((d) => d.nodeId === nodeId),
         };
       })
       .sort((a, b) => a.nodeId.localeCompare(b.nodeId));
@@ -231,6 +301,7 @@ export class Dashboard {
       .latestReadings()
       .subscribe((readings) => this.fetchedReadings.set(readings));
     this.api.devices().subscribe((devices) => this.fetchedDevices.set(devices));
+    this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
 
     // An age that never advances is worse than no age at all: the card would
     // keep claiming a reading is fresh long after the node went quiet.
