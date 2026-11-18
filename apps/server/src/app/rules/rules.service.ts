@@ -221,11 +221,14 @@ export class RulesService implements OnApplicationBootstrap {
   }
 
   /**
-   * The latest reading per admitted node in the zone.
+   * The latest reading per sensor on every admitted node in the zone.
    *
-   * `DISTINCT ON (node_id)` rather than a query per node: this runs every 10 s
-   * forever on an SD card, so it stays one indexed query however many nodes
-   * exist. A `pending` node is excluded here as well as at ingest - belt and
+   * Per SENSOR, not per node: the pumphouse node carries a probe per pipe, and
+   * `DISTINCT ON (node_id)` alone handed the engine whichever probe spoke last,
+   * so a frozen pipe could be hidden behind a warm one on the same node.
+   *
+   * `DISTINCT ON` rather than a query per sensor: this runs every 10 s forever
+   * on an SD card, so it stays one query however many sensors exist. A `pending` node is excluded here as well as at ingest - belt and
    * braces on the path that can start a burner.
    */
   private async latestSamplesForZone(zoneId: string): Promise<NodeSample[]> {
@@ -233,16 +236,19 @@ export class RulesService implements OnApplicationBootstrap {
       .createQueryBuilder('r')
       .innerJoin('r.node', 'n')
       .select('n.slug', 'slug')
+      .addSelect('r.sensorId', 'sensorId')
       .addSelect('r.temperature', 'temperature')
       .addSelect('r.co2', 'co2')
       .addSelect('r.createdAt', 'observedAt')
-      .distinctOn(['r.nodeId'])
+      .distinctOn(['r.nodeId', 'r.sensorId'])
       .where('n.zoneId = :zoneId', { zoneId })
       .andWhere('n.status = :status', { status: NodeStatus.Admitted })
       .orderBy('r.nodeId')
+      .addOrderBy('r.sensorId')
       .addOrderBy('r.createdAt', 'DESC')
       .getRawMany<{
         slug: string;
+        sensorId: string;
         temperature: number;
         co2: number | null;
         observedAt: Date | string;
@@ -250,6 +256,7 @@ export class RulesService implements OnApplicationBootstrap {
 
     return rows.map((row) => ({
       nodeId: row.slug,
+      sensorId: row.sensorId,
       temperatureC: Number(row.temperature),
       co2Ppm: row.co2 === null ? null : Number(row.co2),
       observedAt: new Date(row.observedAt),

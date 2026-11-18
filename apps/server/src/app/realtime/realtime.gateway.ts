@@ -8,6 +8,7 @@ import {
 import type { Server, Socket } from 'socket.io';
 import {
   REALTIME_EVENTS,
+  sensorKey,
   type Device,
   type Reading,
   type SystemStatus,
@@ -63,7 +64,9 @@ export class RealtimeGateway
   }
 
   publishReading(reading: Reading): void {
-    this.lastReadings.set(reading.nodeId, reading);
+    // Keyed per sensor: replayed by node, a newly opened dashboard would see one
+    // probe per node until the others next spoke.
+    this.lastReadings.set(sensorKey(reading), reading);
     this.emit(REALTIME_EVENTS.readingLatest, reading);
   }
 

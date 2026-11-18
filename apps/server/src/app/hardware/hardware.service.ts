@@ -41,7 +41,8 @@ export interface SensorSample {
   /** Server-stamped on receipt; a node's own clock is diagnostic only. */
   receivedAt: Date;
   temperature: number;
-  humidity: number;
+  /** Null when the sensor has none: a DS18B20 measures temperature only. */
+  humidity: number | null;
   /**
    * Null when the node reported an invalid reading. A node reports validity
    * honestly and never substitutes a last-known-good value, so this really

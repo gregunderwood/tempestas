@@ -52,13 +52,18 @@ export class ReadingsService {
     return rows.map(toDto);
   }
 
-  /** One row per admitted node, newest first. What the dashboard opens with. */
-  async findLatestPerNode(): Promise<Reading[]> {
+  /**
+   * One row per sensor on every node, newest first. What the dashboard opens
+   * with. Per sensor, not per node, or a node with a probe per pipe shows
+   * whichever probe spoke last and hides the others.
+   */
+  async findLatestPerSensor(): Promise<Reading[]> {
     const rows = await this.readings
       .createQueryBuilder('r')
       .innerJoinAndSelect('r.node', 'n')
-      .distinctOn(['r.nodeId'])
+      .distinctOn(['r.nodeId', 'r.sensorId'])
       .orderBy('r.nodeId')
+      .addOrderBy('r.sensorId')
       .addOrderBy('r.createdAt', 'DESC')
       .getMany();
     return rows
@@ -261,7 +266,7 @@ export function toDto(row: SensorReadingEntity): Reading {
     nodeId: row.node.slug,
     sensorId: row.sensorId,
     temperature: Number(row.temperature),
-    humidity: Number(row.humidity),
+    humidity: row.humidity === null ? null : Number(row.humidity),
     co2: row.co2 === null ? null : Number(row.co2),
     createdAt: row.createdAt.toISOString(),
   };

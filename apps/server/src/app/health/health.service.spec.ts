@@ -31,6 +31,8 @@ interface Setup {
   counts?: { total: number; online: number; pending: number };
   evaluations?: RulesEvaluation[];
   failingZones?: Map<string, string>;
+  /** Rows of the per-sensor latest query. */
+  sensors?: { slug: string; sensorId: string; latest: Date }[];
   divergences?: DivergenceLog;
 }
 
@@ -45,9 +47,15 @@ function makeService(setup: Setup = {}) {
   const builder = {
     select: () => builder,
     addSelect: () => builder,
+    innerJoin: () => builder,
+    where: () => builder,
+    andWhere: () => builder,
+    groupBy: () => builder,
+    addGroupBy: () => builder,
     getRawOne: async () => ({
       latest: setup.latestReading === undefined ? NOW : setup.latestReading,
     }),
+    getRawMany: async () => setup.sensors ?? [],
   };
   const readings = {
     createQueryBuilder: () => builder,
@@ -132,6 +140,38 @@ describe('HealthService', () => {
     expect(report.problems).toContain(
       'zone "pumphouse" is not being evaluated: invalid rules_config: rules.heater.onAtC must be a number',
     );
+  });
+
+  // With `min` the rule carries on with the probes that remain, which is right
+  // - and is why a dead one has to be named here or nowhere.
+  it('names a sensor that has gone quiet beside ones that have not', async () => {
+    const report = await makeService({
+      sensors: [
+        { slug: 'pumphouse', sensorId: 'air', latest: NOW },
+        {
+          slug: 'pumphouse',
+          sensorId: 'pipes',
+          latest: new Date(NOW.getTime() - 600_000),
+        },
+      ],
+    }).check();
+    expect(report.status).toBe('degraded');
+    expect(report.problems).toEqual([
+      'sensor pumphouse/pipes has not reported for 600s',
+    ]);
+  });
+
+  it('does not name a sensor that is merely between samples', async () => {
+    const report = await makeService({
+      sensors: [
+        {
+          slug: 'pumphouse',
+          sensorId: 'pipes',
+          latest: new Date(NOW.getTime() - 120_000),
+        },
+      ],
+    }).check();
+    expect(report.problems).toEqual([]);
   });
 
   it('surfaces stale sensors, which is the banner condition', async () => {

@@ -11,7 +11,10 @@ export interface ClimateSample {
   temperatureC: number;
   co2Ppm: number | null;
   observedAt: string;
+  /** Each contributing node once, however many of its sensors contributed. */
   sourceNodeIds: NodeId[];
+  /** Each contributing sensor, as `node/sensor` - which probe it actually was. */
+  sourceSensorIds: string[];
 }
 
 /**

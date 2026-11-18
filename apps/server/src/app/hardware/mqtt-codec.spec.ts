@@ -173,6 +173,28 @@ describe('decodeSample', () => {
     });
   });
 
+  // What a DS18B20 sends: temperature only. Dropping the sample over a value no
+  // rule reads would leave the pumphouse with no temperature at all.
+  it('keeps a temperature-only sample, with humidity and CO2 null', () => {
+    const notMeasured = (unit: string) => ({
+      value: null,
+      valid: false,
+      unit,
+      reason: 'not-measured',
+    });
+    const payload = samplePayload({
+      measurements: {
+        co2Ppm: notMeasured('ppm'),
+        tempC: measurement(1.5),
+        humidityPct: notMeasured('%'),
+      },
+    });
+    expect(decodeSample(payload, 'pumphouse', 'pipes', NOW)).toMatchObject({
+      ok: true,
+      value: { sensorId: 'pipes', temperature: 1.5, humidity: null, co2: null },
+    });
+  });
+
   // Every rule reads temperature. A sample without it is not a partial reading,
   // it is nothing - and half-applying it would hand the engine a phantom value.
   it('drops a sample whose temperature is invalid', () => {

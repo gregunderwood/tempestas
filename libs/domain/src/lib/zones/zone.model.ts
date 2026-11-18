@@ -12,12 +12,15 @@ import type { NodeId } from '../nodes/node.model';
  */
 
 /**
- * How a role picks its climate reading when a zone has several sensor nodes.
- * Four options, deliberately - not a predicate language.
+ * How a role picks its climate reading when a zone has several sensors.
+ * Five options, deliberately - not a predicate language.
  *
- *   mean | max | min | node:<slug>
+ *   mean | max | min        across every sensor in the zone
+ *   node:<slug>             every sensor on one node (aggregated by mean)
+ *   sensor:<slug>/<id>      exactly one sensor, e.g. one pipe probe
  */
-export type SensorSource = 'mean' | 'max' | 'min' | `node:${NodeId}`;
+export type SensorSource =
+  'mean' | 'max' | 'min' | `node:${NodeId}` | `sensor:${NodeId}/${string}`;
 
 export interface SensorPolicy {
   source: SensorSource;
