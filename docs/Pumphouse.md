@@ -273,6 +273,20 @@ refuses to start with until they are read off the bus. The plan as written follo
 
 ### E. Flash and install
 
+> [!note] Progress, 2026-11-18
+> Flashed (Raspberry Pi OS Lite 32-bit, 2026-10-06), on its old reservation at `.40`, MAC
+> `b8:27:eb:8c:67:6f`. Kernel 6.18 armv6l, Python 3.13.5, clock synced and reading `MST`.
+> `w1-gpio` loaded (with no pull-up the bus lists phantom `00-…` devices, which the agent
+> ignores), and BCM 5 and 6 are outputs driven high from boot. SSH is key-only.
+> Agent code rsynced, venv built (72 s, `lgpio` from apt), and 163 tests pass on the Zero W itself.
+> The 4 contract tests need `libs/domain`, which is not copied. `patji.toml` is installed as
+> `etc/agent.toml` and refuses to start on its placeholder ROMs, as intended. A 40 s smoke run
+> with `kind = "simulated"` claimed both lines at failsafe on `pinctrl-bcm2835`, connected as
+> `patji`, and was bound by the server, which listed it **pending** and discarded its readings.
+> Both pins stayed high after it stopped.
+> **Left for root:** full-upgrade (46 packages), watchdog, WiFi power-save off, `agent.env`,
+> the unit. Then the board.
+
 **The OS: Raspberry Pi OS Lite (32-bit), the 2026-10-06 release, Debian 13 Trixie.** It is the
 current release, and the 32-bit armhf build is the only one the Zero W's ARMv6 core runs. The
 64-bit images are not an option on this board. Lite, because there is no display and every
