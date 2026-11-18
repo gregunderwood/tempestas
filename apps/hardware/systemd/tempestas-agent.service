@@ -45,6 +45,11 @@ WorkingDirectory=/home/gunderwood/tempestas/apps/hardware
 ExecStart=/home/gunderwood/tempestas/apps/hardware/.venv/bin/tempestas-agent \
     --config /home/gunderwood/tempestas/etc/agent.toml
 Environment=PYTHONUNBUFFERED=1
+# MQTT_USERNAME / MQTT_PASSWORD, 0600 root. systemd reads it as root before
+# dropping to User=, so the credential is never in agent.toml, shell history or
+# `ps`. Required, not `-`: a node with no credential should fail to start here,
+# loudly, rather than start and be refused by the broker every few seconds.
+EnvironmentFile=/etc/tempestas/agent.env
 
 # Gives us /run/tempestas for the advisory lock, cleaned up automatically.
 RuntimeDirectory=tempestas

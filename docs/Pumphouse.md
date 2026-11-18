@@ -284,8 +284,30 @@ refuses to start with until they are read off the bus. The plan as written follo
 > with `kind = "simulated"` claimed both lines at failsafe on `pinctrl-bcm2835`, connected as
 > `patji`, and was bound by the server, which listed it **pending** and discarded its readings.
 > Both pins stayed high after it stopped.
-> **Left for root:** full-upgrade (46 packages), watchdog, WiFi power-save off, `agent.env`,
-> the unit. Then the board.
+> **Then, as root:**
+>
+> - **Full upgrade** (46 packages, kernel 6.18.60). The first attempt was cut off by a spontaneous
+>   reboot while it was building the initramfs. There was no persistent journal, so the cause is
+>   unknown; `throttled` stayed `0x0` and memory never dropped below 300 MB on the re-run. It
+>   was finished with `dpkg --configure -a` inside a `systemd-run` unit, so an SSH drop cannot
+>   kill it, and `dpkg --audit` is clean.
+> - **Journal persistent**, capped at 50 MB (`journald.conf.d/persistent.conf`), so the next
+>   unexplained reboot leaves a reason.
+> - **Watchdog:** Raspberry Pi OS already runs the hardware watchdog at `RuntimeWatchdogSec=1m`.
+>   That is kept. A 15 s override was tried and removed: it adds nothing for freeze protection,
+>   and it makes a heavily loaded Zero W likelier to reset itself mid-upgrade.
+> - **WiFi power save off** on the NM connection. Signal on the bench: -36 dBm.
+> - **Bluetooth off**: `dtoverlay=disable-bt`, plus `bluetooth` and `hciuart` disabled.
+> - **`/etc/tempestas/agent.env`** piped from elantris, never shown.
+> - **The unit**, the repo's own, installed and `systemd-analyze verify` clean. It had **no
+>   `EnvironmentFile` line**, so `agent.env` was never read by anything. That is why elantris's
+>   broker password sits in its `agent.toml`. The line is now in the unit, and required.
+>   A 25 s run under systemd with a simulated sensor passed: it claimed both lines, connected as
+>   `patji`, and was bound. **Installed but not enabled**: it is enabled once the probe ROMs
+>   are in `agent.toml`.
+>
+> Pending on the server from the smoke runs: node `patji`, with simulated capabilities. Its
+> first real `hello` replaces them, and it is admitted then.
 
 **The OS: Raspberry Pi OS Lite (32-bit), the 2026-10-06 release, Debian 13 Trixie.** It is the
 current release, and the 32-bit armhf build is the only one the Zero W's ARMv6 core runs. The
@@ -346,7 +368,7 @@ with the router's reservation. Check
 **4. The box.**
 
 - `sudo apt update && sudo apt full-upgrade`
-- Hardware watchdog: `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf`
+- Hardware watchdog: already on in Raspberry Pi OS (`RuntimeWatchdogSec=1m`); leave it
 - `sudo apt install python3-lgpio python3-venv rsync`
 - `ls /sys/bus/w1/devices/` lists `w1_bus_master1` even with no probes: the overlay is loaded
 
