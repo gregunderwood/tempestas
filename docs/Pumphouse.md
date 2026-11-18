@@ -47,7 +47,7 @@ overheat cut-out bound what "on with nobody watching" can do, so **the heater mu
 Pi Zero pin                Songle 4-ch board               Loads (120 VAC, GFCI circuit)
  4  5V   ──────────────── VCC  (VCC–JD-VCC jumper fitted, as on elantris)
  6  GND  ──────────────── GND
- 29 BCM5 ──────────────── IN1 ─ COM(L)/NC ── JQX-62F coil ── N;  contactor NO: L ── heater
+ 29 BCM5 ──────────────── IN1 ─ COM(L)/NC ── JQX-62F coil ── N;  contactor NO poles: L and N ── heater
  31 BCM6 ──────────────── IN2 ─ COM(L)/NC ── heat tape ── N
  1  3V3  ──── adapter VCC ┐
  7  BCM4 ──── adapter DAT ├── three DS18B20s in parallel: red +, yellow S, black −
