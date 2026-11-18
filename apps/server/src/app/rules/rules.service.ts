@@ -26,6 +26,7 @@ import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';
 import { resolveClimate, type NodeSample } from './climate-resolver';
 import { evaluateRules } from './rules.engine';
+import { parseZoneRulesConfig } from './rules-config';
 import { localTimeLabel, minutesSinceMidnight } from './local-time';
 
 /** 10 s, which is one evaluation per sensor sample - 8,640 a day. */
@@ -47,6 +48,7 @@ export class RulesService implements OnApplicationBootstrap {
   /** `${zoneId}:${role}` -> `${desired}:${reason}`, so repeats stay silent. */
   private readonly lastDecisions = new Map<string, string>();
   private readonly lastOwnership = new Map<string, string>();
+  private readonly failedZones = new Map<string, string>();
   private running = false;
 
   constructor(
@@ -64,7 +66,10 @@ export class RulesService implements OnApplicationBootstrap {
   /** Ownership is logged once at startup, and after that only when it changes. */
   async onApplicationBootstrap(): Promise<void> {
     for (const zone of await this.zones.find()) {
-      this.logOwnership(zone);
+      // A zone that does not parse is skipped here rather than crashing the
+      // bootstrap: its first evaluation reports it, loudly, ten seconds later.
+      const parsed = parseZoneRulesConfig(zone.rulesConfig);
+      if (parsed.ok) this.logOwnership(zone, parsed.config.enabledRoles);
     }
   }
 
@@ -95,10 +100,16 @@ export class RulesService implements OnApplicationBootstrap {
     for (const zone of zones) {
       try {
         evaluations.push(await this.evaluateZone(zone));
+        this.failedZones.delete(zone.slug);
       } catch (err: unknown) {
         // One zone with a hand-edited `rules_config` must not stop the others.
+        // Recorded as well as logged: a zone that is not being evaluated is
+        // a heater nobody is controlling, and the log is not where anybody
+        // looks first.
+        const message = err instanceof Error ? err.message : String(err);
+        this.failedZones.set(zone.slug, message);
         this.logger.error(
-          `Evaluation failed for zone "${zone.slug}": ${err instanceof Error ? err.message : err}`,
+          `Evaluation failed for zone "${zone.slug}": ${message}`,
         );
       }
     }
@@ -132,7 +143,14 @@ export class RulesService implements OnApplicationBootstrap {
 
   async evaluateZone(zone: ZoneEntity): Promise<RulesEvaluation> {
     const now = this.clock.now();
-    const config = zone.rulesConfig;
+    const parsed = parseZoneRulesConfig(zone.rulesConfig);
+    if (parsed.ok === false) {
+      // Nothing is dispatched for a zone whose config does not parse - not even
+      // the roles that look fine. Half-evaluating a zone hides that the other
+      // half is uncontrolled.
+      throw new Error(`invalid rules_config: ${parsed.errors.join('; ')}`);
+    }
+    const config = parsed.config;
 
     const samples = await this.latestSamplesForZone(zone.id);
     const { climateByRole, staleRoles } = resolveClimate(samples, config, now);
@@ -141,7 +159,7 @@ export class RulesService implements OnApplicationBootstrap {
       config.timezone,
     );
 
-    this.logOwnership(zone);
+    this.logOwnership(zone, config.enabledRoles);
 
     const decisions = evaluateRules({
       minutesSinceMidnightLocal,
@@ -188,6 +206,11 @@ export class RulesService implements OnApplicationBootstrap {
     };
     this.lastEvaluations.set(zone.id, evaluation);
     return evaluation;
+  }
+
+  /** Zones whose latest evaluation threw, by slug, with the reason. */
+  failingZones(): ReadonlyMap<string, string> {
+    return this.failedZones;
   }
 
   /** One per zone, newest first. Empty until the first tick has run. */
@@ -350,8 +373,7 @@ export class RulesService implements OnApplicationBootstrap {
     this.logger.log(line);
   }
 
-  private logOwnership(zone: ZoneEntity): void {
-    const roles: readonly DeviceRole[] = zone.rulesConfig.enabledRoles;
+  private logOwnership(zone: ZoneEntity, roles: readonly DeviceRole[]): void {
     const signature = [...roles].sort().join(',');
     if (this.lastOwnership.get(zone.id) === signature) {
       return;

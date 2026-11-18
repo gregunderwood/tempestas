@@ -170,7 +170,7 @@ Promoting the far end hands over every rule and threshold intact. It does **not*
 
 - **Devices wired to the box that is gone.** The CO2 generator is on elantris's relay 6 / BCM 5.
   A successor has authority over it and no copper to it.
-- **A pinned sensor source.** `"byRole": { "co2_generator": { "source": "node:elantris" } }` dangles.
+- **A pinned sensor source.** `"sensor": { "source": "node:elantris" }` on the burner's rule dangles.
   [Safety](Safety.md) rule 4 turns the missing reading into `+Infinity`, so the burner stays off —
   it fails safe, but it fails _silently useless_. Make that degrade loudly.
 - **Radio-bound devices.** Paired to one box's dongle, gone with it.

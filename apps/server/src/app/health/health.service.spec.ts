@@ -30,6 +30,7 @@ interface Setup {
   latestReading?: Date | null;
   counts?: { total: number; online: number; pending: number };
   evaluations?: RulesEvaluation[];
+  failingZones?: Map<string, string>;
   divergences?: DivergenceLog;
 }
 
@@ -59,6 +60,7 @@ function makeService(setup: Setup = {}) {
   } as unknown as NodesService;
   const rules = {
     lastEvaluation: vi.fn(() => setup.evaluations ?? [evaluation()]),
+    failingZones: vi.fn(() => setup.failingZones ?? new Map()),
   } as unknown as RulesService;
 
   return new HealthService(
@@ -113,6 +115,23 @@ describe('HealthService', () => {
     const report = await makeService({ latestReading: null }).check();
     expect(report.status).toBe('degraded');
     expect(report.readings).toEqual({ latestAt: null, ageSeconds: null });
+  });
+
+  // A zone that fails evaluation drives nothing - for the pumphouse, a heater
+  // nobody is controlling. The reason goes in the message, not just the log.
+  it('names a zone that is not being evaluated, and why', async () => {
+    const report = await makeService({
+      failingZones: new Map([
+        [
+          'pumphouse',
+          'invalid rules_config: rules.heater.onAtC must be a number',
+        ],
+      ]),
+    }).check();
+    expect(report.status).toBe('degraded');
+    expect(report.problems).toContain(
+      'zone "pumphouse" is not being evaluated: invalid rules_config: rules.heater.onAtC must be a number',
+    );
   });
 
   it('surfaces stale sensors, which is the banner condition', async () => {

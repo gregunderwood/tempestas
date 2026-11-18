@@ -24,17 +24,30 @@ function rulesConfig(
   return {
     enabledRoles: [DeviceRole.Co2Generator],
     sensorPolicy: { default: { source: 'mean', maxAgeMs: 120_000 } },
-    thresholds: {
-      startTime: '06:30',
-      endTime: '18:30',
-      lightsOnTemp: 26,
-      lightsOffTemp: 27,
-      co2OffTemp: 26,
-      co2NightOnTemp: 3,
-      exhaustOnTemp: 30,
-      exhaustOffTemp: 29.5,
-      co2OnPpm: 1400,
-      co2OffPpm: 1500,
+    daylight: { start: '06:30', end: '18:30' },
+    rules: {
+      [DeviceRole.Lights]: {
+        kind: 'daylight-thermostat',
+        mode: 'heat',
+        onAtC: 26,
+        offAtC: 27,
+        onStale: 'hold',
+      },
+      [DeviceRole.Co2Generator]: {
+        kind: 'co2-burner',
+        dayOffAtC: 26,
+        nightOnBelowC: 3,
+        co2OnPpm: 1400,
+        co2OffPpm: 1500,
+        onStale: 'hold',
+      },
+      [DeviceRole.ExhaustFan]: {
+        kind: 'thermostat',
+        mode: 'cool',
+        onAtC: 30,
+        offAtC: 29.5,
+        onStale: 'hold',
+      },
     },
     timezone: 'America/Vancouver',
     ...overrides,
@@ -414,6 +427,50 @@ describe('degraded conditions', () => {
     const evaluations = await service.evaluateAll();
     expect(evaluations).toHaveLength(1);
     expect(evaluations[0].zoneSlug).toBe('greenhouse');
+  });
+
+  // A typo in hand-edited jsonb used to read as `undefined`, which every
+  // comparison treats as false: the role sat in its dead band forever and
+  // reported a calm-looking "dead-band". Now the zone is refused, whole.
+  it('refuses a zone whose rules_config does not parse, and drives nothing', async () => {
+    const typo = rulesConfig();
+    (typo.rules[DeviceRole.Co2Generator] as unknown as Record<string, unknown>)[
+      'co2OnPmm'
+    ] = 1400;
+    const { service, turnOn, turnOff } = makeService({
+      zones: [zone({ rulesConfig: typo })],
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+
+    expect(await service.evaluateAll()).toEqual([]);
+    expect(turnOn).not.toHaveBeenCalled();
+    expect(turnOff).not.toHaveBeenCalled();
+    expect(service.failingZones().get('greenhouse')).toMatch(
+      /co2OnPmm is not a recognised setting/,
+    );
+  });
+
+  it('forgets a failure once the zone evaluates again', async () => {
+    const broken = zone({ rulesConfig: rulesConfig({ timezone: 'X/Y' }) });
+    const { service } = makeService({
+      zones: [broken],
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    await service.evaluateAll();
+    expect(service.failingZones().has('greenhouse')).toBe(true);
+
+    broken.rulesConfig = rulesConfig();
+    await service.evaluateAll();
+    expect(service.failingZones().size).toBe(0);
+  });
+
+  // Bootstrap reads enabledRoles to log ownership. A broken zone there used to
+  // be an exception in onApplicationBootstrap - a server that will not start.
+  it('starts despite a zone with a broken config', async () => {
+    const { service } = makeService({
+      zones: [zone({ rulesConfig: {} as ZoneRulesConfig })],
+    });
+    await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
   });
 
   it('skips a tick while the previous evaluation is still running', async () => {

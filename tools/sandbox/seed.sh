@@ -15,16 +15,16 @@ INSERT INTO zones (slug, display_name, rules_config) VALUES (
   'greenhouse', 'Greenhouse',
   '{
      "enabledRoles": ["co2_generator"],
-     "sensorPolicy": {
-       "default": { "source": "zone-mean", "maxAgeMs": 120000 },
-       "byRole": { "co2_generator": { "source": "node:elantris" } }
-     },
-     "thresholds": {
-       "startTime": "06:30", "endTime": "18:30",
-       "lightsOnTemp": 26, "lightsOffTemp": 27,
-       "co2OffTemp": 28, "co2NightOnTemp": 3,
-       "exhaustOnTemp": 30, "exhaustOffTemp": 29.5,
-       "co2OnPpm": 1400, "co2OffPpm": 1500
+     "sensorPolicy": { "default": { "source": "mean", "maxAgeMs": 120000 } },
+     "daylight": { "start": "06:30", "end": "18:30" },
+     "rules": {
+       "lights": { "kind": "daylight-thermostat", "mode": "heat", "onAtC": 26, "offAtC": 27, "onStale": "hold" },
+       "co2_generator": {
+         "kind": "co2-burner", "dayOffAtC": 28, "nightOnBelowC": 3,
+         "co2OnPpm": 1400, "co2OffPpm": 1500, "onStale": "hold",
+         "sensor": { "source": "node:elantris" }
+       },
+       "exhaust_fan": { "kind": "thermostat", "mode": "cool", "onAtC": 30, "offAtC": 29.5, "onStale": "hold" }
      },
      "timezone": "America/Vancouver"
    }'

@@ -107,7 +107,7 @@ So introduce a CO2 sensor **outside the burner's decision** and leave it there u
 its place. The mechanism already exists:
 
 ```jsonc
-"byRole": { "co2_generator": { "source": "node:elantris" } }
+"rules": { "co2_generator": { /* ... */ "sensor": { "source": "node:elantris" } } }
 ```
 
 The new sensor contributes to display and to the zone mean; the burner keeps reading the sensor whose
@@ -171,10 +171,11 @@ switches a PSU rather than mains next to water.
 
 ## Two open questions to settle before any of this reaches the database
 
-1. **Irrigation is not climate-shaped.** `RulesThresholds` is setpoints, hysteresis and a time
-   window; watering is dose, interval and veto. Forcing it into `ZoneRulesConfig` produces exactly
-   the config that needs a paragraph to explain what it does. It wants its own shape and its own pure
-   evaluator — the same pattern, not the same struct.
+1. **Irrigation is not climate-shaped.** The climate rule kinds are setpoints, hysteresis and
+   a time window; watering is dose, interval and veto. Forcing it into a thermostat produces exactly
+   the config that needs a paragraph to explain what it does. Each rule now names a kind with its
+   own fields, so watering wants a kind of its own and its own pure evaluator — the same pattern,
+   not the same struct.
 2. **Soil is not airspace.** A zone is deliberately _"one airspace, one temperature, one CO2
    concentration"_, which is why rules scope to it. Two benches in one airspace need independent
    watering, so `zoneId` does not provide the scoping. Either a smaller unit exists, or a pump and

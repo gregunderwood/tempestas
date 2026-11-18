@@ -140,8 +140,8 @@ morning and yesterday afternoon in the same average.
 
 Three things it must keep doing, each with a test:
 
-- **The boundary is the zone's own `thresholds.startTime`/`endTime`** — the pair the rules engine
-  branches on. `daylight-segments.spec.ts` asserts the running period's kind against
+- **The boundary is the zone's own `daylight` window** — the one the rules engine branches on. A
+  zone with none, like the pumphouse, splits at the deployment default in its own timezone. `daylight-segments.spec.ts` asserts the running period's kind against
   `isWithinWindow` at every half hour, for four window shapes, so the screen cannot start
   explaining a decision the controller never made.
 - **Boundaries are SET in the zone, never added as minutes to midnight.** On a spring-forward day

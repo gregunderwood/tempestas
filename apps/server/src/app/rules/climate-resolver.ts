@@ -1,9 +1,10 @@
 import {
-  DeviceRole,
+  type DeviceRole,
   type ClimateSample,
   type SensorPolicy,
   type ZoneRulesConfig,
 } from '@tempestas/domain';
+import { ROLE_ORDER } from './rules.engine';
 
 /**
  * Turns "one latest reading per node" into "the climate each role is evaluated
@@ -39,12 +40,6 @@ export interface ResolvedClimate {
   staleRoles: DeviceRole[];
 }
 
-const RESOLVED_ROLES: readonly DeviceRole[] = [
-  DeviceRole.Lights,
-  DeviceRole.Co2Generator,
-  DeviceRole.ExhaustFan,
-];
-
 export function resolveClimate(
   samples: readonly NodeSample[],
   config: ZoneRulesConfig,
@@ -53,9 +48,14 @@ export function resolveClimate(
   const climateByRole: Partial<Record<DeviceRole, ClimateSample>> = {};
   const staleRoles: DeviceRole[] = [];
 
-  for (const role of RESOLVED_ROLES) {
-    const policy =
-      config.sensorPolicy.byRole?.[role] ?? config.sensorPolicy.default;
+  // Every role the zone has a rule for, owned or not: the last-evaluation
+  // endpoint shows what an unowned role WOULD have seen, which is how a
+  // transition is checked before ownership moves. In the engine's fixed order,
+  // because Postgres hands the jsonb keys back in an order of its own.
+  const roles = ROLE_ORDER.filter((role) => config.rules[role] !== undefined);
+
+  for (const role of roles) {
+    const policy = config.rules[role]?.sensor ?? config.sensorPolicy.default;
     const candidates = selectSource(samples, policy.source);
 
     if (candidates.length === 0) {

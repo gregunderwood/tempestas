@@ -50,7 +50,9 @@ export type RuleReason =
   | 'frost-protection'
   | 'role-not-owned'
   | 'no-sensor'
-  | 'sensor-stale';
+  | 'sensor-stale'
+  /** Stale, and the role's `onStale` says to drive it rather than hold. */
+  | 'stale-failsafe';
 
 export interface RuleDecision {
   role: DeviceRole;
