@@ -39,10 +39,11 @@ sensor_id = "pipes"
 rom = "28-yyyyyyyyyyyy"
 sensor_id = "air"
 
-# A third, if one turns up. Any number works; the zone takes the coldest.
-# [[sensor.probes]]
-# rom = "28-zzzzzzzzzzzz"
-# sensor_id = "floor"
+# The third probe. Name it for where it ends up; any number of probes works,
+# and the zone takes the coldest.
+[[sensor.probes]]
+rom = "28-zzzzzzzzzzzz"
+sensor_id = "floor"
 
 [gpio]
 # BCM5 -> IN1 -> heater (through the JQX-62F 110VAC contactor)
