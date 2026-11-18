@@ -8,8 +8,14 @@ from datetime import UTC, datetime, timedelta
 from tempestas_agent import contract
 from tempestas_agent import gpio as gpio_mod
 from tempestas_agent.agent import Agent, build_backends
-from tempestas_agent.config import AgentConfig, GpioConfig, SensorConfig
-from tempestas_agent.sensor import Measurement, Reading, SimulatedSensor
+from tempestas_agent.config import AgentConfig, GpioConfig, ProbeConfig, SensorConfig
+from tempestas_agent.sensor import (
+    Measurement,
+    Reading,
+    SensorInfo,
+    SimulatedSensor,
+    SingleSensor,
+)
 
 
 class FakeClient:
@@ -44,7 +50,11 @@ def make_agent(lines=(), failsafe=None, deadman_s=30.0):
     gpio = gpio_mod.SimulatedGpio() if lines else gpio_mod.NoGpio()
     gpio.claim(lines, failsafe or {})
     clock = FakeClock()
-    agent = Agent(config, FakeClient(), SimulatedSensor(gpio=gpio), gpio, clock=clock)
+    sensor = SingleSensor(
+        SimulatedSensor(gpio=gpio),
+        SensorInfo("scd4x-v", "scd4x", ("temperature", "humidity", "co2")),
+    )
+    agent = Agent(config, FakeClient(), sensor, gpio, clock=clock)
     return agent, clock
 
 
@@ -71,12 +81,53 @@ class TestCapabilities:
         assert len(hello["bootId"]) > len("boot-")
 
 
+class TestProbeNode:
+    """The pumphouse: one node, several DS18B20s, each its own sensor."""
+
+    def _agent(self, tmp_path):
+        for rom, milli in (("28-0000000000a1", 3125), ("28-0000000000b2", 5500)):
+            (tmp_path / rom).mkdir()
+            (tmp_path / rom / "w1_slave").write_text(
+                f"72 01 4b 46 7f ff 0e 10 57 : crc=57 YES\n72 01 4b 46 7f ff 0e 10 57 t={milli}\n"
+            )
+        config = AgentConfig(
+            node_id="pumphouse",
+            sensor=SensorConfig(
+                kind="ds18b20",
+                probes=(
+                    ProbeConfig("28-0000000000a1", "pipes"),
+                    ProbeConfig("28-0000000000b2", "air"),
+                ),
+                w1_root=str(tmp_path),
+            ),
+        )
+        sensor, gpio = build_backends(config, simulated=False)
+        return Agent(config, FakeClient(), sensor, gpio)
+
+    def test_each_probe_is_announced_with_temperature_only(self, tmp_path):
+        sensors = self._agent(tmp_path).capabilities()["sensors"]
+        assert [(s["sensorId"], s["kind"], s["metrics"]) for s in sensors] == [
+            ("pipes", "ds18b20", ["temperature"]),
+            ("air", "ds18b20", ["temperature"]),
+        ]
+
+    def test_each_sample_names_its_own_probe(self, tmp_path):
+        agent = self._agent(tmp_path)
+        payloads = [agent.sample_payload(sid, r) for sid, r in agent.sensor.read_all()]
+        assert [(p["sensor"], p["measurements"]["tempC"]["value"]) for p in payloads] == [
+            ("pipes", 3.12),
+            ("air", 5.5),
+        ]
+        assert payloads[0]["measurements"]["humidityPct"]["valid"] is False
+        assert payloads[1]["seq"] == payloads[0]["seq"] + 1
+
+
 class TestSampling:
     def test_sequence_numbers_increment_so_duplicates_are_detectable(self):
         agent, _ = make_agent()
-        reading = agent.sensor.read()
-        first = agent.sample_payload(reading)["seq"]
-        second = agent.sample_payload(reading)["seq"]
+        [(sensor_id, reading)] = agent.sensor.read_all()
+        first = agent.sample_payload(sensor_id, reading)["seq"]
+        second = agent.sample_payload(sensor_id, reading)["seq"]
         assert second == first + 1
 
     def test_an_invalid_co2_crosses_the_wire_as_null_with_a_reason(self):
@@ -86,7 +137,7 @@ class TestSampling:
             temperature_c=Measurement(21.5, True, "C"),
             humidity_pct=Measurement(55.0, True, "%"),
         )
-        payload = agent.sample_payload(reading)
+        payload = agent.sample_payload("scd4x-v", reading)
         assert payload["measurements"]["co2Ppm"] == {
             "value": None,
             "valid": False,

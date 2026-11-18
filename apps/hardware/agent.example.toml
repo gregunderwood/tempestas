@@ -14,7 +14,7 @@ url = "mqtt://127.0.0.1:1883"
 # username / password once the broker stops being anonymous (phase 12).
 
 [sensor]
-kind = "scd4x"          # scd4x | simulated
+kind = "scd4x"          # scd4x | simulated | world | ds18b20
 sensor_id = "scd4x-0"
 bus = 1
 address = 0x62
@@ -63,6 +63,25 @@ sample_interval_s = 10.0
 # day, MORE than it refused of a degraded one. 400 refuses nothing clean and
 # 1.1% degraded. Zero disables it.
 # co2_max_change_ppm_per_min = 400
+
+# --- ds18b20 instead (the pumphouse) -----------------------------------------
+# Each probe is its own sensor, published on its own topic and named by the ROM
+# id it carries, never by bus order: a probe swapped after a failure must not
+# silently take over another's name. Read ROM ids one probe at a time with
+# `ls /sys/bus/w1/devices/`, and label each cable end with its sensor_id. A
+# probe on the bus that is not listed here is logged and ignored. Needs
+# `dtoverlay=w1-gpio` (BCM4) in config.txt.
+#
+# kind = "ds18b20"
+# [[sensor.probes]]
+# rom = "28-xxxxxxxxxxxx"
+# sensor_id = "pipes"
+# [[sensor.probes]]
+# rom = "28-yyyyyyyyyyyy"
+# sensor_id = "air"
+#
+# A pipe in a sleeve cannot move this fast; a glitch can. 0 disables it.
+# temperature_max_change_c_per_min = 10.0
 
 [gpio]
 # EMPTY MEANS NO GPIO AT ALL: no capability is advertised, no chip is opened,
