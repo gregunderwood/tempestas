@@ -286,15 +286,15 @@ Pi, nothing to forget on a reflash, and one place that lists every host.
 | Host        | Address          |
 | ----------- | ---------------- |
 | celestine   | 192.168.2.20     |
+| **patji**   | **192.168.2.40** |
 | greenhouse  | 192.168.2.50     |
 | elantris    | 192.168.2.70     |
-| **patji**   | **192.168.2.80** |
 | silverlight | 192.168.2.200    |
 
-`.80` was free on 2026-11-18. patji used to sit at `.252`; if the
-router still holds a reservation there under its MAC, edit it to `.80` rather than adding a
-second one. The Zero W's WiFi MAC starts `b8:27:eb` and is fixed per board, so a reservation
-made now survives every future reflash.
+The router already held a reservation for patji at `.40` from its sensor-node days, kept on
+2026-11-18. The Zero W's WiFi MAC (`b8:27:eb:…`) is fixed per board, so the reservation
+survives every reflash and there is nothing to do on the router. (patji was seen at `.252` in
+its old logs, presumably before the reservation existed.)
 
 **2. Flash with Raspberry Pi Imager**, device "Raspberry Pi Zero", OS "Raspberry Pi OS (other) →
 Raspberry Pi OS Lite (32-bit)". In the customisation screens:
@@ -322,12 +322,11 @@ be powered with the relays attached and the loads stay on through every boot.
 filesystem and reboots once.
 
 ```
-ssh gunderwood@patji.local                 # mDNS, until the reservation exists
-cat /sys/class/net/wlan0/address           # the MAC, for the router
+ssh patji                                  # 192.168.2.40, via the laptop's ~/.ssh/config
 ```
 
-Make the reservation (`patji`, that MAC, `192.168.2.80`), then `sudo reboot` so the new lease is
-taken. From then on `ssh patji` works through the laptop's `~/.ssh/config`. Check
+If it is not at `.40`, `ssh patji.local` (mDNS) and compare `cat /sys/class/net/wlan0/address`
+with the router's reservation. Check
 `date` reads `MST -0700` (Trixie's tzdata knows BC's change, Node's does not; see G).
 
 **4. The box.**
