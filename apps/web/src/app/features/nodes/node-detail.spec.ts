@@ -295,6 +295,9 @@ describe('NodeDetail', () => {
     // subscription is torn down separately, so counting requests passes even
     // when the interval is left running for the life of the page.
     it('clears its timers once the screen is gone', () => {
+      // Pinned before the fixture's boundary. On the real clock the boundary
+      // is in the past, no timeout is armed, and the count of two is wrong.
+      vi.setSystemTime(new Date('2026-09-10T23:00:00.000Z'));
       setup();
       // Two: the slow refresh interval and the boundary timeout.
       expect(vi.getTimerCount()).toBe(2);
