@@ -21,6 +21,7 @@ import {
   type Segment,
 } from './daylight-segments';
 import { resolveReadingWindow, type ReadingWindow } from './reading-window';
+import { parseZoneRulesConfig } from '../rules/rules-config';
 
 const DEFAULT_LIMIT = 500;
 
@@ -70,7 +71,7 @@ export class ReadingsService {
    *
    * No combined figure: a window spanning both averages two different jobs
    * together and describes neither. Split at the ZONE's own
-   * `startTime`/`endTime`, because that pair is what the rules engine branches
+   * daylight window, because that is what the rules engine branches
    * on - a screen drawing the line elsewhere would explain a decision the
    * controller never made.
    */
@@ -147,13 +148,15 @@ export class ReadingsService {
       where: { slug: nodeId },
       relations: { zone: true },
     });
-    const config = (node?.zone as ZoneEntity | null | undefined)?.rulesConfig;
-    if (!config) return fallback;
-    return {
-      startTime: config.thresholds.startTime,
-      endTime: config.thresholds.endTime,
-      timezone: config.timezone,
-    };
+    const raw = (node?.zone as ZoneEntity | null | undefined)?.rulesConfig;
+    if (!raw) return fallback;
+    const parsed = parseZoneRulesConfig(raw);
+    if (parsed.ok === false) return fallback;
+    const { daylight, timezone } = parsed.config;
+    // A zone with no daylight window - a pumphouse has no day job - still gets
+    // a day/night split in its own timezone, at the deployment default.
+    if (!daylight) return { ...fallback, timezone };
+    return { startTime: daylight.start, endTime: daylight.end, timezone };
   }
 
   async stats(query: ReadingsQuery): Promise<ReadingStats> {

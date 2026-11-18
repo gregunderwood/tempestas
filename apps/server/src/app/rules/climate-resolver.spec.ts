@@ -9,28 +9,50 @@ const NOW = new Date('2026-01-10T12:00:00Z');
 const FRESH = new Date('2026-01-10T11:59:30Z'); // 30s old
 const OLD = new Date('2026-01-10T11:50:00Z'); //  10min old
 
+/**
+ * The greenhouse's three roles. `byRole` lands on each rule's `sensor`, where a
+ * per-role override now lives, so the tests below read as they always have.
+ */
 function config(
   defaultPolicy: SensorPolicy,
-  byRole?: Partial<Record<DeviceRole, SensorPolicy>>,
+  byRole: Partial<Record<DeviceRole, SensorPolicy>> = {},
 ): ZoneRulesConfig {
+  const sensor = (role: DeviceRole): { sensor?: SensorPolicy } =>
+    byRole[role] ? { sensor: byRole[role] } : {};
   return {
     enabledRoles: [
       DeviceRole.Lights,
       DeviceRole.Co2Generator,
       DeviceRole.ExhaustFan,
     ],
-    sensorPolicy: { default: defaultPolicy, ...(byRole ? { byRole } : {}) },
-    thresholds: {
-      startTime: '06:30',
-      endTime: '18:30',
-      lightsOnTemp: 26,
-      lightsOffTemp: 27,
-      co2OffTemp: 26,
-      co2NightOnTemp: 3,
-      exhaustOnTemp: 30,
-      exhaustOffTemp: 29.5,
-      co2OnPpm: 1400,
-      co2OffPpm: 1500,
+    sensorPolicy: { default: defaultPolicy },
+    daylight: { start: '06:30', end: '18:30' },
+    rules: {
+      [DeviceRole.Lights]: {
+        kind: 'daylight-thermostat',
+        mode: 'heat',
+        onAtC: 26,
+        offAtC: 27,
+        onStale: 'hold',
+        ...sensor(DeviceRole.Lights),
+      },
+      [DeviceRole.Co2Generator]: {
+        kind: 'co2-burner',
+        dayOffAtC: 26,
+        nightOnBelowC: 3,
+        co2OnPpm: 1400,
+        co2OffPpm: 1500,
+        onStale: 'hold',
+        ...sensor(DeviceRole.Co2Generator),
+      },
+      [DeviceRole.ExhaustFan]: {
+        kind: 'thermostat',
+        mode: 'cool',
+        onAtC: 30,
+        offAtC: 29.5,
+        onStale: 'hold',
+        ...sensor(DeviceRole.ExhaustFan),
+      },
     },
     timezone: 'America/Vancouver',
   };
@@ -276,5 +298,53 @@ describe('no sensors at all', () => {
     );
     expect(climateByRole).toEqual({});
     expect(staleRoles).toEqual([]);
+  });
+});
+
+describe('which roles are resolved', () => {
+  // A zone resolves the roles it has rules for - a pumphouse has no lights to
+  // resolve, and a heater the old fixed list did not know about.
+  it('resolves exactly the roles the zone has rules for', () => {
+    const pumphouse: ZoneRulesConfig = {
+      enabledRoles: [DeviceRole.Heater],
+      sensorPolicy: { default: { source: 'min' } },
+      rules: {
+        [DeviceRole.Heater]: {
+          kind: 'thermostat',
+          mode: 'heat',
+          onAtC: 2,
+          offAtC: 5,
+          onStale: 'on',
+        },
+      },
+      timezone: 'America/Vancouver',
+    };
+    const { climateByRole } = resolveClimate(bothEnds(), pumphouse, NOW);
+    expect(Object.keys(climateByRole)).toEqual([DeviceRole.Heater]);
+    expect(climateByRole[DeviceRole.Heater]).toMatchObject({
+      temperatureC: 20,
+    });
+  });
+});
+
+describe('role order', () => {
+  // Postgres returns jsonb keys shortest-first, so the order they were written
+  // in is gone by the time the zone is loaded.
+  it('resolves in the fixed role order, not the order of the rules object', () => {
+    const base = config({ source: 'mean', maxAgeMs: 60_000 });
+    const reordered: ZoneRulesConfig = {
+      ...base,
+      rules: {
+        [DeviceRole.ExhaustFan]: base.rules[DeviceRole.ExhaustFan],
+        [DeviceRole.Lights]: base.rules[DeviceRole.Lights],
+        [DeviceRole.Co2Generator]: base.rules[DeviceRole.Co2Generator],
+      },
+    };
+    const { staleRoles } = resolveClimate(bothEnds(OLD), reordered, NOW);
+    expect(staleRoles).toEqual([
+      DeviceRole.Lights,
+      DeviceRole.Co2Generator,
+      DeviceRole.ExhaustFan,
+    ]);
   });
 });

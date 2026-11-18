@@ -89,6 +89,13 @@ export class HealthService {
       problems.push(`last rules evaluation was ${evaluationAge}s ago`);
     }
 
+    // A zone that fails evaluation drives nothing at all - for the pumphouse,
+    // a heater nobody is controlling. Named, with the reason, so the fix is in
+    // the message rather than in the journal.
+    for (const [slug, reason] of this.rules.failingZones()) {
+      problems.push(`zone "${slug}" is not being evaluated: ${reason}`);
+    }
+
     const staleRoles = [...new Set(evaluations.flatMap((e) => e.staleRoles))];
     if (staleRoles.length > 0) {
       problems.push(`stale sensors for: ${staleRoles.join(', ')}`);
