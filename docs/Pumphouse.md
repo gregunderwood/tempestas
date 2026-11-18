@@ -178,7 +178,13 @@ Plus:
   probe, and nothing for metrics the sensor does not have. Today it assumes humidity and CO2.
 - The realtime reading event's `humidity` becomes nullable.
 
-### C. The DS18B20 backend (agent)
+### C. The DS18B20 backend (agent) — ✅ built
+
+Built as planned against a fake sysfs tree. There were two additions. First, an **all-zero
+scratchpad** is refused: its CRC is zero, so the kernel reports `YES` and `t=0`, which is what
+a shorted data line looks like. Second, the not-measured reason is `NOT_MEASURED`, in the same
+form as the agent's other reasons. Any number of probes works, so a third is only a
+`[[sensor.probes]]` entry. What follows is the plan as written.
 
 ```toml
 [sensor]

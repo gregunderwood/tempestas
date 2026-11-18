@@ -194,12 +194,11 @@ def main() -> int:
 
     try:
         while not stopping:
-            reading = sensor.read()
-            if reading is not None:
+            for sensor_id, reading in sensor.read_all():
                 qos, retain = contract.QOS["sample"]
                 client.publish(
-                    contract.topic_sample(config.node_id, config.sensor.sensor_id),
-                    json.dumps(agent.sample_payload(reading)),
+                    contract.topic_sample(config.node_id, sensor_id),
+                    json.dumps(agent.sample_payload(sensor_id, reading)),
                     qos=qos,
                     retain=retain,
                 )
