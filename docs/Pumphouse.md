@@ -44,13 +44,17 @@ overheat cut-out bound what "on with nobody watching" can do, so **the heater mu
 | TWTADE JQX-62F-2Z                      | 110 VAC coil, 80 A DPDT (2NO+2NC). Switches the heater                  |
 
 ```
-Pi Zero                    Songle board                    Loads
- 5V ───────────────────── VCC  (jumper fitted, as on elantris)
- GND ──────────────────── GND
- BCM 5 ───────────────── IN1 ─ COM/NC ── 120 V ── JQX-62F coil ── heater on its NO pole(s)
- BCM 6 ───────────────── IN2 ─ COM/NC ── 120 V ── heat tape
- 3.3V / GND / BCM 4 ──── Gikfun adapter ── all DS18B20s in parallel
+Pi Zero pin                Songle 4-ch board               Loads (120 VAC, GFCI circuit)
+ 4  5V   ──────────────── VCC  (VCC–JD-VCC jumper fitted, as on elantris)
+ 6  GND  ──────────────── GND
+ 29 BCM5 ──────────────── IN1 ─ COM(L)/NC ── JQX-62F coil ── N;  contactor NO: L ── heater
+ 31 BCM6 ──────────────── IN2 ─ COM(L)/NC ── heat tape ── N
+ 1  3V3  ──── adapter VCC ┐
+ 7  BCM4 ──── adapter DAT ├── three DS18B20s in parallel: red +, yellow S, black −
+ 9  GND  ──── adapter GND ┘    (4.7 kΩ pull-up on the adapter)
 ```
+
+The drawn version, with both sheets and the checks below, is the "Patji wiring" artifact.
 
 **Both loads hang off NC, and that is the failsafe.** A released Songle relay powers the heat
 tape and the JQX-62F coil, so a dead, unpowered or booting Pi means **heat**, with no software
@@ -70,6 +74,9 @@ Consequences worth knowing:
   110 VAC but its description text says DC 12V. A 12 VDC coil on 120 VAC burns out.
 - ⚠ The heat tape goes straight through a Songle contact (10 A / 125 VAC). Read the tape's
   wattage; keep it under ~5 A (600 W) for margin on a cheap contact.
+- ⚠ **Circuit load.** Keep running loads under 80% of the breaker (12 A on 15 A). A 1500 W
+  heater alone is 12.5 A, so heater plus tape needs a 20 A circuit or a smaller heater.
+- ⚠ **Ground-fault protection.** Heat tape makers require it: feed the box from a GFCI.
 - Mains, open screw terminals and a damp pumphouse: everything in an enclosure.
 
 ### What each failure does
