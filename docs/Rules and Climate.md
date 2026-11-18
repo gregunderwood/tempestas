@@ -65,7 +65,7 @@ Every thermostat comparison is **strict**, so the setpoints themselves sit insid
 - **A zone may carry a rule for a role it does not own.** The greenhouse keeps its lights and fan
   settings across the transition; `enabledRoles` alone says what is controlled.
 - **A per-role sensor override** is the rule's own `sensor`, e.g.
-  `"sensor": { "source": "node:elantris" }`, or `sensor:pumphouse/pipes` to pin one probe on a
+  `"sensor": { "source": "node:elantris" }`, or `sensor:patji/pipes` to pin one probe on a
   node that has several. The zone's `sensorPolicy.default` covers the rest.
 - They live server-side. Operational policy that controls a heater is never shipped as consts in
   the browser bundle, where a stale cache could disagree about a setpoint.
