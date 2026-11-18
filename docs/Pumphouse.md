@@ -70,8 +70,8 @@ Consequences worth knowing:
 - Probes wire in parallel to the one adapter: red to VCC, black to GND, yellow to DATA. Three is
   as easy as two.
 - Probes on **3.3 V**, not 5 V, so DATA never presents 5 V to a GPIO.
-- ⚠ Before wiring the JQX-62F, read the coil voltage **on the relay**. The listing title says
-  110 VAC but its description text says DC 12V. A 12 VDC coil on 120 VAC burns out.
+- The JQX-62F coil is **120 VAC**, read off the relay on 2026-11-18. The listing contradicted
+  itself (110 VAC in the title, DC 12V in the text), so check the relay itself if it is ever replaced.
 - ⚠ The heat tape goes straight through a Songle contact (10 A / 125 VAC). Read the tape's
   wattage; keep it under ~5 A (600 W) for margin on a cheap contact.
 - ⚠ **Circuit load.** Keep running loads under 80% of the breaker (12 A on 15 A). A 1500 W
