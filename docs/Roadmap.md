@@ -573,10 +573,10 @@ Answer each before its stage, not before starting.
 7. ~~**Stats default window.**~~ **Answered in phase 6:** a rolling 24 hours by default, `days=n`
    aligned to local midnight, and `to` clamped so it is never in the future. See
    [Readings](Infrastructure/Readings.md#how-a-query-becomes-a-window).
-8. **Irrigation is not climate-shaped — what config does it get?** `RulesThresholds` is setpoints,
-   hysteresis and a time window; watering is dose, interval and veto. Forcing one into the other
-   produces config that needs a paragraph to explain itself. It wants its own shape and its own pure
-   evaluator — the same pattern, not the same struct. See
+8. **Irrigation is not climate-shaped — what config does it get?** The climate rule kinds are
+   setpoints, hysteresis and a time window; watering is dose, interval and veto. Since 2026-11 each
+   role's rule names a kind with its own fields, so watering can be a kind of its own with its own
+   pure evaluator — the same pattern, not the same struct. See
    [Off-the-shelf devices](Infrastructure/Off-the-shelf%20devices.md).
    _(Blocks a `pump` role, and cheap to decide before there are rows.)_
 9. **What does watering scope to, given a zone is an airspace?** A zone is deliberately "one
