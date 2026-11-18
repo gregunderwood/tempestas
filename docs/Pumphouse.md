@@ -8,8 +8,9 @@ greenhouse, so it forces the rules engine to stop assuming every zone is a green
 
 > [!note] Status
 > **In progress.** Phase 0 is done: elantris's broker is back up with a boot-retry drop-in (see
-> [Provisioning](Infrastructure/Provisioning.md)). **Section A is built** (2026-11-17) and its
-> lasting content lives in [Rules and Climate](Rules%20and%20Climate.md). B onwards are not.
+> [Provisioning](Infrastructure/Provisioning.md)). **A to C are built** and their lasting content
+> lives in [Rules and Climate](Rules%20and%20Climate.md) and [Node Agent](Infrastructure/Node%20Agent.md).
+> **D is live on elantris** apart from the devices. Next is E: flashing patji.
 > The greenhouse season is over, so the greenhouse zone can be changed freely as long as its
 > behaviour next season is provably unchanged.
 
@@ -17,7 +18,8 @@ greenhouse, so it forces the rules engine to stop assuming every zone is a green
 
 | Question                       | Decision                                                                 |
 | ------------------------------ | ------------------------------------------------------------------------ |
-| Which box                      | The Pi Zero W v1.1 that was `patji`, reflashed. `patji` is retired       |
+| Which box                      | The Pi Zero W v1.1 `patji`, reflashed. Host and node keep the name       |
+| Names                          | Host and node `patji`; the zone it is admitted to is `pumphouse`         |
 | Where the DB and server run    | elantris, unchanged. The Pi runs the agent only, over MQTT               |
 | Heat tape when control is lost | **Hold ~10 min, then ON**                                                |
 | Heater when control is lost    | **Hold ~10 min, then ON**                                                |
@@ -226,10 +228,12 @@ time, and each probe is labelled at its cable end with the name it was given.
 
 Done on 2026-11-17. The server and the elantris agent were deployed from the `pumphouse` branch,
 and the three migrations ran after a `pg_dump` to `~/backups/` on elantris. The greenhouse zone
-converted number for number. The ACL now has a `pumphouse` block instead of `patji`. The
-credential was generated on elantris and is kept at `/etc/tempestas/pumphouse-agent.env`
-(0600 root), ready to be copied to the Pi as its `agent.env`. It was verified with MQTT v5:
-own topics RC:0, another node's sample and its own `gpio/set` RC:135, and `patji` refused. The
+converted number for number. The ACL's `patji` block is now the heater node's, not the old
+sensor-only one. The credential was generated on elantris and is kept at
+`/etc/tempestas/patji-agent.env` (0600 root), ready to be copied to the Pi as its `agent.env`.
+It was verified with MQTT v5: own topics RC:0, another node's sample and its own `gpio/set`
+RC:135. (For one day the identity was called `pumphouse`; on 2026-11-18 it was renamed back
+to `patji`, with the password unchanged, and `pumphouse` is now refused.) The
 zone came from [tools/pumphouse-zone.sql](../tools/pumphouse-zone.sql) and evaluates as
 `no-sensor` until the node exists.
 
@@ -237,16 +241,16 @@ Two things were found on the way. `tools/deploy.sh` refused to deploy because a 
 held a client socket on :7000; it now checks listeners only. And the Provisioning advice to
 `chown root:root` the password file took the broker down for every client on reload (see
 Provisioning). **The devices are not created yet:** they need the node admitted, which needs
-the Pi flashed (E). The probe ROM ids in `pumphouse.toml` are placeholders that the agent
+the Pi flashed (E). The probe ROM ids in `patji.toml` are placeholders that the agent
 refuses to start with until they are read off the bus. The plan as written follows.
 
-- [apps/hardware/nodes/pumphouse.toml](../apps/hardware/nodes/): `node_id = "pumphouse"`,
+- [apps/hardware/nodes/patji.toml](../apps/hardware/nodes/patji.toml): `node_id = "patji"`,
   `lines = [5, 6]`, `chip_label = "pinctrl-bcm2835"`, failsafe `5 = 1` and `6 = 1`,
   **`deadman_s = 600`**. That is the "hold, then on": both lines fail to the same "on", so a
   single node-wide timer gives the hold with no agent change. A WiFi blip shorter than ten
   minutes changes nothing.
-- [tempestas.acl](../apps/hardware/mosquitto/tempestas.acl): a `pumphouse` identity scoped like
-  `elantris` (its own subtree, never `gpio/set`). The `patji` block is removed. The password is
+- [tempestas.acl](../apps/hardware/mosquitto/tempestas.acl): a `patji` identity scoped like
+  `elantris` (its own subtree, never `gpio/set`), replacing its old sensor-only block. The password is
   generated **on elantris** and verified with MQTT v5, both per Provisioning.
 - The agent unit: `SupplementaryGroups=gpio` only. 1-wire sysfs is world-readable, and there is
   no I²C on this box.
@@ -269,22 +273,83 @@ refuses to start with until they are read off the bus. The plan as written follo
 
 ### E. Flash and install
 
-1. **Raspberry Pi OS Lite 32-bit, Trixie**, via Raspberry Pi Imager. Hostname `pumphouse`,
-   user `gunderwood`, SSH key, WiFi, timezone. Fall back to Bookworm Lite, which is proven on this
-   board, if anything misbehaves.
-2. `/boot/firmware/config.txt`:
-   ```
-   dtoverlay=w1-gpio            # gpiopin=4 is the default
-   gpio=5,6=op,dh               # relays released (loads ON) from ~1 s after power-on
-   ```
-   Hardware watchdog: `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf`.
-3. `sudo apt install python3-lgpio python3-venv`, then
-   `python3 -m venv --system-site-packages .venv && .venv/bin/pip install -e .`. There is no `uv`
-   on ARMv6, and the apt `lgpio` saves an afternoon of compiling.
-4. Code is rsynced from the laptop. Nothing is built on the Pi.
-5. Secrets in `/etc/tempestas/agent.env`, unit installed and `systemd-analyze verify`ed.
-6. Server and web rebuilt on the laptop and rsynced to elantris, migrations run through
-   `tempestas-migrate@run`.
+**The OS: Raspberry Pi OS Lite (32-bit), the 2026-10-06 release, Debian 13 Trixie.** It is the
+current release, and the 32-bit armhf build is the only one the Zero W's ARMv6 core runs. The
+64-bit images are not an option on this board. Lite, because there is no display and every
+megabyte of the 512 matters. Fallback: **Raspberry Pi OS (Legacy, 32-bit) Lite**, Bookworm, same
+date. patji ran Bookworm 12.14 before this reflash, so it is proven on the board.
+
+**1. Before flashing: the address.** patji keeps a fixed address through a **DHCP reservation
+on the router** (192.168.2.1), the same as the other hosts. That means no static config on the
+Pi, nothing to forget on a reflash, and one place that lists every host.
+
+| Host        | Address          |
+| ----------- | ---------------- |
+| celestine   | 192.168.2.20     |
+| greenhouse  | 192.168.2.50     |
+| elantris    | 192.168.2.70     |
+| **patji**   | **192.168.2.71** |
+| silverlight | 192.168.2.200    |
+
+`.71` was free on 2026-11-18 and sits next to elantris. patji used to sit at `.252`; if the
+router still holds a reservation there under its MAC, edit it to `.71` rather than adding a
+second one. The Zero W's WiFi MAC starts `b8:27:eb` and is fixed per board, so a reservation
+made now survives every future reflash.
+
+**2. Flash with Raspberry Pi Imager**, device "Raspberry Pi Zero", OS "Raspberry Pi OS (other) →
+Raspberry Pi OS Lite (32-bit)". In the customisation screens:
+
+- Hostname **`patji`**
+- User **`gunderwood`**, with a password as well. It is the console fallback, and `sudo` asks
+  for it.
+- WiFi: the house SSID, country **CA**
+- Locale: timezone `America/Vancouver`, keyboard `us`
+- SSH: on, **public key only**, with the laptop's key `~/.ssh/id_rsa.pub`
+  (`SHA256:o48WBt95…`, the same key elantris and greenhouse trust). Password login stays off.
+- Telemetry off
+
+Then, before ejecting, add to `/boot/firmware/config.txt` on the card (`bootfs`):
+
+```
+dtoverlay=w1-gpio            # gpiopin=4 is the default
+gpio=5,6=op,dh               # relays released (loads ON) from ~1 s after power-on
+```
+
+The `gpio=` line belongs there before the first boot, not after: from then on, the board can
+be powered with the relays attached and the loads stay on through every boot.
+
+**3. First boot.** WiFi on a Zero W takes a minute or two, and the first boot resizes the
+filesystem and reboots once.
+
+```
+ssh gunderwood@patji.local                 # mDNS, until the reservation exists
+cat /sys/class/net/wlan0/address           # the MAC, for the router
+```
+
+Make the reservation (`patji`, that MAC, `192.168.2.71`), then `sudo reboot` so the new lease is
+taken. From then on `ssh patji` works through the laptop's `~/.ssh/config`. Check
+`date` reads `MST -0700` (Trixie's tzdata knows BC's change, Node's does not; see G).
+
+**4. The box.**
+
+- `sudo apt update && sudo apt full-upgrade`
+- Hardware watchdog: `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf`
+- `sudo apt install python3-lgpio python3-venv rsync`
+- `ls /sys/bus/w1/devices/` lists `w1_bus_master1` even with no probes: the overlay is loaded
+
+**5. The agent.** Code is rsynced from the laptop; nothing is built on the Pi.
+
+- `python3 -m venv --system-site-packages .venv && .venv/bin/pip install -e .`. There is no
+  `uv` on ARMv6, and the apt `lgpio` saves an afternoon of compiling.
+- The credential, without it ever passing through the laptop's terminal:
+  `ssh elantris sudo cat /etc/tempestas/patji-agent.env | ssh patji 'sudo install -d -m 0755 /etc/tempestas && sudo tee /etc/tempestas/agent.env >/dev/null && sudo chmod 0600 /etc/tempestas/agent.env'`
+- [patji.toml](../apps/hardware/nodes/patji.toml) to `~/tempestas/etc/agent.toml`. It will not
+  start until the probe ROMs are filled in, which happens when the board is built (F).
+- The agent unit with `SupplementaryGroups=gpio` only, `systemd-analyze verify`ed, and enabled.
+
+**6. Then the board** (relays, contactor, probes). Read each ROM with one probe plugged in at a
+time, fill in `patji.toml`, start the agent, admit `patji` to the `pumphouse` zone, and create
+the two devices from D. Then the bench test.
 
 ### F. Bench test, before it goes outside
 

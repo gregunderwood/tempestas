@@ -1,14 +1,15 @@
-# pumphouse - the Pi Zero W v1.1 that was patji, heating the pumphouse.
+# patji - the Pi Zero W v1.1, reflashed to heat the pumphouse. The host and
+# the node keep the name; the zone it is admitted to is `pumphouse`.
 #
 # Agent only. The server, Postgres and the broker are on elantris. See
 # docs/Pumphouse.md for the wiring and the reasoning behind every number here.
 #
 # Deploy to /home/<user>/tempestas/etc/agent.toml on the box.
 # Credentials live in /etc/tempestas/agent.env (0600 root), never here:
-#   MQTT_USERNAME=pumphouse
+#   MQTT_USERNAME=patji
 #   MQTT_PASSWORD=...        (generated on elantris, see Provisioning)
 
-node_id = "pumphouse"
+node_id = "patji"
 kind = "rpi"
 agent_version = "0.1.0"
 
