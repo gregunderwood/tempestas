@@ -111,6 +111,8 @@ export class MqttHardwareService
     string,
     { level: GpioLevel | null; known: boolean }
   >();
+  /** The last `gpio/state` per pin, timestamp and all. See `lastPinReport`. */
+  private readonly reports = new Map<string, PinStateReport>();
   private readonly online = new Map<NodeId, boolean>();
   private readonly nodes = new Set<NodeId>();
   private readonly warnedAt = new Map<string, number>();
@@ -134,7 +136,10 @@ export class MqttHardwareService
   ) {
     super();
     this.epoch = this.clock.now().getTime();
-    this.role = resolveControllerRole(this.config.get<string>('CONTROLLER_ROLE'), true);
+    this.role = resolveControllerRole(
+      this.config.get<string>('CONTROLLER_ROLE'),
+      true,
+    );
   }
 
   get isLeader(): boolean {
@@ -172,7 +177,9 @@ export class MqttHardwareService
             will: {
               topic: mqttTopics.serverStatus,
               payload: Buffer.from(
-                JSON.stringify(buildStatus('server', 'offline', this.clock.now())),
+                JSON.stringify(
+                  buildStatus('server', 'offline', this.clock.now()),
+                ),
               ),
               qos: mqttQos.serverStatus.qos,
               retain: mqttQos.serverStatus.retain,
@@ -449,13 +456,15 @@ export class MqttHardwareService
           level: decoded.value.level,
           known: decoded.value.known,
         });
-        this.pinStates.next({
+        const report: PinStateReport = {
           nodeId: parsed.nodeId,
           pin: decoded.value.pin,
           level: decoded.value.level,
           known: decoded.value.known,
           observedAt: decoded.value.observedAt,
-        });
+        };
+        this.reports.set(`${parsed.nodeId}:${decoded.value.pin}`, report);
+        this.pinStates.next(report);
         return;
       }
       case 'gpio-result': {
@@ -607,6 +616,15 @@ export class MqttHardwareService
         this.pins.set(key, { level: null, known: false });
       }
     }
+    // An offline node's last report describes a relay that may since have
+    // failed safe. Seeding a new device from it would be a guess.
+    for (const key of this.reports.keys()) {
+      if (key.startsWith(`${nodeId}:`)) this.reports.delete(key);
+    }
+  }
+
+  lastPinReport(nodeId: NodeId, pin: number): PinStateReport | null {
+    return this.reports.get(`${nodeId}:${pin}`) ?? null;
   }
 
   private async announceServerOnline(): Promise<void> {
@@ -635,7 +653,9 @@ export class MqttHardwareService
     if (!this.isLeader) {
       // The binding a heartbeat creates is the right to command. A follower
       // must never create one, or the node starts obeying two controllers.
-      this.logger.log('Follower: not heartbeating, so no node will bind to this server');
+      this.logger.log(
+        'Follower: not heartbeating, so no node will bind to this server',
+      );
       return;
     }
     this.heartbeat = setInterval(() => {
