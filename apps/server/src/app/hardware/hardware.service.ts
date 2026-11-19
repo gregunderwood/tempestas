@@ -126,4 +126,16 @@ export abstract class HardwareService {
    * device row stayed wrong until somebody noticed.
    */
   abstract readonly pinStates$: Observable<PinStateReport>;
+
+  /**
+   * The last line-state report for one pin, or `null` if there is none since
+   * the node last came online.
+   *
+   * `pinStates$` only reaches devices that exist when the report arrives. A
+   * device created after its node reported would otherwise start as "off"
+   * whatever the relay is doing - on a fail-to-on node, a load that is running
+   * while the server believes it is not, and every rule tick answered
+   * "already off" - until the node happened to report again.
+   */
+  abstract lastPinReport(nodeId: NodeId, pin: number): PinStateReport | null;
 }

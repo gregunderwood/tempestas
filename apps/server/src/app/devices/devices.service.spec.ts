@@ -54,6 +54,7 @@ function makeService(
   device: DeviceEntity,
   setPin = vi.fn().mockResolvedValue(undefined),
   node: NodeEntity | null = NODE,
+  lastReport: PinStateReport | null = null,
 ) {
   const mocks = {
     findOne: vi.fn().mockResolvedValue(device),
@@ -69,7 +70,11 @@ function makeService(
   const nodeRepo = {
     findOne: mocks.nodeFindOne,
   } as unknown as Repository<NodeEntity>;
-  const hardware = { setPin, syncPins: vi.fn() } as unknown as HardwareService;
+  const hardware = {
+    setPin,
+    syncPins: vi.fn(),
+    lastPinReport: vi.fn().mockReturnValue(lastReport),
+  } as unknown as HardwareService;
   const publishDeviceState = vi.fn();
   const realtime = { publishDeviceState } as unknown as RealtimeGateway;
   const service = new DevicesService(
@@ -297,6 +302,65 @@ describe('DevicesService.create', () => {
       },
     });
     expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  // A node reports its pins when it connects, which can be long before the
+  // device exists. patji's relays were released (loads ON, by design) while
+  // the new rows said off, and every rule tick was answered "already off".
+  describe('starts from what the node last reported', () => {
+    const extraRelay = {
+      nodeId: 'elantris',
+      name: 'Extra Relay',
+      gpio: 12,
+      onDelayDuration: 300,
+      onLevel: 1 as const,
+    };
+    const reported = (
+      level: 0 | 1 | null,
+      known = level !== null,
+    ): PinStateReport => ({
+      nodeId: 'elantris',
+      pin: 12,
+      level,
+      known,
+      observedAt: new Date(NOW.getTime() - 60_000),
+    });
+
+    it('is ON when the pin sits at its onLevel, as of the report', async () => {
+      const { service, save } = makeService(
+        burner(),
+        undefined,
+        NODE,
+        reported(1),
+      );
+      const dto = await service.create(extraRelay);
+      expect(dto.isOn).toBe(true);
+      expect(save.mock.calls[0][0].onAt).toEqual(
+        new Date(NOW.getTime() - 60_000),
+      );
+    });
+
+    it('is off, with no cooldown, when the pin is reported off', async () => {
+      const { service } = makeService(burner(), undefined, NODE, reported(0));
+      const dto = await service.create(extraRelay);
+      expect(dto.isOn).toBe(false);
+      expect(dto.canTurnOn).toBe(true);
+    });
+
+    it('is off when the level is unknown - unknown is not on either', async () => {
+      const { service } = makeService(
+        burner(),
+        undefined,
+        NODE,
+        reported(null),
+      );
+      expect((await service.create(extraRelay)).isOn).toBe(false);
+    });
+
+    it('is off when the node has reported nothing', async () => {
+      const { service } = makeService(burner());
+      expect((await service.create(extraRelay)).isOn).toBe(false);
+    });
   });
 
   it('404s a node slug it has never met', async () => {
