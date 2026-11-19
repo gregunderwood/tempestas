@@ -7,9 +7,18 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { Subscription } from 'rxjs';
-import { HardwareService, type PinStateReport } from '../hardware/hardware.service';
+import {
+  HardwareService,
+  type PinStateReport,
+} from '../hardware/hardware.service';
 import { DeviceEntity, PinTransitionEntity } from './models';
-import { energisedBy, judgeTransition, type LastKnown } from './pin-transition';
+import { Clock } from '../common/clock';
+import {
+  energisedBy,
+  judgeTransition,
+  recordedAt,
+  type LastKnown,
+} from './pin-transition';
 
 /**
  * Writes the relay history that `devices` cannot keep.
@@ -40,6 +49,7 @@ export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(DeviceEntity)
     private readonly devices: Repository<DeviceEntity>,
     private readonly hardware: HardwareService,
+    private readonly clock: Clock,
   ) {}
 
   onModuleInit(): void {
@@ -59,7 +69,10 @@ export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
     this.subscription?.unsubscribe();
   }
 
-  private async lastFor(key: string, report: PinStateReport): Promise<LastKnown | null> {
+  private async lastFor(
+    key: string,
+    report: PinStateReport,
+  ): Promise<LastKnown | null> {
     const cached = this.lastWritten.get(key);
     if (cached) return cached;
 
@@ -105,6 +118,7 @@ export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
     const last = await this.lastFor(key, report);
     const verdict = judgeTransition(last, report);
     if (verdict.action === 'skip') return;
+    const observedAt = recordedAt(last, report, this.clock.now());
 
     // The device is the INTERPRETATION, resolved now and then frozen into the
     // row. The pin and the level are the fact.
@@ -122,13 +136,13 @@ export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
       deviceId: device?.id ?? null,
       role: device?.role ?? null,
       reason: verdict.reason,
-      observedAt: report.observedAt,
+      observedAt,
     });
 
     this.lastWritten.set(key, {
       level: report.level,
       known: report.known,
-      observedAt: report.observedAt,
+      observedAt,
     });
 
     this.logger.log(

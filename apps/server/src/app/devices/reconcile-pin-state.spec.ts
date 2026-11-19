@@ -24,8 +24,9 @@ function seen(
   level: 0 | 1 | null,
   observedAt: Date,
   known = level !== null,
+  live = false,
 ): PinObservation {
-  return { level, known, observedAt };
+  return { level, known, observedAt, live };
 }
 
 describe('reconcilePinState', () => {
@@ -149,5 +150,44 @@ describe('correctionPatch', () => {
       NOW,
     );
     expect(isOn({ ...row, ...correctionPatch(verdict as never) })).toBe(false);
+  });
+});
+
+// A Pi has no RTC: after a reboot it runs on the time saved at shutdown until
+// NTP answers. patji came back 3.5 min slow and failed safe to ON; its report
+// predated the rule's last "off", the row stayed off, and every rule tick was
+// answered "already off" - a heater that could never be turned off again.
+describe('reconcilePinState with a node clock that is behind', () => {
+  const lastOff = T('2026-09-10T20:58:00Z');
+  const row = () =>
+    device({ onLevel: 1, onAt: T('2026-09-10T20:30:00Z'), offAt: lastOff });
+  const slow = T('2026-09-10T20:57:00Z');
+
+  it('believes a LIVE report dated before the row, and dates it at receipt', () => {
+    const verdict = reconcilePinState(row(), seen(1, slow, true, true), NOW);
+    expect(verdict).toMatchObject({
+      action: 'correct',
+      hardwareOn: true,
+      at: NOW,
+    });
+    if (verdict.action !== 'correct') throw new Error('unreachable');
+    expect(isOn({ ...row(), ...correctionPatch(verdict) })).toBe(true);
+  });
+
+  it('still ignores a retained replay dated before the row', () => {
+    expect(
+      reconcilePinState(row(), seen(1, slow, true, false), NOW),
+    ).toMatchObject({
+      action: 'none',
+    });
+  });
+
+  it('does nothing for a live report that agrees with the row', () => {
+    expect(
+      reconcilePinState(row(), seen(0, slow, true, true), NOW),
+    ).toMatchObject({
+      action: 'none',
+      reason: 'hardware and the row agree',
+    });
   });
 });

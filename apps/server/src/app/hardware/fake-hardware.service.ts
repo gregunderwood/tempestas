@@ -214,6 +214,7 @@ export class FakeHardwareService
       level: command.level,
       known: true,
       observedAt: new Date(),
+      live: true,
     };
     this.reports.set(`${nodeId}:${command.pin}`, report);
     this.pinStates.next(report);

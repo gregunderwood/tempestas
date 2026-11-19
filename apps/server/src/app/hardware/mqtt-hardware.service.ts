@@ -462,6 +462,7 @@ export class MqttHardwareService
           level: decoded.value.level,
           known: decoded.value.known,
           observedAt: decoded.value.observedAt,
+          live: !retained,
         };
         this.reports.set(`${parsed.nodeId}:${decoded.value.pin}`, report);
         this.pinStates.next(report);
