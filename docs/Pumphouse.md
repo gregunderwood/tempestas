@@ -407,6 +407,13 @@ coming on:
 > its node reported its pins started "off" while the relay was released (load ON), and the rule
 > was answered "already off" forever. Fixed in `f19b540` (a new device starts from the pin's last
 > report) and verified live by deleting and recreating the tape while it was on.
+>
+> A reboot test then found a second one. patji has no RTC and came back 3.5 min slow; its
+> fail-safe report was dated before the rule's last "off", so the server took it for an old
+> retained replay and ignored it, and both loads stayed on with the server showing them off and
+> unable to turn them off. Fixed in `f89c139`: a live (non-retained) report is believed whatever
+> its timestamp, dated at receipt. Rebooted again afterwards: back under rule control 10 s after
+> it reconnected.
 
 - [ ] Every probe reports, with distinct sensor ids, and the node is admitted (two of three so far)
 - [x] Each relay switches from the API, and the cooldown refuses an early restart
