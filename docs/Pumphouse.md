@@ -400,13 +400,23 @@ A lamp stands in for each load. Every row of the failure table above is exercise
 Start with both loads commanded **off** (probes warm), so every failure is visible as lamps
 coming on:
 
-- [ ] Every probe reports, with distinct sensor ids, and the node is admitted
-- [ ] Each relay switches from the API and from the rule, using a probe in ice water
+> [!note] First pass, 2026-11-18: two probes on a breadboard, relays not yet wired to anything
+> `pipes` = `28-3ce1d443663c`, `air` = `28-3ce1d4436bd1`, assigned arbitrarily; the soldered
+> board brings the third probe and the real names. Readings persist every 10 s. patji admitted
+> to `pumphouse`, both devices created. Creating them found a server bug: a device made after
+> its node reported its pins started "off" while the relay was released (load ON), and the rule
+> was answered "already off" forever. Fixed in `f19b540` (a new device starts from the pin's last
+> report) and verified live by deleting and recreating the tape while it was on.
+
+- [ ] Every probe reports, with distinct sensor ids, and the node is admitted (two of three so far)
+- [x] Each relay switches from the API, and the cooldown refuses an early restart
+- [ ] Each relay switches from the rule, using a probe in ice water
 - [ ] Unpower the Pi: both lamps on
 - [ ] `kill -9` the agent: both on within ~5 s, back under rule control after
 - [ ] Block the Pi from the broker (firewall rule on elantris): nothing for 10 min, then both on,
       and the server re-asserts when unblocked
-- [ ] Stop `tempestas-server`: both on at once (LWT), back under rule control when it returns
+- [x] Stop `tempestas-server`: both on at once (LWT), back under rule control when it returns
+      (a deploy, 2026-11-18: on at 19:23:37, ruled off 14 s after the new server bound)
 - [ ] Unplug every probe: `stale-failsafe` within `maxAgeMs`, both on, banner up
 - [ ] Unplug one probe: control continues on the rest, health reports the dead one
 - [ ] Cold reboot: no chatter through boot, then the rule takes over
