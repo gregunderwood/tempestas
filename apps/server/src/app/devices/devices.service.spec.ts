@@ -324,6 +324,7 @@ describe('DevicesService.create', () => {
       level,
       known,
       observedAt: new Date(NOW.getTime() - 60_000),
+      live: true,
     });
 
     it('is ON when the pin sits at its onLevel, as of the report', async () => {
@@ -488,6 +489,7 @@ describe('DevicesService reconciliation during its own command', () => {
     level: 1,
     known: true,
     observedAt: NOW,
+    live: true,
   });
 
   /**

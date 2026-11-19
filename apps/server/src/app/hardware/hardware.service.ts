@@ -84,6 +84,8 @@ export interface PinStateReport {
   level: GpioLevel | null;
   known: boolean;
   observedAt: Date;
+  /** Published while we were subscribed, not a retained replay. */
+  live: boolean;
 }
 
 export interface PinCommand {
