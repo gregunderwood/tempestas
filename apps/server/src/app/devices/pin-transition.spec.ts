@@ -1,15 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import type { PinStateReport } from '../hardware/hardware.service';
-import { energisedBy, judgeTransition, type LastKnown } from './pin-transition';
+import {
+  energisedBy,
+  judgeTransition,
+  recordedAt,
+  type LastKnown,
+} from './pin-transition';
 
 const AT = new Date('2026-09-10T18:03:00Z');
 
 function report(over: Partial<PinStateReport> = {}): PinStateReport {
-  return { nodeId: 'elantris', pin: 5, level: 0, known: true, observedAt: AT, ...over };
+  return {
+    nodeId: 'elantris',
+    pin: 5,
+    level: 0,
+    known: true,
+    observedAt: AT,
+    live: true,
+    ...over,
+  };
 }
 
 function last(over: Partial<LastKnown> = {}): LastKnown {
-  return { level: 1, known: true, observedAt: new Date(AT.getTime() - 60_000), ...over };
+  return {
+    level: 1,
+    known: true,
+    observedAt: new Date(AT.getTime() - 60_000),
+    ...over,
+  };
 }
 
 describe('judgeTransition', () => {
@@ -39,7 +57,10 @@ describe('judgeTransition', () => {
 
   it('records losing track of a pin, because unknown is not off', () => {
     expect(
-      judgeTransition(last({ level: 0, known: true }), report({ level: null, known: false })),
+      judgeTransition(
+        last({ level: 0, known: true }),
+        report({ level: null, known: false }),
+      ),
     ).toEqual({ action: 'record', reason: 'became-unknown' });
   });
 
@@ -55,7 +76,10 @@ describe('judgeTransition', () => {
   it('records recovering from unknown even to the same level', () => {
     // Going unknown -> 0 is a real event: we now know something we did not.
     expect(
-      judgeTransition(last({ level: null, known: false }), report({ level: 0 })),
+      judgeTransition(
+        last({ level: null, known: false }),
+        report({ level: 0 }),
+      ),
     ).toEqual({ action: 'record', reason: 'level-changed' });
   });
 
@@ -63,16 +87,37 @@ describe('judgeTransition', () => {
     // A reconnect replays retained state, and QoS 1 permits redelivery. An
     // older observation overwriting a newer one would invent a transition that
     // ran backwards in time.
-    const older = report({ level: 0, observedAt: new Date(AT.getTime() - 120_000) });
+    const older = report({
+      level: 0,
+      observedAt: new Date(AT.getTime() - 120_000),
+      live: false,
+    });
     expect(judgeTransition(last({ level: 1 }), older)).toEqual({
       action: 'skip',
       reason: 'stale',
     });
   });
 
+  // patji, 2026-11-18: rebooted with its clock 3.5 min slow, failed safe, and
+  // its live report was dated before the last commanded change. Skipping it
+  // erased the one transition that mattered.
+  it('records a LIVE change even when the node dates it in the past', () => {
+    const behind = report({
+      level: 0,
+      observedAt: new Date(AT.getTime() - 120_000),
+      live: true,
+    });
+    expect(judgeTransition(last({ level: 1 }), behind)).toEqual({
+      action: 'record',
+      reason: 'level-changed',
+    });
+  });
+
   it('accepts an observation at exactly the recorded time', () => {
     const same = report({ level: 0, observedAt: AT });
-    expect(judgeTransition(last({ level: 1, observedAt: AT }), same).action).toBe('record');
+    expect(
+      judgeTransition(last({ level: 1, observedAt: AT }), same).action,
+    ).toBe('record');
   });
 });
 
@@ -95,5 +140,24 @@ describe('energisedBy', () => {
   it('is null when no device claims the pin', () => {
     expect(energisedBy(0, true, null)).toBeNull();
     expect(energisedBy(0, true, undefined)).toBeNull();
+  });
+});
+
+describe('recordedAt', () => {
+  const RECEIVED = new Date(AT.getTime() + 5_000);
+
+  it("files a report under the node's own timestamp", () => {
+    expect(recordedAt(last(), report(), RECEIVED)).toEqual(AT);
+  });
+
+  it('files a live report from a clock that is behind at receipt, keeping history in order', () => {
+    const behind = report({ observedAt: new Date(AT.getTime() - 120_000) });
+    expect(recordedAt(last({ observedAt: AT }), behind, RECEIVED)).toEqual(
+      RECEIVED,
+    );
+  });
+
+  it('keeps the first sight of a pin at its own timestamp', () => {
+    expect(recordedAt(null, report(), RECEIVED)).toEqual(AT);
   });
 });

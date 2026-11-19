@@ -14,7 +14,10 @@ export interface LastKnown {
 }
 
 export type TransitionVerdict =
-  | { action: 'record'; reason: 'first-sight' | 'level-changed' | 'became-unknown' }
+  | {
+      action: 'record';
+      reason: 'first-sight' | 'level-changed' | 'became-unknown';
+    }
   | { action: 'skip'; reason: 'unchanged' | 'stale' };
 
 /**
@@ -32,6 +35,10 @@ export type TransitionVerdict =
  * - **Reports can arrive out of order.** QoS 1 permits redelivery, and a
  *   reconnect replays retained state that may be older than something already
  *   seen. An older observation must never overwrite a newer one.
+ * - **...but a live report is never old.** Only a retained replay can be. A
+ *   live report dated before the last one means the node's clock is behind (a
+ *   Pi rebooting without an RTC), and skipping it hid patji failing safe to ON
+ *   after a reboot on 2026-11-18. See `recordedAt` for its timestamp.
  */
 export function judgeTransition(
   last: LastKnown | null,
@@ -43,7 +50,7 @@ export function judgeTransition(
     return { action: 'record', reason: 'first-sight' };
   }
 
-  if (report.observedAt.getTime() < last.observedAt.getTime()) {
+  if (!report.live && report.observedAt.getTime() < last.observedAt.getTime()) {
     return { action: 'skip', reason: 'stale' };
   }
 
@@ -73,6 +80,29 @@ export function energisedBy(
   known: boolean,
   onLevel: GpioLevel | null | undefined,
 ): boolean | null {
-  if (!known || level === null || onLevel === null || onLevel === undefined) return null;
+  if (!known || level === null || onLevel === null || onLevel === undefined)
+    return null;
   return level === onLevel;
+}
+
+/**
+ * The instant to file a report under.
+ *
+ * The node's own timestamp, normally - it is when the relay moved. A live
+ * report dated before the last one carries a clock that is behind, and filing
+ * it there would put history out of order, so it is filed at receipt instead.
+ */
+export function recordedAt(
+  last: LastKnown | null,
+  report: PinStateReport,
+  receivedAt: Date,
+): Date {
+  if (
+    report.live &&
+    last !== null &&
+    report.observedAt.getTime() < last.observedAt.getTime()
+  ) {
+    return receivedAt;
+  }
+  return report.observedAt;
 }
