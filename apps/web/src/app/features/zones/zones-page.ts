@@ -9,13 +9,15 @@ import {
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { RouterLink } from '@angular/router';
-import type { Node, RulesCycle, Zone } from '@tempestas/domain';
+import type { Node, Zone } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
-import { RealtimeService } from '../../core/realtime.service';
-import { buildZoneCards, pickNewerCycle } from './zone-view';
+import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
+import { buildZoneCards } from './zone-view';
 import { formatDuration } from './zone-words';
+
+const CLOCK_TICK_MILLISECONDS = 1_000;
 
 @Component({
   selector: 'temp-zones-page',
@@ -24,14 +26,22 @@ import { formatDuration } from './zone-words';
   template: `
     <h1>Zones</h1>
 
-    @if (cards().length === 0) {
+    @if (hasZonesRequestFailed()) {
+      <mat-card appearance="outlined">
+        <mat-card-content
+          ><p class="alert">Could not load the zones.</p></mat-card-content
+        >
+      </mat-card>
+    } @else if (cards() === null) {
+      <p class="muted">Loading zones…</p>
+    } @else if (cards()?.length === 0) {
       <mat-card appearance="outlined">
         <mat-card-content><p>No zones yet.</p></mat-card-content>
       </mat-card>
     }
 
     <div class="zones">
-      @for (zone of cards(); track zone.id) {
+      @for (zone of cards() ?? []; track zone.id) {
         <mat-card
           appearance="outlined"
           class="zone"
@@ -43,10 +53,10 @@ import { formatDuration } from './zone-words';
               @if (zone.localTime) {
                 {{ zone.localTime }} {{ zone.timezone }} ·
               }
-              @if (zone.evaluatedAgoSeconds === null) {
-                not evaluated yet
+              @if (zone.rulesRanAgoSeconds === null) {
+                rules have not run yet
               } @else {
-                evaluated {{ formatDuration(zone.evaluatedAgoSeconds) }} ago
+                rules ran {{ formatDuration(zone.rulesRanAgoSeconds) }} ago
               }
             </mat-card-subtitle>
           </mat-card-header>
@@ -56,14 +66,9 @@ import { formatDuration } from './zone-words';
               <p class="alert" role="alert">
                 <strong>Not being evaluated.</strong> {{ zone.failure }}
               </p>
-            } @else if (
-              zone.isEvaluationOld && zone.evaluatedAgoSeconds !== null
-            ) {
+            } @else if (zone.isRulesRunOld) {
               <p class="alert" role="alert">
-                <strong
-                  >Rules last ran
-                  {{ formatDuration(zone.evaluatedAgoSeconds) }} ago.</strong
-                >
+                <strong>Rules have not run for over a minute.</strong>
                 What follows may no longer be true.
               </p>
             }
@@ -77,7 +82,7 @@ import { formatDuration } from './zone-words';
                 @for (probe of zone.probes; track probe.key) {
                   <li
                     class="probe"
-                    [class.probe--picked]="probe.tag"
+                    [class.probe--controlling]="probe.tag"
                     [class.probe--quiet]="probe.isQuiet"
                   >
                     <span class="probe__name">{{ probe.label }}</span>
@@ -106,7 +111,7 @@ import { formatDuration } from './zone-words';
                 <div
                   class="strip"
                   role="img"
-                  [attr.aria-label]="'Daylight ' + daylight.window"
+                  [attr.aria-label]="'Daylight ' + daylight.windowLabel"
                 >
                   @for (segment of daylight.segments; track $index) {
                     <span
@@ -124,7 +129,7 @@ import { formatDuration } from './zone-words';
                 </div>
                 <div class="strip__labels">
                   <span>00:00</span>
-                  <span>day {{ daylight.window }}</span>
+                  <span>day {{ daylight.windowLabel }}</span>
                   <span>24:00</span>
                 </div>
               </section>
@@ -304,7 +309,7 @@ import { formatDuration } from './zone-words';
       font-size: 0.85rem;
       opacity: 0.7;
     }
-    .probe--picked .probe__value {
+    .probe--controlling .probe__value {
       color: var(--temp-gauge-blue);
     }
     .probe__tag {
@@ -516,11 +521,11 @@ import { formatDuration } from './zone-words';
 })
 export class ZonesPage {
   private readonly api = inject(ApiService);
-  private readonly realtime = inject(RealtimeService);
 
-  private readonly zones = signal<Zone[]>([]);
+  private readonly zones = signal<Zone[] | null>(null);
+  protected readonly hasZonesRequestFailed = signal(false);
   private readonly nodes = signal<Node[]>([]);
-  private readonly fetchedCycle = signal<RulesCycle | null>(null);
+  private readonly cycle = injectLiveRulesCycle();
   private readonly readings = injectLiveReadings();
   private readonly devices = injectLiveDevices().devices;
   private readonly now = signal(Date.now());
@@ -528,14 +533,11 @@ export class ZonesPage {
   protected readonly formatDuration = formatDuration;
 
   readonly cards = computed(() => {
-    const cycle = pickNewerCycle(
-      this.realtime.rulesCycle(),
-      this.fetchedCycle(),
-    );
+    const zones = this.zones();
+    if (zones === null) return null;
     return buildZoneCards({
-      zones: this.zones(),
-      evaluations: cycle?.evaluations ?? [],
-      failures: cycle?.failingZones ?? [],
+      zones,
+      cycle: this.cycle(),
       nodes: this.nodes(),
       readings: this.readings(),
       devices: this.devices(),
@@ -544,11 +546,16 @@ export class ZonesPage {
   });
 
   constructor() {
-    this.api.zones().subscribe((zones) => this.zones.set(zones));
+    this.api.zones().subscribe({
+      next: (zones) => this.zones.set(zones),
+      error: () => this.hasZonesRequestFailed.set(true),
+    });
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
-    this.api.rulesCycle().subscribe((cycle) => this.fetchedCycle.set(cycle));
 
-    const clock = setInterval(() => this.now.set(Date.now()), 1_000);
+    const clock = setInterval(
+      () => this.now.set(Date.now()),
+      CLOCK_TICK_MILLISECONDS,
+    );
     inject(DestroyRef).onDestroy(() => clearInterval(clock));
   }
 }

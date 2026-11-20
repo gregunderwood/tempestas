@@ -14,10 +14,8 @@ import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
 import { Gauge } from '../../shared/gauge/gauge';
 import { metricsFor } from '../../shared/metrics';
-import {
-  READING_QUIET_AFTER_SECONDS,
-  secondsSince,
-} from '../../shared/freshness';
+import { READING_QUIET_AFTER_SECONDS } from '../../shared/freshness';
+import { secondsSince } from '../../shared/time';
 import {
   sensorKey,
   type Device,

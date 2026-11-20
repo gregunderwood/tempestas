@@ -72,10 +72,34 @@ const MERGE_LABELS_CLOSER_THAN_PERCENT = 20;
 interface BarWindow {
   low: number;
   high: number;
+  lowPercent: number;
+  highPercent: number;
   minimum: number;
   maximum: number;
   toPercent(value: number): number;
 }
+
+interface SideLayout {
+  belowBand: SegmentKind;
+  aboveBand: SegmentKind;
+  onDirection: string;
+  offDirection: string;
+}
+
+const SIDE_LAYOUTS: Record<BarSide, SideLayout> = {
+  low: {
+    belowBand: 'on',
+    aboveBand: 'off',
+    onDirection: 'below',
+    offDirection: 'above',
+  },
+  high: {
+    belowBand: 'off',
+    aboveBand: 'on',
+    onDirection: 'above',
+    offDirection: 'below',
+  },
+};
 
 export function buildRuleBars(
   rule: RoleRule,
@@ -168,20 +192,22 @@ function buildWindow(spec: BarSpec): BarWindow {
   );
   const minimum = low - padding;
   const maximum = high + padding;
+  const toPercent = (value: number): number =>
+    ((value - minimum) / (maximum - minimum)) * 100;
   return {
     low,
     high,
+    lowPercent: toPercent(low),
+    highPercent: toPercent(high),
     minimum,
     maximum,
-    toPercent: (value) => ((value - minimum) / (maximum - minimum)) * 100,
+    toPercent,
   };
 }
 
 function buildSegments(window: BarWindow, onSide: BarSide): BarSegment[] {
-  const lowPercent = window.toPercent(window.low);
-  const highPercent = window.toPercent(window.high);
-  const [belowBand, aboveBand]: SegmentKind[] =
-    onSide === 'low' ? ['on', 'off'] : ['off', 'on'];
+  const { lowPercent, highPercent } = window;
+  const { belowBand, aboveBand } = SIDE_LAYOUTS[onSide];
   return [
     { kind: belowBand, fromPercent: 0, widthPercent: lowPercent },
     {
@@ -198,8 +224,7 @@ function buildSegments(window: BarWindow, onSide: BarSide): BarSegment[] {
 }
 
 function buildThresholdLabels(window: BarWindow, scale: BarScale): BarLabel[] {
-  const lowPercent = window.toPercent(window.low);
-  const highPercent = window.toPercent(window.high);
+  const { lowPercent, highPercent } = window;
   const areLabelsCrowded =
     highPercent - lowPercent < MERGE_LABELS_CLOSER_THAN_PERCENT;
   if (areLabelsCrowded) {
@@ -233,8 +258,7 @@ function describeReading(spec: BarSpec): string {
 }
 
 function describeBar(spec: BarSpec, readingText: string): string {
-  const [onDirection, offDirection] =
-    spec.onSide === 'low' ? ['below', 'above'] : ['above', 'below'];
+  const { onDirection, offDirection } = SIDE_LAYOUTS[spec.onSide];
   return (
     `${spec.caption}: on ${onDirection} ${formatValue(spec.onAt, spec.scale)}, ` +
     `off ${offDirection} ${formatValue(spec.offAt, spec.scale)}, holding in between; ${readingText}.`

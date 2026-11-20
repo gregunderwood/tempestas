@@ -18,20 +18,19 @@ import {
 import {
   buildDeviceLine,
   buildZoneCards,
-  pickNewerCycle,
   type ZoneCard,
   type ZonesInput,
 } from './zone-view';
 
-const PUMPHOUSE_FAILING = [
-  { zoneSlug: 'pumphouse', reason: 'invalid rules_config' },
-];
+const PUMPHOUSE_REFUSED = cycleOf(
+  [],
+  [{ zoneSlug: 'pumphouse', reason: 'invalid rules_config' }],
+);
 
 function zonesInput(overrides: Partial<ZonesInput> = {}): ZonesInput {
   return {
     zones: [PUMPHOUSE],
-    evaluations: [pumphouseEvaluation()],
-    failures: [],
+    cycle: cycleOf([pumphouseEvaluation()]),
     nodes: [node('patji', 'z-pump')],
     readings: [probe('pipes', 17.5), probe('air', 19.4)],
     devices: [device()],
@@ -58,6 +57,8 @@ function zoneWith(
   };
 }
 
+const MINUTE_AGO = new Date(NOW.getTime() - 61_000).toISOString();
+
 const probeTagsOf = (card: ZoneCard): [string, string | null][] =>
   card.probes.map((probeLine) => [probeLine.label, probeLine.tag]);
 
@@ -66,7 +67,7 @@ describe('buildZoneCards', () => {
     const card = onlyCard();
     expect(card.name).toBe('Pumphouse');
     expect(card.localTime).toBe('14:14');
-    expect(card.evaluatedAgoSeconds).toBe(3);
+    expect(card.rulesRanAgoSeconds).toBe(3);
     expect(card.policy).toBe(
       'Controls on the coldest probe · stale after 2 min',
     );
@@ -112,15 +113,17 @@ describe('buildZoneCards', () => {
     expect(card.rules[1].devices).toEqual([]);
   });
 
-  it('carries a failure from the rules cycle onto the card', () => {
-    const card = onlyCard({ evaluations: [], failures: PUMPHOUSE_FAILING });
+  it('carries a failure from the rules cycle onto the card, aged from that cycle', () => {
+    const minuteOldRefusal = { ...PUMPHOUSE_REFUSED, at: MINUTE_AGO };
+    const card = onlyCard({ cycle: minuteOldRefusal });
     expect(card.failure).toBe('invalid rules_config');
-    expect(card.evaluatedAgoSeconds).toBeNull();
+    expect(card.rulesRanAgoSeconds).toBe(61);
+    expect(card.isRulesRunOld).toBe(true);
     expect(card.rules[0].decision).toBeNull();
   });
 
   it('shows the rules kept for roles another controller drives, after the owned one', () => {
-    const card = onlyCard({ zones: [GREENHOUSE], evaluations: [] });
+    const card = onlyCard({ zones: [GREENHOUSE], cycle: cycleOf([]) });
     expect(card.rules.map((rule) => [rule.role, rule.isOwned])).toEqual([
       [DeviceRole.Co2Generator, true],
       [DeviceRole.Lights, false],
@@ -132,7 +135,7 @@ describe('buildZoneCards', () => {
       'Night: a heater - on below 3 °C, CO₂ ignored.',
     ]);
     expect(card.daylight).toEqual({
-      window: '06:30–18:30',
+      windowLabel: '06:30–18:30',
       segments: [{ fromPercent: 27.083333333333332, widthPercent: 50 }],
       nowPercent: null,
     });
@@ -178,11 +181,7 @@ describe('buildZoneCards with a config it cannot draw', () => {
   it('still renders a card, with the failure, when the whole config is unusable', () => {
     const zone = { ...PUMPHOUSE, rulesConfig: null } as unknown as Zone;
     const cards = buildZoneCards(
-      zonesInput({
-        zones: [zone, GREENHOUSE],
-        evaluations: [],
-        failures: PUMPHOUSE_FAILING,
-      }),
+      zonesInput({ zones: [zone, GREENHOUSE], cycle: PUMPHOUSE_REFUSED }),
     );
     expect(cards).toHaveLength(2);
     expect(cards[0].failure).toBe('invalid rules_config');
@@ -195,26 +194,38 @@ describe('buildZoneCards shows nothing that is not true', () => {
   it("never shows another role's reading on a rule with none of its own", () => {
     const evaluation = pumphouseEvaluation();
     delete evaluation.climateByRole.heat_tape;
-    const [heater, heatTape] = onlyCard({ evaluations: [evaluation] }).rules;
+    const [heater, heatTape] = onlyCard({ cycle: cycleOf([evaluation]) }).rules;
     expect(heater.bars[0].readingText).toBe('now 17.5 °C');
     expect(heatTape.bars[0].readingText).toBe('no reading');
     expect(heatTape.bars[0].marker).toBeNull();
   });
 
   it('drops the last good evaluation of a zone that failed this cycle', () => {
-    const card = onlyCard({ failures: PUMPHOUSE_FAILING });
-    expect(card.evaluatedAgoSeconds).toBeNull();
+    const card = onlyCard({
+      cycle: { ...PUMPHOUSE_REFUSED, evaluations: [pumphouseEvaluation()] },
+    });
+    expect(card.localTime).toBeNull();
     expect(card.rules[0].decision).toBeNull();
   });
 
-  it('flags an evaluation that has not been refreshed for a minute', () => {
+  it('flags rules that have not run for a minute', () => {
     const minuteOldEvaluation = pumphouseEvaluation({
-      evaluatedAt: new Date(NOW.getTime() - 61_000).toISOString(),
+      evaluatedAt: MINUTE_AGO,
     });
     expect(
-      onlyCard({ evaluations: [minuteOldEvaluation] }).isEvaluationOld,
+      onlyCard({ cycle: cycleOf([minuteOldEvaluation]) }).isRulesRunOld,
     ).toBe(true);
-    expect(onlyCard().isEvaluationOld).toBe(false);
+    expect(onlyCard().isRulesRunOld).toBe(false);
+  });
+
+  it('keeps the controlling tag on the probe that decided, whatever it reads now', () => {
+    const card = onlyCard({
+      readings: [probe('pipes', 19.4), probe('air', 17.5)],
+    });
+    expect(probeTagsOf(card)).toEqual([
+      ['air', null],
+      ['pipes', 'controlling'],
+    ]);
   });
 
   it('tags probes per role when a role overrides the zone policy', () => {
@@ -229,9 +240,10 @@ describe('buildZoneCards shows nothing that is not true', () => {
       ...(evaluation.climateByRole.heater as ClimateSample),
       temperatureC: 19.4,
       sourceSensorIds: ['patji/air'],
+      decidingSensorIds: ['patji/air'],
     };
     expect(
-      probeTagsOf(onlyCard({ zones: [zone], evaluations: [evaluation] })),
+      probeTagsOf(onlyCard({ zones: [zone], cycle: cycleOf([evaluation]) })),
     ).toEqual([
       ['air', 'controls Heat tape'],
       ['pipes', 'controls Heater'],
@@ -277,21 +289,5 @@ describe('buildDeviceLine', () => {
       hasFailed: true,
       outcome: 'FAILED: NODE_OFFLINE',
     });
-  });
-});
-
-describe('pickNewerCycle', () => {
-  const older = { ...cycleOf([]), at: '2026-11-20T21:13:50.000Z' };
-  const newer = cycleOf([]);
-
-  it('takes whichever cycle is newer, from either source', () => {
-    expect(pickNewerCycle(older, newer)).toBe(newer);
-    expect(pickNewerCycle(newer, older)).toBe(newer);
-  });
-
-  it('falls back to whichever one exists', () => {
-    expect(pickNewerCycle(null, older)).toBe(older);
-    expect(pickNewerCycle(older, null)).toBe(older);
-    expect(pickNewerCycle(null, null)).toBeNull();
   });
 });

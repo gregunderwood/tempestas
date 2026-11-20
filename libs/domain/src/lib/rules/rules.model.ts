@@ -15,6 +15,8 @@ export interface ClimateSample {
   sourceNodeIds: NodeId[];
   /** Each contributing sensor, as `node/sensor` - which probe it actually was. */
   sourceSensorIds: string[];
+  /** The contributors whose temperature was picked: one for `min`/`max` unless tied, else all. */
+  decidingSensorIds: string[];
 }
 
 /**

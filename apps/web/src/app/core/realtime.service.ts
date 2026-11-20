@@ -8,7 +8,7 @@ import {
   type RulesCycle,
   type SystemStatus,
 } from '@tempestas/domain';
-import { recordDevicePush, type PushedDevice } from './live-devices';
+import { recordDevicePush, type PushedDevice } from './device-pushes';
 
 /**
  * The socket feed, as signals.
@@ -27,7 +27,7 @@ export class RealtimeService implements OnDestroy {
   readonly status = signal<SystemStatus | null>(null);
   readonly connected = signal(false);
   readonly devicePushes = signal<ReadonlyMap<string, PushedDevice>>(new Map());
-  readonly rulesCycle = signal<RulesCycle | null>(null);
+  readonly latestRulesCycle = signal<RulesCycle | null>(null);
 
   private socket?: Socket;
 
@@ -55,7 +55,7 @@ export class RealtimeService implements OnDestroy {
       this.status.set(status);
     });
     this.socket.on(REALTIME_EVENTS.rulesCycle, (cycle: RulesCycle) => {
-      this.rulesCycle.set(cycle);
+      this.latestRulesCycle.set(cycle);
     });
   }
 

@@ -100,7 +100,7 @@ export class ApiService {
 
   // ------------------------------------------------------------------ rules
 
-  rulesCycle(): Observable<RulesCycle | null> {
+  fetchLatestRulesCycle(): Observable<RulesCycle | null> {
     return this.http
       .get<{ cycle: RulesCycle | null }>(`${this.base}/rules/latest-cycle`)
       .pipe(map((body) => body.cycle));
