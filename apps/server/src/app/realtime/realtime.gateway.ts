@@ -11,7 +11,7 @@ import {
   sensorKey,
   type Device,
   type Reading,
-  type RulesTick,
+  type RulesCycle,
   type SystemStatus,
 } from '@tempestas/domain';
 
@@ -45,7 +45,7 @@ export class RealtimeGateway
 
   private lastReadings = new Map<string, Reading>();
   private lastStatus: SystemStatus | null = null;
-  private lastTick: RulesTick | null = null;
+  private latestCycle: RulesCycle | null = null;
   private clients = 0;
 
   handleConnection(client: Socket): void {
@@ -57,8 +57,8 @@ export class RealtimeGateway
     if (this.lastStatus) {
       client.emit(REALTIME_EVENTS.systemStatus, this.lastStatus);
     }
-    if (this.lastTick) {
-      client.emit(REALTIME_EVENTS.rulesEvaluation, this.lastTick);
+    if (this.latestCycle) {
+      client.emit(REALTIME_EVENTS.rulesCycle, this.latestCycle);
     }
     this.logger.debug(`Client connected (${this.clients} total)`);
   }
@@ -87,19 +87,13 @@ export class RealtimeGateway
     this.emit(REALTIME_EVENTS.systemStatus, status);
   }
 
-  /**
-   * Cached and replayed, unlike device state: a rules cycle is a snapshot that
-   * the next one wholly replaces. A server that stops evaluating (demoted to
-   * follower) clears it, so a replayed copy is never older than the loop.
-   */
-  publishRulesTick(tick: RulesTick): void {
-    this.lastTick = tick;
-    this.emit(REALTIME_EVENTS.rulesEvaluation, tick);
+  publishRulesCycle(tick: RulesCycle): void {
+    this.latestCycle = tick;
+    this.emit(REALTIME_EVENTS.rulesCycle, tick);
   }
 
-  /** Stop replaying a cycle this server no longer stands behind. */
-  clearRulesTick(): void {
-    this.lastTick = null;
+  forgetRulesCycle(): void {
+    this.latestCycle = null;
   }
 
   connectedClients(): number {

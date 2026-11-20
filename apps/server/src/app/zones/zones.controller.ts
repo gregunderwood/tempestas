@@ -2,7 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import type { Zone } from '@tempestas/domain';
 import { ZonesService } from './zones.service';
 
-/** GET only. There is no zones write API, and that is a decision, not a gap. */
+/** Read-only on purpose: zone rules drive heaters and change only through reviewed SQL. */
 @Controller('zones')
 export class ZonesController {
   constructor(private readonly zones: ZonesService) {}
