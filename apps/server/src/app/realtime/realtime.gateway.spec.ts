@@ -2,7 +2,7 @@ import {
   REALTIME_EVENTS,
   type Device,
   type Reading,
-  type RulesTick,
+  type RulesCycle,
   type SystemStatus,
 } from '@tempestas/domain';
 import { RealtimeGateway } from './realtime.gateway';
@@ -142,52 +142,52 @@ describe('RealtimeGateway', () => {
   });
 });
 
-describe('RealtimeGateway rules ticks', () => {
-  const tick = (at: string): RulesTick => ({
+describe('RealtimeGateway rules cycles', () => {
+  const cycleAt = (at: string): RulesCycle => ({
     at,
     evaluations: [],
     failingZones: [],
   });
 
-  it('emits a cycle under rules:evaluation', () => {
+  function rulesCyclesReplayedTo(
+    client: ReturnType<typeof fakeClient>,
+  ): unknown[][] {
+    return (client.emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([event]) => event === REALTIME_EVENTS.rulesCycle,
+    );
+  }
+
+  it('emits a cycle under rules:cycle', () => {
     const gateway = new RealtimeGateway();
     const emit = attach(gateway);
-    gateway.publishRulesTick(tick('2026-01-10T12:00:00.000Z'));
+    gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:00.000Z'));
     expect(emit).toHaveBeenCalledWith(
-      REALTIME_EVENTS.rulesEvaluation,
-      tick('2026-01-10T12:00:00.000Z'),
+      REALTIME_EVENTS.rulesCycle,
+      cycleAt('2026-01-10T12:00:00.000Z'),
     );
   });
 
-  // A page opened between ticks must render at once, not after up to 10 s of
-  // empty cards - and only the newest cycle, never a backlog.
   it('replays only the newest cycle to a client that connects', () => {
     const gateway = new RealtimeGateway();
     attach(gateway);
-    gateway.publishRulesTick(tick('2026-01-10T12:00:00.000Z'));
-    gateway.publishRulesTick(tick('2026-01-10T12:00:10.000Z'));
+    gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:00.000Z'));
+    gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:10.000Z'));
 
     const client = fakeClient();
     gateway.handleConnection(client);
-    const replayed = (
-      client.emit as ReturnType<typeof vi.fn>
-    ).mock.calls.filter((c) => c[0] === REALTIME_EVENTS.rulesEvaluation);
-    expect(replayed).toEqual([
-      [REALTIME_EVENTS.rulesEvaluation, tick('2026-01-10T12:00:10.000Z')],
+    expect(rulesCyclesReplayedTo(client)).toEqual([
+      [REALTIME_EVENTS.rulesCycle, cycleAt('2026-01-10T12:00:10.000Z')],
     ]);
   });
 
-  it('replays nothing once the cycle has been cleared', () => {
+  it('replays nothing once the cycle has been forgotten', () => {
     const gateway = new RealtimeGateway();
     attach(gateway);
-    gateway.publishRulesTick(tick('2026-01-10T12:00:00.000Z'));
-    gateway.clearRulesTick();
+    gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:00.000Z'));
+    gateway.forgetRulesCycle();
 
     const client = fakeClient();
     gateway.handleConnection(client);
-    const replayed = (
-      client.emit as ReturnType<typeof vi.fn>
-    ).mock.calls.filter((c) => c[0] === REALTIME_EVENTS.rulesEvaluation);
-    expect(replayed).toEqual([]);
+    expect(rulesCyclesReplayedTo(client)).toEqual([]);
   });
 });

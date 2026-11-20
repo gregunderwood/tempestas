@@ -1,5 +1,5 @@
 import { Controller, Get, HttpCode, Post } from '@nestjs/common';
-import type { RulesEvaluation, RulesTick } from '@tempestas/domain';
+import type { RulesEvaluation, RulesCycle } from '@tempestas/domain';
 import { RulesService } from './rules.service';
 
 @Controller('rules')
@@ -16,19 +16,14 @@ export class RulesController {
    * An array because a zone is the unit of evaluation and there may be several.
    * Empty until the first tick has run.
    */
-  /**
-   * The newest whole cycle: every evaluation plus the zones that failed, the
-   * same message `rules:evaluation` pushes. A screen paints from this, then
-   * follows the socket. `null` before the first cycle and on a follower.
-   */
-  @Get('tick')
-  tick(): { tick: RulesTick | null } {
-    return { tick: this.rules.lastTick() };
-  }
-
   @Get('last-evaluation')
   lastEvaluation(): RulesEvaluation[] {
     return this.rules.lastEvaluation();
+  }
+
+  @Get('latest-cycle')
+  latestCycle(): { cycle: RulesCycle | null } {
+    return { cycle: this.rules.latestCycle() };
   }
 
   /**
