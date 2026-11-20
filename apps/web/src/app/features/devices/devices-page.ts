@@ -1,20 +1,9 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { ApiService } from '../../core/api.service';
-import { RealtimeService } from '../../core/realtime.service';
-import {
-  NO_DEVICES,
-  withPushes,
-  type FetchedDevices,
-} from '../../core/device-pushes';
+import { injectLiveDevices } from '../../core/live-devices';
 import type { Device } from '@tempestas/domain';
 
 /**
@@ -81,16 +70,8 @@ import type { Device } from '@tempestas/domain';
 })
 export class DevicesPage {
   private readonly api = inject(ApiService);
-  private readonly realtime = inject(RealtimeService);
-  private readonly fetched = signal<FetchedDevices>(NO_DEVICES);
-  /** A pushed device state patches the list; it never becomes the list. */
-  readonly devices = computed(() =>
-    withPushes(this.fetched(), this.realtime.devicePushes()),
-  );
-
-  constructor() {
-    this.refresh();
-  }
+  private readonly liveDevices = injectLiveDevices();
+  readonly devices = this.liveDevices.devices;
 
   on(device: Device): void {
     this.api
@@ -111,9 +92,6 @@ export class DevicesPage {
   }
 
   private refresh(): void {
-    const requestedAt = Date.now();
-    this.api
-      .devices()
-      .subscribe((devices) => this.fetched.set({ devices, requestedAt }));
+    this.liveDevices.refresh();
   }
 }

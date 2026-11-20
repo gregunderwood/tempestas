@@ -1,47 +1,62 @@
 import { describe, expect, it } from 'vitest';
 import type { Device } from '@tempestas/domain';
-import { withPushes, type PushedDevice } from './device-pushes';
+import {
+  applyNewerPushes,
+  recordDevicePush,
+  type PushedDevice,
+} from './live-devices';
 
 const device = (id: string, isOn: boolean): Device =>
   ({ id, name: id, isOn }) as Device;
 
-const pushes = (...p: [Device, number][]): Map<string, PushedDevice> =>
-  new Map(p.map(([d, receivedAt]) => [d.id, { device: d, receivedAt }]));
+function pushesOf(
+  ...pushes: [Device, number][]
+): ReadonlyMap<string, PushedDevice> {
+  return pushes.reduce(
+    (recorded, [pushedDevice, receivedAt]) =>
+      recordDevicePush(recorded, pushedDevice, receivedAt),
+    new Map<string, PushedDevice>() as ReadonlyMap<string, PushedDevice>,
+  );
+}
 
-describe('withPushes', () => {
+const isOnOf = (devices: Device[]): boolean[] =>
+  devices.map((merged) => merged.isOn);
+
+describe('applyNewerPushes', () => {
   const fetched = {
     devices: [device('heater', false), device('tape', false)],
     requestedAt: 1_000,
   };
 
-  // One rules decision switches two devices: both pushes must survive, not
-  // only the newest (#12).
-  it('applies every push, not only the newest', () => {
-    const out = withPushes(
+  it('applies a push for every device, not only the newest push', () => {
+    const merged = applyNewerPushes(
       fetched,
-      pushes([device('heater', true), 2_000], [device('tape', true), 2_001]),
+      pushesOf([device('heater', true), 2_000], [device('tape', true), 2_001]),
     );
-    expect(out.map((d) => d.isOn)).toEqual([true, true]);
+    expect(isOnOf(merged)).toEqual([true, true]);
   });
 
-  // A push that arrived after the request left is at least as new as the
-  // response, so the response must not overwrite it.
   it('keeps a push received after the request was sent', () => {
-    const out = withPushes(fetched, pushes([device('heater', true), 1_000]));
-    expect(out[0].isOn).toBe(true);
+    const merged = applyNewerPushes(
+      fetched,
+      pushesOf([device('heater', true), 1_000]),
+    );
+    expect(isOnOf(merged)).toEqual([true, false]);
   });
 
   it('lets a later fetch win over an older push', () => {
-    const out = withPushes(
+    const merged = applyNewerPushes(
       { ...fetched, requestedAt: 5_000 },
-      pushes([device('heater', true), 2_000]),
+      pushesOf([device('heater', true), 2_000]),
     );
-    expect(out[0].isOn).toBe(false);
+    expect(isOnOf(merged)).toEqual([false, false]);
   });
 
   it('ignores a push for a device the fetch does not list', () => {
-    expect(withPushes(fetched, pushes([device('ghost', true), 9_000]))).toEqual(
-      fetched.devices,
+    const merged = applyNewerPushes(
+      fetched,
+      pushesOf([device('ghost', true), 9_000]),
     );
+    expect(merged).toEqual(fetched.devices);
   });
 });
