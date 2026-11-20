@@ -2,7 +2,7 @@
 
 ## What it is
 
-The socket.io contract to the browser: three named events on one connection, and nothing else. No
+The socket.io contract to the browser: four named events on one connection, and nothing else. No
 request/response, no rooms, no per-client subscriptions.
 
 The old feed was a bare `rxjs/webSocket` with no event envelope and no reconnect. A Pi on home WiFi
@@ -20,6 +20,7 @@ needs both, which is the whole reason for socket.io here.
 | `reading:latest` | `Reading`      | a sample is **persisted** — roughly every 10 s per node |
 | `device:state`   | `Device`       | a relay write succeeded, or `rulesEnabled` changed      |
 | `system:status`  | `SystemStatus` | once per rules evaluation cycle                         |
+| `rules:cycle`    | `RulesCycle`   | once per rules evaluation cycle, on the leader only     |
 
 `REALTIME_EVENTS` and `RealtimePayloads` in `@tempestas/domain` are the contract; a client that
 imports them cannot mis-type a handler.
@@ -39,16 +40,43 @@ The timing is the interesting part, and it is the same discipline as everywhere 
   the relay never reached. This is the same ordering `drive()` uses for the database.
 - **`system:status` is one event per cycle, not per zone.** `staleRoles` is the union across zones,
   because a quiet sensor anywhere is worth surfacing everywhere.
+- **`rules:cycle` is the whole cycle in one message**: every zone's evaluation (inputs,
+  decisions, what each device did) plus `failingZones`, the zones the engine refused and why. One
+  message so a screen never shows two zones from different ticks, and so a zone that is not being
+  evaluated - a heater nobody is controlling - is said in the same breath. Failures for zones that
+  no longer exist are dropped. `GET /api/rules/latest-cycle` returns the same message for first paint.
 
 ## Replay on connect
 
-A new client immediately receives the last `reading:latest` **per node** and the last
-`system:status`, so a browser opening mid-cycle renders straight away instead of showing an empty
-dashboard for ten seconds.
+A new client immediately receives the last `reading:latest` **per sensor**, the last
+`system:status` and the last `rules:cycle`, so a browser opening mid-cycle renders straight
+away instead of showing an empty dashboard for ten seconds.
+
+The cached `rules:cycle` is **cleared when the server stops being the leader**: a follower
+does not evaluate, and replaying the last cycle it ran would present old decisions as current.
+The zones page also flags any evaluation more than a minute old.
 
 `device:state` is deliberately **not** replayed. Device state is authoritative from
 `GET /api/devices`, and a cached copy replayed on connect could contradict it. A client renders
 devices from the API and patches them from the socket.
+
+Devices, readings, the rules cycle, and the zones page's zones and nodes are fetched through
+`injectLiveSource`. It times a request out after 15 s and **fetches again on every reconnect**, so a
+change made while the browser was offline is seen. A failed request is tried again after 10 s,
+doubling to at most a minute, and the wait resets on success. Retries and reconnect refetches are
+background requests: the error snackbar skips them, because the page already reports the failure
+and a retry every few seconds would keep the snackbar up for good.
+
+A response to an older request never overwrites a newer one, and a request still running when its
+page closes is cancelled. Each source is `loading`, `loaded`, `out-of-date` (the last refresh
+failed; the previous response is kept) or `failed`. A rules cycle pushed over the socket counts as
+loaded, because each one is complete; pushed readings do not, because each covers one sensor.
+
+The client keeps the newest push **per device**, with when it arrived (`RealtimeService.devicePushes`).
+`injectLiveDevices` applies every push received after its request was sent, so two devices switched
+back to back both show, and a response never overwrites a newer push. `injectLiveReadings` keeps
+whichever reading per sensor is newer by `createdAt`, so a push cached before the socket dropped
+never hides a fresher fetch.
 
 ## `system:status` is a safety feature
 
@@ -93,8 +121,8 @@ for replay.
   node's readings. That is correct for a LAN dashboard and would not be for anything multi-tenant.
 - **CORS is set on the gateway separately from the HTTP app.** Both allow `localhost:*` and
   `192.168.*`; changing one does not change the other.
-- **The reading cache is keyed by node slug**, so a renamed slug would orphan an entry until the
-  next sample. Slugs are immutable after admission, which is why that is safe.
+- **The reading cache is keyed by `node/sensor`**, so a renamed slug or probe would orphan an entry
+  until the next sample. Slugs are immutable after admission, which is why that is safe.
 - **`system:status` can arrive before any reading** on a fresh boot, and correctly says
   `sensorStale: true` until fresh samples land — the last readings in the table may be from a
   previous run.

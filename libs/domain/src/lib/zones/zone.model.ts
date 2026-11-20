@@ -136,4 +136,6 @@ export interface Zone {
   slug: string;
   displayName: string;
   rulesConfig: ZoneRulesConfig;
+  /** ISO-8601. */
+  updatedAt: string;
 }

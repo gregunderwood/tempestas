@@ -1,5 +1,5 @@
 import { Controller, Get, HttpCode, Post } from '@nestjs/common';
-import type { RulesEvaluation } from '@tempestas/domain';
+import type { RulesEvaluation, RulesCycle } from '@tempestas/domain';
 import { RulesService } from './rules.service';
 
 @Controller('rules')
@@ -19,6 +19,11 @@ export class RulesController {
   @Get('last-evaluation')
   lastEvaluation(): RulesEvaluation[] {
     return this.rules.lastEvaluation();
+  }
+
+  @Get('latest-cycle')
+  findLatestRulesCycle(): { cycle: RulesCycle | null } {
+    return { cycle: this.rules.findLatestRulesCycle() };
   }
 
   /**

@@ -1,4 +1,4 @@
-import { HttpErrorResponse } from '@angular/common/http';
+import { HttpContext, HttpErrorResponse } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
@@ -6,6 +6,7 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ApiErrorCode } from '@tempestas/domain';
 import { apiErrorInterceptor, messageFor } from './api-error.interceptor';
+import { IS_BACKGROUND_REQUEST } from './background-request';
 
 describe('apiErrorInterceptor', () => {
   let http: HttpClient;
@@ -67,6 +68,14 @@ describe('apiErrorInterceptor', () => {
 
   // A cooldown message that vanishes before it is read is a bug report waiting
   // to happen; a system failure deserves longer still.
+  it('stays quiet about a background retry, which the page reports itself', () => {
+    const context = new HttpContext().set(IS_BACKGROUND_REQUEST, true);
+    http.get('/api/devices', { context }).subscribe({ error: () => undefined });
+    controller.expectOne('/api/devices').error(new ProgressEvent('network'));
+
+    expect(opened).toEqual([]);
+  });
+
   it('keeps an unexpected failure on screen longer than an expected refusal', () => {
     http.post('/api/devices/x/on', {}).subscribe({ error: () => undefined });
     controller

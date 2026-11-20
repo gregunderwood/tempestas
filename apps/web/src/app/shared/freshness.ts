@@ -1,0 +1,1 @@
+export const READING_QUIET_AFTER_SECONDS = 120;

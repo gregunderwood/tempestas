@@ -27,7 +27,7 @@ function setup(
     connected: signal(connected),
     status: signal(status),
     readings: signal({}),
-    deviceState: signal(null),
+    devicePushes: signal(new Map()),
     connect: () => undefined,
   };
   TestBed.configureTestingModule({
