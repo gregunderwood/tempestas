@@ -22,7 +22,7 @@ export function applyNewerPushes(
   if (!fetched) return [];
   return fetched.payload.map((fetchedDevice) => {
     const pushed = pushes.get(fetchedDevice.id);
-    // A push received after the request was sent is at least as new as the response.
+    // A push received after the request was sent is at least as new as what it returned.
     if (pushed !== undefined && pushed.receivedAt >= fetched.requestedAt) {
       return pushed.device;
     }
@@ -33,7 +33,7 @@ export function applyNewerPushes(
 export function injectLiveDevices(): LiveDevices {
   const api = inject(ApiService);
   const realtime = inject(RealtimeService);
-  const source = injectLiveSource(() => api.devices());
+  const source = injectLiveSource((options) => api.devices(options));
   return {
     devices: computed(() =>
       applyNewerPushes(source.latest(), realtime.devicePushes()),

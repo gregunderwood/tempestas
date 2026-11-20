@@ -32,7 +32,7 @@ function isAtLeastAsNew(candidate: Reading, known: Reading): boolean {
 export function injectLiveReadings(): LiveReadings {
   const api = inject(ApiService);
   const realtime = inject(RealtimeService);
-  const source = injectLiveSource(() => api.latestReadings());
+  const source = injectLiveSource((options) => api.latestReadings(options));
   return {
     readings: computed(() =>
       mergeLatestReadings(source.latest()?.payload ?? [], realtime.readings()),
