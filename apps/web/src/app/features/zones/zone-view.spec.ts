@@ -58,10 +58,19 @@ describe('thresholdBar', () => {
     expect(bar.marker?.pct).toBeCloseTo(50);
   });
 
-  it('stretches to keep a reading far outside the thresholds on the bar', () => {
+  // Stretching the scale to reach 19.4 crushed 2-5 °C into a corner of the
+  // bar, on the live pumphouse. The scale stays put; the reading pins to the
+  // edge and is said in words instead.
+  it('pins a reading beyond the scale to its edge rather than stretching', () => {
     const bar = heat(19.4);
-    expect(bar.marker?.pct).toBeCloseTo(100);
+    expect(bar.marker).toEqual({ pct: 100, offScale: 'high' });
+    expect(bar.now).toBe('now 19.4 °C');
     expect(bar.labels.map((l) => l.text)).toEqual(['2.0 °C', '5.0 °C']);
+    expect(heat(-30).marker).toEqual({ pct: 0, offScale: 'low' });
+  });
+
+  it('draws the same scale whatever the reading', () => {
+    expect(heat(3).segments).toEqual(heat(19.4).segments);
   });
 
   it('puts the on side on the right for a cooling rule', () => {
@@ -77,6 +86,9 @@ describe('thresholdBar', () => {
     });
     expect(bar.segments.map((s) => s.kind)).toEqual(['off', 'band', 'on']);
     expect(bar.marker).toBeNull();
+    expect(bar.now).toBe('no reading');
+    // 29.5 and 30 would print on top of each other.
+    expect(bar.labels.map((l) => l.text)).toEqual(['29.5–30.0 °C']);
     expect(bar.description).toContain('on above 30.0 °C');
     expect(bar.description).toContain('no reading');
   });
