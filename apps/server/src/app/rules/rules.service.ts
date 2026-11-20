@@ -15,6 +15,7 @@ import {
   type DeviceRole,
   type RuleDecision,
   type RulesEvaluation,
+  type RulesCycle,
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
 import { HardwareService } from '../hardware/hardware.service';
@@ -48,7 +49,8 @@ export class RulesService implements OnApplicationBootstrap {
   /** `${zoneId}:${role}` -> `${desired}:${reason}`, so repeats stay silent. */
   private readonly lastDecisions = new Map<string, string>();
   private readonly lastOwnership = new Map<string, string>();
-  private readonly failedZones = new Map<string, string>();
+  private readonly failingZoneReasons = new Map<string, string>();
+  private latestRulesCycle: RulesCycle | null = null;
   private running = false;
 
   constructor(
@@ -78,7 +80,10 @@ export class RulesService implements OnApplicationBootstrap {
     // A follower evaluates nothing. Not because its decisions would be wrong,
     // but because acting on them is the leader's job alone - and a rules engine
     // that runs and then fails to dispatch just fills the log with refusals.
-    if (!this.hardware.isLeader) return;
+    if (!this.hardware.isLeader) {
+      this.forgetCycleAsFollower();
+      return;
+    }
     // A slow database must not queue evaluations behind each other; the next
     // tick is 10 s away and level-triggered dispatch means nothing is lost.
     if (this.running) {
@@ -100,22 +105,49 @@ export class RulesService implements OnApplicationBootstrap {
     for (const zone of zones) {
       try {
         evaluations.push(await this.evaluateZone(zone));
-        this.failedZones.delete(zone.slug);
+        this.failingZoneReasons.delete(zone.slug);
       } catch (err: unknown) {
         // One zone with a hand-edited `rules_config` must not stop the others.
         // Recorded as well as logged: a zone that is not being evaluated is
         // a heater nobody is controlling, and the log is not where anybody
         // looks first.
         const message = err instanceof Error ? err.message : String(err);
-        this.failedZones.set(zone.slug, message);
+        this.failingZoneReasons.set(zone.slug, message);
         this.logger.error(
           `Evaluation failed for zone "${zone.slug}": ${message}`,
         );
       }
     }
 
+    this.forgetFailuresOfRemovedZones(zones);
+    if (this.hardware.isLeader) this.publishCycle(evaluations);
     await this.publishStatus(evaluations);
     return evaluations;
+  }
+
+  private forgetFailuresOfRemovedZones(zones: ZoneEntity[]): void {
+    const existingSlugs = new Set(zones.map((zone) => zone.slug));
+    for (const slug of [...this.failingZoneReasons.keys()]) {
+      if (!existingSlugs.has(slug)) this.failingZoneReasons.delete(slug);
+    }
+  }
+
+  private publishCycle(evaluations: RulesEvaluation[]): void {
+    this.latestRulesCycle = {
+      at: this.clock.now().toISOString(),
+      evaluations,
+      failingZones: [...this.failingZoneReasons].map(([zoneSlug, reason]) => ({
+        zoneSlug,
+        reason,
+      })),
+    };
+    this.realtime.publishRulesCycle(this.latestRulesCycle);
+  }
+
+  private forgetCycleAsFollower(): void {
+    if (!this.latestRulesCycle) return;
+    this.latestRulesCycle = null;
+    this.realtime.forgetRulesCycle();
   }
 
   /**
@@ -210,7 +242,11 @@ export class RulesService implements OnApplicationBootstrap {
 
   /** Zones whose latest evaluation threw, by slug, with the reason. */
   failingZones(): ReadonlyMap<string, string> {
-    return this.failedZones;
+    return this.failingZoneReasons;
+  }
+
+  findLatestRulesCycle(): RulesCycle | null {
+    return this.latestRulesCycle;
   }
 
   /** One per zone, newest first. Empty until the first tick has run. */

@@ -18,6 +18,7 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { RulesModule } from './rules/rules.module';
 import { SensorReadingEntity } from './readings/models';
 import { ZoneEntity } from './zones/models';
+import { ZonesModule } from './zones/zones.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -71,6 +72,7 @@ import { HealthModule } from './health/health.module';
     DevicesModule,
     ReadingsModule,
     RulesModule,
+    ZonesModule,
     HealthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

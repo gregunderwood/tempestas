@@ -11,6 +11,7 @@ import {
   sensorKey,
   type Device,
   type Reading,
+  type RulesCycle,
   type SystemStatus,
 } from '@tempestas/domain';
 
@@ -44,6 +45,7 @@ export class RealtimeGateway
 
   private lastReadings = new Map<string, Reading>();
   private lastStatus: SystemStatus | null = null;
+  private latestRulesCycle: RulesCycle | null = null;
   private clients = 0;
 
   handleConnection(client: Socket): void {
@@ -54,6 +56,9 @@ export class RealtimeGateway
     }
     if (this.lastStatus) {
       client.emit(REALTIME_EVENTS.systemStatus, this.lastStatus);
+    }
+    if (this.latestRulesCycle) {
+      client.emit(REALTIME_EVENTS.rulesCycle, this.latestRulesCycle);
     }
     this.logger.debug(`Client connected (${this.clients} total)`);
   }
@@ -80,6 +85,15 @@ export class RealtimeGateway
   publishSystemStatus(status: SystemStatus): void {
     this.lastStatus = status;
     this.emit(REALTIME_EVENTS.systemStatus, status);
+  }
+
+  publishRulesCycle(cycle: RulesCycle): void {
+    this.latestRulesCycle = cycle;
+    this.emit(REALTIME_EVENTS.rulesCycle, cycle);
+  }
+
+  forgetRulesCycle(): void {
+    this.latestRulesCycle = null;
   }
 
   connectedClients(): number {
