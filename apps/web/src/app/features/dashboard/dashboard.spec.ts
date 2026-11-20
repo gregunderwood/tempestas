@@ -244,7 +244,7 @@ describe('Dashboard', () => {
   it('keeps every pushed device state, not only the newest', () => {
     const heater = device({ id: 'd1', name: 'Heater', isOn: false });
     const tape = device({ id: 'd2', name: 'Heat tape', isOn: false });
-    const el = setup(
+    const page = setup(
       [reading()],
       [heater, tape],
       [ELANTRIS],
@@ -253,6 +253,6 @@ describe('Dashboard', () => {
         { ...tape, isOn: true },
       ],
     );
-    expect(el.querySelectorAll('.relay--on')).toHaveLength(2);
+    expect(page.querySelectorAll('.relay--on')).toHaveLength(2);
   });
 });

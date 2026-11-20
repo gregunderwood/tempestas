@@ -447,7 +447,8 @@ function findRolesDecidedByProbes(
   if (!evaluation) return [];
   return enabledRoles.flatMap((role) => {
     const climate = evaluation.climateByRole[role];
-    const isDecidedByProbes = climate && !evaluation.staleRoles.includes(role);
+    const isDecidedByProbes =
+      climate !== undefined && !evaluation.staleRoles.includes(role);
     return isDecidedByProbes
       ? [[role, climate] as [DeviceRole, ClimateSample]]
       : [];

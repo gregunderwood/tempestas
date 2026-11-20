@@ -60,12 +60,14 @@ The zones page also flags any evaluation more than a minute old.
 `GET /api/devices`, and a cached copy replayed on connect could contradict it. A client renders
 devices from the API and patches them from the socket.
 
-Every fetched source on the web — devices, readings, the rules cycle, zones, nodes — goes through
-`injectLiveSource`. It times a request out after 15 s and **fetches again on every reconnect**, so a
-change made while the browser was offline is seen, and a failed first load recovers on its own. A
-response to an older request never overwrites a newer one. It reports each source as `loading`,
-`loaded`, `out-of-date` (the last refresh failed; the previous response is kept) or `failed`, and
-counts readings or a cycle already pushed over the socket as loaded.
+Devices, readings, the rules cycle, and the zones page's zones and nodes are fetched through
+`injectLiveSource`. It times a request out after 15 s, tries a failed request again every 10 s, and
+**fetches again on every reconnect**, so a change made while the browser was offline is seen. A
+response to an older request never overwrites a newer one, and a request still running when its
+page closes is cancelled. It reports each source as `loading`, `loaded`, `out-of-date` (the last
+refresh failed; the previous response is kept) or `failed`. A rules cycle pushed over the socket
+counts as loaded, because each one is complete; pushed readings do not, because each covers one
+sensor.
 
 The client keeps the newest push **per device**, with when it arrived (`RealtimeService.devicePushes`).
 `injectLiveDevices` applies every push received after its request was sent, so two devices switched

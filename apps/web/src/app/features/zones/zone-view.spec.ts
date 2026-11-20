@@ -252,6 +252,15 @@ describe('buildZoneCards shows nothing that is not true', () => {
     ]);
   });
 
+  it('does not call a probe controlling when an enabled role has no reading at all', () => {
+    const evaluation = pumphouseEvaluation();
+    delete evaluation.climateByRole.heat_tape;
+    expect(probeTagsOf(onlyCard({ cycle: cycleOf([evaluation]) }))).toEqual([
+      ['air', null],
+      ['pipes', 'controls Heater'],
+    ]);
+  });
+
   it('tags probes per role when a role overrides the zone policy', () => {
     const zone = zoneWith({
       heat_tape: {

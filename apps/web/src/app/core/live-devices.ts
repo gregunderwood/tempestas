@@ -4,7 +4,7 @@ import { ApiService } from './api.service';
 import type { PushedDevice } from './device-pushes';
 import {
   injectLiveSource,
-  type FetchedResponse,
+  type FetchedPayload,
   type SourceState,
 } from './live-source';
 import { RealtimeService } from './realtime.service';
@@ -16,11 +16,11 @@ export interface LiveDevices {
 }
 
 export function applyNewerPushes(
-  fetched: FetchedResponse<Device[]> | null,
+  fetched: FetchedPayload<Device[]> | null,
   pushes: ReadonlyMap<string, PushedDevice>,
 ): Device[] {
   if (!fetched) return [];
-  return fetched.response.map((fetchedDevice) => {
+  return fetched.payload.map((fetchedDevice) => {
     const pushed = pushes.get(fetchedDevice.id);
     // A push received after the request was sent is at least as new as the response.
     if (pushed !== undefined && pushed.receivedAt >= fetched.requestedAt) {

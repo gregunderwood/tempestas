@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { NEVER, of, throwError, type Observable } from 'rxjs';
-import type { RulesCycle, Zone } from '@tempestas/domain';
+import { DeviceRole, type RulesCycle, type Zone } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import {
@@ -95,6 +95,12 @@ function renderZonesPage(options: RenderOptions = {}): RenderedPage {
   return { page: fixture.nativeElement as HTMLElement, realtime, render };
 }
 
+function probeLabelsOf(page: HTMLElement): string[] {
+  return [...page.querySelectorAll('.probe__name')].map(
+    (label) => label.textContent?.trim() ?? '',
+  );
+}
+
 function alertText(page: HTMLElement): string | undefined {
   return page.querySelector('[role="alert"]')?.textContent ?? undefined;
 }
@@ -137,6 +143,7 @@ describe('ZonesPage', () => {
 
   it('keeps every pushed device state, not only the newest', () => {
     const { page, realtime, render } = renderZonesPage();
+    vi.advanceTimersByTime(1);
     pushDevice(realtime, device({ isOn: true }));
     render();
     pushDevice(realtime, heatTape({ isOn: true }));
@@ -207,15 +214,44 @@ describe('ZonesPage', () => {
     );
   });
 
-  it('draws from readings and a rules cycle pushed over the socket while their requests hang', () => {
+  it('draws from a rules cycle pushed over the socket while its request hangs', () => {
     const { page, realtime, render } = renderZonesPage({
-      pendingRequests: ['latestReadings', 'fetchLatestRulesCycle'],
+      pendingRequests: ['fetchLatestRulesCycle'],
     });
     expect(page.textContent).toContain('Loading zones…');
-    realtime.readings.set({ 'patji/pipes': probe('pipes', 17.5) });
     realtime.latestRulesCycle.set(cycleOf([pumphouseEvaluation()]));
     render();
     expect(page.textContent).toContain('OFF · above setpoint');
+    expect(probeLabelsOf(page)).toEqual(['air', 'pipes']);
+  });
+
+  it('waits for the readings request even when some readings were pushed', () => {
+    const { page, realtime, render } = renderZonesPage({
+      pendingRequests: ['latestReadings'],
+    });
+    realtime.readings.set({ 'patji/pipes': probe('pipes', 17.5) });
+    render();
+    expect(page.textContent).toContain('Loading zones…');
+    expect(page.textContent).not.toContain('No probes reporting');
+  });
+
+  it('does not call a pushed rules cycle out of date when its request failed', () => {
+    const { page, realtime, render } = renderZonesPage({
+      failingRequests: ['fetchLatestRulesCycle'],
+    });
+    realtime.latestRulesCycle.set(cycleOf([pumphouseEvaluation()]));
+    render();
+    expect(page.textContent).not.toContain('rules cycle');
+    expect(page.textContent).toContain('OFF · above setpoint');
+  });
+
+  it('dims a stale reading that is off the scale', () => {
+    const { page } = renderZonesPage({
+      firstCycle: cycleOf([
+        pumphouseEvaluation({ staleRoles: [DeviceRole.HeatTape] }),
+      ]),
+    });
+    expect(page.querySelectorAll('.bar__offscale--stale')).toHaveLength(1);
   });
 
   it('recovers from a failed request when the socket reconnects', () => {
