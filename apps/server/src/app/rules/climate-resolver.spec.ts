@@ -468,6 +468,15 @@ describe('several sensors on one node - the pumphouse', () => {
     ]);
   });
 
+  it('names both probes when they tie for the coldest', () => {
+    const tied = probes().map((probe) => ({ ...probe, temperatureC: 1.5 }));
+    const { climateByRole } = resolveClimate(tied, pumphouse, NOW);
+    expect(climateByRole[DeviceRole.HeatTape]?.decidingSensorIds).toEqual([
+      'pumphouse/air',
+      'pumphouse/pipes',
+    ]);
+  });
+
   it('names every contributor as deciding a mean', () => {
     const averaged: ZoneRulesConfig = {
       ...pumphouse,

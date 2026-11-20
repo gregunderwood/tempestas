@@ -24,6 +24,8 @@ import {
   type Reading,
 } from '@tempestas/domain';
 
+const AGE_TICK_MILLISECONDS = 10_000;
+
 interface SensorGauge {
   key: string;
   metric: MetricKey;
@@ -220,7 +222,7 @@ export class Dashboard {
   /** Re-read on every socket tick so ages advance without a poll of our own. */
   private readonly tick = signal(0);
 
-  private readonly readings = injectLiveReadings();
+  private readonly readings = injectLiveReadings().readings;
   private readonly devices = injectLiveDevices().devices;
 
   readonly cards = computed<NodeCard[]>(() => {
@@ -285,7 +287,7 @@ export class Dashboard {
     // keep claiming a reading is fresh long after the node went quiet.
     const timer = setInterval(
       () => this.tick.update((count) => count + 1),
-      10_000,
+      AGE_TICK_MILLISECONDS,
     );
     this.destroyRef.onDestroy(() => clearInterval(timer));
   }

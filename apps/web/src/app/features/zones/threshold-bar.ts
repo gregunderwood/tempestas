@@ -23,6 +23,7 @@ export interface BarLabel {
 export interface BarMarker {
   atPercent: number;
   offScale: BarSide | null;
+  isStale: boolean;
 }
 
 export interface ThresholdBar {
@@ -40,13 +41,14 @@ export interface BarScale {
   decimals: number;
 }
 
-export interface BarSpec {
+export interface BarDefinition {
   caption: string;
   scale: BarScale;
   onSide: BarSide;
   onAt: number;
   offAt: number;
   reading: number | null;
+  isReadingStale: boolean;
 }
 
 export interface RuleBars {
@@ -104,13 +106,14 @@ const SIDE_LAYOUTS: Record<BarSide, SideLayout> = {
 export function buildRuleBars(
   rule: RoleRule,
   climate: ClimateSample | null,
+  isClimateStale: boolean,
 ): RuleBars {
   switch (rule.kind) {
     case 'thermostat':
     case 'daylight-thermostat':
-      return buildThermostatBars(rule, climate);
+      return buildThermostatBars(rule, climate, isClimateStale);
     case 'co2-burner':
-      return buildCo2BurnerBars(rule, climate);
+      return buildCo2BurnerBars(rule, climate, isClimateStale);
     default:
       throw new Error(
         `unknown rule kind "${String((rule as { kind?: unknown }).kind)}"`,
@@ -121,6 +124,7 @@ export function buildRuleBars(
 function buildThermostatBars(
   rule: ThermostatRule | DaylightThermostatRule,
   climate: ClimateSample | null,
+  isClimateStale: boolean,
 ): RuleBars {
   const isDaylightOnly = rule.kind === 'daylight-thermostat';
   return {
@@ -132,6 +136,7 @@ function buildThermostatBars(
         onAt: rule.onAtC,
         offAt: rule.offAtC,
         reading: climate?.temperatureC ?? null,
+        isReadingStale: isClimateStale,
       }),
     ],
     notes: isDaylightOnly
@@ -143,6 +148,7 @@ function buildThermostatBars(
 function buildCo2BurnerBars(
   rule: Co2BurnerRule,
   climate: ClimateSample | null,
+  isClimateStale: boolean,
 ): RuleBars {
   return {
     bars: [
@@ -153,6 +159,7 @@ function buildCo2BurnerBars(
         onAt: rule.co2OnPpm,
         offAt: rule.co2OffPpm,
         reading: climate?.co2Ppm ?? null,
+        isReadingStale: isClimateStale,
       }),
     ],
     notes: [
@@ -162,32 +169,32 @@ function buildCo2BurnerBars(
   };
 }
 
-export function buildThresholdBar(spec: BarSpec): ThresholdBar {
-  assertThresholdsAreNumbers(spec);
-  const window = buildWindow(spec);
-  const readingText = describeReading(spec);
+export function buildThresholdBar(definition: BarDefinition): ThresholdBar {
+  assertThresholdsAreNumbers(definition);
+  const barWindow = buildWindow(definition);
+  const readingText = describeReading(definition);
   return {
-    caption: spec.caption,
-    segments: buildSegments(window, spec.onSide),
-    labels: buildThresholdLabels(window, spec.scale),
+    caption: definition.caption,
+    segments: buildSegments(barWindow, definition.onSide),
+    labels: buildThresholdLabels(barWindow, definition.scale),
     readingText,
-    marker: placeMarker(spec.reading, window),
-    screenReaderText: describeBar(spec, readingText),
+    marker: placeMarker(definition, barWindow),
+    screenReaderText: describeBar(definition, readingText),
   };
 }
 
-function assertThresholdsAreNumbers(spec: BarSpec): void {
-  if (!Number.isFinite(spec.onAt) || !Number.isFinite(spec.offAt)) {
-    throw new Error(`${spec.caption} thresholds are not numbers`);
+function assertThresholdsAreNumbers(definition: BarDefinition): void {
+  if (!Number.isFinite(definition.onAt) || !Number.isFinite(definition.offAt)) {
+    throw new Error(`${definition.caption} thresholds are not numbers`);
   }
 }
 
-function buildWindow(spec: BarSpec): BarWindow {
-  const low = Math.min(spec.onAt, spec.offAt);
-  const high = Math.max(spec.onAt, spec.offAt);
+function buildWindow(definition: BarDefinition): BarWindow {
+  const low = Math.min(definition.onAt, definition.offAt);
+  const high = Math.max(definition.onAt, definition.offAt);
   // Sized from the thresholds, never the reading, so a rule always draws the same bar.
   const padding = Math.max(
-    spec.scale.minimumPadding,
+    definition.scale.minimumPadding,
     (high - low) * PADDING_PER_BAND_WIDTH,
   );
   const minimum = low - padding;
@@ -205,8 +212,8 @@ function buildWindow(spec: BarSpec): BarWindow {
   };
 }
 
-function buildSegments(window: BarWindow, onSide: BarSide): BarSegment[] {
-  const { lowPercent, highPercent } = window;
+function buildSegments(barWindow: BarWindow, onSide: BarSide): BarSegment[] {
+  const { lowPercent, highPercent } = barWindow;
   const { belowBand, aboveBand } = SIDE_LAYOUTS[onSide];
   return [
     { kind: belowBand, fromPercent: 0, widthPercent: lowPercent },
@@ -223,45 +230,53 @@ function buildSegments(window: BarWindow, onSide: BarSide): BarSegment[] {
   ];
 }
 
-function buildThresholdLabels(window: BarWindow, scale: BarScale): BarLabel[] {
-  const { lowPercent, highPercent } = window;
+function buildThresholdLabels(
+  barWindow: BarWindow,
+  scale: BarScale,
+): BarLabel[] {
+  const { lowPercent, highPercent } = barWindow;
   const areLabelsCrowded =
     highPercent - lowPercent < MERGE_LABELS_CLOSER_THAN_PERCENT;
   if (areLabelsCrowded) {
     return [
       {
         atPercent: (lowPercent + highPercent) / 2,
-        text: `${window.low.toFixed(scale.decimals)}–${formatValue(window.high, scale)}`,
+        text: `${barWindow.low.toFixed(scale.decimals)}–${formatValue(barWindow.high, scale)}`,
       },
     ];
   }
   return [
-    { atPercent: lowPercent, text: formatValue(window.low, scale) },
-    { atPercent: highPercent, text: formatValue(window.high, scale) },
+    { atPercent: lowPercent, text: formatValue(barWindow.low, scale) },
+    { atPercent: highPercent, text: formatValue(barWindow.high, scale) },
   ];
 }
 
 function placeMarker(
-  reading: number | null,
-  window: BarWindow,
+  definition: BarDefinition,
+  barWindow: BarWindow,
 ): BarMarker | null {
+  const { reading, isReadingStale: isStale } = definition;
   if (reading === null) return null;
-  if (reading < window.minimum) return { atPercent: 0, offScale: 'low' };
-  if (reading > window.maximum) return { atPercent: 100, offScale: 'high' };
-  return { atPercent: window.toPercent(reading), offScale: null };
+  if (reading < barWindow.minimum) {
+    return { atPercent: 0, offScale: 'low', isStale };
+  }
+  if (reading > barWindow.maximum) {
+    return { atPercent: 100, offScale: 'high', isStale };
+  }
+  return { atPercent: barWindow.toPercent(reading), offScale: null, isStale };
 }
 
-function describeReading(spec: BarSpec): string {
-  return spec.reading === null
-    ? 'no reading'
-    : `now ${formatValue(spec.reading, spec.scale)}`;
+function describeReading(definition: BarDefinition): string {
+  if (definition.reading === null) return 'no reading';
+  const value = formatValue(definition.reading, definition.scale);
+  return definition.isReadingStale ? `last ${value} (stale)` : `now ${value}`;
 }
 
-function describeBar(spec: BarSpec, readingText: string): string {
-  const { onDirection, offDirection } = SIDE_LAYOUTS[spec.onSide];
+function describeBar(definition: BarDefinition, readingText: string): string {
+  const { onDirection, offDirection } = SIDE_LAYOUTS[definition.onSide];
   return (
-    `${spec.caption}: on ${onDirection} ${formatValue(spec.onAt, spec.scale)}, ` +
-    `off ${offDirection} ${formatValue(spec.offAt, spec.scale)}, holding in between; ${readingText}.`
+    `${definition.caption}: on ${onDirection} ${formatValue(definition.onAt, definition.scale)}, ` +
+    `off ${offDirection} ${formatValue(definition.offAt, definition.scale)}, holding in between; ${readingText}.`
   );
 }
 

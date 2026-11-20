@@ -5,12 +5,13 @@ import {
   computed,
   inject,
   signal,
+  type Signal,
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { RouterLink } from '@angular/router';
-import type { Node, Zone } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
+import { fetchOnce, type RequestState } from '../../core/fetch-once';
 import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
 import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
@@ -19,6 +20,11 @@ import { formatDuration } from './zone-words';
 
 const CLOCK_TICK_MILLISECONDS = 1_000;
 
+interface NamedSource {
+  name: string;
+  requestState: Signal<RequestState>;
+}
+
 @Component({
   selector: 'temp-zones-page',
   imports: [MatCardModule, RouterLink, DatePipe, DecimalPipe],
@@ -26,29 +32,31 @@ const CLOCK_TICK_MILLISECONDS = 1_000;
   template: `
     <h1>Zones</h1>
 
-    @if (hasZonesRequestFailed()) {
+    @if (failedSources().length > 0) {
       <mat-card appearance="outlined">
         <mat-card-content
-          ><p class="alert">Could not load the zones.</p></mat-card-content
+          ><p class="alert">
+            Could not load the {{ failedSources().join(', ') }}.
+          </p></mat-card-content
         >
       </mat-card>
-    } @else if (cards() === null) {
+    } @else if (isLoading()) {
       <p class="muted">Loading zones…</p>
-    } @else if (cards()?.length === 0) {
+    } @else if (cards().length === 0) {
       <mat-card appearance="outlined">
         <mat-card-content><p>No zones yet.</p></mat-card-content>
       </mat-card>
     }
 
     <div class="zones">
-      @for (zone of cards() ?? []; track zone.id) {
+      @for (zone of cards(); track zone.id) {
         <mat-card
           appearance="outlined"
           class="zone"
           [class.zone--failing]="zone.failure"
         >
           <mat-card-header>
-            <mat-card-title>{{ zone.name }}</mat-card-title>
+            <h2 mat-card-title class="zone__name">{{ zone.name }}</h2>
             <mat-card-subtitle>
               @if (zone.localTime) {
                 {{ zone.localTime }} {{ zone.timezone }} ·
@@ -111,7 +119,7 @@ const CLOCK_TICK_MILLISECONDS = 1_000;
                 <div
                   class="strip"
                   role="img"
-                  [attr.aria-label]="'Daylight ' + daylight.windowLabel"
+                  [attr.aria-label]="daylight.screenReaderText"
                 >
                   @for (segment of daylight.segments; track $index) {
                     <span
@@ -142,7 +150,7 @@ const CLOCK_TICK_MILLISECONDS = 1_000;
                 [attr.aria-label]="rule.label + ' rule'"
               >
                 <header class="rule__head">
-                  <h2>{{ rule.label }}</h2>
+                  <h3>{{ rule.label }}</h3>
                   @if (!rule.isOwned) {
                     <span class="rule__decision tone-idle"
                       >not driven by tempestas</span
@@ -191,6 +199,7 @@ const CLOCK_TICK_MILLISECONDS = 1_000;
                         } @else {
                           <span
                             class="bar__marker"
+                            [class.bar__marker--stale]="marker.isStale"
                             [style.left.%]="marker.atPercent"
                           ></span>
                         }
@@ -265,6 +274,9 @@ const CLOCK_TICK_MILLISECONDS = 1_000;
       grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 36rem));
       gap: 1rem;
       align-items: start;
+    }
+    .zone__name {
+      margin: 0;
     }
     .zone--failing {
       border-color: var(--temp-gauge-red);
@@ -367,7 +379,7 @@ const CLOCK_TICK_MILLISECONDS = 1_000;
       justify-content: space-between;
       gap: 0.25rem 1rem;
     }
-    .rule__head h2 {
+    .rule__head h3 {
       font-size: 1.05rem;
       margin: 0;
     }
@@ -456,6 +468,10 @@ const CLOCK_TICK_MILLISECONDS = 1_000;
       background: var(--mat-sys-on-surface);
       border-radius: 2px;
     }
+    .bar__marker--stale {
+      background: transparent;
+      border: 1px dashed var(--mat-sys-on-surface);
+    }
     .bar__labels {
       position: relative;
       height: 1rem;
@@ -522,36 +538,48 @@ const CLOCK_TICK_MILLISECONDS = 1_000;
 export class ZonesPage {
   private readonly api = inject(ApiService);
 
-  private readonly zones = signal<Zone[] | null>(null);
-  protected readonly hasZonesRequestFailed = signal(false);
-  private readonly nodes = signal<Node[]>([]);
+  private readonly zones = fetchOnce(this.api.fetchZones());
+  private readonly nodes = fetchOnce(this.api.nodes());
   private readonly cycle = injectLiveRulesCycle();
   private readonly readings = injectLiveReadings();
-  private readonly devices = injectLiveDevices().devices;
+  private readonly devices = injectLiveDevices();
   private readonly now = signal(Date.now());
+
+  private readonly sources: NamedSource[] = [
+    { name: 'zones', requestState: this.zones.requestState },
+    { name: 'nodes', requestState: this.nodes.requestState },
+    { name: 'devices', requestState: this.devices.requestState },
+    { name: 'readings', requestState: this.readings.requestState },
+    { name: 'rules cycle', requestState: this.cycle.requestState },
+  ];
 
   protected readonly formatDuration = formatDuration;
 
+  protected readonly failedSources = computed(() =>
+    this.sources
+      .filter((source) => source.requestState() === 'failed')
+      .map((source) => source.name),
+  );
+
+  protected readonly isLoading = computed(() =>
+    this.sources.some((source) => source.requestState() === 'loading'),
+  );
+
   readonly cards = computed(() => {
-    const zones = this.zones();
-    if (zones === null) return null;
+    const hasEverySource =
+      !this.isLoading() && this.failedSources().length === 0;
+    if (!hasEverySource) return [];
     return buildZoneCards({
-      zones,
-      cycle: this.cycle(),
-      nodes: this.nodes(),
-      readings: this.readings(),
-      devices: this.devices(),
+      zones: this.zones.value() ?? [],
+      cycle: this.cycle.cycle(),
+      nodes: this.nodes.value() ?? [],
+      readings: this.readings.readings(),
+      devices: this.devices.devices(),
       now: this.now(),
     });
   });
 
   constructor() {
-    this.api.zones().subscribe({
-      next: (zones) => this.zones.set(zones),
-      error: () => this.hasZonesRequestFailed.set(true),
-    });
-    this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
-
     const clock = setInterval(
       () => this.now.set(Date.now()),
       CLOCK_TICK_MILLISECONDS,

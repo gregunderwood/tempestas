@@ -94,7 +94,7 @@ export class ApiService {
 
   // ------------------------------------------------------------------ zones
 
-  zones(): Observable<Zone[]> {
+  fetchZones(): Observable<Zone[]> {
     return this.http.get<Zone[]>(`${this.base}/zones`);
   }
 
