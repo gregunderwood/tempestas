@@ -461,6 +461,34 @@ describe('several sensors on one node - the pumphouse', () => {
     });
   });
 
+  it('names the probe that decided, not only the probes that took part', () => {
+    const { climateByRole } = resolveClimate(probes(), pumphouse, NOW);
+    expect(climateByRole[DeviceRole.HeatTape]?.decidingSensorIds).toEqual([
+      'pumphouse/pipes',
+    ]);
+  });
+
+  it('names both probes when they tie for the coldest', () => {
+    const tied = probes().map((probe) => ({ ...probe, temperatureC: 1.5 }));
+    const { climateByRole } = resolveClimate(tied, pumphouse, NOW);
+    expect(climateByRole[DeviceRole.HeatTape]?.decidingSensorIds).toEqual([
+      'pumphouse/air',
+      'pumphouse/pipes',
+    ]);
+  });
+
+  it('names every contributor as deciding a mean', () => {
+    const averaged: ZoneRulesConfig = {
+      ...pumphouse,
+      sensorPolicy: { default: { source: 'mean' } },
+    };
+    const { climateByRole } = resolveClimate(probes(), averaged, NOW);
+    expect(climateByRole[DeviceRole.HeatTape]?.decidingSensorIds).toEqual([
+      'pumphouse/air',
+      'pumphouse/pipes',
+    ]);
+  });
+
   it('names the node once, however many of its probes contributed', () => {
     const { climateByRole } = resolveClimate(probes(), pumphouse, NOW);
     expect(climateByRole[DeviceRole.HeatTape]?.sourceNodeIds).toEqual([

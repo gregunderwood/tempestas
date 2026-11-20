@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { provideZonelessChangeDetection, signal } from '@angular/core';
+import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import {
@@ -12,6 +12,7 @@ import {
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
+import { fakeRealtime, pushDevice } from '../../testing/fake-realtime';
 import { Dashboard } from './dashboard';
 
 const NOW = new Date('2026-09-10T22:00:00.000Z');
@@ -101,8 +102,11 @@ function setup(
   readings: Reading[],
   devices: Device[] = [],
   nodes: Node[] = [ELANTRIS],
+  pushed: Device[] = [],
 ): HTMLElement {
   vi.setSystemTime(NOW);
+  const realtime = fakeRealtime();
+  for (const pushedDevice of pushed) pushDevice(realtime, pushedDevice);
   TestBed.configureTestingModule({
     imports: [Dashboard],
     providers: [
@@ -116,15 +120,7 @@ function setup(
           nodes: () => of(nodes),
         },
       },
-      {
-        provide: RealtimeService,
-        useValue: {
-          readings: signal({}),
-          deviceState: signal(null),
-          status: signal(null),
-          connected: signal(true),
-        },
-      },
+      { provide: RealtimeService, useValue: realtime },
     ],
   });
   const fixture = TestBed.createComponent(Dashboard);
@@ -243,5 +239,20 @@ describe('Dashboard', () => {
 
   it('says so plainly when there is nothing to show', () => {
     expect(setup([]).textContent).toContain('No readings yet');
+  });
+
+  it('keeps every pushed device state, not only the newest', () => {
+    const heater = device({ id: 'd1', name: 'Heater', isOn: false });
+    const tape = device({ id: 'd2', name: 'Heat tape', isOn: false });
+    const page = setup(
+      [reading()],
+      [heater, tape],
+      [ELANTRIS],
+      [
+        { ...heater, isOn: true },
+        { ...tape, isOn: true },
+      ],
+    );
+    expect(page.querySelectorAll('.relay--on')).toHaveLength(2);
   });
 });

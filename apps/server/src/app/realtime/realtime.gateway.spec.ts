@@ -2,6 +2,7 @@ import {
   REALTIME_EVENTS,
   type Device,
   type Reading,
+  type RulesCycle,
   type SystemStatus,
 } from '@tempestas/domain';
 import { RealtimeGateway } from './realtime.gateway';
@@ -138,5 +139,55 @@ describe('RealtimeGateway', () => {
     expect(gateway.connectedClients()).toBe(2);
     gateway.handleDisconnect();
     expect(gateway.connectedClients()).toBe(1);
+  });
+});
+
+describe('RealtimeGateway rules cycles', () => {
+  const cycleAt = (at: string): RulesCycle => ({
+    at,
+    evaluations: [],
+    failingZones: [],
+  });
+
+  function rulesCyclesReplayedTo(
+    client: ReturnType<typeof fakeClient>,
+  ): unknown[][] {
+    return (client.emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([event]) => event === REALTIME_EVENTS.rulesCycle,
+    );
+  }
+
+  it('emits a cycle under rules:cycle', () => {
+    const gateway = new RealtimeGateway();
+    const emit = attach(gateway);
+    gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:00.000Z'));
+    expect(emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.rulesCycle,
+      cycleAt('2026-01-10T12:00:00.000Z'),
+    );
+  });
+
+  it('replays only the newest cycle to a client that connects', () => {
+    const gateway = new RealtimeGateway();
+    attach(gateway);
+    gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:00.000Z'));
+    gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:10.000Z'));
+
+    const client = fakeClient();
+    gateway.handleConnection(client);
+    expect(rulesCyclesReplayedTo(client)).toEqual([
+      [REALTIME_EVENTS.rulesCycle, cycleAt('2026-01-10T12:00:10.000Z')],
+    ]);
+  });
+
+  it('replays nothing once the cycle has been forgotten', () => {
+    const gateway = new RealtimeGateway();
+    attach(gateway);
+    gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:00.000Z'));
+    gateway.forgetRulesCycle();
+
+    const client = fakeClient();
+    gateway.handleConnection(client);
+    expect(rulesCyclesReplayedTo(client)).toEqual([]);
   });
 });

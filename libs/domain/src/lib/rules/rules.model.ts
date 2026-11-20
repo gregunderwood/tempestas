@@ -15,6 +15,8 @@ export interface ClimateSample {
   sourceNodeIds: NodeId[];
   /** Each contributing sensor, as `node/sensor` - which probe it actually was. */
   sourceSensorIds: string[];
+  /** The contributors whose temperature was picked: one for `min`/`max` unless tied, else all. */
+  decidingSensorIds: string[];
 }
 
 /**
@@ -104,4 +106,17 @@ export interface RulesEvaluation {
   climateByRole: Partial<Record<DeviceRole, ClimateSample>>;
   staleRoles: DeviceRole[];
   decisions: DecisionOutcome[];
+}
+
+export interface ZoneFailure {
+  zoneSlug: string;
+  reason: string;
+}
+
+/** Every zone in one message, so a screen never mixes zones from different cycles. */
+export interface RulesCycle {
+  /** ISO-8601. */
+  at: string;
+  evaluations: RulesEvaluation[];
+  failingZones: ZoneFailure[];
 }

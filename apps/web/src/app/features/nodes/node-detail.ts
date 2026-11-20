@@ -19,11 +19,11 @@ import {
   type DayNightStats,
   type Device,
   type Node,
-  type Reading,
   type SegmentStats,
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
-import { RealtimeService } from '../../core/realtime.service';
+import { injectLiveDevices } from '../../core/live-devices';
+import { injectLiveReadings } from '../../core/live-readings';
 import { Gauge } from '../../shared/gauge/gauge';
 import { metricsFor, nodeMetrics } from '../../shared/metrics';
 
@@ -395,7 +395,6 @@ interface MetricBlock {
 })
 export class NodeDetail {
   private readonly api = inject(ApiService);
-  private readonly realtime = inject(RealtimeService);
 
   /** Bound from the route, so the component works from a deep link. */
   readonly slug = input.required<string>();
@@ -404,8 +403,8 @@ export class NodeDetail {
   private readonly reload = new BehaviorSubject<void>(undefined);
   private boundaryTimer: ReturnType<typeof setTimeout> | undefined;
 
-  private readonly latest = signal<Reading[]>([]);
-  private readonly fetchedDevices = signal<Device[]>([]);
+  private readonly liveReadings = injectLiveReadings().readings;
+  private readonly allDevices = injectLiveDevices().devices;
   private readonly nodes = signal<Node[]>([]);
   protected readonly stats = signal<DayNightStats | null>(null);
 
@@ -418,30 +417,20 @@ export class NodeDetail {
    * the API established, never replaces it.
    */
   protected readonly sensors = computed(() => {
-    const merged = new Map<string, Reading>();
-    for (const r of this.latest()) {
-      if (r.nodeId === this.slug()) merged.set(sensorKey(r), r);
-    }
-    for (const [key, r] of Object.entries(this.realtime.readings())) {
-      if (r.nodeId === this.slug()) merged.set(key, r);
-    }
     const node = this.node();
-    return [...merged.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, reading]) => ({
-        key,
+    return this.liveReadings()
+      .filter((reading) => reading.nodeId === this.slug())
+      .map((reading) => ({
+        key: sensorKey(reading),
         reading,
         metrics: metricsFor(reading, node),
-      }));
+      }))
+      .sort((first, second) => first.key.localeCompare(second.key));
   });
 
-  /** The socket patches what the API established, never replaces it. */
-  protected readonly devices = computed<Device[]>(() => {
-    const pushed = this.realtime.deviceState();
-    return this.fetchedDevices()
-      .map((d) => (pushed && d.id === pushed.id ? pushed : d))
-      .filter((d) => d.nodeId === this.slug());
-  });
+  protected readonly devices = computed<Device[]>(() =>
+    this.allDevices().filter((device) => device.nodeId === this.slug()),
+  );
 
   protected readonly blocks = computed<MetricBlock[]>(() => {
     // Newest first on screen. The API returns them chronologically, which is
@@ -483,8 +472,6 @@ export class NodeDetail {
 
   constructor() {
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
-    this.api.latestReadings().subscribe((all) => this.latest.set(all));
-    this.api.devices().subscribe((all) => this.fetchedDevices.set(all));
 
     // Driven off the route parameter rather than read once: a required input
     // has no value during construction, and moving between two nodes reuses
