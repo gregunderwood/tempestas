@@ -5,11 +5,11 @@ import {
   type Device,
   type Node,
   type Reading,
+  type RulesCycle,
   type RulesEvaluation,
+  type ZoneFailure,
   type Zone,
 } from '@tempestas/domain';
-
-/** The pumphouse and the greenhouse as they are actually configured. Specs only. */
 
 export const NOW = new Date('2026-11-20T21:14:00.000Z');
 
@@ -104,7 +104,7 @@ export function node(slug: string, zoneId: string | null): Node {
 export function probe(
   sensorId: string,
   temperature: number,
-  ageS = 4,
+  ageSeconds = 4,
 ): Reading {
   return {
     id: `r-${sensorId}`,
@@ -113,11 +113,11 @@ export function probe(
     temperature,
     humidity: null,
     co2: null,
-    createdAt: new Date(NOW.getTime() - ageS * 1000).toISOString(),
+    createdAt: new Date(NOW.getTime() - ageSeconds * 1000).toISOString(),
   };
 }
 
-export function device(over: Partial<Device> = {}): Device {
+export function device(overrides: Partial<Device> = {}): Device {
   return {
     id: 'd-heater',
     nodeId: 'patji',
@@ -134,13 +134,22 @@ export function device(over: Partial<Device> = {}): Device {
     isOn: false,
     canTurnOn: true,
     canTurnOnAt: null,
-    ...over,
+    ...overrides,
   };
 }
 
-/** One pumphouse cycle: both probes contributed, the coldest is 17.5 °C. */
+export function heatTape(overrides: Partial<Device> = {}): Device {
+  return device({
+    id: 'd-tape',
+    name: 'Heat tape',
+    gpio: 6,
+    role: DeviceRole.HeatTape,
+    ...overrides,
+  });
+}
+
 export function pumphouseEvaluation(
-  over: Partial<RulesEvaluation> = {},
+  overrides: Partial<RulesEvaluation> = {},
 ): RulesEvaluation {
   const climate = {
     temperatureC: 17.5,
@@ -181,6 +190,13 @@ export function pumphouseEvaluation(
         dispatched: [],
       },
     ],
-    ...over,
+    ...overrides,
   };
+}
+
+export function cycleOf(
+  evaluations: RulesEvaluation[],
+  failingZones: ZoneFailure[] = [],
+): RulesCycle {
+  return { at: NOW.toISOString(), evaluations, failingZones };
 }
