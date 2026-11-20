@@ -543,8 +543,12 @@ interface NamedSource {
 export class ZonesPage {
   private readonly api = inject(ApiService);
 
-  private readonly zones = injectLiveSource(() => this.api.fetchZones());
-  private readonly nodes = injectLiveSource(() => this.api.nodes());
+  private readonly zones = injectLiveSource((options) =>
+    this.api.fetchZones(options),
+  );
+  private readonly nodes = injectLiveSource((options) =>
+    this.api.nodes(options),
+  );
   private readonly cycle = injectLiveRulesCycle();
   private readonly readings = injectLiveReadings();
   private readonly devices = injectLiveDevices();

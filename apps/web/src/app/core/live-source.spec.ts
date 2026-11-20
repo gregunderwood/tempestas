@@ -11,10 +11,13 @@ import { NEVER, Subject, of, throwError, type Observable } from 'rxjs';
 import { fakeRealtime, type FakeRealtime } from '../testing/fake-realtime';
 import {
   REQUEST_TIMEOUT_MILLISECONDS,
-  RETRY_AFTER_FAILURE_MILLISECONDS,
+  FIRST_RETRY_AFTER_MILLISECONDS,
+  LONGEST_RETRY_AFTER_MILLISECONDS,
+  waitBeforeRetry,
   injectLiveSource,
   type LiveSource,
 } from './live-source';
+import type { RequestOptions } from './background-request';
 import { RealtimeService } from './realtime.service';
 
 interface StartedSource {
@@ -24,7 +27,7 @@ interface StartedSource {
 }
 
 function startSource(
-  request: () => Observable<string>,
+  request: (options: RequestOptions) => Observable<string>,
   hasPushedSnapshot?: () => boolean,
 ): StartedSource {
   const realtime = fakeRealtime();
@@ -86,7 +89,7 @@ describe('injectLiveSource', () => {
   it('tries a failed request again without waiting for a reconnect', () => {
     const { source } = startSource(answerInTurn(offline(), of('second try')));
     expect(source.sourceState()).toBe('failed');
-    vi.advanceTimersByTime(RETRY_AFTER_FAILURE_MILLISECONDS);
+    vi.advanceTimersByTime(FIRST_RETRY_AFTER_MILLISECONDS);
     expect(source.sourceState()).toBe('loaded');
     expect(source.latest()?.payload).toBe('second try');
   });
@@ -146,7 +149,53 @@ describe('injectLiveSource', () => {
     const { realtime, closePage } = startSource(request);
     closePage();
     reconnect(realtime);
-    vi.advanceTimersByTime(RETRY_AFTER_FAILURE_MILLISECONDS);
+    vi.advanceTimersByTime(FIRST_RETRY_AFTER_MILLISECONDS);
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores an answer that arrives after its page has closed', () => {
+    const lateAnswer = new Subject<string>();
+    const { source, closePage } = startSource(() => lateAnswer);
+    closePage();
+    lateAnswer.next('late');
+    expect(source.latest()).toBeNull();
+  });
+
+  it('sends nothing when refreshed after its page has closed', () => {
+    const afterClose = new Subject<string>();
+    const { source, closePage } = startSource(
+      answerInTurn(of('first'), afterClose),
+    );
+    closePage();
+    source.refresh();
+    expect(afterClose.observed).toBe(false);
+  });
+
+  it('keeps one retry waiting when refreshed while a retry is pending', () => {
+    const request = vi.fn(answerInTurn(offline(), new Subject<string>()));
+    const { source } = startSource(request);
+    source.refresh();
+    vi.advanceTimersByTime(FIRST_RETRY_AFTER_MILLISECONDS);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks in the foreground first, and in the background when retrying or reconnecting', () => {
+    const request = vi.fn(answerInTurn(offline(), of('retried'), of('again')));
+    const { realtime } = startSource(request);
+    vi.advanceTimersByTime(FIRST_RETRY_AFTER_MILLISECONDS);
+    reconnect(realtime);
+    expect(request.mock.calls.map(([options]) => options.isBackground)).toEqual(
+      [false, true, true],
+    );
+  });
+
+  it('waits twice as long after each failure in a row, up to a minute', () => {
+    expect([1, 2, 3, 4, 5].map(waitBeforeRetry)).toEqual([
+      10_000,
+      20_000,
+      40_000,
+      LONGEST_RETRY_AFTER_MILLISECONDS,
+      LONGEST_RETRY_AFTER_MILLISECONDS,
+    ]);
   });
 });
