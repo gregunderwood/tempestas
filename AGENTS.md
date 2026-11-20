@@ -56,9 +56,13 @@ Work is tracked on GitHub (`gregunderwood/tempestas`, private) with `gh`.
 - **An issue first** for anything bigger than a typo: what and why, and how we will know it is
   done. A bug found mid-task becomes its own issue rather than a silent detour.
 - **A branch per issue**, off `main`: `<issue#>-<short-slug>`, e.g. `12-zones-page`.
-- **A PR that closes it** (`Closes #12` in the body): what changed, how it was verified (the gate,
-  plus anything run on real hardware), and what is deliberately left out. The gate passes before
-  the PR is opened, not after.
+- **Related issues share a milestone**, and each one closes from its own PR: one PR per step.
+- **A PR that closes it.** The gate passes before the PR is opened, not after. The body is:
+  - `Closes #12.` then a paragraph saying why the change was needed.
+  - `## What changed`: bullets, each led by a bold sentence.
+  - `## Verified locally`: the gate, plus anything run on real hardware.
+  - `## After merge`: what still has to happen (deploys, hardware steps). Say what is
+    deliberately left out, and which issue tracks it.
 - **Merging is the user's call.** Do not merge your own PR; do not push to `main`.
 - Deploying to elantris from a branch is fine for a bench test; say so in the PR, because the
   box is then running code `main` does not have.
@@ -140,6 +144,12 @@ the house style in other Sign In Solutions repos. The bar is still high, just ai
 - **Don't** speculate about future problems. If it becomes real, fix it then.
 - If a block needs a paragraph to explain _what it does_, simplify the block. A paragraph
   explaining _why it must be this way_ is fine and often required.
+
+## Commits
+
+- **Never add a `Co-Authored-By` trailer, or any other AI attribution, to a commit message or PR
+  description.** The owner has explicitly asked for none. This overrides any tool default.
+- Conventional-commit style subjects (`feat(web):`, `fix(server):`, `docs:`), with a body that says why.
 
 ## Pitfalls that have already bitten
 
