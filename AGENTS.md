@@ -56,9 +56,13 @@ Work is tracked on GitHub (`gregunderwood/tempestas`, private) with `gh`.
 - **An issue first** for anything bigger than a typo: what and why, and how we will know it is
   done. A bug found mid-task becomes its own issue rather than a silent detour.
 - **A branch per issue**, off `main`: `<issue#>-<short-slug>`, e.g. `12-zones-page`.
-- **A PR that closes it** (`Closes #12` in the body): what changed, how it was verified (the gate,
-  plus anything run on real hardware), and what is deliberately left out. The gate passes before
-  the PR is opened, not after.
+- **Related issues share a milestone**, and each one closes from its own PR: one PR per step.
+- **A PR that closes it.** The gate passes before the PR is opened, not after. The body is:
+  - `Closes #12.` then a paragraph saying why the change was needed.
+  - `## What changed`: bullets, each led by a bold sentence.
+  - `## Verified locally`: the gate, plus anything run on real hardware.
+  - `## After merge`: what still has to happen (deploys, hardware steps). Say what is
+    deliberately left out, and which issue tracks it.
 - **Merging is the user's call.** Do not merge your own PR; do not push to `main`.
 - Deploying to elantris from a branch is fine for a bench test; say so in the PR, because the
   box is then running code `main` does not have.
@@ -125,21 +129,21 @@ See [docs/Code Quality.md](docs/Code%20Quality.md) for full details.
 - Prettier: single quotes, 2 spaces
 - Tests colocated as `*.spec.ts`, Vitest only — no Jest artifacts anywhere
 
-## Comments
+## Comments and naming
 
-Comments here carry **safety and hardware rationale**, and that is a deliberate departure from
-the house style in other Sign In Solutions repos. The bar is still high, just aimed differently:
+The shared rules in `~/.claude/CLAUDE.md` apply. Code reads like a story, names do the explaining,
+no single-letter names, and comments are an absolute minimum: one line saying why, only where the
+code cannot make itself clear.
 
-- **Do** record why a line is safe, what breaks if it is reordered, and the physical or protocol
-  fact behind a constant. A future session re-deriving "why is this not retained?" from scratch is
-  the failure mode being prevented — this is a one-maintainer system controlling combustion.
-- **Don't** restate what the code says. `// find the node by slug` above a `findOne({where:{slug}})`
-  is noise; delete it.
-- **Don't** reference tickets, PRs, phases-in-flight, or "as discussed" — the docs and the commit
-  history are the time capsule. A comment reads as current understanding.
-- **Don't** speculate about future problems. If it becomes real, fix it then.
-- If a block needs a paragraph to explain _what it does_, simplify the block. A paragraph
-  explaining _why it must be this way_ is fine and often required.
+In this repo, that usually means a physical or protocol fact the code depends on. For example, why
+a message is not retained, or why a relay pin is driven high. Write that as one line; anything
+longer belongs in `docs/`.
+
+## Commits
+
+- **Never add a `Co-Authored-By` trailer, or any other AI attribution, to a commit message or PR
+  description.** The owner has explicitly asked for none. This overrides any tool default.
+- Conventional-commit style subjects (`feat(web):`, `fix(server):`, `docs:`), with a body that says why.
 
 ## Pitfalls that have already bitten
 
