@@ -19,6 +19,18 @@ import type { Device } from '@tempestas/domain';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <h1>Devices</h1>
+    <div aria-live="polite">
+      @switch (sourceState()) {
+        @case ('failed') {
+          <p class="temp-alert">Could not load the devices.</p>
+        }
+        @case ('out-of-date') {
+          <p class="temp-alert">
+            Could not refresh the devices; the states below may be out of date.
+          </p>
+        }
+      }
+    </div>
     <div class="temp-cards">
       @for (device of devices(); track device.id) {
         <mat-card appearance="outlined">
@@ -62,6 +74,9 @@ import type { Device } from '@tempestas/domain';
       flex-wrap: wrap;
       gap: 1rem;
     }
+    .temp-alert {
+      color: var(--temp-gauge-red);
+    }
     .temp-muted {
       opacity: 0.7;
       font-size: 0.85rem;
@@ -72,6 +87,7 @@ export class DevicesPage {
   private readonly api = inject(ApiService);
   private readonly liveDevices = injectLiveDevices();
   readonly devices = this.liveDevices.devices;
+  protected readonly sourceState = this.liveDevices.sourceState;
 
   on(device: Device): void {
     this.api

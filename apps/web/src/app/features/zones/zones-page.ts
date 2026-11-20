@@ -577,9 +577,9 @@ export class ZonesPage {
       !this.isLoading() && this.failedSources().length === 0;
     if (!hasEverySource) return [];
     return buildZoneCards({
-      zones: this.zones.latest()?.response ?? [],
+      zones: this.zones.latest()?.payload ?? [],
       cycle: this.cycle.cycle(),
-      nodes: this.nodes.latest()?.response ?? [],
+      nodes: this.nodes.latest()?.payload ?? [],
       readings: this.readings.readings(),
       devices: this.devices.devices(),
       now: this.now(),

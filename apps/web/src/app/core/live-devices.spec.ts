@@ -21,7 +21,7 @@ const isOnOf = (devices: Device[]): boolean[] =>
 
 describe('applyNewerPushes', () => {
   const fetched = {
-    response: [device('heater', false), device('tape', false)],
+    payload: [device('heater', false), device('tape', false)],
     requestedAt: 1_000,
   };
 
@@ -66,6 +66,6 @@ describe('applyNewerPushes', () => {
       fetched,
       pushesOf([device('ghost', true), 9_000]),
     );
-    expect(merged).toEqual(fetched.response);
+    expect(merged).toEqual(fetched.payload);
   });
 });
