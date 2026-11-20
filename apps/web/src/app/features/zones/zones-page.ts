@@ -9,33 +9,14 @@ import {
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { RouterLink } from '@angular/router';
-import {
-  sensorKey,
-  type Device,
-  type Node,
-  type Reading,
-  type RulesTick,
-  type Zone,
-} from '@tempestas/domain';
+import type { Node, RulesCycle, Zone } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
-import {
-  NO_DEVICES,
-  withPushes,
-  type FetchedDevices,
-} from '../../core/device-pushes';
+import { injectLiveDevices } from '../../core/live-devices';
+import { injectLiveReadings } from '../../core/live-readings';
 import { RealtimeService } from '../../core/realtime.service';
-import { formatDuration, zoneCards } from './zone-view';
+import { buildZoneCards, pickNewerCycle } from './zone-view';
+import { formatDuration } from './zone-words';
 
-/**
- * Every zone: the rules it runs, and what they are doing right now.
- *
- * Read-only. The rules are changed by reviewed SQL, and the card says where.
- *
- * Live without polling. The REST calls are first paint only; after that each
- * rules cycle arrives as `rules:evaluation`, readings as `reading:latest` and
- * device changes as `device:state`. The one timer is the clock that ages
- * readings and counts cooldowns down - it fetches nothing.
- */
 @Component({
   selector: 'temp-zones-page',
   imports: [MatCardModule, RouterLink, DatePipe, DecimalPipe],
@@ -62,10 +43,10 @@ import { formatDuration, zoneCards } from './zone-view';
               @if (zone.localTime) {
                 {{ zone.localTime }} {{ zone.timezone }} ·
               }
-              @if (zone.evaluatedAgoS === null) {
+              @if (zone.evaluatedAgoSeconds === null) {
                 not evaluated yet
               } @else {
-                evaluated {{ age(zone.evaluatedAgoS) }} ago
+                evaluated {{ formatDuration(zone.evaluatedAgoSeconds) }} ago
               }
             </mat-card-subtitle>
           </mat-card-header>
@@ -73,47 +54,45 @@ import { formatDuration, zoneCards } from './zone-view';
           <mat-card-content>
             @if (zone.failure) {
               <p class="alert" role="alert">
-                <span aria-hidden="true">&#9888;</span>
                 <strong>Not being evaluated.</strong> {{ zone.failure }}
               </p>
-            } @else if (zone.evaluationOld && zone.evaluatedAgoS !== null) {
+            } @else if (
+              zone.isEvaluationOld && zone.evaluatedAgoSeconds !== null
+            ) {
               <p class="alert" role="alert">
-                <span aria-hidden="true">&#9888;</span>
                 <strong
-                  >Rules last ran {{ age(zone.evaluatedAgoS) }} ago.</strong
+                  >Rules last ran
+                  {{ formatDuration(zone.evaluatedAgoSeconds) }} ago.</strong
                 >
                 What follows may no longer be true.
               </p>
             }
             @for (problem of zone.problems; track $index) {
-              <p class="alert">
-                <span aria-hidden="true">&#9888;</span> {{ problem }}
-              </p>
+              <p class="alert">{{ problem }}</p>
             }
 
             <section class="probes" aria-label="Probes">
               <p class="policy">{{ zone.policy }}</p>
               <ul>
-                @for (p of zone.probes; track p.key) {
+                @for (probe of zone.probes; track probe.key) {
                   <li
                     class="probe"
-                    [class.probe--picked]="p.tag"
-                    [class.probe--quiet]="p.quiet"
+                    [class.probe--picked]="probe.tag"
+                    [class.probe--quiet]="probe.isQuiet"
                   >
-                    <span class="probe__name">{{ p.label }}</span>
+                    <span class="probe__name">{{ probe.label }}</span>
                     <span class="probe__value"
-                      >{{ p.temperatureC | number: '1.1-1' }} °C</span
+                      >{{ probe.temperatureC | number: '1.1-1' }} °C</span
                     >
                     <span class="probe__age">
-                      @if (p.quiet) {
-                        <span aria-hidden="true">&#9888;</span> quiet
-                        {{ age(p.ageS) }}
+                      @if (probe.isQuiet) {
+                        quiet {{ formatDuration(probe.ageSeconds) }}
                       } @else {
-                        {{ age(p.ageS) }} ago
+                        {{ formatDuration(probe.ageSeconds) }} ago
                       }
                     </span>
-                    @if (p.tag) {
-                      <span class="probe__tag">{{ p.tag }}</span>
+                    @if (probe.tag) {
+                      <span class="probe__tag">{{ probe.tag }}</span>
                     }
                   </li>
                 } @empty {
@@ -122,32 +101,30 @@ import { formatDuration, zoneCards } from './zone-view';
               </ul>
             </section>
 
-            @if (zone.daylight; as day) {
+            @if (zone.daylight; as daylight) {
               <section class="daylight" aria-label="Daylight window">
                 <div
                   class="strip"
                   role="img"
-                  [attr.aria-label]="
-                    'Daylight ' + hm(day.start) + ' to ' + hm(day.end)
-                  "
+                  [attr.aria-label]="'Daylight ' + daylight.window"
                 >
-                  @for (seg of daySegments(day.start, day.end); track $index) {
+                  @for (segment of daylight.segments; track $index) {
                     <span
                       class="strip__day"
-                      [style.left.%]="seg.from"
-                      [style.width.%]="seg.width"
+                      [style.left.%]="segment.fromPercent"
+                      [style.width.%]="segment.widthPercent"
                     ></span>
                   }
-                  @if (day.now !== null) {
+                  @if (daylight.nowPercent !== null) {
                     <span
                       class="strip__now"
-                      [style.left.%]="(day.now / 1440) * 100"
+                      [style.left.%]="daylight.nowPercent"
                     ></span>
                   }
                 </div>
                 <div class="strip__labels">
                   <span>00:00</span>
-                  <span>day {{ hm(day.start) }}–{{ hm(day.end) }}</span>
+                  <span>day {{ daylight.window }}</span>
                   <span>24:00</span>
                 </div>
               </section>
@@ -156,65 +133,69 @@ import { formatDuration, zoneCards } from './zone-view';
             @for (rule of zone.rules; track rule.role) {
               <section
                 class="rule"
-                [class.rule--unowned]="!rule.owned"
+                [class.rule--unowned]="!rule.isOwned"
                 [attr.aria-label]="rule.label + ' rule'"
               >
                 <header class="rule__head">
                   <h2>{{ rule.label }}</h2>
-                  @if (!rule.owned) {
+                  @if (!rule.isOwned) {
                     <span class="rule__decision tone-idle"
                       >not driven by tempestas</span
                     >
-                  } @else if (rule.decision; as d) {
-                    <span class="rule__decision" [class]="'tone-' + d.tone">{{
-                      d.headline
-                    }}</span>
+                  } @else if (rule.decision; as decision) {
+                    <span
+                      class="rule__decision"
+                      [class]="'tone-' + decision.tone"
+                      >{{ decision.headline }}</span
+                    >
                   }
                 </header>
 
                 @if (rule.problem) {
-                  <p class="alert">
-                    <span aria-hidden="true">&#9888;</span> {{ rule.problem }}
-                  </p>
+                  <p class="alert">{{ rule.problem }}</p>
                 }
                 @for (bar of rule.bars; track bar.caption) {
                   <figure class="bar">
                     <figcaption>
                       <span>{{ bar.caption }}</span>
-                      <span class="bar__now">{{ bar.now }}</span>
+                      <span class="bar__now">{{ bar.readingText }}</span>
                     </figcaption>
                     <div
                       class="bar__track"
                       role="img"
-                      [attr.aria-label]="bar.description"
+                      [attr.aria-label]="bar.screenReaderText"
                     >
-                      @for (seg of bar.segments; track $index) {
-                        <span
-                          class="bar__seg seg-{{ seg.kind }}"
-                          [style.left.%]="seg.from"
-                          [style.width.%]="seg.width"
-                        ></span>
-                      }
-                      @if (bar.marker; as m) {
-                        @if (m.offScale) {
+                      <div class="bar__segments">
+                        @for (segment of bar.segments; track $index) {
+                          <span
+                            class="bar__segment segment-{{ segment.kind }}"
+                            [style.left.%]="segment.fromPercent"
+                            [style.width.%]="segment.widthPercent"
+                          ></span>
+                        }
+                      </div>
+                      @if (bar.marker; as marker) {
+                        @if (marker.offScale) {
                           <span
                             class="bar__offscale bar__offscale--{{
-                              m.offScale
+                              marker.offScale
                             }}"
                             aria-hidden="true"
-                            >{{ m.offScale === 'high' ? '▶' : '◀' }}</span
+                            >{{ marker.offScale === 'high' ? '▶' : '◀' }}</span
                           >
                         } @else {
                           <span
                             class="bar__marker"
-                            [style.left.%]="m.pct"
+                            [style.left.%]="marker.atPercent"
                           ></span>
                         }
                       }
                     </div>
                     <div class="bar__labels" aria-hidden="true">
-                      @for (l of bar.labels; track $index) {
-                        <span [style.left.%]="l.pct">{{ l.text }}</span>
+                      @for (label of bar.labels; track $index) {
+                        <span [style.left.%]="label.atPercent">{{
+                          label.text
+                        }}</span>
                       }
                     </div>
                   </figure>
@@ -222,40 +203,41 @@ import { formatDuration, zoneCards } from './zone-view';
                 @for (note of rule.notes; track $index) {
                   <p class="note">{{ note }}</p>
                 }
-                @if (rule.stale) {
-                  <p class="note">{{ rule.stale }}</p>
+                @if (rule.stalePolicy) {
+                  <p class="note">{{ rule.stalePolicy }}</p>
                 }
 
                 @if (rule.devices.length > 0) {
                   <ul class="devices" aria-label="Devices">
-                    @for (dev of rule.devices; track dev.id) {
+                    @for (device of rule.devices; track device.id) {
                       <li
                         class="device"
-                        [class.device--on]="dev.isOn"
-                        [class.device--failed]="dev.failed"
+                        [class.device--on]="device.isOn"
+                        [class.device--failed]="device.hasFailed"
                       >
                         <span class="device__state">{{
-                          dev.isOn ? 'ON' : 'off'
+                          device.isOn ? 'ON' : 'off'
                         }}</span>
                         <span class="device__name">
-                          <a [routerLink]="['/nodes', dev.nodeId]">{{
-                            dev.name
+                          <a [routerLink]="['/nodes', device.nodeId]">{{
+                            device.name
                           }}</a>
-                          <span class="muted">{{ dev.where }}</span>
+                          <span class="muted">{{ device.where }}</span>
                         </span>
                         <span class="device__detail">
-                          @if (dev.manual) {
+                          @if (device.isManual) {
                             <strong class="manual">manual</strong> ·
                           }
-                          @if (dev.cooldownS !== null) {
-                            can restart in {{ age(dev.cooldownS) }} ·
+                          @if (device.cooldownSeconds !== null) {
+                            can restart in
+                            {{ formatDuration(device.cooldownSeconds) }} ·
                           }
-                          {{ dev.outcome ?? 'no decision yet' }}
+                          {{ device.outcome ?? 'no decision yet' }}
                         </span>
                       </li>
                     }
                   </ul>
-                } @else if (rule.owned) {
+                } @else if (rule.isOwned) {
                   <p class="note muted">
                     No device has this role in this zone.
                   </p>
@@ -285,6 +267,10 @@ import { formatDuration, zoneCards } from './zone-view';
     .alert {
       color: var(--temp-gauge-red);
       margin: 0 0 0.75rem;
+    }
+    .alert::before,
+    .probe--quiet .probe__age::before {
+      content: '⚠ ' / '';
     }
     .muted {
       opacity: 0.7;
@@ -432,28 +418,28 @@ import { formatDuration, zoneCards } from './zone-view';
       border-radius: 4px;
       background: var(--mat-sys-surface-container-highest);
     }
-    .bar__seg {
+    .bar__segments {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      overflow: hidden;
+    }
+    .bar__segment {
       position: absolute;
       top: 0;
       bottom: 0;
     }
-    .bar__seg:first-child {
-      border-radius: 4px 0 0 4px;
-    }
-    .bar__seg:last-of-type {
-      border-radius: 0 4px 4px 0;
-    }
-    .seg-on {
+    .segment-on {
       background: color-mix(in srgb, var(--temp-gauge-orange) 55%, transparent);
     }
-    .seg-band {
+    .segment-band {
       background: repeating-linear-gradient(
         135deg,
         var(--mat-sys-outline-variant) 0 4px,
         transparent 4px 8px
       );
     }
-    .seg-off {
+    .segment-off {
       background: var(--mat-sys-surface-container-highest);
     }
     .bar__marker {
@@ -534,33 +520,22 @@ export class ZonesPage {
 
   private readonly zones = signal<Zone[]>([]);
   private readonly nodes = signal<Node[]>([]);
-  /** First paint only: the same message the socket pushes, failures included. */
-  private readonly fetchedTick = signal<RulesTick | null>(null);
-  private readonly fetchedReadings = signal<Reading[]>([]);
-  private readonly fetchedDevices = signal<FetchedDevices>(NO_DEVICES);
-  /** Every push newer than the fetch, not only the newest one. */
-  private readonly devices = computed<Device[]>(() =>
-    withPushes(this.fetchedDevices(), this.realtime.devicePushes()),
-  );
-  /** The page's only clock. Ages and cooldowns read it; nothing is fetched on it. */
+  private readonly fetchedCycle = signal<RulesCycle | null>(null);
+  private readonly readings = injectLiveReadings();
+  private readonly devices = injectLiveDevices().devices;
   private readonly now = signal(Date.now());
 
-  private readonly readings = computed<Reading[]>(() => {
-    const merged = new Map(
-      this.fetchedReadings().map((r) => [sensorKey(r), r]),
-    );
-    for (const [key, reading] of Object.entries(this.realtime.readings())) {
-      merged.set(key, reading);
-    }
-    return [...merged.values()];
-  });
+  protected readonly formatDuration = formatDuration;
 
   readonly cards = computed(() => {
-    const tick = newer(this.realtime.rulesTick(), this.fetchedTick());
-    return zoneCards({
+    const cycle = pickNewerCycle(
+      this.realtime.rulesCycle(),
+      this.fetchedCycle(),
+    );
+    return buildZoneCards({
       zones: this.zones(),
-      evaluations: tick?.evaluations ?? [],
-      failures: tick?.failingZones ?? [],
+      evaluations: cycle?.evaluations ?? [],
+      failures: cycle?.failingZones ?? [],
       nodes: this.nodes(),
       readings: this.readings(),
       devices: this.devices(),
@@ -571,43 +546,9 @@ export class ZonesPage {
   constructor() {
     this.api.zones().subscribe((zones) => this.zones.set(zones));
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
-    this.api.rulesTick().subscribe((t) => this.fetchedTick.set(t));
-    this.api.latestReadings().subscribe((r) => this.fetchedReadings.set(r));
-    const requestedAt = Date.now();
-    this.api
-      .devices()
-      .subscribe((devices) =>
-        this.fetchedDevices.set({ devices, requestedAt }),
-      );
+    this.api.rulesCycle().subscribe((cycle) => this.fetchedCycle.set(cycle));
 
-    const timer = setInterval(() => this.now.set(Date.now()), 1_000);
-    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    const clock = setInterval(() => this.now.set(Date.now()), 1_000);
+    inject(DestroyRef).onDestroy(() => clearInterval(clock));
   }
-
-  age(seconds: number): string {
-    return formatDuration(seconds);
-  }
-
-  hm(minutes: number): string {
-    const h = Math.floor(minutes / 60);
-    return `${String(h).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
-  }
-
-  /** The daylight window as strip segments; a window may cross midnight. */
-  daySegments(start: number, end: number): { from: number; width: number }[] {
-    const pct = (m: number) => (m / 1440) * 100;
-    return start <= end
-      ? [{ from: pct(start), width: pct(end - start) }]
-      : [
-          { from: pct(start), width: 100 - pct(start) },
-          { from: 0, width: pct(end) },
-        ];
-  }
-}
-
-/** Whichever cycle is more recent: the socket's, or the one fetched for first paint. */
-function newer(a: RulesTick | null, b: RulesTick | null): RulesTick | null {
-  if (!a) return b;
-  if (!b) return a;
-  return a.at >= b.at ? a : b;
 }
