@@ -15,6 +15,7 @@ import {
   type Zone,
   type ZoneFailure,
 } from '@tempestas/domain';
+import { READING_QUIET_AFTER_S } from '../../shared/freshness';
 
 /**
  * The zones page as pure functions: what each zone's rules ARE, beside what
@@ -22,8 +23,12 @@ import {
  * pin time and the component owns the only clock.
  */
 
-/** Beyond this a probe is old enough to say so. Matches the dashboard. */
-export const PROBE_QUIET_AFTER_S = 120;
+/**
+ * Beyond this the last rules cycle is old enough that the card says so: six
+ * missed ticks. A server that stopped evaluating (crashed loop, demoted to
+ * follower) must not show its last decision as if it were current.
+ */
+export const EVALUATION_OLD_AFTER_S = 60;
 
 // ------------------------------------------------------------- the bars
 
@@ -81,6 +86,9 @@ export interface BarSpec {
 }
 
 export function thresholdBar(spec: BarSpec): ThresholdBar {
+  if (!Number.isFinite(spec.onAt) || !Number.isFinite(spec.offAt)) {
+    throw new Error(`${spec.caption} thresholds are not numbers`);
+  }
   const low = Math.min(spec.onAt, spec.offAt);
   const high = Math.max(spec.onAt, spec.offAt);
   // A fixed window around the thresholds: the scale never moves with the
@@ -180,6 +188,12 @@ export function barsForRule(
           `Night: a heater - on below ${rule.nightOnBelowC} °C, CO₂ ignored.`,
         ],
       };
+    default:
+      // The config is shown as stored; the engine is what validates it. A kind
+      // this build does not know must not take the page down with it.
+      throw new Error(
+        `unknown rule kind "${String((rule as { kind?: unknown }).kind)}"`,
+      );
   }
 }
 
@@ -251,7 +265,7 @@ export function staleText(policy: StalePolicy): string {
 }
 
 export function policyText(policy: SensorPolicy): string {
-  const source = policy.source;
+  const source = String(policy.source);
   const from =
     source === 'min'
       ? 'the coldest probe'
@@ -342,59 +356,82 @@ export interface ProbeLine {
   temperatureC: number;
   ageS: number;
   quiet: boolean;
-  /** Fed the decision this cycle. */
-  contributing: boolean;
-  /** The one value the policy picked (min/max), when there is one. */
-  picked: boolean;
+  /**
+   * The owned roles whose decision this probe's value decided: the one picked
+   * by `min`/`max`, or every contributor to `mean`, a node or a single sensor.
+   */
+  controls: string[];
+  /** "controlling" when it decides every owned role, else which ones. */
+  tag: string | null;
+}
+
+/** The sensor policy a role actually uses: its own override, else the zone's. */
+function policyFor(
+  rule: RoleRule | undefined,
+  zone: Zone,
+): SensorPolicy | null {
+  return rule?.sensor ?? zone.rulesConfig.sensorPolicy?.default ?? null;
 }
 
 export function probeLines(
   zone: Zone,
   nodes: readonly Node[],
   readings: readonly Reading[],
-  climate: ClimateSample | null,
+  evaluation: RulesEvaluation | null,
   now: number,
 ): ProbeLine[] {
   const inZone = new Set(
     nodes.filter((n) => n.zoneId === zone.id).map((n) => n.slug),
   );
   const severalNodes = inZone.size > 1;
-  const sources = new Set(climate?.sourceSensorIds ?? []);
-  const source = zone.rulesConfig.sensorPolicy?.default?.source;
-  const picks = source === 'min' || source === 'max';
 
-  const lines = readings
+  const lines: ProbeLine[] = readings
     .filter((r) => inZone.has(r.nodeId))
     .map((r) => {
-      const key = sensorKey(r);
       const ageS = Math.max(
         0,
         Math.round((now - new Date(r.createdAt).getTime()) / 1000),
       );
       return {
-        key,
-        label: severalNodes ? key : r.sensorId,
+        key: sensorKey(r),
+        label: severalNodes ? sensorKey(r) : r.sensorId,
         temperatureC: r.temperature,
         ageS,
-        quiet: ageS > PROBE_QUIET_AFTER_S,
-        contributing: sources.has(key),
-        picked: false,
+        quiet: ageS > READING_QUIET_AFTER_S,
+        controls: [],
+        tag: null,
       };
     })
     .sort((a, b) => a.label.localeCompare(b.label));
 
-  // The resolver does not say which probe won, only which took part, so the
-  // winner is the contributor nearest the resolved value. Ties mark both.
-  if (picks && climate) {
-    const contributors = lines.filter((l) => l.contributing);
-    const best = Math.min(
-      ...contributors.map((l) =>
-        Math.abs(l.temperatureC - climate.temperatureC),
-      ),
-    );
-    for (const l of contributors) {
-      l.picked = Math.abs(l.temperatureC - climate.temperatureC) === best;
+  // Per role, because a role may override the zone's policy with its own
+  // sensor: the zone default says nothing about which probe drives that role.
+  const owned = (zone.rulesConfig.enabledRoles ?? []).filter(
+    (role) => evaluation?.climateByRole[role],
+  );
+  for (const role of owned) {
+    const climate = evaluation?.climateByRole[role] as ClimateSample;
+    const sources = new Set(climate.sourceSensorIds);
+    const contributors = lines.filter((l) => sources.has(l.key));
+    const source = policyFor(zone.rulesConfig.rules?.[role], zone)?.source;
+    let deciding = contributors;
+    if (source === 'min' || source === 'max') {
+      // The resolver says which probes took part, not which won, so the winner
+      // is the contributor nearest the resolved value. Ties mark both.
+      const distance = (l: ProbeLine) =>
+        Math.abs(l.temperatureC - climate.temperatureC);
+      const best = Math.min(...contributors.map(distance));
+      deciding = contributors.filter((l) => distance(l) === best);
     }
+    for (const l of deciding) l.controls.push(roleLabel(role));
+  }
+  for (const l of lines) {
+    l.tag =
+      l.controls.length === 0
+        ? null
+        : l.controls.length === owned.length
+          ? 'controlling'
+          : `controls ${l.controls.join(', ')}`;
   }
   return lines;
 }
@@ -411,6 +448,8 @@ export interface RuleRow {
   stale: string;
   decision: { headline: string; tone: DecisionTone } | null;
   devices: DeviceLine[];
+  /** This rule could not be drawn from its config; the rest of the zone still is. */
+  problem: string | null;
 }
 
 export interface ZoneCard {
@@ -421,8 +460,12 @@ export interface ZoneCard {
   localTime: string | null;
   /** Seconds since the last cycle evaluated this zone; null before the first. */
   evaluatedAgoS: number | null;
+  /** The last evaluation is older than `EVALUATION_OLD_AFTER_S`. */
+  evaluationOld: boolean;
   /** The rules engine refused this zone this cycle. */
   failure: string | null;
+  /** Parts of the stored config this page could not draw. */
+  problems: string[];
   policy: string;
   probes: ProbeLine[];
   /** Local minutes, for the daylight strip. */
@@ -441,92 +484,182 @@ export interface ZonesInput {
   now: number;
 }
 
-/** Owned roles first, in config order, then the rules kept for other controllers. */
+/**
+ * One card per zone, each built on its own: a hand-edited config that this
+ * code cannot draw must cost that zone's card, never the page - the failure
+ * alert on that very card is the thing a broken zone most needs shown.
+ */
 export function zoneCards(input: ZonesInput): ZoneCard[] {
   return input.zones.map((zone) => {
-    const config = zone.rulesConfig;
-    const evaluation =
-      input.evaluations.find((e) => e.zoneId === zone.id) ?? null;
     const failure =
       input.failures.find((f) => f.zoneSlug === zone.slug)?.reason ?? null;
-    const owned = new Set<DeviceRole>(config.enabledRoles ?? []);
-    const anyClimate = evaluation
-      ? (Object.values(evaluation.climateByRole).find(Boolean) ?? null)
-      : null;
-
-    const roles = Object.keys(config.rules ?? {}) as DeviceRole[];
-    roles.sort((a, b) => Number(owned.has(b)) - Number(owned.has(a)));
-
-    const rules: RuleRow[] = roles.map((role) => {
-      const rule = config.rules[role] as RoleRule;
-      const climate = evaluation?.climateByRole[role] ?? anyClimate;
-      const decision =
-        evaluation?.decisions.find((d) => d.role === role) ?? null;
-      const { bars, notes } = barsForRule(rule, climate);
-      return {
-        role,
-        label: roleLabel(role),
-        owned: owned.has(role),
-        bars,
-        notes,
-        stale: staleText(rule.onStale),
-        decision: decision
-          ? {
-              headline: decisionHeadline(decision),
-              tone: decisionTone(decision),
-            }
-          : null,
-        devices: input.devices
-          .filter((d) => d.zoneId === zone.id && d.role === role)
-          .map((d) =>
-            deviceLine(
-              d,
-              decision?.dispatched.find((x) => x.deviceId === d.id),
-              input.now,
-            ),
-          ),
-      };
-    });
-
-    return {
-      id: zone.id,
-      slug: zone.slug,
-      name: zone.displayName,
-      timezone: config.timezone,
-      localTime: evaluation?.localTime ?? null,
-      evaluatedAgoS: evaluation
-        ? Math.max(
-            0,
-            Math.round(
-              (input.now - new Date(evaluation.evaluatedAt).getTime()) / 1000,
-            ),
-          )
-        : null,
-      failure,
-      policy: config.sensorPolicy?.default
-        ? policyText(config.sensorPolicy.default)
-        : 'No sensor policy',
-      probes: probeLines(
-        zone,
-        input.nodes,
-        input.readings,
-        anyClimate,
-        input.now,
-      ),
-      daylight: config.daylight
-        ? {
-            start: hhmm(config.daylight.start),
-            end: hhmm(config.daylight.end),
-            now: evaluation?.minutesSinceMidnightLocal ?? null,
-          }
-        : null,
-      rules,
-      updatedAt: zone.updatedAt,
-    };
+    try {
+      return zoneCard(zone, failure, input);
+    } catch (err: unknown) {
+      return brokenCard(zone, failure, err);
+    }
   });
 }
 
-function hhmm(value: string): number {
-  const [h, m] = value.split(':').map(Number);
-  return h * 60 + m;
+function zoneCard(
+  zone: Zone,
+  failure: string | null,
+  input: ZonesInput,
+): ZoneCard {
+  const config = zone.rulesConfig;
+  // A zone that failed this cycle has no current evaluation, whatever an
+  // earlier one said.
+  const evaluation = failure
+    ? null
+    : (input.evaluations.find((e) => e.zoneId === zone.id) ?? null);
+  const owned = new Set<DeviceRole>(config.enabledRoles ?? []);
+  const problems: string[] = [];
+
+  // Owned roles first, in config order, then the rules kept for other controllers.
+  const roles = Object.keys(config.rules ?? {}) as DeviceRole[];
+  roles.sort((a, b) => Number(owned.has(b)) - Number(owned.has(a)));
+
+  const rules = roles.map((role) =>
+    ruleRow(zone, role, owned.has(role), evaluation, input),
+  );
+
+  let daylight: ZoneCard['daylight'] = null;
+  if (config.daylight) {
+    const start = hhmm(config.daylight.start);
+    const end = hhmm(config.daylight.end);
+    if (start === null || end === null) {
+      problems.push(
+        `daylight window "${String(config.daylight.start)}"–"${String(config.daylight.end)}" is not HH:MM`,
+      );
+    } else {
+      daylight = {
+        start,
+        end,
+        now: evaluation?.minutesSinceMidnightLocal ?? null,
+      };
+    }
+  }
+
+  const evaluatedAgoS = evaluation
+    ? Math.max(
+        0,
+        Math.round(
+          (input.now - new Date(evaluation.evaluatedAt).getTime()) / 1000,
+        ),
+      )
+    : null;
+
+  return {
+    id: zone.id,
+    slug: zone.slug,
+    name: zone.displayName,
+    timezone: String(config.timezone ?? ''),
+    localTime: evaluation?.localTime ?? null,
+    evaluatedAgoS,
+    evaluationOld:
+      evaluatedAgoS !== null && evaluatedAgoS > EVALUATION_OLD_AFTER_S,
+    failure,
+    problems,
+    policy: config.sensorPolicy?.default
+      ? policyText(config.sensorPolicy.default)
+      : 'No sensor policy',
+    probes: probeLines(
+      zone,
+      input.nodes,
+      input.readings,
+      evaluation,
+      input.now,
+    ),
+    daylight,
+    rules,
+    updatedAt: zone.updatedAt,
+  };
+}
+
+function ruleRow(
+  zone: Zone,
+  role: DeviceRole,
+  owned: boolean,
+  evaluation: RulesEvaluation | null,
+  input: ZonesInput,
+): RuleRow {
+  const decision = evaluation?.decisions.find((d) => d.role === role) ?? null;
+  const devices = input.devices
+    .filter((d) => d.zoneId === zone.id && d.role === role)
+    .map((d) =>
+      deviceLine(
+        d,
+        decision?.dispatched.find((x) => x.deviceId === d.id),
+        input.now,
+      ),
+    );
+  const base = {
+    role,
+    label: roleLabel(role),
+    owned,
+    decision: decision
+      ? { headline: decisionHeadline(decision), tone: decisionTone(decision) }
+      : null,
+    devices,
+  };
+
+  try {
+    const rule = zone.rulesConfig.rules[role] as RoleRule;
+    // This role's own reading or none. Borrowing another role's would show a
+    // healthy number for a probe that has stopped reporting.
+    const climate = evaluation?.climateByRole[role] ?? null;
+    const { bars, notes } = barsForRule(rule, climate);
+    return {
+      ...base,
+      bars,
+      notes,
+      stale: staleText(rule.onStale),
+      problem: null,
+    };
+  } catch (err: unknown) {
+    return {
+      ...base,
+      bars: [],
+      notes: [],
+      stale: '',
+      problem: `This rule cannot be drawn: ${messageOf(err)}.`,
+    };
+  }
+}
+
+/** The last resort: the card still exists, and still carries the failure. */
+function brokenCard(
+  zone: Zone,
+  failure: string | null,
+  err: unknown,
+): ZoneCard {
+  return {
+    id: zone.id,
+    slug: zone.slug,
+    name: zone.displayName,
+    timezone: '',
+    localTime: null,
+    evaluatedAgoS: null,
+    evaluationOld: false,
+    failure,
+    problems: [`this zone's config cannot be drawn: ${messageOf(err)}`],
+    policy: '',
+    probes: [],
+    daylight: null,
+    rules: [],
+    updatedAt: zone.updatedAt,
+  };
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** `HH:MM` to minutes since midnight, or null if it is not one. */
+export function hhmm(value: unknown): number | null {
+  const match =
+    typeof value === 'string' ? /^(\d{1,2}):(\d{2})$/.exec(value) : null;
+  if (!match) return null;
+  const [h, m] = [Number(match[1]), Number(match[2])];
+  return h < 24 && m < 60 ? h * 60 + m : null;
 }

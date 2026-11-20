@@ -24,6 +24,11 @@ import {
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
+import {
+  NO_DEVICES,
+  withPushes,
+  type FetchedDevices,
+} from '../../core/device-pushes';
 import { Gauge } from '../../shared/gauge/gauge';
 import { metricsFor, nodeMetrics } from '../../shared/metrics';
 
@@ -405,7 +410,7 @@ export class NodeDetail {
   private boundaryTimer: ReturnType<typeof setTimeout> | undefined;
 
   private readonly latest = signal<Reading[]>([]);
-  private readonly fetchedDevices = signal<Device[]>([]);
+  private readonly fetchedDevices = signal<FetchedDevices>(NO_DEVICES);
   private readonly nodes = signal<Node[]>([]);
   protected readonly stats = signal<DayNightStats | null>(null);
 
@@ -437,10 +442,10 @@ export class NodeDetail {
 
   /** The socket patches what the API established, never replaces it. */
   protected readonly devices = computed<Device[]>(() => {
-    const pushed = this.realtime.deviceState();
-    return this.fetchedDevices()
-      .map((d) => (pushed && d.id === pushed.id ? pushed : d))
-      .filter((d) => d.nodeId === this.slug());
+    return withPushes(
+      this.fetchedDevices(),
+      this.realtime.devicePushes(),
+    ).filter((d) => d.nodeId === this.slug());
   });
 
   protected readonly blocks = computed<MetricBlock[]>(() => {
@@ -484,7 +489,12 @@ export class NodeDetail {
   constructor() {
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
     this.api.latestReadings().subscribe((all) => this.latest.set(all));
-    this.api.devices().subscribe((all) => this.fetchedDevices.set(all));
+    const requestedAt = Date.now();
+    this.api
+      .devices()
+      .subscribe((devices) =>
+        this.fetchedDevices.set({ devices, requestedAt }),
+      );
 
     // Driven off the route parameter rather than read once: a required input
     // has no value during construction, and moving between two nodes reuses

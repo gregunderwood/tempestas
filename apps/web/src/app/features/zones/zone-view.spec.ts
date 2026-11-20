@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DeviceRole } from '@tempestas/domain';
+import { DeviceRole, type RoleRule, type Zone } from '@tempestas/domain';
 import {
   GREENHOUSE,
   NOW,
@@ -122,9 +122,9 @@ describe('zoneCards', () => {
   // not which won, so the winner is the one matching the resolved value.
   it('marks the probe that is controlling', () => {
     const [card] = zoneCards(input());
-    expect(card.probes.map((p) => [p.label, p.picked])).toEqual([
-      ['air', false],
-      ['pipes', true],
+    expect(card.probes.map((p) => [p.label, p.tag])).toEqual([
+      ['air', null],
+      ['pipes', 'controlling'],
     ]);
   });
 
@@ -255,5 +255,128 @@ describe('the words', () => {
     expect(formatDuration(120)).toBe('2 min');
     expect(formatDuration(192)).toBe('3:12');
     expect(formatDuration(3_900)).toBe('1 h 5 min');
+  });
+});
+
+// A hand-edited zone this page cannot draw must cost that zone - and only the
+// part of it that is broken - never the whole page: the card's failure alert
+// is exactly what a broken zone most needs shown.
+describe('zoneCards with a config it cannot draw', () => {
+  const withRules = (rules: Record<string, unknown>, extra = {}): Zone => ({
+    ...PUMPHOUSE,
+    rulesConfig: {
+      ...PUMPHOUSE.rulesConfig,
+      ...extra,
+      rules: { ...PUMPHOUSE.rulesConfig.rules, ...rules },
+    } as Zone['rulesConfig'],
+  });
+
+  it('keeps the other rules when one has a kind it does not know', () => {
+    const zone = withRules({ heater: { kind: 'pid', onStale: 'on' } });
+    const [card] = zoneCards(input({ zones: [zone] }));
+    const [heater, tape] = card.rules;
+    expect(heater.problem).toBe(
+      'This rule cannot be drawn: unknown rule kind "pid".',
+    );
+    expect(heater.bars).toEqual([]);
+    expect(heater.devices).toHaveLength(1);
+    expect(tape.problem).toBeNull();
+    expect(tape.bars).toHaveLength(1);
+  });
+
+  it('refuses to draw a bar with a missing threshold', () => {
+    const zone = withRules({
+      heat_tape: { kind: 'thermostat', mode: 'heat', onAtC: 4, onStale: 'on' },
+    });
+    const [card] = zoneCards(input({ zones: [zone] }));
+    expect(card.rules[1].problem).toBe(
+      'This rule cannot be drawn: Temperature thresholds are not numbers.',
+    );
+  });
+
+  it('names a daylight window that is not HH:MM instead of drawing NaN', () => {
+    const zone = withRules({}, { daylight: { start: '7:00am', end: '18:30' } });
+    const [card] = zoneCards(input({ zones: [zone] }));
+    expect(card.daylight).toBeNull();
+    expect(card.problems).toEqual([
+      'daylight window "7:00am"–"18:30" is not HH:MM',
+    ]);
+  });
+
+  it('still renders a card, with the failure, when the whole config is unusable', () => {
+    const zone = { ...PUMPHOUSE, rulesConfig: null } as unknown as Zone;
+    const cards = zoneCards(
+      input({
+        zones: [zone, GREENHOUSE],
+        evaluations: [],
+        failures: [{ zoneSlug: 'pumphouse', reason: 'invalid rules_config' }],
+      }),
+    );
+    expect(cards).toHaveLength(2);
+    expect(cards[0].failure).toBe('invalid rules_config');
+    expect(cards[0].problems[0]).toMatch(/^this zone's config cannot be drawn/);
+    expect(cards[1].rules.length).toBeGreaterThan(0);
+  });
+});
+
+describe('zoneCards honesty', () => {
+  // heat_tape's probe went stale, so it has no climate this cycle. Its bar
+  // must say so, not borrow the heater's reading and look healthy.
+  it("never shows another role's reading on a rule with none of its own", () => {
+    const evaluation = pumphouseEvaluation();
+    delete evaluation.climateByRole.heat_tape;
+    const [card] = zoneCards(input({ evaluations: [evaluation] }));
+    expect(card.rules[0].bars[0].now).toBe('now 17.5 °C');
+    expect(card.rules[1].bars[0].now).toBe('no reading');
+    expect(card.rules[1].bars[0].marker).toBeNull();
+  });
+
+  it('drops the last good evaluation of a zone that failed this cycle', () => {
+    const [card] = zoneCards(
+      input({ failures: [{ zoneSlug: 'pumphouse', reason: 'boom' }] }),
+    );
+    expect(card.evaluatedAgoS).toBeNull();
+    expect(card.rules[0].decision).toBeNull();
+  });
+
+  it('flags an evaluation that has not been refreshed for a minute', () => {
+    const old = pumphouseEvaluation({
+      evaluatedAt: new Date(NOW.getTime() - 61_000).toISOString(),
+    });
+    expect(zoneCards(input({ evaluations: [old] }))[0].evaluationOld).toBe(
+      true,
+    );
+    expect(zoneCards(input())[0].evaluationOld).toBe(false);
+  });
+
+  // The zone default is `min`, but a role may run on one sensor of its own.
+  // The tag follows each role's actual policy.
+  it('tags probes per role when a role overrides the zone policy', () => {
+    const zone: Zone = {
+      ...PUMPHOUSE,
+      rulesConfig: {
+        ...PUMPHOUSE.rulesConfig,
+        rules: {
+          ...PUMPHOUSE.rulesConfig.rules,
+          heat_tape: {
+            ...(PUMPHOUSE.rulesConfig.rules.heat_tape as RoleRule),
+            sensor: { source: 'sensor:patji/air' },
+          } as RoleRule,
+        },
+      },
+    };
+    const evaluation = pumphouseEvaluation();
+    evaluation.climateByRole.heat_tape = {
+      ...evaluation.climateByRole.heater!,
+      temperatureC: 19.4,
+      sourceSensorIds: ['patji/air'],
+    };
+    const [card] = zoneCards(
+      input({ zones: [zone], evaluations: [evaluation] }),
+    );
+    expect(card.probes.map((p) => [p.label, p.tag])).toEqual([
+      ['air', 'controls Heat tape'],
+      ['pipes', 'controls Heater'],
+    ]);
   });
 });

@@ -137,10 +137,15 @@ function makeService(setup: Setup = {}) {
   } as unknown as NodesService;
   const publishSystemStatus = vi.fn();
   const publishRulesTick = vi.fn();
+  const clearRulesTick = vi.fn();
   const realtime = {
     publishSystemStatus,
     publishRulesTick,
+    clearRulesTick,
   } as unknown as RealtimeGateway;
+  const hardware = { isLeader: setup.isLeader ?? true } as {
+    isLeader: boolean;
+  };
 
   const service = new RulesService(
     zones,
@@ -151,7 +156,7 @@ function makeService(setup: Setup = {}) {
     new FixedClock(setup.now ?? NOW),
     // These cases are all about what a LEADER decides. Follower behaviour has
     // its own test below, where the assertion is that nothing is evaluated.
-    { isLeader: setup.isLeader ?? true } as HardwareService,
+    hardware as HardwareService,
   );
   return {
     service,
@@ -160,6 +165,9 @@ function makeService(setup: Setup = {}) {
     findByRole,
     publishSystemStatus,
     publishRulesTick,
+    clearRulesTick,
+    hardware,
+    zoneRows,
   };
 }
 
@@ -621,5 +629,58 @@ describe('rules tick fan-out', () => {
     expect(tick.failingZones).toEqual([
       { zoneSlug: 'greenhouse', reason: expect.stringMatching(/Mars/) },
     ]);
+  });
+});
+
+describe('rules tick lifecycle', () => {
+  it('serves the newest cycle for first paint', async () => {
+    const { service } = makeService({
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    expect(service.lastTick()).toBeNull();
+    const evaluations = await service.evaluateAll();
+    expect(service.lastTick()).toEqual({
+      at: NOW.toISOString(),
+      evaluations,
+      failingZones: [],
+    });
+  });
+
+  // Its slug is never evaluated again, so nothing would ever clear it: a
+  // phantom uncontrolled zone reported every ten seconds for good.
+  it('forgets the failure of a zone that has since been deleted', async () => {
+    const broken = zone({
+      id: 'zone-broken',
+      slug: 'broken',
+      rulesConfig: rulesConfig({ timezone: 'Mars/Olympus_Mons' }),
+    });
+    const { service, zoneRows } = makeService({ zones: [broken, zone()] });
+    await service.evaluateAll();
+    expect(service.lastTick()?.failingZones.map((f) => f.zoneSlug)).toEqual([
+      'broken',
+    ]);
+
+    zoneRows.splice(0, 1);
+    await service.evaluateAll();
+    expect(service.lastTick()?.failingZones).toEqual([]);
+    expect(service.failingZones().has('broken')).toBe(false);
+  });
+
+  // A demoted leader stops evaluating. Replaying its last cycle to every new
+  // browser would present hours-old decisions as current.
+  it('stops standing behind its last cycle once it is no longer the leader', async () => {
+    const { service, hardware, clearRulesTick } = makeService({
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    await service.tick();
+    expect(service.lastTick()).not.toBeNull();
+
+    hardware.isLeader = false;
+    await service.tick();
+    expect(service.lastTick()).toBeNull();
+    expect(clearRulesTick).toHaveBeenCalledTimes(1);
+
+    await service.tick();
+    expect(clearRulesTick).toHaveBeenCalledTimes(1);
   });
 });

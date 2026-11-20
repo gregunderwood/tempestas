@@ -15,6 +15,7 @@ import {
   type DeviceRole,
   type RuleDecision,
   type RulesEvaluation,
+  type RulesTick,
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
 import { HardwareService } from '../hardware/hardware.service';
@@ -49,6 +50,8 @@ export class RulesService implements OnApplicationBootstrap {
   private readonly lastDecisions = new Map<string, string>();
   private readonly lastOwnership = new Map<string, string>();
   private readonly failedZones = new Map<string, string>();
+  /** The newest whole cycle, as pushed. Null before the first, and on a follower. */
+  private latestTick: RulesTick | null = null;
   private running = false;
 
   constructor(
@@ -78,7 +81,15 @@ export class RulesService implements OnApplicationBootstrap {
     // A follower evaluates nothing. Not because its decisions would be wrong,
     // but because acting on them is the leader's job alone - and a rules engine
     // that runs and then fails to dispatch just fills the log with refusals.
-    if (!this.hardware.isLeader) return;
+    if (!this.hardware.isLeader) {
+      // A demoted leader must not keep handing out its last cycle as if it
+      // were current: forget it, so the page shows "not evaluated" instead.
+      if (this.latestTick) {
+        this.latestTick = null;
+        this.realtime.clearRulesTick();
+      }
+      return;
+    }
     // A slow database must not queue evaluations behind each other; the next
     // tick is 10 s away and level-triggered dispatch means nothing is lost.
     if (this.running) {
@@ -114,14 +125,22 @@ export class RulesService implements OnApplicationBootstrap {
       }
     }
 
-    this.realtime.publishRulesTick({
+    // A zone deleted or renamed while failing would otherwise be reported as
+    // failing for ever: its slug is never evaluated again to clear it.
+    const live = new Set(zones.map((z) => z.slug));
+    for (const slug of [...this.failedZones.keys()]) {
+      if (!live.has(slug)) this.failedZones.delete(slug);
+    }
+
+    this.latestTick = {
       at: this.clock.now().toISOString(),
       evaluations,
       failingZones: [...this.failedZones].map(([zoneSlug, reason]) => ({
         zoneSlug,
         reason,
       })),
-    });
+    };
+    this.realtime.publishRulesTick(this.latestTick);
     await this.publishStatus(evaluations);
     return evaluations;
   }
@@ -219,6 +238,11 @@ export class RulesService implements OnApplicationBootstrap {
   /** Zones whose latest evaluation threw, by slug, with the reason. */
   failingZones(): ReadonlyMap<string, string> {
     return this.failedZones;
+  }
+
+  /** The newest whole cycle - first paint for a page that then follows the socket. */
+  lastTick(): RulesTick | null {
+    return this.latestTick;
   }
 
   /** One per zone, newest first. Empty until the first tick has run. */

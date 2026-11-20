@@ -1,6 +1,6 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import type {
   AdmitNodePayload,
   DayNightStats,
@@ -10,6 +10,7 @@ import type {
   ReadingStats,
   ReadingsQuery,
   RulesEvaluation,
+  RulesTick,
   Zone,
 } from '@tempestas/domain';
 
@@ -99,6 +100,13 @@ export class ApiService {
   }
 
   // ------------------------------------------------------------------ rules
+
+  /** The newest whole rules cycle, failures included; null before the first. */
+  rulesTick(): Observable<RulesTick | null> {
+    return this.http
+      .get<{ tick: RulesTick | null }>(`${this.base}/rules/tick`)
+      .pipe(map((body) => body.tick));
+  }
 
   /** Every input alongside every decision. The debugging endpoint. */
   lastEvaluation(): Observable<RulesEvaluation[]> {
