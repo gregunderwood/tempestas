@@ -403,7 +403,7 @@ export class NodeDetail {
   private readonly reload = new BehaviorSubject<void>(undefined);
   private boundaryTimer: ReturnType<typeof setTimeout> | undefined;
 
-  private readonly liveReadings = injectLiveReadings();
+  private readonly liveReadings = injectLiveReadings().readings;
   private readonly allDevices = injectLiveDevices().devices;
   private readonly nodes = signal<Node[]>([]);
   protected readonly stats = signal<DayNightStats | null>(null);

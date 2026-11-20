@@ -163,7 +163,7 @@ export function pumphouseEvaluation(
     zoneId: 'z-pump',
     zoneSlug: 'pumphouse',
     evaluatedAt: new Date(NOW.getTime() - 3000).toISOString(),
-    minutesSinceMidnightLocal: 794,
+    minutesSinceMidnightLocal: 854,
     localTime: '14:14',
     timezone: 'America/Vancouver',
     enabledRoles: [DeviceRole.Heater, DeviceRole.HeatTape],
@@ -201,3 +201,8 @@ export function cycleOf(
 ): RulesCycle {
   return { at: NOW.toISOString(), evaluations, failingZones };
 }
+
+export const PUMPHOUSE_REFUSED = cycleOf(
+  [],
+  [{ zoneSlug: 'pumphouse', reason: 'invalid rules_config' }],
+);

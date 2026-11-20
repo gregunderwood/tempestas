@@ -10,7 +10,12 @@ import type { RealtimeService } from '../core/realtime.service';
 
 export type FakeRealtime = Pick<
   RealtimeService,
-  'readings' | 'status' | 'connected' | 'devicePushes' | 'latestRulesCycle'
+  | 'readings'
+  | 'status'
+  | 'connected'
+  | 'connectionCount'
+  | 'devicePushes'
+  | 'latestRulesCycle'
 >;
 
 export function fakeRealtime(
@@ -20,6 +25,7 @@ export function fakeRealtime(
     readings: signal<Record<string, Reading>>({}),
     status: signal<SystemStatus | null>(null),
     connected: signal(true),
+    connectionCount: signal(1),
     devicePushes: signal<ReadonlyMap<string, PushedDevice>>(new Map()),
     latestRulesCycle: signal<RulesCycle | null>(null),
     ...overrides,

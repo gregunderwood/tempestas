@@ -9,6 +9,7 @@ import {
   GREENHOUSE,
   NOW,
   PUMPHOUSE,
+  PUMPHOUSE_REFUSED,
   cycleOf,
   device,
   node,
@@ -21,11 +22,6 @@ import {
   type ZoneCard,
   type ZonesInput,
 } from './zone-view';
-
-const PUMPHOUSE_REFUSED = cycleOf(
-  [],
-  [{ zoneSlug: 'pumphouse', reason: 'invalid rules_config' }],
-);
 
 function zonesInput(overrides: Partial<ZonesInput> = {}): ZonesInput {
   return {
@@ -138,7 +134,15 @@ describe('buildZoneCards', () => {
       windowLabel: '06:30–18:30',
       segments: [{ fromPercent: 27.083333333333332, widthPercent: 50 }],
       nowPercent: null,
+      screenReaderText: 'Daylight 06:30–18:30',
     });
+  });
+
+  it('tells a screen reader where now falls in the daylight window', () => {
+    const zone = zoneWith({}, { daylight: { start: '06:30', end: '18:30' } });
+    expect(onlyCard({ zones: [zone] }).daylight?.screenReaderText).toBe(
+      'Daylight 06:30–18:30, now 14:14',
+    );
   });
 
   it('draws a daylight window that crosses midnight as two segments', () => {
@@ -198,6 +202,16 @@ describe('buildZoneCards shows nothing that is not true', () => {
     expect(heater.bars[0].readingText).toBe('now 17.5 °C');
     expect(heatTape.bars[0].readingText).toBe('no reading');
     expect(heatTape.bars[0].marker).toBeNull();
+  });
+
+  it('calls the reading of a role whose sensors went quiet the last one, not now', () => {
+    const evaluation = pumphouseEvaluation({
+      staleRoles: [DeviceRole.HeatTape],
+    });
+    const [heater, heatTape] = onlyCard({ cycle: cycleOf([evaluation]) }).rules;
+    expect(heater.bars[0].readingText).toBe('now 17.5 °C');
+    expect(heatTape.bars[0].readingText).toBe('last 17.5 °C (stale)');
+    expect(heatTape.bars[0].marker?.isStale).toBe(true);
   });
 
   it('drops the last good evaluation of a zone that failed this cycle', () => {

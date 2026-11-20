@@ -2,16 +2,17 @@ import { describe, expect, it } from 'vitest';
 import {
   TEMPERATURE_SCALE,
   buildThresholdBar,
-  type BarSpec,
+  type BarDefinition,
   type ThresholdBar,
 } from './threshold-bar';
 
-const HEATER: Omit<BarSpec, 'reading'> = {
+const HEATER: Omit<BarDefinition, 'reading'> = {
   caption: 'Temperature',
   scale: TEMPERATURE_SCALE,
   onSide: 'low',
   onAt: 2,
   offAt: 5,
+  isReadingStale: false,
 };
 
 const heaterBarAt = (reading: number | null): ThresholdBar =>
@@ -36,10 +37,18 @@ describe('buildThresholdBar', () => {
 
   it('pins a reading beyond the scale to its edge rather than stretching', () => {
     const bar = heaterBarAt(19.4);
-    expect(bar.marker).toEqual({ atPercent: 100, offScale: 'high' });
+    expect(bar.marker).toEqual({
+      atPercent: 100,
+      offScale: 'high',
+      isStale: false,
+    });
     expect(bar.readingText).toBe('now 19.4 °C');
     expect(labelTextsOf(bar)).toEqual(['2.0 °C', '5.0 °C']);
-    expect(heaterBarAt(-30).marker).toEqual({ atPercent: 0, offScale: 'low' });
+    expect(heaterBarAt(-30).marker).toEqual({
+      atPercent: 0,
+      offScale: 'low',
+      isStale: false,
+    });
   });
 
   it('draws the same scale whatever the reading', () => {
@@ -65,6 +74,17 @@ describe('buildThresholdBar', () => {
     expect(heaterBarAt(17.5).screenReaderText).toBe(
       'Temperature: on below 2.0 °C, off above 5.0 °C, holding in between; now 17.5 °C.',
     );
+  });
+
+  it('calls a reading from sensors that went quiet the last one, not now', () => {
+    const bar = buildThresholdBar({
+      ...HEATER,
+      reading: 17.5,
+      isReadingStale: true,
+    });
+    expect(bar.readingText).toBe('last 17.5 °C (stale)');
+    expect(bar.marker?.isStale).toBe(true);
+    expect(bar.screenReaderText).toContain('last 17.5 °C (stale)');
   });
 
   it('refuses thresholds that are not numbers', () => {
