@@ -1,12 +1,12 @@
 import { computed, inject, type Signal } from '@angular/core';
 import { sensorKey, type Reading } from '@tempestas/domain';
 import { ApiService } from './api.service';
-import { fetchOnce, type RequestState } from './fetch-once';
+import { injectLiveSource, type SourceState } from './live-source';
 import { RealtimeService } from './realtime.service';
 
 export interface LiveReadings {
   readings: Signal<Reading[]>;
-  requestState: Signal<RequestState>;
+  sourceState: Signal<SourceState>;
 }
 
 export function mergeLatestReadings(
@@ -30,12 +30,16 @@ function isAtLeastAsNew(candidate: Reading, known: Reading): boolean {
 }
 
 export function injectLiveReadings(): LiveReadings {
+  const api = inject(ApiService);
   const realtime = inject(RealtimeService);
-  const fetched = fetchOnce(inject(ApiService).latestReadings());
+  const source = injectLiveSource(
+    () => api.latestReadings(),
+    () => Object.keys(realtime.readings()).length > 0,
+  );
   return {
     readings: computed(() =>
-      mergeLatestReadings(fetched.value() ?? [], realtime.readings()),
+      mergeLatestReadings(source.latest()?.response ?? [], realtime.readings()),
     ),
-    requestState: fetched.requestState,
+    sourceState: source.sourceState,
   };
 }
