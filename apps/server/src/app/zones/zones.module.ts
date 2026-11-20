@@ -1,0 +1,12 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { ZoneEntity } from './models';
+import { ZonesController } from './zones.controller';
+import { ZonesService } from './zones.service';
+
+@Module({
+  imports: [TypeOrmModule.forFeature([ZoneEntity])],
+  controllers: [ZonesController],
+  providers: [ZonesService],
+})
+export class ZonesModule {}

@@ -10,6 +10,7 @@ import type {
   ReadingStats,
   ReadingsQuery,
   RulesEvaluation,
+  Zone,
 } from '@tempestas/domain';
 
 /**
@@ -88,6 +89,13 @@ export class ApiService {
         params: toParams(query),
       },
     );
+  }
+
+  // ------------------------------------------------------------------ zones
+
+  /** Read-only. The rules each zone runs; there is no write API. */
+  zones(): Observable<Zone[]> {
+    return this.http.get<Zone[]>(`${this.base}/zones`);
   }
 
   // ------------------------------------------------------------------ rules

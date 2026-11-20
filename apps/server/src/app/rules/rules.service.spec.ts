@@ -136,7 +136,11 @@ function makeService(setup: Setup = {}) {
     counts: vi.fn().mockResolvedValue({ total: 2, online: 2, pending: 0 }),
   } as unknown as NodesService;
   const publishSystemStatus = vi.fn();
-  const realtime = { publishSystemStatus } as unknown as RealtimeGateway;
+  const publishRulesTick = vi.fn();
+  const realtime = {
+    publishSystemStatus,
+    publishRulesTick,
+  } as unknown as RealtimeGateway;
 
   const service = new RulesService(
     zones,
@@ -149,7 +153,14 @@ function makeService(setup: Setup = {}) {
     // its own test below, where the assertion is that nothing is evaluated.
     { isLeader: setup.isLeader ?? true } as HardwareService,
   );
-  return { service, turnOn, turnOff, findByRole, publishSystemStatus };
+  return {
+    service,
+    turnOn,
+    turnOff,
+    findByRole,
+    publishSystemStatus,
+    publishRulesTick,
+  };
 }
 
 describe('Checkpoint 5', () => {
@@ -576,5 +587,39 @@ describe('a follower evaluates nothing', () => {
     await follower.service.tick();
     expect(follower.turnOn).not.toHaveBeenCalled();
     expect(follower.turnOff).not.toHaveBeenCalled();
+  });
+});
+
+// The zones page renders from this event alone after first paint, so it must
+// carry the whole cycle - and a zone that failed must be in it, not just absent.
+describe('rules tick fan-out', () => {
+  it('publishes every evaluation of the cycle in one message', async () => {
+    const { service, publishRulesTick } = makeService({
+      zones: [zone(), zone({ id: 'zone-2', slug: 'shed' })],
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    const evaluations = await service.evaluateAll();
+
+    expect(publishRulesTick).toHaveBeenCalledTimes(1);
+    expect(publishRulesTick).toHaveBeenCalledWith({
+      at: NOW.toISOString(),
+      evaluations,
+      failingZones: [],
+    });
+  });
+
+  it('names a zone that could not be evaluated, with the reason', async () => {
+    const { service, publishRulesTick } = makeService({
+      zones: [
+        zone({ rulesConfig: rulesConfig({ timezone: 'Mars/Olympus_Mons' }) }),
+      ],
+    });
+    await service.evaluateAll();
+
+    const tick = publishRulesTick.mock.calls[0][0];
+    expect(tick.evaluations).toEqual([]);
+    expect(tick.failingZones).toEqual([
+      { zoneSlug: 'greenhouse', reason: expect.stringMatching(/Mars/) },
+    ]);
   });
 });

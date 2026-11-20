@@ -5,6 +5,7 @@ import {
   sensorKey,
   type Device,
   type Reading,
+  type RulesTick,
   type SystemStatus,
 } from '@tempestas/domain';
 
@@ -26,6 +27,8 @@ export class RealtimeService implements OnDestroy {
   readonly connected = signal(false);
   /** The most recent device state pushed, for a screen to merge in. */
   readonly deviceState = signal<Device | null>(null);
+  /** The newest rules cycle - every zone's inputs and decisions. Replayed on connect. */
+  readonly rulesTick = signal<RulesTick | null>(null);
 
   private socket?: Socket;
 
@@ -49,6 +52,9 @@ export class RealtimeService implements OnDestroy {
     });
     this.socket.on(REALTIME_EVENTS.systemStatus, (status: SystemStatus) => {
       this.status.set(status);
+    });
+    this.socket.on(REALTIME_EVENTS.rulesEvaluation, (tick: RulesTick) => {
+      this.rulesTick.set(tick);
     });
   }
 

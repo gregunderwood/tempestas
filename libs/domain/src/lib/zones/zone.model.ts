@@ -131,9 +131,16 @@ export interface ZoneRulesConfig {
   timezone: string;
 }
 
+/**
+ * The response of `GET /api/zones`. Read-only: there is deliberately no write
+ * API, because these numbers drive a heater and a burner and are changed by
+ * reviewed SQL.
+ */
 export interface Zone {
   id: string;
   slug: string;
   displayName: string;
   rulesConfig: ZoneRulesConfig;
+  /** ISO-8601. When the config was last changed. */
+  updatedAt: string;
 }
