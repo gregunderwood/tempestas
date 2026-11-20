@@ -109,6 +109,7 @@ function aggregate(
   source: SensorPolicy['source'],
 ): ClimateSample {
   const temperatures = samples.map((s) => s.temperatureC);
+  const pickedTemperature = pick(temperatures, source);
   // Nulls are excluded rather than propagated: one broken sensor beside a
   // working one should not blind the zone. Null survives only when NO node has
   // a valid reading, which is the case the burner rule fails safe on.
@@ -117,7 +118,7 @@ function aggregate(
     .filter((v): v is number => v !== null);
 
   return {
-    temperatureC: round2(pick(temperatures, source)),
+    temperatureC: round2(pickedTemperature),
     co2Ppm: co2s.length === 0 ? null : Math.round(pick(co2s, source)),
     // The oldest contributing sample, so provenance cannot look fresher than
     // the weakest input it was computed from.
@@ -126,7 +127,24 @@ function aggregate(
     ).toISOString(),
     sourceNodeIds: [...new Set(samples.map((s) => s.nodeId))],
     sourceSensorIds: samples.map(sensorKey),
+    decidingSensorIds: findDecidingSensorIds(
+      samples,
+      source,
+      pickedTemperature,
+    ),
   };
+}
+
+function findDecidingSensorIds(
+  samples: NodeSample[],
+  source: SensorPolicy['source'],
+  pickedTemperature: number,
+): string[] {
+  const picksOneSample = source === 'min' || source === 'max';
+  const deciding = picksOneSample
+    ? samples.filter((sample) => sample.temperatureC === pickedTemperature)
+    : samples;
+  return deciding.map(sensorKey);
 }
 
 function pick(values: number[], source: SensorPolicy['source']): number {

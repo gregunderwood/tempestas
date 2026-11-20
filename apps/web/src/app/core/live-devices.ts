@@ -1,12 +1,8 @@
 import { computed, inject, signal, type Signal } from '@angular/core';
 import type { Device } from '@tempestas/domain';
 import { ApiService } from './api.service';
+import type { PushedDevice } from './device-pushes';
 import { RealtimeService } from './realtime.service';
-
-export interface PushedDevice {
-  device: Device;
-  receivedAt: number;
-}
 
 export interface FetchedDevices {
   devices: Device[];
@@ -18,14 +14,6 @@ export interface LiveDevices {
   refresh(): void;
 }
 
-export function recordDevicePush(
-  pushes: ReadonlyMap<string, PushedDevice>,
-  device: Device,
-  receivedAt: number,
-): ReadonlyMap<string, PushedDevice> {
-  return new Map(pushes).set(device.id, { device, receivedAt });
-}
-
 export function applyNewerPushes(
   fetched: FetchedDevices,
   pushes: ReadonlyMap<string, PushedDevice>,
@@ -33,8 +21,10 @@ export function applyNewerPushes(
   return fetched.devices.map((fetchedDevice) => {
     const pushed = pushes.get(fetchedDevice.id);
     // A push received after the request was sent is at least as new as the response.
-    const isPushNewer = pushed && pushed.receivedAt >= fetched.requestedAt;
-    return isPushNewer ? pushed.device : fetchedDevice;
+    if (pushed !== undefined && pushed.receivedAt >= fetched.requestedAt) {
+      return pushed.device;
+    }
+    return fetchedDevice;
   });
 }
 

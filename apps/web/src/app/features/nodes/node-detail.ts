@@ -404,7 +404,7 @@ export class NodeDetail {
   private boundaryTimer: ReturnType<typeof setTimeout> | undefined;
 
   private readonly liveReadings = injectLiveReadings();
-  private readonly liveDevices = injectLiveDevices().devices;
+  private readonly allDevices = injectLiveDevices().devices;
   private readonly nodes = signal<Node[]>([]);
   protected readonly stats = signal<DayNightStats | null>(null);
 
@@ -429,7 +429,7 @@ export class NodeDetail {
   });
 
   protected readonly devices = computed<Device[]>(() =>
-    this.liveDevices().filter((device) => device.nodeId === this.slug()),
+    this.allDevices().filter((device) => device.nodeId === this.slug()),
   );
 
   protected readonly blocks = computed<MetricBlock[]>(() => {

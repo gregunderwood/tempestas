@@ -10,15 +10,16 @@ import {
   type RoleRule,
   type RulesCycle,
   type RulesEvaluation,
-  type SensorPolicy,
   type Zone,
   type ZoneFailure,
   type ZoneRulesConfig,
 } from '@tempestas/domain';
+import { READING_QUIET_AFTER_SECONDS } from '../../shared/freshness';
 import {
-  READING_QUIET_AFTER_SECONDS,
+  MILLISECONDS_PER_SECOND,
+  MINUTES_PER_DAY,
   secondsSince,
-} from '../../shared/freshness';
+} from '../../shared/time';
 import { buildRuleBars, type ThresholdBar } from './threshold-bar';
 import {
   chooseDecisionTone,
@@ -32,8 +33,7 @@ import {
   type DecisionTone,
 } from './zone-words';
 
-export const EVALUATION_OLD_AFTER_SECONDS = 60;
-const MINUTES_PER_DAY = 24 * 60;
+export const RULES_RUN_OLD_AFTER_SECONDS = 60;
 
 export interface DeviceLine {
   id: string;
@@ -69,7 +69,7 @@ export interface RuleRow {
 }
 
 export interface DaylightStrip {
-  window: string;
+  windowLabel: string;
   segments: { fromPercent: number; widthPercent: number }[];
   nowPercent: number | null;
 }
@@ -79,8 +79,8 @@ export interface ZoneCard {
   name: string;
   timezone: string;
   localTime: string | null;
-  evaluatedAgoSeconds: number | null;
-  isEvaluationOld: boolean;
+  rulesRanAgoSeconds: number | null;
+  isRulesRunOld: boolean;
   failure: string | null;
   problems: string[];
   policy: string;
@@ -92,8 +92,7 @@ export interface ZoneCard {
 
 export interface ZonesInput {
   zones: readonly Zone[];
-  evaluations: readonly RulesEvaluation[];
-  failures: readonly ZoneFailure[];
+  cycle: RulesCycle | null;
   nodes: readonly Node[];
   readings: readonly Reading[];
   devices: readonly Device[];
@@ -102,18 +101,9 @@ export interface ZonesInput {
 
 type ProbeReading = Omit<ProbeLine, 'tag'>;
 
-export function pickNewerCycle(
-  socketCycle: RulesCycle | null,
-  fetchedCycle: RulesCycle | null,
-): RulesCycle | null {
-  if (!socketCycle) return fetchedCycle;
-  if (!fetchedCycle) return socketCycle;
-  return socketCycle.at >= fetchedCycle.at ? socketCycle : fetchedCycle;
-}
-
 export function buildZoneCards(input: ZonesInput): ZoneCard[] {
   return input.zones.map((zone) => {
-    const failure = findFailure(zone, input.failures);
+    const failure = findFailure(zone, input.cycle?.failingZones ?? []);
     try {
       return buildZoneCard(zone, failure, input);
     } catch (error: unknown) {
@@ -128,9 +118,15 @@ function buildZoneCard(
   input: ZonesInput,
 ): ZoneCard {
   const config = zone.rulesConfig;
-  const evaluation = findCurrentEvaluation(zone, failure, input.evaluations);
-  const evaluatedAgoSeconds = evaluation
-    ? secondsSince(evaluation.evaluatedAt, input.now)
+  const evaluation = findCurrentEvaluation(
+    zone,
+    failure,
+    input.cycle?.evaluations ?? [],
+  );
+  const rulesRanAt =
+    evaluation?.evaluatedAt ?? (failure ? input.cycle?.at : null);
+  const rulesRanAgoSeconds = rulesRanAt
+    ? secondsSince(rulesRanAt, input.now)
     : null;
   const daylight = buildDaylight(config, evaluation);
   const ownedRoles = new Set<DeviceRole>(config.enabledRoles ?? []);
@@ -139,10 +135,10 @@ function buildZoneCard(
     ...buildEmptyZoneCard(zone, failure),
     timezone: String(config.timezone ?? ''),
     localTime: evaluation?.localTime ?? null,
-    evaluatedAgoSeconds,
-    isEvaluationOld:
-      evaluatedAgoSeconds !== null &&
-      evaluatedAgoSeconds > EVALUATION_OLD_AFTER_SECONDS,
+    rulesRanAgoSeconds,
+    isRulesRunOld:
+      rulesRanAgoSeconds !== null &&
+      rulesRanAgoSeconds > RULES_RUN_OLD_AFTER_SECONDS,
     problems: daylight.problems,
     policy: config.sensorPolicy?.default
       ? describeSensorPolicy(config.sensorPolicy.default)
@@ -174,8 +170,8 @@ function buildEmptyZoneCard(zone: Zone, failure: string | null): ZoneCard {
     name: zone.displayName,
     timezone: '',
     localTime: null,
-    evaluatedAgoSeconds: null,
-    isEvaluationOld: false,
+    rulesRanAgoSeconds: null,
+    isRulesRunOld: false,
     failure,
     problems: [],
     policy: '',
@@ -263,7 +259,7 @@ function buildDaylightStrip(
         },
       ];
   return {
-    window: `${formatHourMinute(startMinute)}–${formatHourMinute(endMinute)}`,
+    windowLabel: `${formatHourMinute(startMinute)}–${formatHourMinute(endMinute)}`,
     segments,
     nowPercent: nowMinute === null ? null : toPercent(nowMinute),
   };
@@ -352,7 +348,9 @@ export function buildDeviceLine(
 function secondsUntilRestart(device: Device, now: number): number | null {
   if (device.isOn || !device.canTurnOnAt) return null;
   const restartAt = Date.parse(device.canTurnOnAt);
-  return restartAt > now ? Math.ceil((restartAt - now) / 1000) : null;
+  return restartAt > now
+    ? Math.ceil((restartAt - now) / MILLISECONDS_PER_SECOND)
+    : null;
 }
 
 function buildProbeLines(
@@ -368,11 +366,7 @@ function buildProbeLines(
     .sort((first, second) => first.label.localeCompare(second.label));
 
   const measuredRoles = findMeasuredRoles(zone, evaluation);
-  const controlledRolesByProbe = mapControlledRolesToProbes(
-    zone,
-    measuredRoles,
-    probes,
-  );
+  const controlledRolesByProbe = mapControlledRolesToProbes(measuredRoles);
   return probes.map((probe) => ({
     ...probe,
     tag: describeControlTag(
@@ -414,50 +408,19 @@ function findMeasuredRoles(
 }
 
 function mapControlledRolesToProbes(
-  zone: Zone,
   measuredRoles: [DeviceRole, ClimateSample][],
-  probes: ProbeReading[],
 ): Map<string, string[]> {
   const controlledRolesByProbe = new Map<string, string[]>();
   for (const [role, climate] of measuredRoles) {
-    const policy = findPolicyForRole(zone, role);
-    for (const probe of findDecidingProbes(probes, climate, policy)) {
-      const controlledRoles = controlledRolesByProbe.get(probe.key) ?? [];
-      controlledRolesByProbe.set(probe.key, [
+    for (const probeKey of climate.decidingSensorIds) {
+      const controlledRoles = controlledRolesByProbe.get(probeKey) ?? [];
+      controlledRolesByProbe.set(probeKey, [
         ...controlledRoles,
         labelRole(role),
       ]);
     }
   }
   return controlledRolesByProbe;
-}
-
-function findPolicyForRole(zone: Zone, role: DeviceRole): SensorPolicy | null {
-  return (
-    zone.rulesConfig.rules?.[role]?.sensor ??
-    zone.rulesConfig.sensorPolicy?.default ??
-    null
-  );
-}
-
-function findDecidingProbes(
-  probes: ProbeReading[],
-  climate: ClimateSample,
-  policy: SensorPolicy | null,
-): ProbeReading[] {
-  const contributors = probes.filter((probe) =>
-    climate.sourceSensorIds.includes(probe.key),
-  );
-  const picksOneProbe = policy?.source === 'min' || policy?.source === 'max';
-  if (!picksOneProbe) return contributors;
-
-  // The resolver names contributors, not the winner: the winner is the nearest, and ties mark both.
-  const distanceFromResolved = (probe: ProbeReading): number =>
-    Math.abs(probe.temperatureC - climate.temperatureC);
-  const nearestDistance = Math.min(...contributors.map(distanceFromResolved));
-  return contributors.filter(
-    (probe) => distanceFromResolved(probe) === nearestDistance,
-  );
 }
 
 function describeControlTag(

@@ -6,11 +6,14 @@ import type {
   SensorPolicy,
   StalePolicy,
 } from '@tempestas/domain';
+import {
+  MILLISECONDS_PER_SECOND,
+  MINUTES_PER_HOUR,
+  SECONDS_PER_MINUTE,
+} from '../../shared/time';
 
 export type DecisionTone = 'on' | 'off' | 'hold' | 'warn' | 'idle';
 
-const SECONDS_PER_MINUTE = 60;
-const MINUTES_PER_HOUR = 60;
 const NODE_SOURCE_PREFIX = 'node:';
 const SENSOR_SOURCE_PREFIX = 'sensor:';
 const HOUR_MINUTE_PATTERN = /^(\d{1,2}):(\d{2})$/;
@@ -92,7 +95,7 @@ export function describeSensorPolicy(policy: SensorPolicy): string {
   const staleAfter =
     policy.maxAgeMs === undefined
       ? ''
-      : ` · stale after ${formatDuration(policy.maxAgeMs / 1000)}`;
+      : ` · stale after ${formatDuration(policy.maxAgeMs / MILLISECONDS_PER_SECOND)}`;
   return `Controls on ${describeSensorSource(String(policy.source))}${staleAfter}`;
 }
 
@@ -113,7 +116,8 @@ export function describeDispatch(
 ): string | null {
   if (!dispatch) return null;
   const description = DISPATCH_DESCRIPTIONS[dispatch.outcome];
-  const hasFailureDetail = dispatch.outcome === 'failed' && dispatch.detail;
+  const hasFailureDetail =
+    dispatch.outcome === 'failed' && Boolean(dispatch.detail);
   return hasFailureDetail ? `${description}: ${dispatch.detail}` : description;
 }
 
