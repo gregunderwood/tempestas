@@ -58,6 +58,56 @@ def invalid(unit: str, reason: str) -> Measurement:
     return Measurement(value=None, valid=False, unit=unit, reason=reason)
 
 
+@dataclass(frozen=True)
+class SensorInfo:
+    """One entry of `capabilities.sensors`: what a sensor is and what it measures."""
+
+    sensor_id: str
+    kind: str
+    metrics: tuple[str, ...]
+
+
+class SensorSet(Protocol):
+    """What the agent samples: one or more sensors, each published on its own topic.
+
+    A node with three pipe probes is one backend with three sensors, not three
+    backends - they share one bus and one read cycle.
+    """
+
+    def start(self) -> None: ...
+    def sensors(self) -> list[SensorInfo]: ...
+    def read_all(self) -> list[tuple[str, Reading]]:
+        """A reading per sensor that has one. A sensor with nothing credible is absent."""
+        ...
+
+    def stop(self) -> None: ...
+    def describe(self) -> str: ...
+
+
+class SingleSensor:
+    """Presents a one-reading backend (SCD4x, simulated, world) as a sensor set."""
+
+    def __init__(self, backend: SensorBackend, info: SensorInfo) -> None:
+        self.backend = backend
+        self.info = info
+
+    def start(self) -> None:
+        self.backend.start()
+
+    def sensors(self) -> list[SensorInfo]:
+        return [self.info]
+
+    def read_all(self) -> list[tuple[str, Reading]]:
+        reading = self.backend.read()
+        return [] if reading is None else [(self.info.sensor_id, reading)]
+
+    def stop(self) -> None:
+        self.backend.stop()
+
+    def describe(self) -> str:
+        return self.backend.describe()
+
+
 class SensorBackend(Protocol):
     def start(self) -> None: ...
     def read(self) -> Reading | None:
@@ -170,7 +220,11 @@ class RateGuard:
         max_gap_s: float = 120.0,
         resync_after: int = 3,
         corroborate_within_ppm: float = 60.0,
+        unit: str = "ppm",
     ) -> None:
+        # The arithmetic is unit-free, and the DS18B20 backend reuses it for
+        # degrees. `unit` only keeps the refusal message honest.
+        self.unit = unit
         self.max_ppm_per_min = max_ppm_per_min
         self.max_gap_s = max_gap_s
         self.resync_after = resync_after
@@ -218,10 +272,12 @@ class RateGuard:
                 return True, None
             self._candidate = value
             return False, (
-                f"RATE_IMPLAUSIBLE ({rate:.0f} ppm/min > {self.max_ppm_per_min:.0f}), "
+                f"RATE_IMPLAUSIBLE ({rate:.0f} {self.unit}/min > {self.max_ppm_per_min:.0f}), "
                 f"awaiting corroboration"
             )
-        return False, f"RATE_IMPLAUSIBLE ({rate:.0f} ppm/min > {self.max_ppm_per_min:.0f})"
+        return False, (
+            f"RATE_IMPLAUSIBLE ({rate:.0f} {self.unit}/min > {self.max_ppm_per_min:.0f})"
+        )
 
 
 class Scd4xSensor:
@@ -524,4 +580,3 @@ class WorldSensor:
 
     def describe(self) -> str:
         return f"world sensor at {self._position}"
-

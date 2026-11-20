@@ -90,6 +90,7 @@ export class FakeHardwareService
   private readonly hello = new Subject<NodeHello>();
   private readonly pinStates = new Subject<PinStateReport>();
   private readonly pinState = new Map<string, number>();
+  private readonly reports = new Map<string, PinStateReport>();
   private readonly seq = new Map<NodeId, number>();
   private timer: NodeJS.Timeout | null = null;
 
@@ -207,13 +208,20 @@ export class FakeHardwareService
     // A real node reports every line change, so the fake does too - otherwise
     // the reconciliation path has no coverage in local dev, which is where the
     // whole point of this driver is that it behaves like the real one.
-    this.pinStates.next({
+    const report: PinStateReport = {
       nodeId,
       pin: command.pin,
       level: command.level,
       known: true,
       observedAt: new Date(),
-    });
+      live: true,
+    };
+    this.reports.set(`${nodeId}:${command.pin}`, report);
+    this.pinStates.next(report);
+  }
+
+  lastPinReport(nodeId: NodeId, pin: number): PinStateReport | null {
+    return this.reports.get(`${nodeId}:${pin}`) ?? null;
   }
 
   async syncPins(nodeId: NodeId, commands: PinCommand[]): Promise<void> {

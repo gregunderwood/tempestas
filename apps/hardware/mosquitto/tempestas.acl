@@ -80,21 +80,24 @@ topic read tempestas/v1/#
 
 # ------------------------------------------------------------ patji
 #
-# Sensor only, east wall mid-greenhouse. A node with `lines = []` advertises no
-# GPIO capability, so the server cannot create a device on it. The ACL says the
-# same thing from the other side, which is the point: no read on gpio/set or
-# gpio/sync at all, and no write on gpio/state or gpio/result. Two independent
-# reasons it cannot actuate, so neither one has to be trusted alone.
+# The Pi Zero W, reflashed to heat the pumphouse zone: DS18B20 probes, a
+# heater (through a 110VAC contactor) and heat tape. Same shape as elantris -
+# own subtree only, and no write on gpio/set, so this credential can neither
+# command its own relays nor speak as another node.
 #
-# It still reads the server LWT - a node that cannot actuate can still usefully
-# know the brain has gone.
-#
-# Copy this block per sensor-only node and substitute the slug.
+# Its old sensor-only block was replaced by this one. To add a sensor-only node,
+# copy this block, substitute the slug, and drop the four gpio lines: a node
+# with `lines = []` advertises no GPIO capability, and the ACL then says the
+# same thing from the other side.
 user patji
 topic write tempestas/v1/node/patji/hello
 topic write tempestas/v1/node/patji/status
 topic write tempestas/v1/node/patji/sensor/+/sample
+topic write tempestas/v1/node/patji/gpio/result
+topic write tempestas/v1/node/patji/gpio/state/+
 topic write tempestas/v1/node/patji/alarm
+topic read tempestas/v1/node/patji/gpio/set
+topic read tempestas/v1/node/patji/gpio/sync
 topic read tempestas/v1/node/patji/control/heartbeat
 topic read tempestas/v1/server/status
 

@@ -15,6 +15,8 @@ export enum DeviceRole {
   Lights = 'lights',
   Co2Generator = 'co2_generator',
   ExhaustFan = 'exhaust_fan',
+  Heater = 'heater',
+  HeatTape = 'heat_tape',
 }
 
 export interface Device {

@@ -69,3 +69,58 @@ def test_mqtt_url_is_split_into_host_and_port(tmp_path):
     body = 'node_id = "bench"\n[mqtt]\nurl = "mqtt://192.168.2.70:1884"\n'
     config = load(write(tmp_path, body), env={})
     assert (config.mqtt.host, config.mqtt.port) == ("192.168.2.70", 1884)
+
+
+PROBES = """node_id = "pumphouse"
+[sensor]
+kind = "ds18b20"
+[[sensor.probes]]
+rom = "28-0000000000A1"
+sensor_id = "pipes"
+[[sensor.probes]]
+rom = "28-0000000000b2"
+sensor_id = "air"
+"""
+
+
+class TestProbes:
+    def test_probes_load_in_order_with_roms_lowercased(self, tmp_path):
+        config = load(write(tmp_path, PROBES), env={})
+        assert [(p.rom, p.sensor_id) for p in config.sensor.probes] == [
+            ("28-0000000000a1", "pipes"),
+            ("28-0000000000b2", "air"),
+        ]
+
+    def test_a_ds18b20_node_needs_at_least_one_probe(self, tmp_path):
+        body = 'node_id = "pumphouse"\n[sensor]\nkind = "ds18b20"\n'
+        with pytest.raises(ConfigError, match="at least one"):
+            load(write(tmp_path, body), env={})
+
+    # Ignored probes would be a pumphouse nobody is measuring.
+    def test_probes_on_another_kind_are_refused(self, tmp_path):
+        body = PROBES.replace('kind = "ds18b20"', 'kind = "scd4x"')
+        with pytest.raises(ConfigError, match="only read for"):
+            load(write(tmp_path, body), env={})
+
+    @pytest.mark.parametrize("rom", ["28-123", "10-0000000000a1", "pipes", ""])
+    def test_a_malformed_rom_is_refused(self, tmp_path, rom):
+        body = PROBES.replace("28-0000000000A1", rom)
+        with pytest.raises(ConfigError, match="ROM id"):
+            load(write(tmp_path, body), env={})
+
+    # It is an MQTT topic segment and the tail of a sensor:<node>/<id> source.
+    @pytest.mark.parametrize("sensor_id", ["pipe probe", "a/b", "a+", "#", ""])
+    def test_a_sensor_id_that_cannot_be_a_topic_segment_is_refused(self, tmp_path, sensor_id):
+        body = PROBES.replace('"pipes"', f'"{sensor_id}"')
+        with pytest.raises(ConfigError, match="sensor_id"):
+            load(write(tmp_path, body), env={})
+
+    # Two probes under one name would alternate as one sensor; one probe under
+    # two names would be counted twice by `mean`.
+    @pytest.mark.parametrize(
+        ("old", "new", "field"),
+        [('"air"', '"pipes"', "sensor_id"), ("28-0000000000b2", "28-0000000000a1", "rom")],
+    )
+    def test_duplicates_are_refused(self, tmp_path, old, new, field):
+        with pytest.raises(ConfigError, match=f"repeats a {field}"):
+            load(write(tmp_path, PROBES.replace(old, new)), env={})

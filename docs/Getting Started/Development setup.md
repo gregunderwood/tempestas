@@ -91,12 +91,21 @@ themselves from `hello`; zones and devices do not:
 docker exec -i tempestas-db psql -U tempestas -d tempestas <<'SQL'
 INSERT INTO zones (slug, display_name, rules_config) VALUES (
   'greenhouse', 'Greenhouse',
-  '{"enabledRoles":["co2_generator"],"thresholds":{"startTime":"06:30","endTime":"18:30",
-    "lightsOnTemp":26,"lightsOffTemp":27,"co2OffTemp":26,"co2NightOnTemp":3,
-    "exhaustOnTemp":30,"exhaustOffTemp":29.5,"co2ThresholdPpm":1500}}'
+  '{"enabledRoles":["co2_generator"],
+    "sensorPolicy":{"default":{"source":"mean","maxAgeMs":120000}},
+    "daylight":{"start":"06:30","end":"18:30"},
+    "rules":{
+      "lights":{"kind":"daylight-thermostat","mode":"heat","onAtC":26,"offAtC":27,"onStale":"hold"},
+      "co2_generator":{"kind":"co2-burner","dayOffAtC":28,"nightOnBelowC":3,
+                       "co2OnPpm":1400,"co2OffPpm":1500,"onStale":"hold"},
+      "exhaust_fan":{"kind":"thermostat","mode":"cool","onAtC":30,"offAtC":29.5,"onStale":"hold"}},
+    "timezone":"America/Vancouver"}'
 ) ON CONFLICT (slug) DO NOTHING;
 SQL
 ```
+
+The server validates this on every evaluation and refuses the whole zone on any error, naming it in
+`GET /api/health` — see [Rules and Climate](../Rules%20and%20Climate.md#the-config-is-validated-strictly).
 
 **Use `docker exec -i`.** Without `-i` stdin is not forwarded and the heredoc silently never
 arrives — the command appears to succeed and inserts nothing.

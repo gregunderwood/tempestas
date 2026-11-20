@@ -21,6 +21,7 @@ import {
   type Segment,
 } from './daylight-segments';
 import { resolveReadingWindow, type ReadingWindow } from './reading-window';
+import { parseZoneRulesConfig } from '../rules/rules-config';
 
 const DEFAULT_LIMIT = 500;
 
@@ -51,13 +52,18 @@ export class ReadingsService {
     return rows.map(toDto);
   }
 
-  /** One row per admitted node, newest first. What the dashboard opens with. */
-  async findLatestPerNode(): Promise<Reading[]> {
+  /**
+   * One row per sensor on every node, newest first. What the dashboard opens
+   * with. Per sensor, not per node, or a node with a probe per pipe shows
+   * whichever probe spoke last and hides the others.
+   */
+  async findLatestPerSensor(): Promise<Reading[]> {
     const rows = await this.readings
       .createQueryBuilder('r')
       .innerJoinAndSelect('r.node', 'n')
-      .distinctOn(['r.nodeId'])
+      .distinctOn(['r.nodeId', 'r.sensorId'])
       .orderBy('r.nodeId')
+      .addOrderBy('r.sensorId')
       .addOrderBy('r.createdAt', 'DESC')
       .getMany();
     return rows
@@ -70,7 +76,7 @@ export class ReadingsService {
    *
    * No combined figure: a window spanning both averages two different jobs
    * together and describes neither. Split at the ZONE's own
-   * `startTime`/`endTime`, because that pair is what the rules engine branches
+   * daylight window, because that is what the rules engine branches
    * on - a screen drawing the line elsewhere would explain a decision the
    * controller never made.
    */
@@ -147,13 +153,15 @@ export class ReadingsService {
       where: { slug: nodeId },
       relations: { zone: true },
     });
-    const config = (node?.zone as ZoneEntity | null | undefined)?.rulesConfig;
-    if (!config) return fallback;
-    return {
-      startTime: config.thresholds.startTime,
-      endTime: config.thresholds.endTime,
-      timezone: config.timezone,
-    };
+    const raw = (node?.zone as ZoneEntity | null | undefined)?.rulesConfig;
+    if (!raw) return fallback;
+    const parsed = parseZoneRulesConfig(raw);
+    if (parsed.ok === false) return fallback;
+    const { daylight, timezone } = parsed.config;
+    // A zone with no daylight window - a pumphouse has no day job - still gets
+    // a day/night split in its own timezone, at the deployment default.
+    if (!daylight) return { ...fallback, timezone };
+    return { startTime: daylight.start, endTime: daylight.end, timezone };
   }
 
   async stats(query: ReadingsQuery): Promise<ReadingStats> {
@@ -258,7 +266,7 @@ export function toDto(row: SensorReadingEntity): Reading {
     nodeId: row.node.slug,
     sensorId: row.sensorId,
     temperature: Number(row.temperature),
-    humidity: Number(row.humidity),
+    humidity: row.humidity === null ? null : Number(row.humidity),
     co2: row.co2 === null ? null : Number(row.co2),
     createdAt: row.createdAt.toISOString(),
   };

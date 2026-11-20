@@ -117,13 +117,17 @@ class Agent:
     def capabilities(self) -> dict:
         caps: dict = {
             "contractVersion": contract.SUPPORTED_MAJOR,
+            # One entry per sensor, and only the metrics it actually has. The
+            # dashboard draws a gauge per declared metric, so a pipe probe that
+            # claimed humidity would show a permanently empty dial.
             "sensors": [
                 {
-                    "sensorId": self.config.sensor.sensor_id,
-                    "kind": "scd4x",
-                    "metrics": ["temperature", "humidity", "co2"],
+                    "sensorId": info.sensor_id,
+                    "kind": info.kind,
+                    "metrics": list(info.metrics),
                     "sampleIntervalMs": int(self.config.sensor.sample_interval_s * 1000),
                 }
+                for info in self.sensor.sensors()
             ],
             "hasRtc": True,
         }
@@ -152,14 +156,17 @@ class Agent:
             "state": state,
         }
 
-    def sample_payload(self, reading: sensor_mod.Reading) -> dict:
+    def sample_payload(self, sensor_id: str, reading: sensor_mod.Reading) -> dict:
+        # One counter per node, shared by its sensors. The server's dedupe key
+        # includes the sensor, so a shared counter is unique where it needs to
+        # be and still says, in a log, which order the samples were taken in.
         self.seq += 1
         return {
             "schema": contract.SCHEMAS["sample"],
             "node": self.config.node_id,
             "ts": now_iso(),
             "seq": self.seq,
-            "sensor": self.config.sensor.sensor_id,
+            "sensor": sensor_id,
             "measurements": {
                 "co2Ppm": _measurement(reading.co2_ppm),
                 "tempC": _measurement(reading.temperature_c),
@@ -347,6 +354,18 @@ def build_backends(config: AgentConfig, simulated: bool):
         gpio = gpio_mod.build(config.gpio.lines, config.gpio.chip_label, simulated)
     gpio.claim(config.gpio.lines, config.gpio.failsafe)
 
+    if config.sensor.kind == "ds18b20" and not simulated:
+        from .ds18b20 import Ds18b20Sensors, Probe
+
+        return (
+            Ds18b20Sensors(
+                tuple(Probe(p.rom, p.sensor_id) for p in config.sensor.probes),
+                w1_root=config.sensor.w1_root,
+                max_c_per_min=config.sensor.temperature_max_change_c_per_min,
+            ),
+            gpio,
+        )
+
     if world_client is not None and config.sensor.kind == "world":
         sensor = sensor_mod.WorldSensor(
             world_client,
@@ -366,4 +385,7 @@ def build_backends(config: AgentConfig, simulated: bool):
             asc_enabled=config.sensor.automatic_self_calibration,
             max_ppm_per_min=config.sensor.co2_max_change_ppm_per_min,
         )
-    return sensor, gpio
+    info = sensor_mod.SensorInfo(
+        config.sensor.sensor_id, "scd4x", ("temperature", "humidity", "co2")
+    )
+    return sensor_mod.SingleSensor(sensor, info), gpio

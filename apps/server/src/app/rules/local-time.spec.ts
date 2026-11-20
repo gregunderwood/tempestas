@@ -45,13 +45,17 @@ describe('minutesSinceMidnight', () => {
     ).toBe(3 * 60);
   });
 
-  // Fall back 2026: 01:30 local happens twice on November 1, an hour apart.
+  // Fall back 2025: 01:30 local happens twice on November 2, an hour apart.
   // Both are 01:30, both get 90, and the rules engine is RIGHT to treat them
   // identically - "is it night?" has one answer at 01:30 however often 01:30
   // happens. The point is that neither is silently shifted by an hour.
+  //
+  // 2025, not 2026: BC stayed on UTC-7 from 2026-11-01 (tzdata 2026b), so
+  // there was no 2026 fall-back. A 2026 date made this test's verdict depend
+  // on which tzdata the runtime happened to bundle.
   it('gives both fall-back 01:30 instants the same local minute', () => {
-    const beforeTransition = new Date('2026-11-01T08:30:00Z'); // 01:30 PDT
-    const afterTransition = new Date('2026-11-01T09:30:00Z'); //  01:30 PST
+    const beforeTransition = new Date('2025-11-02T08:30:00Z'); // 01:30 PDT
+    const afterTransition = new Date('2025-11-02T09:30:00Z'); //  01:30 PST
 
     expect(beforeTransition.getTime()).not.toBe(afterTransition.getTime());
     expect(minutesSinceMidnight(beforeTransition, VANCOUVER)).toBe(90);

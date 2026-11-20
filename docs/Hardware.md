@@ -11,10 +11,11 @@ this file over that one.**
 
 ## The boxes
 
-| Host         | Board                  | OS                           | Role                                                                                       |
-| ------------ | ---------------------- | ---------------------------- | ------------------------------------------------------------------------------------------ |
-| `elantris`   | Raspberry Pi 4B, arm64 | Debian 13 (trixie), headless | The first node **and** the brain. `192.168.2.70`, user `gunderwood`, Wi-Fi (`wlan0`)       |
-| `greenhouse` | Raspberry Pi 5         | 32-bit userland              | Runs the legacy Flask app on lights + fans. Later reflashed to arm64 and demoted to a node |
+| Host         | Board                           | OS                                   | Role                                                                                                |
+| ------------ | ------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `elantris`   | Raspberry Pi 4B, arm64          | Debian 13 (trixie), headless         | The first node **and** the brain. `192.168.2.70`, user `gunderwood`, Wi-Fi (`wlan0`)                |
+| `greenhouse` | Raspberry Pi 5                  | 32-bit userland                      | Runs the legacy Flask app on lights + fans. Later reflashed to arm64 and demoted to a node          |
+| `patji`      | Raspberry Pi Zero W v1.1, ARMv6 | Raspberry Pi OS Lite 32-bit (trixie) | The [pumphouse](Pumphouse.md) node: DS18B20s, heater, heat tape. `192.168.2.40` by DHCP reservation |
 
 Node-to-node TCP works (ports 22 and 80 open from elantris to greenhouse). **ICMP is filtered on
 both greenhouse and the Mac, so `ping` fails misleadingly** — that is not a connectivity problem.
