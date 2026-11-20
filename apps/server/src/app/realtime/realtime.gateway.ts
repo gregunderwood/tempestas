@@ -11,6 +11,7 @@ import {
   sensorKey,
   type Device,
   type Reading,
+  type RulesTick,
   type SystemStatus,
 } from '@tempestas/domain';
 
@@ -44,6 +45,7 @@ export class RealtimeGateway
 
   private lastReadings = new Map<string, Reading>();
   private lastStatus: SystemStatus | null = null;
+  private lastTick: RulesTick | null = null;
   private clients = 0;
 
   handleConnection(client: Socket): void {
@@ -54,6 +56,9 @@ export class RealtimeGateway
     }
     if (this.lastStatus) {
       client.emit(REALTIME_EVENTS.systemStatus, this.lastStatus);
+    }
+    if (this.lastTick) {
+      client.emit(REALTIME_EVENTS.rulesEvaluation, this.lastTick);
     }
     this.logger.debug(`Client connected (${this.clients} total)`);
   }
@@ -80,6 +85,16 @@ export class RealtimeGateway
   publishSystemStatus(status: SystemStatus): void {
     this.lastStatus = status;
     this.emit(REALTIME_EVENTS.systemStatus, status);
+  }
+
+  /**
+   * Cached and replayed, unlike device state: a rules cycle is a snapshot that
+   * the next one wholly replaces, so a replayed copy is at worst ten seconds
+   * old and never contradicts anything newer.
+   */
+  publishRulesTick(tick: RulesTick): void {
+    this.lastTick = tick;
+    this.emit(REALTIME_EVENTS.rulesEvaluation, tick);
   }
 
   connectedClients(): number {
