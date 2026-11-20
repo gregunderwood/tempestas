@@ -1,9 +1,20 @@
-import { ChangeDetectionStrategy, Component, effect, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
+import {
+  NO_DEVICES,
+  withPushes,
+  type FetchedDevices,
+} from '../../core/device-pushes';
 import type { Device } from '@tempestas/domain';
 
 /**
@@ -24,12 +35,18 @@ import type { Device } from '@tempestas/domain';
         <mat-card appearance="outlined">
           <mat-card-header>
             <mat-card-title>{{ device.name }}</mat-card-title>
-            <mat-card-subtitle>{{ device.nodeId }} · pin {{ device.gpio }}</mat-card-subtitle>
+            <mat-card-subtitle
+              >{{ device.nodeId }} · pin {{ device.gpio }}</mat-card-subtitle
+            >
           </mat-card-header>
           <mat-card-content>
-            <p><strong>{{ device.isOn ? 'ON' : 'off' }}</strong></p>
+            <p>
+              <strong>{{ device.isOn ? 'ON' : 'off' }}</strong>
+            </p>
             @if (!device.canTurnOn && !device.isOn && device.canTurnOnAt) {
-              <p class="temp-muted">Cooling down until {{ device.canTurnOnAt }}</p>
+              <p class="temp-muted">
+                Cooling down until {{ device.canTurnOnAt }}
+              </p>
             }
             <mat-slide-toggle
               [checked]="device.rulesEnabled"
@@ -39,39 +56,52 @@ import type { Device } from '@tempestas/domain';
             </mat-slide-toggle>
           </mat-card-content>
           <mat-card-actions>
-            <button mat-button [disabled]="device.isOn" (click)="on(device)">Turn on</button>
-            <button mat-button [disabled]="!device.isOn" (click)="off(device)">Turn off</button>
+            <button mat-button [disabled]="device.isOn" (click)="on(device)">
+              Turn on
+            </button>
+            <button mat-button [disabled]="!device.isOn" (click)="off(device)">
+              Turn off
+            </button>
           </mat-card-actions>
         </mat-card>
       }
     </div>
   `,
   styles: `
-    .temp-cards { display: flex; flex-wrap: wrap; gap: 1rem; }
-    .temp-muted { opacity: 0.7; font-size: 0.85rem; }
+    .temp-cards {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .temp-muted {
+      opacity: 0.7;
+      font-size: 0.85rem;
+    }
   `,
 })
 export class DevicesPage {
   private readonly api = inject(ApiService);
   private readonly realtime = inject(RealtimeService);
-  readonly devices = signal<Device[]>([]);
+  private readonly fetched = signal<FetchedDevices>(NO_DEVICES);
+  /** A pushed device state patches the list; it never becomes the list. */
+  readonly devices = computed(() =>
+    withPushes(this.fetched(), this.realtime.devicePushes()),
+  );
 
   constructor() {
     this.refresh();
-    // A pushed device state patches the list; it never becomes the list.
-    effect(() => {
-      const pushed = this.realtime.deviceState();
-      if (!pushed) return;
-      this.devices.update((all) => all.map((d) => (d.id === pushed.id ? pushed : d)));
-    });
   }
 
   on(device: Device): void {
-    this.api.turnOn(device.id).subscribe({ next: () => this.refresh(), error: () => undefined });
+    this.api
+      .turnOn(device.id)
+      .subscribe({ next: () => this.refresh(), error: () => undefined });
   }
 
   off(device: Device): void {
-    this.api.turnOff(device.id).subscribe({ next: () => this.refresh(), error: () => undefined });
+    this.api
+      .turnOff(device.id)
+      .subscribe({ next: () => this.refresh(), error: () => undefined });
   }
 
   setRules(device: Device, rulesEnabled: boolean): void {
@@ -81,6 +111,9 @@ export class DevicesPage {
   }
 
   private refresh(): void {
-    this.api.devices().subscribe((devices) => this.devices.set(devices));
+    const requestedAt = Date.now();
+    this.api
+      .devices()
+      .subscribe((devices) => this.fetched.set({ devices, requestedAt }));
   }
 }

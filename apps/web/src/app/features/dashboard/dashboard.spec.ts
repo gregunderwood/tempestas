@@ -101,6 +101,7 @@ function setup(
   readings: Reading[],
   devices: Device[] = [],
   nodes: Node[] = [ELANTRIS],
+  pushed: Device[] = [],
 ): HTMLElement {
   vi.setSystemTime(NOW);
   TestBed.configureTestingModule({
@@ -120,7 +121,15 @@ function setup(
         provide: RealtimeService,
         useValue: {
           readings: signal({}),
-          deviceState: signal(null),
+          // Received after the fetch was sent, as a live push would be.
+          devicePushes: signal(
+            new Map(
+              pushed.map((d) => [
+                d.id,
+                { device: d, receivedAt: NOW.getTime() + 1 },
+              ]),
+            ),
+          ),
           status: signal(null),
           connected: signal(true),
         },
@@ -243,5 +252,22 @@ describe('Dashboard', () => {
 
   it('says so plainly when there is nothing to show', () => {
     expect(setup([]).textContent).toContain('No readings yet');
+  });
+
+  // #12: the dashboard kept only the newest push, so when one rules decision
+  // switched two relays the first reverted to the stale fetched state.
+  it('keeps every pushed device state, not only the newest', () => {
+    const heater = device({ id: 'd1', name: 'Heater', isOn: false });
+    const tape = device({ id: 'd2', name: 'Heat tape', isOn: false });
+    const el = setup(
+      [reading()],
+      [heater, tape],
+      [ELANTRIS],
+      [
+        { ...heater, isOn: true },
+        { ...tape, isOn: true },
+      ],
+    );
+    expect(el.querySelectorAll('.relay--on')).toHaveLength(2);
   });
 });

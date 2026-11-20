@@ -11,8 +11,14 @@ import { MatCardModule } from '@angular/material/card';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
+import {
+  NO_DEVICES,
+  withPushes,
+  type FetchedDevices,
+} from '../../core/device-pushes';
 import { Gauge } from '../../shared/gauge/gauge';
 import { metricsFor } from '../../shared/metrics';
+import { READING_QUIET_AFTER_S } from '../../shared/freshness';
 import {
   sensorKey,
   type Device,
@@ -20,9 +26,6 @@ import {
   type Node,
   type Reading,
 } from '@tempestas/domain';
-
-/** Beyond this a reading is old enough to say so on the card. */
-const STALE_AFTER_S = 120;
 
 interface SensorGauge {
   key: string;
@@ -218,7 +221,7 @@ export class Dashboard {
   private readonly destroyRef = inject(DestroyRef);
 
   private readonly fetchedReadings = signal<Reading[]>([]);
-  private readonly fetchedDevices = signal<Device[]>([]);
+  private readonly fetchedDevices = signal<FetchedDevices>(NO_DEVICES);
   private readonly nodes = signal<Node[]>([]);
   /** Re-read on every socket tick so ages advance without a poll of our own. */
   private readonly tick = signal(0);
@@ -235,13 +238,10 @@ export class Dashboard {
     return [...merged.values()];
   });
 
-  private readonly devices = computed<Device[]>(() => {
-    const pushed = this.realtime.deviceState();
-    const all = this.fetchedDevices();
-    return pushed === null
-      ? all
-      : all.map((d) => (d.id === pushed.id ? pushed : d));
-  });
+  /** Every push newer than the fetch, not only the newest one (#12). */
+  private readonly devices = computed<Device[]>(() =>
+    withPushes(this.fetchedDevices(), this.realtime.devicePushes()),
+  );
 
   readonly cards = computed<NodeCard[]>(() => {
     this.tick();
@@ -279,7 +279,7 @@ export class Dashboard {
               Math.round((now - new Date(reading.createdAt).getTime()) / 1000),
             ),
           }))
-          .filter((q) => q.ageSeconds > STALE_AFTER_S);
+          .filter((q) => q.ageSeconds > READING_QUIET_AFTER_S);
         const latestAt = sorted
           .map((r) => r.createdAt)
           .reduce((a, b) => (new Date(a) > new Date(b) ? a : b));
@@ -300,7 +300,12 @@ export class Dashboard {
     this.api
       .latestReadings()
       .subscribe((readings) => this.fetchedReadings.set(readings));
-    this.api.devices().subscribe((devices) => this.fetchedDevices.set(devices));
+    const requestedAt = Date.now();
+    this.api
+      .devices()
+      .subscribe((devices) =>
+        this.fetchedDevices.set({ devices, requestedAt }),
+      );
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
 
     // An age that never advances is worse than no age at all: the card would
