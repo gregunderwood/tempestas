@@ -22,7 +22,7 @@ The shape that matters: **adding or removing a node must not require a code chan
 ### Zones, nodes, devices
 
 ```
-Zone "greenhouse"  ── rules_config: thresholds, enabledRoles, sensorPolicy
+Zone "greenhouse"  ── rules_config: a rule per role, enabledRoles, sensorPolicy, daylight
    ├── Node "elantris"        rpi     · SCD-4x + relays · CO2 generator
    ├── Node "greenhouse-pi5"  rpi     · lights + fans (legacy, for now)
    └── Node "north-end"       esp32   · sensor only
@@ -45,25 +45,27 @@ Consequences you will meet in the schema:
 
 ### Cross-node rules, without a rule engine
 
-A per-role **sensor policy** in the zone's `rules_config` covers "sensors at each end" as data:
+A **sensor policy** in the zone's `rules_config` covers "sensors at each end" as data — a zone
+default, overridden on any role's rule:
 
 ```jsonc
 {
   "enabledRoles": ["co2_generator"],
-  "sensorPolicy": {
-    "default": { "source": "mean", "maxAgeMs": 120000 },
-    "byRole": { "exhaust_fan": { "source": "max" }, "co2_generator": { "source": "node:elantris" } },
+  "sensorPolicy": { "default": { "source": "mean", "maxAgeMs": 120000 } },
+  "rules": {
+    "exhaust_fan": { "kind": "thermostat", "mode": "cool", "onAtC": 30, "offAtC": 29.5, "onStale": "hold", "sensor": { "source": "max" } },
+    "co2_generator": { "kind": "co2-burner", /* ... */ "sensor": { "source": "node:elantris" } },
   },
-  "thresholds": { "co2NightOnTemp": 3, "co2ThresholdPpm": 1500 },
 }
 ```
 
 `source` is one of `mean | max | min | node:<slug>`. Four options, not a predicate language.
 
-**There is deliberately no `Rule` entity.** The three rule bodies are fixed physics with hysteresis,
-and a DSL with one user is a liability when a mis-click controls a burner. The tripwire for
-revisiting: when two rules are needed on the _same_ role with _different_ bodies, or a
-non-developer needs to author one.
+**There is deliberately no `Rule` entity and no DSL.** Each role names one **kind** from a fixed menu
+written in code — `thermostat`, `daylight-thermostat`, `co2-burner` — and supplies its numbers. A new
+environment such as the pumphouse is configuration; a new kind of rule is a code change with tests.
+A DSL with one user is a liability when a mis-click controls a burner. The tripwire for revisiting is
+unchanged: a non-developer needing to author a rule. See [Rules and Climate](Rules%20and%20Climate.md).
 
 ### Ownership is explicit, never inferred
 

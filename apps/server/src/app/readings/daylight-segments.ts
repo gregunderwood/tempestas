@@ -15,7 +15,7 @@ import { DateTime } from 'luxon';
  * of 4 °C means the night rule did its job, or that something went wrong at
  * midday, and only the period it belongs to says which.
  *
- * The boundary is the zone's own `thresholds.startTime`/`endTime`, the pair the
+ * The boundary is the zone's own `daylight` window, the one the
  * rules engine branches on. A second definition of night living here would
  * eventually disagree with the one that drives the relay.
  *

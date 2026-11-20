@@ -1,52 +1,59 @@
-# patji - east wall, middle of the greenhouse, under canopy.
+# patji - the Pi Zero W v1.1, reflashed to heat the pumphouse. The host and
+# the node keep the name; the zone it is admitted to is `pumphouse`.
 #
-# SENSOR ONLY. `lines = []` is not an empty default, it is the whole point:
-# with no lines the agent opens no chip, advertises no GPIO capability, and the
-# server cannot create a device on this node. It has nothing to drive and no
-# way to acquire anything to drive.
+# Agent only. The server, Postgres and the broker are on elantris. See
+# docs/Pumphouse.md for the wiring and the reasoning behind every number here.
 #
 # Deploy to /home/<user>/tempestas/etc/agent.toml on the box.
-# Credentials live in /etc/tempestas/agent.env (0600 root), never here.
+# Credentials live in /etc/tempestas/agent.env (0600 root), never here:
+#   MQTT_USERNAME=patji
+#   MQTT_PASSWORD=...        (generated on elantris, see Provisioning)
 
 node_id = "patji"
 kind = "rpi"
 agent_version = "0.1.0"
 
-# Meaningless on a node that cannot actuate - there is nothing to fail safe -
-# but left at the default so the heartbeat still tells us when it goes quiet.
-deadman_s = 30.0
+# "Hold, then on." Both loads hang off the relay board's NC contacts, so both
+# fail to ON, and one node-wide timer gives the hold with no agent change. A
+# WiFi blip shorter than ten minutes changes nothing; a dead elantris means the
+# heater and the tape run until somebody looks. On costs electricity, off costs
+# the pipes.
+deadman_s = 600.0
 
 [mqtt]
 url = "mqtt://192.168.2.70:1883"
 
 [sensor]
-kind = "scd4x"
-sensor_id = "scd4x-0"
-bus = 1
-address = 0x62
+kind = "ds18b20"
 sample_interval_s = 10.0
 
-# UNSET until calibrated at installed equilibrium. The M5Stack CO2L is a sealed
-# plastic enclosure, so it will self-heat more than elantris's bare Adafruit
-# breakout and will NOT share its 3.2 C figure. Guessing one is worse than the
-# known unknown: see docs/Hardware.md on tuning it.
-# temperature_offset_c =
-altitude_m = 600
+# Pinned by ROM id, never by bus order. Read each id at bring-up with ONE probe
+# plugged in at a time (`ls /sys/bus/w1/devices/`), and label the cable end
+# with its sensor_id. These placeholders are refused by the config check on
+# purpose: the agent will not start until they are real.
+[[sensor.probes]]
+rom = "28-3ce1d443663c"
+sensor_id = "pipes"
 
-# OFF. patji sits mid-greenhouse under canopy, which is enriched air - it does
-# not see outdoor CO2 regularly, so ASC would revise its baseline toward a
-# number this spot never reaches and it would read progressively low.
-#
-# Turn this ON only if it ends up somewhere genuinely ventilated, where it
-# would then self-calibrate forever with no manual intervention.
-automatic_self_calibration = false
+[[sensor.probes]]
+rom = "28-3ce1d4436bd1"
+sensor_id = "air"
+
+# The third probe, not soldered yet. Name it for where it ends up; any number
+# of probes works, and the zone takes the coldest. Uncomment with its real ROM.
+# [[sensor.probes]]
+# rom = "28-zzzzzzzzzzzz"
+# sensor_id = "floor"
 
 [gpio]
-lines = []
-# Never read, because no lines are claimed. Present so that wiring this box up
-# later is a change to `lines`, not a hunt for what the label should be.
+# BCM5 -> IN1 -> heater (through the JQX-62F 110VAC contactor)
+# BCM6 -> IN2 -> heat tape
+lines = [5, 6]
 chip_label = "pinctrl-bcm2835"   # Pi Zero W v1.1, BCM2835
 
 [gpio.failsafe]
-# Deliberately empty. A safe level is a statement about a load, and this node
-# has none.
+# 1 = HIGH = relay de-energised (the board is active-LOW) = NC closed = load
+# ON. config.txt drives both high from boot (`gpio=5,6=op,dh`) so the loads
+# are on before this process exists, too.
+5 = 1
+6 = 1

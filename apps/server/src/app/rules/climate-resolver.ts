@@ -1,9 +1,11 @@
 import {
-  DeviceRole,
+  type DeviceRole,
   type ClimateSample,
   type SensorPolicy,
   type ZoneRulesConfig,
+  sensorKey,
 } from '@tempestas/domain';
+import { ROLE_ORDER } from './rules.engine';
 
 /**
  * Turns "one latest reading per node" into "the climate each role is evaluated
@@ -14,15 +16,18 @@ import {
  * own end, while the exhaust fan should vent when the *hottest* end is hot. That
  * is a per-role choice over the same set of samples, expressed as data:
  *
- *     mean | max | min | node:<slug>
+ *     mean | max | min | node:<slug> | sensor:<slug>/<sensorId>
  *
- * Four options, deliberately - not a predicate language.
+ * Five options, deliberately - not a predicate language. The unit is a SENSOR,
+ * not a node: the pumphouse node carries a probe per pipe, and `min` has to
+ * see each of them or the coldest pipe is averaged away inside its node.
  *
  * Pure: `now` is a parameter, never `new Date()`.
  */
 
 export interface NodeSample {
   nodeId: string;
+  sensorId: string;
   temperatureC: number;
   /** Null means the node reported an INVALID reading, not a zero one. */
   co2Ppm: number | null;
@@ -39,12 +44,6 @@ export interface ResolvedClimate {
   staleRoles: DeviceRole[];
 }
 
-const RESOLVED_ROLES: readonly DeviceRole[] = [
-  DeviceRole.Lights,
-  DeviceRole.Co2Generator,
-  DeviceRole.ExhaustFan,
-];
-
 export function resolveClimate(
   samples: readonly NodeSample[],
   config: ZoneRulesConfig,
@@ -53,9 +52,14 @@ export function resolveClimate(
   const climateByRole: Partial<Record<DeviceRole, ClimateSample>> = {};
   const staleRoles: DeviceRole[] = [];
 
-  for (const role of RESOLVED_ROLES) {
-    const policy =
-      config.sensorPolicy.byRole?.[role] ?? config.sensorPolicy.default;
+  // Every role the zone has a rule for, owned or not: the last-evaluation
+  // endpoint shows what an unowned role WOULD have seen, which is how a
+  // transition is checked before ownership moves. In the engine's fixed order,
+  // because Postgres hands the jsonb keys back in an order of its own.
+  const roles = ROLE_ORDER.filter((role) => config.rules[role] !== undefined);
+
+  for (const role of roles) {
+    const policy = config.rules[role]?.sensor ?? config.sensorPolicy.default;
     const candidates = selectSource(samples, policy.source);
 
     if (candidates.length === 0) {
@@ -93,6 +97,10 @@ function selectSource(
     const slug = source.slice('node:'.length);
     return samples.filter((s) => s.nodeId === slug);
   }
+  if (source.startsWith('sensor:')) {
+    const key = source.slice('sensor:'.length);
+    return samples.filter((s) => sensorKey(s) === key);
+  }
   return [...samples];
 }
 
@@ -116,7 +124,8 @@ function aggregate(
     observedAt: new Date(
       Math.min(...samples.map((s) => s.observedAt.getTime())),
     ).toISOString(),
-    sourceNodeIds: samples.map((s) => s.nodeId),
+    sourceNodeIds: [...new Set(samples.map((s) => s.nodeId))],
+    sourceSensorIds: samples.map(sensorKey),
   };
 }
 
@@ -126,8 +135,8 @@ function pick(values: number[], source: SensorPolicy['source']): number {
       return Math.max(...values);
     case 'min':
       return Math.min(...values);
-    // `mean`, and every `node:<slug>` source - which has already been narrowed
-    // to a single sample, so its mean is that sample.
+    // `mean`, `node:<slug>` (the mean of that node's sensors) and
+    // `sensor:<slug>/<id>`, already narrowed to one sample.
     default:
       return values.reduce((sum, v) => sum + v, 0) / values.length;
   }

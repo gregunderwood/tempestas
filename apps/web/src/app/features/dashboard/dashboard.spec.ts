@@ -2,7 +2,14 @@ import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
-import type { Device, Reading } from '@tempestas/domain';
+import {
+  NodeKind,
+  NodeStatus,
+  type Device,
+  type MetricKey,
+  type Node,
+  type Reading,
+} from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import { Dashboard } from './dashboard';
@@ -43,7 +50,58 @@ function device(over: Partial<Device> = {}): Device {
   };
 }
 
-function setup(readings: Reading[], devices: Device[] = []): HTMLElement {
+function node(slug: string, sensors: Record<string, MetricKey[]>): Node {
+  return {
+    id: slug,
+    slug,
+    displayName: slug,
+    location: null,
+    kind: NodeKind.RaspberryPi,
+    status: NodeStatus.Admitted,
+    online: true,
+    lastSeenAt: null,
+    agentVersion: null,
+    capabilities: {
+      contractVersion: 1,
+      hasRtc: true,
+      sensors: Object.entries(sensors).map(([sensorId, metrics]) => ({
+        sensorId,
+        kind: 'test',
+        metrics,
+        sampleIntervalMs: 30_000,
+      })),
+    },
+    zoneId: null,
+    deviceCount: 0,
+    latestReadingAt: null,
+  };
+}
+
+const ELANTRIS = node('elantris', {
+  'scd4x-0': ['temperature', 'humidity', 'co2'],
+});
+
+function probe(
+  sensorId: string,
+  temperature: number,
+  over: Partial<Reading> = {},
+): Reading {
+  return reading({
+    id: sensorId,
+    nodeId: 'pumphouse',
+    sensorId,
+    temperature,
+    humidity: null,
+    co2: null,
+    ...over,
+  });
+}
+
+function setup(
+  readings: Reading[],
+  devices: Device[] = [],
+  nodes: Node[] = [ELANTRIS],
+): HTMLElement {
   vi.setSystemTime(NOW);
   TestBed.configureTestingModule({
     imports: [Dashboard],
@@ -55,6 +113,7 @@ function setup(readings: Reading[], devices: Device[] = []): HTMLElement {
         useValue: {
           latestReadings: () => of(readings),
           devices: () => of(devices),
+          nodes: () => of(nodes),
         },
       },
       {
@@ -130,6 +189,56 @@ describe('Dashboard', () => {
       [device({ id: 'd2', nodeId: 'somewhere-else', name: 'Other Relay' })],
     );
     expect(el.textContent).not.toContain('Other Relay');
+  });
+
+  // The pumphouse: pipe probes measure temperature and nothing else. Empty
+  // humidity and CO2 dials beside them would read as broken sensors.
+  it('shows only the metrics each sensor declares', () => {
+    const el = setup(
+      [probe('28-a', 3.1), probe('28-b', 4.2), probe('28-c', 5.0)],
+      [],
+      [
+        node('pumphouse', {
+          '28-a': ['temperature'],
+          '28-b': ['temperature'],
+          '28-c': ['temperature'],
+        }),
+      ],
+    );
+    expect(el.querySelectorAll('mat-card')).toHaveLength(1);
+    expect(el.querySelectorAll('temp-gauge')).toHaveLength(3);
+    expect(el.textContent).not.toContain('unknown');
+    const captions = [...el.querySelectorAll('.gauge__sensor')].map((c) =>
+      c.textContent?.trim(),
+    );
+    expect(captions).toEqual(['28-a', '28-b', '28-c']);
+  });
+
+  it('does not caption the gauges of a single-sensor node', () => {
+    expect(setup([reading()]).querySelector('.gauge__sensor')).toBeNull();
+  });
+
+  // Until the node list arrives the reading decides: a null it never had is
+  // no reason to draw a dial.
+  it('falls back to the metrics a reading carries before nodes load', () => {
+    const el = setup([probe('28-a', 3.1)], [], []);
+    expect(el.querySelectorAll('temp-gauge')).toHaveLength(1);
+  });
+
+  // One probe dying beside two working ones: `min` carries on without it, so
+  // the card is the place that has to say which one went quiet.
+  it('names the probe that has stopped reporting', () => {
+    const old = new Date(NOW.getTime() - 10 * 60_000).toISOString();
+    const el = setup(
+      [probe('28-a', 3.1), probe('28-b', 4.2, { createdAt: old })],
+      [],
+      [node('pumphouse', { '28-a': ['temperature'], '28-b': ['temperature'] })],
+    );
+    expect(el.querySelector('.card--stale')).not.toBeNull();
+    expect(el.textContent?.replace(/\s+/g, ' ')).toContain(
+      '28-b: no reading for 600s',
+    );
+    expect(el.textContent).not.toContain('28-a:');
   });
 
   it('says so plainly when there is nothing to show', () => {

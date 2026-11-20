@@ -49,6 +49,20 @@ npx prettier --write .                # format
 - `npm run migration:generate -- apps/server/src/migrations/<Name>` needs the database up.
 - There is no `serve` on `libs/domain`; it is consumed through the `@tempestas/domain` alias.
 
+## Workflow: issue, branch, PR
+
+Work is tracked on GitHub (`gregunderwood/tempestas`, private) with `gh`.
+
+- **An issue first** for anything bigger than a typo: what and why, and how we will know it is
+  done. A bug found mid-task becomes its own issue rather than a silent detour.
+- **A branch per issue**, off `main`: `<issue#>-<short-slug>`, e.g. `12-zones-page`.
+- **A PR that closes it** (`Closes #12` in the body): what changed, how it was verified (the gate,
+  plus anything run on real hardware), and what is deliberately left out. The gate passes before
+  the PR is opened, not after.
+- **Merging is the user's call.** Do not merge your own PR; do not push to `main`.
+- Deploying to elantris from a branch is fine for a bench test; say so in the PR, because the
+  box is then running code `main` does not have.
+
 ## Who owns what right now
 
 `enabledRoles` on the zone is the machine-readable half of this. This table is the human half,
@@ -57,7 +71,9 @@ current or somebody wires a second controller onto a live relay.
 
 | Role            | Owner today                        | Notes                                                  |
 | --------------- | ---------------------------------- | ------------------------------------------------------ |
-| `co2_generator` | **tempestas** (elantris)           | The first and only role tempestas owns                 |
+| `co2_generator` | **tempestas** (elantris)           | Greenhouse zone                                        |
+| `heater`        | **tempestas** (patji)              | Pumphouse zone; fails ON. See docs/Pumphouse.md        |
+| `heat_tape`     | **tempestas** (patji)              | Pumphouse zone; fails ON                               |
 | `exhaust_fan`   | legacy Flask app (greenhouse Pi 5) | Moves over after a full day of verified burner control |
 | `lights`        | legacy Flask app (greenhouse Pi 5) | Moves last                                             |
 

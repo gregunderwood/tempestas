@@ -2,52 +2,101 @@
 
 ## What it is
 
-The control law: what the greenhouse actually does, at which thresholds, and why. Ported faithfully
-from the Python system, with three deliberate behaviour changes and one landmine.
+The control law: what each zone actually does, at which setpoints, and why. The greenhouse rules
+were ported faithfully from the Python system, with three deliberate behaviour changes and one
+landmine. Since 2026-11 a zone picks its rules from a fixed menu of **rule kinds**, which is how the
+pumphouse runs on the same engine with none of the greenhouse's numbers.
 
 **Source of truth for the port is the _uncommitted_ `set_device_states.py` running on the greenhouse
 Pi right now** — not any doc, and not any committed version. The committed versions and the old
 `CLAUDE.md` both carry stale thresholds.
 
 > [!note] Status
-> Built, phase 5. The engine is [../apps/server/src/app/rules/rules.engine.ts](../apps/server/src/app/rules/rules.engine.ts),
+> Built, phase 5; rule kinds per role added 2026-11 for the [pumphouse](Pumphouse.md). The engine
+> is [../apps/server/src/app/rules/rules.engine.ts](../apps/server/src/app/rules/rules.engine.ts),
 > evaluated every 10 s by `RulesService`, and `GET /api/rules/last-evaluation` shows what it saw.
 
 ## Key files
 
-- [../libs/domain/src/lib/zones/zone.model.ts](../libs/domain/src/lib/zones/zone.model.ts) — `RulesThresholds`, `SensorPolicy`, `SensorSource`
+- [../libs/domain/src/lib/zones/zone.model.ts](../libs/domain/src/lib/zones/zone.model.ts) — `ZoneRulesConfig`, the `RoleRule` kinds, `StalePolicy`, `SensorPolicy`
 - [../libs/domain/src/lib/rules/rules.model.ts](../libs/domain/src/lib/rules/rules.model.ts) — `RulesInput`, `RuleDecision`, `RuleReason`
 - [../libs/domain/src/lib/devices/device.model.ts](../libs/domain/src/lib/devices/device.model.ts) — `DeviceRole`, which automation binds to
 - [../apps/server/src/app/rules/rules.engine.ts](../apps/server/src/app/rules/rules.engine.ts) — the control law, pure
+- [../apps/server/src/app/rules/rules-config.ts](../apps/server/src/app/rules/rules-config.ts) — `parseZoneRulesConfig`, the gate between the jsonb and the engine
 - [../apps/server/src/app/rules/climate-resolver.ts](../apps/server/src/app/rules/climate-resolver.ts) — sensor policy, pure
 - [../apps/server/src/app/rules/local-time.ts](../apps/server/src/app/rules/local-time.ts) — the only place an instant becomes a wall clock
 - [../apps/server/src/app/rules/rules.service.ts](../apps/server/src/app/rules/rules.service.ts) — the impure shell: load, resolve, evaluate, dispatch
 - [../apps/server/src/app/devices/device-state.ts](../apps/server/src/app/devices/device-state.ts) — the interlocks the decisions run into
 
-## The constants
+## A zone's rules
 
+A zone's `rules_config` jsonb names, per role, one **kind** from a fixed menu and that kind's
+numbers. It cannot invent logic: a new kind is a code change with tests, never a config change.
+There is still no DSL, and that reasoning stands — a predicate language with one user is a liability
+when a mis-click controls a propane burner.
+
+| Kind                  | Does                                                                        | Used by                   |
+| --------------------- | --------------------------------------------------------------------------- | ------------------------- |
+| `thermostat`          | `heat`: on below `onAtC`, off above `offAtC`. `cool`: the mirror            | exhaust fan, heater, tape |
+| `daylight-thermostat` | A thermostat inside the zone's daylight window, unconditionally off outside | greenhouse lights         |
+| `co2-burner`          | Day enrichment with a CO2 dead band, night frost protection ignoring CO2    | greenhouse CO2 generator  |
+
+Every thermostat comparison is **strict**, so the setpoints themselves sit inside the dead band.
+
+```jsonc
+// greenhouse, as running (enabledRoles: ["co2_generator"])
+"daylight": { "start": "06:30", "end": "18:30" },
+"rules": {
+  "lights":        { "kind": "daylight-thermostat", "mode": "heat", "onAtC": 26, "offAtC": 27, "onStale": "hold" },
+  "co2_generator": { "kind": "co2-burner", "dayOffAtC": 28, "nightOnBelowC": 3,
+                     "co2OnPpm": 1400, "co2OffPpm": 1500, "onStale": "hold" },
+  "exhaust_fan":   { "kind": "thermostat", "mode": "cool", "onAtC": 30, "offAtC": 29.5, "onStale": "hold" }
+}
+// pumphouse (enabledRoles: ["heater", "heat_tape"]) - no daylight window, nothing reads one
+"rules": {
+  "heat_tape": { "kind": "thermostat", "mode": "heat", "onAtC": 4, "offAtC": 6, "onStale": "on" },
+  "heater":    { "kind": "thermostat", "mode": "heat", "onAtC": 2, "offAtC": 5, "onStale": "on" }
+}
 ```
-startTime 06:30   endTime 18:30
-lightsOnTemp 26   lightsOffTemp 27
-co2OffTemp 26     co2NightOnTemp 3     co2ThresholdPpm 1500
-exhaustOnTemp 30  exhaustOffTemp 29.5
-```
 
-They live in the zone's `rules_config` jsonb, server-side. Operational policy that controls a heater
-is never shipped as consts in the browser bundle, where a stale cache could disagree about a setpoint.
+- **The daylight window belongs to the zone**, not to a rule. Lights and burner share it, so they
+  cannot disagree about when night is, and the readings screens split day from night at it.
+  `daylight-thermostat` and `co2-burner` require one.
+- **A zone may carry a rule for a role it does not own.** The greenhouse keeps its lights and fan
+  settings across the transition; `enabledRoles` alone says what is controlled.
+- **A per-role sensor override** is the rule's own `sensor`, e.g.
+  `"sensor": { "source": "node:elantris" }`, or `sensor:patji/pipes` to pin one probe on a
+  node that has several. The zone's `sensorPolicy.default` covers the rest.
+- They live server-side. Operational policy that controls a heater is never shipped as consts in
+  the browser bundle, where a stale cache could disagree about a setpoint.
 
-## The three rules
+### The config is validated, strictly
 
-**Lights** — a heat source, 1 °C hysteresis. Inside the window: `t < 26` on; `t > 27` off; `26–27`
-dead band, no action. Outside the window: unconditionally off.
+`parseZoneRulesConfig` runs on every evaluation. Before it existed a typo was whatever the engine
+made of it: a misspelled setpoint read as `undefined`, every comparison against it was false, and the
+role sat in its dead band forever reporting a calm-looking `dead-band`. On a heater that is a freeze.
 
-**CO2 generator** — doubles as the heater, and the two branches are genuinely different rules:
+It refuses unknown keys (the typo that matters most is in an optional field, which would otherwise
+silently fall back), an unknown kind, a band that is backwards or zero-width, a missing `onStale`,
+an owned role with no rule, and a day-dependent rule with no daylight window. A zone that fails is
+**not evaluated at all** — half-evaluating it would hide that the other half is uncontrolled — and
+it is named, with every error and its JSON path, in `GET /api/health` `problems`.
 
-- _Day:_ on iff `t < 26 AND co2 < 1500`. A **null CO2 coerces to `+Infinity`** so it stays off.
+## The greenhouse rules
+
+**Lights** (`daylight-thermostat`) — a heat source, 1 °C hysteresis. Inside the window: `t < 26` on;
+`t > 27` off; `26–27` dead band, no action. Outside the window: unconditionally off.
+
+**CO2 generator** (`co2-burner`) — doubles as the heater, and the two branches are genuinely
+different rules:
+
+- _Day:_ off at or above `dayOffAtC` (28 as running). Below it, on under 1400 ppm, off at 1500,
+  holding between. A **null CO2 coerces to `+Infinity`** so it stays off.
 - _Night:_ CO2 is irrelevant — pure frost protection, on iff `t < 3`.
-- No hysteresis on either branch. Anti-cycling comes only from `onDelayDuration = 300`.
+- No temperature hysteresis on either branch. Anti-cycling comes from `onDelayDuration = 300`.
 
-**Exhaust fan** — time-independent: `t > 30` on, `t < 29.5` off, dead band between.
+**Exhaust fan** (`thermostat`, `cool`) — time-independent: `t > 30` on, `t < 29.5` off, dead band
+between.
 
 Time windows are **minutes since midnight, start inclusive, end exclusive**, and midnight-crossing
 aware.
@@ -65,11 +114,14 @@ single most important structural decision in the port.
 ## How a reading becomes a decision
 
 ```
-sample (per node)
+sample (per sensor; a node may carry several)
    │  ReadingsIngestService — admission gate, then persist
    ▼
-ClimateResolver — applies the zone's sensorPolicy per role
-   │  mean | max | min | node:<slug>, with maxAgeMs collapsing staleness into "no sensor"
+parseZoneRulesConfig — refuses the whole zone on any error
+   ▼
+ClimateResolver — applies each rule's sensor policy, or the zone default
+   │  mean | max | min | node:<slug> | sensor:<slug>/<id>, with maxAgeMs collapsing
+   │  staleness into "no sensor"
    ▼
 evaluateRules(minutesSinceMidnightLocal, config, enabledRoles, climateByRole)
    │  RuleDecision[] — { role, desired, reason, sourceNodeIds }
@@ -81,7 +133,13 @@ HardwareService.setPin — publish, await readback, then persist
 ```
 
 `sourceNodeIds` is carried through so the UI and the logs can say **which sensors a decision came
-from**. A decision whose provenance is unknowable is a decision nobody can debug.
+from**, and the climate sample beside it carries `sourceSensorIds` (`node/sensor`) for the case
+where one node holds several probes. A decision whose provenance is unknowable is a decision
+nobody can debug.
+
+With several probes and `min`, a probe that goes quiet simply drops out and the rule carries on
+with the rest. That is the right control behaviour and exactly why it is said elsewhere:
+`GET /api/health` names any sensor that reported in the last day and has since stopped.
 
 ## Three deliberate behaviour changes
 
@@ -102,17 +160,22 @@ looked identical.
 `POST /api/rules/evaluate` forces one now, on the same code path as the scheduled tick. It drives
 real relays, so it is a POST and it sits behind the shared token with the other mutating verbs.
 
-### Two kinds of no-op, and why they differ
+### The no-ops, and the stale cases
 
-| Reason           | Meaning                                                                   |
-| ---------------- | ------------------------------------------------------------------------- |
-| `role-not-owned` | `enabledRoles` does not include this role. Devices are not even looked up |
-| `no-sensor`      | No node reports for this role at all — a configuration gap                |
-| `sensor-stale`   | Sensors existed and went quiet. **Holds last state and logs at ERROR**    |
-| `dead-band`      | Inside the hysteresis band; changing state here is what causes cycling    |
+| Reason           | Meaning                                                                       |
+| ---------------- | ----------------------------------------------------------------------------- |
+| `role-not-owned` | `enabledRoles` does not include this role. Devices are not even looked up     |
+| `no-sensor`      | No node reports for this role at all — a configuration gap                    |
+| `sensor-stale`   | Sensors existed and went quiet, and the rule says `onStale: "hold"`           |
+| `stale-failsafe` | Sensors went quiet, and the rule says `onStale: "on"` or `"off"` — so it does |
+| `dead-band`      | Inside the hysteresis band; changing state here is what causes cycling        |
 
-`sensor-stale` is separate from `no-sensor` precisely so it can shout. Both hold last state, but only
-one of them is an incident.
+`onStale` is **required on every rule**, not defaulted: what a heater does when its thermometer dies
+is a decision somebody has to have made, per environment. The greenhouse holds, because failing the
+burner off can freeze the crop and forcing it on can cook it. The pumphouse says `on`, because a
+heater left running costs electricity and a heater left off costs the pipes. Either way a stale role
+logs at ERROR and raises the banner — `sensor-stale` is separate from `no-sensor` precisely so it can
+shout.
 
 ## ⚠ The porting landmine
 
@@ -143,8 +206,11 @@ six-month-old reading resolving with _its own_ offset.
   defaults a missing CO2 to `0` inverts a safety behaviour into a hazard.
 - **The night branch must not read CO2 at all.** A CO2 ceiling or a stale-CO2 guard applied
   globally would shut the heat off on a cold night. See [Safety](Safety.md).
-- **A stale sensor holds last state**, logs at ERROR, and raises a banner. It does not fail
-  everything off, and it does not force heat on. A human decides.
+- **What a stale sensor does is the rule's `onStale`.** The greenhouse holds last state and a
+  human decides; the pumphouse turns heat on. Both log at ERROR and raise the banner.
+- **Postgres reorders jsonb keys**, so the order of the `rules` object is meaningless. Roles are
+  always evaluated and reported in the engine's `ROLE_ORDER`, and a new role must be added there —
+  a spec fails if one is missing.
 - **`role` is what automation binds to, not the name.** The old system resolved devices by display
   name (`'Lights'`, `'CO2 Generator'`), so renaming a device in the UI silently disabled its rule.
 - **Roles are not unique.** Every device sharing a `(zone, role)` gets the same decision. Do not add
@@ -187,9 +253,9 @@ overshoot the real oscillation is nearer **1360–1610** than 1400–1500.
 
 ## When to update this file
 
-- A threshold gains or loses a dead band
-
-- A threshold changes (and it changes in the zone's `rules_config`, not in code)
-- A rule body changes, or a fourth rule appears
+- A setpoint gains or loses a dead band
+- A setpoint changes (and it changes in the zone's `rules_config`, not in code)
+- A rule kind changes, or a new kind joins the menu
+- A role is added
 - The sensor policy gains a `source` option
 - A new deliberate divergence from the Python behaviour is made

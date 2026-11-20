@@ -14,6 +14,7 @@ import { MatCardModule } from '@angular/material/card';
 import { RouterLink } from '@angular/router';
 import {
   GAUGE_METRICS,
+  sensorKey,
   type GaugeMetricKey,
   type DayNightStats,
   type Device,
@@ -24,6 +25,7 @@ import {
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import { Gauge } from '../../shared/gauge/gauge';
+import { metricsFor, nodeMetrics } from '../../shared/metrics';
 
 /**
  * How often the statistics are re-queried. Slow on purpose: a min or max a
@@ -84,14 +86,21 @@ interface MetricBlock {
     <mat-card appearance="outlined">
       <mat-card-header><mat-card-title>Now</mat-card-title></mat-card-header>
       <mat-card-content>
-        @if (reading(); as r) {
-          <div class="gauges">
-            <temp-gauge metricKey="temperature" [value]="r.temperature" />
-            <temp-gauge metricKey="humidity" [value]="r.humidity" />
-            <temp-gauge metricKey="co2" [value]="r.co2" />
-          </div>
-          <p class="sub taken">Taken {{ r.createdAt | date: 'medium' }}</p>
-        } @else {
+        @for (s of sensors(); track s.key) {
+          <section class="sensor">
+            @if (sensors().length > 1) {
+              <h3 class="sensor__name">{{ s.reading.sensorId }}</h3>
+            }
+            <div class="gauges">
+              @for (metric of s.metrics; track metric) {
+                <temp-gauge [metricKey]="metric" [value]="s.reading[metric]" />
+              }
+            </div>
+            <p class="sub taken">
+              Taken {{ s.reading.createdAt | date: 'medium' }}
+            </p>
+          </section>
+        } @empty {
           <p>No readings from this node.</p>
         }
       </mat-card-content>
@@ -250,6 +259,14 @@ interface MetricBlock {
       margin-top: 1rem;
       margin-bottom: 0;
     }
+    .sensor + .sensor {
+      margin-top: 1.25rem;
+    }
+    .sensor__name {
+      margin: 0 0 0.25rem;
+      font-size: 0.95rem;
+      font-weight: 500;
+    }
     .relays {
       list-style: none;
       margin: 0;
@@ -396,13 +413,27 @@ export class NodeDetail {
     () => this.nodes().find((n) => n.slug === this.slug()) ?? null,
   );
 
-  /** The socket patches what the API established, never replaces it. */
-  protected readonly reading = computed<Reading | null>(
-    () =>
-      this.realtime.readings()[this.slug()] ??
-      this.latest().find((r) => r.nodeId === this.slug()) ??
-      null,
-  );
+  /**
+   * The latest reading of each sensor on this node. The socket patches what
+   * the API established, never replaces it.
+   */
+  protected readonly sensors = computed(() => {
+    const merged = new Map<string, Reading>();
+    for (const r of this.latest()) {
+      if (r.nodeId === this.slug()) merged.set(sensorKey(r), r);
+    }
+    for (const [key, r] of Object.entries(this.realtime.readings())) {
+      if (r.nodeId === this.slug()) merged.set(key, r);
+    }
+    const node = this.node();
+    return [...merged.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, reading]) => ({
+        key,
+        reading,
+        metrics: metricsFor(reading, node),
+      }));
+  });
 
   /** The socket patches what the API established, never replaces it. */
   protected readonly devices = computed<Device[]>(() => {
@@ -418,27 +449,27 @@ export class NodeDetail {
     // looked for and it belongs at the top.
     const segments = [...(this.stats()?.periods ?? [])].reverse();
     if (segments.length === 0) return [];
-    return (['temperature', 'humidity', 'co2'] as GaugeMetricKey[]).map(
-      (key) => {
-        const metric = GAUGE_METRICS[key];
-        return {
-          key,
-          label: metric.label,
-          unit: metric.unit,
-          digits: `1.${metric.decimals}-${metric.decimals}`,
-          periods: segments.map((seg) => ({
-            period: periodLabel(seg),
-            span: periodSpan(seg),
-            inProgress: seg.inProgress,
-            min: seg.stats.min[key]?.[key] ?? null,
-            minAt: seg.stats.min[key]?.createdAt ?? null,
-            max: seg.stats.max[key]?.[key] ?? null,
-            maxAt: seg.stats.max[key]?.createdAt ?? null,
-            average: seg.stats.average[key],
-          })),
-        };
-      },
-    );
+    // A pipe-probe node has no humidity: a block of dashes would read as a
+    // broken sensor rather than one that was never there.
+    return nodeMetrics(this.node()).map((key) => {
+      const metric = GAUGE_METRICS[key];
+      return {
+        key,
+        label: metric.label,
+        unit: metric.unit,
+        digits: `1.${metric.decimals}-${metric.decimals}`,
+        periods: segments.map((seg) => ({
+          period: periodLabel(seg),
+          span: periodSpan(seg),
+          inProgress: seg.inProgress,
+          min: seg.stats.min[key]?.[key] ?? null,
+          minAt: seg.stats.min[key]?.createdAt ?? null,
+          max: seg.stats.max[key]?.[key] ?? null,
+          maxAt: seg.stats.max[key]?.createdAt ?? null,
+          average: seg.stats.average[key],
+        })),
+      };
+    });
   });
 
   private readonly decimal = new DecimalPipe('en-US');

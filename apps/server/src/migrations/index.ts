@@ -11,3 +11,6 @@ export { AddNodeBootId1788923106173 } from './1788923106173-AddNodeBootId';
 export { ScopeReadingDedupeToBoot1788925934987 } from './1788925934987-ScopeReadingDedupeToBoot';
 export { AddCo2DeadBand1789087500000 } from './1789087500000-AddCo2DeadBand';
 export { AddPinTransitions1789170000000 } from './1789170000000-AddPinTransitions';
+export { RuleKindsPerRole1794975900000 } from './1794975900000-RuleKindsPerRole';
+export { AddHeatingRoles1794976900000 } from './1794976900000-AddHeatingRoles';
+export { HumidityIsOptional1794977000000 } from './1794977000000-HumidityIsOptional';

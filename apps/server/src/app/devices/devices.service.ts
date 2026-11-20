@@ -183,6 +183,24 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       rulesEnabled: dto.rulesEnabled ?? true,
       role: dto.role ?? null,
     } as Partial<DeviceEntity>);
+
+    // Start from what the relay is doing, not from "off". The node reported
+    // this pin before the device existed, so `reconcile` never saw it - and on
+    // a fail-to-on node (patji, 2026-11-18) that left a running heater recorded
+    // as off, with every rule tick answered "already off". Same verdict as
+    // `reconcile`; logged as seeding, because nothing has diverged yet.
+    const report = this.hardware.lastPinReport(node.slug, dto.gpio);
+    if (report) {
+      const verdict = reconcilePinState(row, report, this.clock.now());
+      if (verdict.action === 'correct') {
+        Object.assign(row, correctionPatch(verdict));
+        this.logger.log(
+          `${row.name} starts ${verdict.hardwareOn ? 'ON' : 'OFF'}: ` +
+            `${node.slug} pin ${dto.gpio} reported level ${String(report.level)}`,
+        );
+      }
+    }
+
     const saved = await this.devices.save(row);
     saved.node = node;
     return this.toDto(saved);
