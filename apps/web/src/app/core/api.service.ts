@@ -1,6 +1,7 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
+import { buildRequestContext, type RequestOptions } from './background-request';
 import type {
   AdmitNodePayload,
   DayNightStats,
@@ -27,8 +28,10 @@ export class ApiService {
 
   // ------------------------------------------------------------------ nodes
 
-  nodes(): Observable<Node[]> {
-    return this.http.get<Node[]>(`${this.base}/nodes`);
+  nodes(options: RequestOptions = {}): Observable<Node[]> {
+    return this.http.get<Node[]>(`${this.base}/nodes`, {
+      context: buildRequestContext(options),
+    });
   }
 
   admitNode(id: string, payload: AdmitNodePayload = {}): Observable<Node> {
@@ -41,8 +44,10 @@ export class ApiService {
 
   // ---------------------------------------------------------------- devices
 
-  devices(): Observable<Device[]> {
-    return this.http.get<Device[]>(`${this.base}/devices`);
+  devices(options: RequestOptions = {}): Observable<Device[]> {
+    return this.http.get<Device[]>(`${this.base}/devices`, {
+      context: buildRequestContext(options),
+    });
   }
 
   turnOn(id: string): Observable<Device> {
@@ -66,8 +71,10 @@ export class ApiService {
 
   // --------------------------------------------------------------- readings
 
-  latestReadings(): Observable<Reading[]> {
-    return this.http.get<Reading[]>(`${this.base}/readings/latest`);
+  latestReadings(options: RequestOptions = {}): Observable<Reading[]> {
+    return this.http.get<Reading[]>(`${this.base}/readings/latest`, {
+      context: buildRequestContext(options),
+    });
   }
 
   readings(query: ReadingsQuery = {}): Observable<Reading[]> {
@@ -94,15 +101,21 @@ export class ApiService {
 
   // ------------------------------------------------------------------ zones
 
-  fetchZones(): Observable<Zone[]> {
-    return this.http.get<Zone[]>(`${this.base}/zones`);
+  fetchZones(options: RequestOptions = {}): Observable<Zone[]> {
+    return this.http.get<Zone[]>(`${this.base}/zones`, {
+      context: buildRequestContext(options),
+    });
   }
 
   // ------------------------------------------------------------------ rules
 
-  fetchLatestRulesCycle(): Observable<RulesCycle | null> {
+  fetchLatestRulesCycle(
+    options: RequestOptions = {},
+  ): Observable<RulesCycle | null> {
     return this.http
-      .get<{ cycle: RulesCycle | null }>(`${this.base}/rules/latest-cycle`)
+      .get<{ cycle: RulesCycle | null }>(`${this.base}/rules/latest-cycle`, {
+        context: buildRequestContext(options),
+      })
       .pipe(map((body) => body.cycle));
   }
 

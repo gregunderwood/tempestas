@@ -445,13 +445,11 @@ function findRolesDecidedByProbes(
   evaluation: RulesEvaluation | null,
 ): [DeviceRole, ClimateSample][] {
   if (!evaluation) return [];
-  return enabledRoles.flatMap((role) => {
+  return enabledRoles.flatMap((role): [DeviceRole, ClimateSample][] => {
     const climate = evaluation.climateByRole[role];
     const isDecidedByProbes =
       climate !== undefined && !evaluation.staleRoles.includes(role);
-    return isDecidedByProbes
-      ? [[role, climate] as [DeviceRole, ClimateSample]]
-      : [];
+    return isDecidedByProbes ? [[role, climate]] : [];
   });
 }
 

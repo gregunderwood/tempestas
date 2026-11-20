@@ -3,6 +3,7 @@ import { inject } from '@angular/core';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { catchError, throwError } from 'rxjs';
 import { ApiErrorCode, type ApiError } from '@tempestas/domain';
+import { IS_BACKGROUND_REQUEST } from './background-request';
 
 /**
  * One place that turns a failed request into something the operator can see.
@@ -18,10 +19,13 @@ export const apiErrorInterceptor: HttpInterceptorFn = (request, next) => {
 
   return next(request).pipe(
     catchError((error: HttpErrorResponse) => {
-      snackBar.open(messageFor(error), 'Dismiss', {
-        duration: durationFor(error),
-        panelClass: 'tempestas-error-snack',
-      });
+      // A background retry fails every few seconds while the Pi is down; the page already says so.
+      if (!request.context.get(IS_BACKGROUND_REQUEST)) {
+        snackBar.open(messageFor(error), 'Dismiss', {
+          duration: durationFor(error),
+          panelClass: 'tempestas-error-snack',
+        });
+      }
       return throwError(() => error);
     }),
   );

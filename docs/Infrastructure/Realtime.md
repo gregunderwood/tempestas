@@ -61,13 +61,16 @@ The zones page also flags any evaluation more than a minute old.
 devices from the API and patches them from the socket.
 
 Devices, readings, the rules cycle, and the zones page's zones and nodes are fetched through
-`injectLiveSource`. It times a request out after 15 s, tries a failed request again every 10 s, and
-**fetches again on every reconnect**, so a change made while the browser was offline is seen. A
-response to an older request never overwrites a newer one, and a request still running when its
-page closes is cancelled. It reports each source as `loading`, `loaded`, `out-of-date` (the last
-refresh failed; the previous response is kept) or `failed`. A rules cycle pushed over the socket
-counts as loaded, because each one is complete; pushed readings do not, because each covers one
-sensor.
+`injectLiveSource`. It times a request out after 15 s and **fetches again on every reconnect**, so a
+change made while the browser was offline is seen. A failed request is tried again after 10 s,
+doubling to at most a minute, and the wait resets on success. Retries and reconnect refetches are
+background requests: the error snackbar skips them, because the page already reports the failure
+and a retry every few seconds would keep the snackbar up for good.
+
+A response to an older request never overwrites a newer one, and a request still running when its
+page closes is cancelled. Each source is `loading`, `loaded`, `out-of-date` (the last refresh
+failed; the previous response is kept) or `failed`. A rules cycle pushed over the socket counts as
+loaded, because each one is complete; pushed readings do not, because each covers one sensor.
 
 The client keeps the newest push **per device**, with when it arrived (`RealtimeService.devicePushes`).
 `injectLiveDevices` applies every push received after its request was sent, so two devices switched

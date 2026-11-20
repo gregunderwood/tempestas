@@ -22,7 +22,7 @@ export function injectLiveRulesCycle(): LiveRulesCycle {
   const api = inject(ApiService);
   const realtime = inject(RealtimeService);
   const source = injectLiveSource(
-    () => api.fetchLatestRulesCycle(),
+    (options) => api.fetchLatestRulesCycle(options),
     () => realtime.latestRulesCycle() !== null,
   );
   return {
