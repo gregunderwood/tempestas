@@ -11,7 +11,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
-import { fetchOnce, type RequestState } from '../../core/fetch-once';
+import { injectLiveSource, type SourceState } from '../../core/live-source';
 import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
 import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
@@ -22,7 +22,7 @@ const CLOCK_TICK_MILLISECONDS = 1_000;
 
 interface NamedSource {
   name: string;
-  requestState: Signal<RequestState>;
+  sourceState: Signal<SourceState>;
 }
 
 @Component({
@@ -32,21 +32,22 @@ interface NamedSource {
   template: `
     <h1>Zones</h1>
 
-    @if (failedSources().length > 0) {
-      <mat-card appearance="outlined">
-        <mat-card-content
-          ><p class="alert">
-            Could not load the {{ failedSources().join(', ') }}.
-          </p></mat-card-content
-        >
-      </mat-card>
-    } @else if (isLoading()) {
-      <p class="muted">Loading zones…</p>
-    } @else if (cards().length === 0) {
-      <mat-card appearance="outlined">
-        <mat-card-content><p>No zones yet.</p></mat-card-content>
-      </mat-card>
-    }
+    <div class="page-status" aria-live="polite">
+      @if (failedSources().length > 0) {
+        <p class="alert">
+          Could not load the {{ failedSources().join(', ') }}.
+        </p>
+      } @else if (isLoading()) {
+        <p class="muted">Loading zones…</p>
+      } @else if (outOfDateSources().length > 0) {
+        <p class="alert">
+          Could not refresh the {{ outOfDateSources().join(', ') }}; what
+          follows may be out of date.
+        </p>
+      } @else if (cards().length === 0) {
+        <p>No zones yet.</p>
+      }
+    </div>
 
     <div class="zones">
       @for (zone of cards(); track zone.id) {
@@ -193,6 +194,7 @@ interface NamedSource {
                             class="bar__offscale bar__offscale--{{
                               marker.offScale
                             }}"
+                            [class.bar__offscale--stale]="marker.isStale"
                             aria-hidden="true"
                             >{{ marker.offScale === 'high' ? '▶' : '◀' }}</span
                           >
@@ -423,6 +425,9 @@ interface NamedSource {
       line-height: 1;
       color: var(--mat-sys-on-surface);
     }
+    .bar__offscale--stale {
+      opacity: 0.5;
+    }
     .bar__offscale--high {
       right: 2px;
     }
@@ -538,31 +543,33 @@ interface NamedSource {
 export class ZonesPage {
   private readonly api = inject(ApiService);
 
-  private readonly zones = fetchOnce(this.api.fetchZones());
-  private readonly nodes = fetchOnce(this.api.nodes());
+  private readonly zones = injectLiveSource(() => this.api.fetchZones());
+  private readonly nodes = injectLiveSource(() => this.api.nodes());
   private readonly cycle = injectLiveRulesCycle();
   private readonly readings = injectLiveReadings();
   private readonly devices = injectLiveDevices();
   private readonly now = signal(Date.now());
 
   private readonly sources: NamedSource[] = [
-    { name: 'zones', requestState: this.zones.requestState },
-    { name: 'nodes', requestState: this.nodes.requestState },
-    { name: 'devices', requestState: this.devices.requestState },
-    { name: 'readings', requestState: this.readings.requestState },
-    { name: 'rules cycle', requestState: this.cycle.requestState },
+    { name: 'zones', sourceState: this.zones.sourceState },
+    { name: 'nodes', sourceState: this.nodes.sourceState },
+    { name: 'devices', sourceState: this.devices.sourceState },
+    { name: 'readings', sourceState: this.readings.sourceState },
+    { name: 'rules cycle', sourceState: this.cycle.sourceState },
   ];
 
   protected readonly formatDuration = formatDuration;
 
   protected readonly failedSources = computed(() =>
-    this.sources
-      .filter((source) => source.requestState() === 'failed')
-      .map((source) => source.name),
+    this.nameSourcesIn('failed'),
   );
 
-  protected readonly isLoading = computed(() =>
-    this.sources.some((source) => source.requestState() === 'loading'),
+  protected readonly outOfDateSources = computed(() =>
+    this.nameSourcesIn('out-of-date'),
+  );
+
+  protected readonly isLoading = computed(
+    () => this.nameSourcesIn('loading').length > 0,
   );
 
   readonly cards = computed(() => {
@@ -570,9 +577,9 @@ export class ZonesPage {
       !this.isLoading() && this.failedSources().length === 0;
     if (!hasEverySource) return [];
     return buildZoneCards({
-      zones: this.zones.value() ?? [],
+      zones: this.zones.latest()?.response ?? [],
       cycle: this.cycle.cycle(),
-      nodes: this.nodes.value() ?? [],
+      nodes: this.nodes.latest()?.response ?? [],
       readings: this.readings.readings(),
       devices: this.devices.devices(),
       now: this.now(),
@@ -585,5 +592,11 @@ export class ZonesPage {
       CLOCK_TICK_MILLISECONDS,
     );
     inject(DestroyRef).onDestroy(() => clearInterval(clock));
+  }
+
+  private nameSourcesIn(state: SourceState): string[] {
+    return this.sources
+      .filter((source) => source.sourceState() === state)
+      .map((source) => source.name);
   }
 }

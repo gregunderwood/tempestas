@@ -1,12 +1,12 @@
 import { computed, inject, type Signal } from '@angular/core';
 import type { RulesCycle } from '@tempestas/domain';
 import { ApiService } from './api.service';
-import { fetchOnce, type RequestState } from './fetch-once';
+import { injectLiveSource, type SourceState } from './live-source';
 import { RealtimeService } from './realtime.service';
 
 export interface LiveRulesCycle {
   cycle: Signal<RulesCycle | null>;
-  requestState: Signal<RequestState>;
+  sourceState: Signal<SourceState>;
 }
 
 export function pickNewerCycle(
@@ -19,12 +19,19 @@ export function pickNewerCycle(
 }
 
 export function injectLiveRulesCycle(): LiveRulesCycle {
+  const api = inject(ApiService);
   const realtime = inject(RealtimeService);
-  const fetched = fetchOnce(inject(ApiService).fetchLatestRulesCycle());
+  const source = injectLiveSource(
+    () => api.fetchLatestRulesCycle(),
+    () => realtime.latestRulesCycle() !== null,
+  );
   return {
     cycle: computed(() =>
-      pickNewerCycle(realtime.latestRulesCycle(), fetched.value()),
+      pickNewerCycle(
+        realtime.latestRulesCycle(),
+        source.latest()?.response ?? null,
+      ),
     ),
-    requestState: fetched.requestState,
+    sourceState: source.sourceState,
   };
 }

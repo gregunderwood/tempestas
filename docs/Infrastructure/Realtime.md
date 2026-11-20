@@ -60,14 +60,18 @@ The zones page also flags any evaluation more than a minute old.
 `GET /api/devices`, and a cached copy replayed on connect could contradict it. A client renders
 devices from the API and patches them from the socket.
 
-The client keeps the newest push **per device**, with when it arrived (`RealtimeService.devicePushes`).
-`injectLiveDevices` fetches `GET /api/devices` and applies every push received after that request
-was sent, so two devices switched back to back both show, and a response never overwrites a newer
-push. Because nothing replays device state, it **refetches on every reconnect**: a relay switched
-while the browser was offline would otherwise show its old state until the page was reloaded.
+Every fetched source on the web — devices, readings, the rules cycle, zones, nodes — goes through
+`injectLiveSource`. It times a request out after 15 s and **fetches again on every reconnect**, so a
+change made while the browser was offline is seen, and a failed first load recovers on its own. A
+response to an older request never overwrites a newer one. It reports each source as `loading`,
+`loaded`, `out-of-date` (the last refresh failed; the previous response is kept) or `failed`, and
+counts readings or a cycle already pushed over the socket as loaded.
 
-`injectLiveReadings` keeps whichever reading per sensor is newer by `createdAt`, fetched or pushed,
-so a push cached before the socket dropped never hides a fresher fetch.
+The client keeps the newest push **per device**, with when it arrived (`RealtimeService.devicePushes`).
+`injectLiveDevices` applies every push received after its request was sent, so two devices switched
+back to back both show, and a response never overwrites a newer push. `injectLiveReadings` keeps
+whichever reading per sensor is newer by `createdAt`, so a push cached before the socket dropped
+never hides a fresher fetch.
 
 ## `system:status` is a safety feature
 

@@ -36,6 +36,13 @@ describe('mergeLatestReadings', () => {
     expect(temperaturesOf(merged)).toEqual([3]);
   });
 
+  it('takes the pushed reading when both are from the same moment', () => {
+    const merged = mergeLatestReadings([reading('pipes', 3)], {
+      'patji/pipes': reading('pipes', 4),
+    });
+    expect(temperaturesOf(merged)).toEqual([4]);
+  });
+
   it('keeps fetched sensors nothing was pushed for, and adds new ones', () => {
     const merged = mergeLatestReadings([reading('pipes', 3)], {
       'patji/air': reading('air', 7),

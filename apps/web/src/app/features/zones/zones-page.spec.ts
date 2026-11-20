@@ -32,19 +32,26 @@ interface RenderedPage {
 interface RenderOptions {
   zones?: Zone[];
   firstCycle?: RulesCycle | null;
-  failingRequest?: 'fetchZones' | 'nodes';
-  pendingRequest?: 'devices';
+  failingRequests?: ApiRequest[];
+  pendingRequests?: ApiRequest[];
 }
 
+type ApiRequest =
+  | 'fetchZones'
+  | 'nodes'
+  | 'devices'
+  | 'latestReadings'
+  | 'fetchLatestRulesCycle';
+
 function respondTo<Body>(
-  request: string,
+  request: ApiRequest,
   options: RenderOptions,
   body: Body,
 ): Observable<Body> {
-  if (options.failingRequest === request) {
+  if (options.failingRequests?.includes(request)) {
     return throwError(() => new Error('offline'));
   }
-  if (options.pendingRequest === request) return NEVER;
+  if (options.pendingRequests?.includes(request)) return NEVER;
   return of(body);
 }
 
@@ -66,8 +73,13 @@ function renderZonesPage(options: RenderOptions = {}): RenderedPage {
           fetchZones: () =>
             respondTo('fetchZones', options, options.zones ?? [PUMPHOUSE]),
           nodes: () => respondTo('nodes', options, [node('patji', 'z-pump')]),
-          fetchLatestRulesCycle: () => of(firstCycle),
-          latestReadings: () => of([probe('pipes', 17.5), probe('air', 19.4)]),
+          fetchLatestRulesCycle: () =>
+            respondTo('fetchLatestRulesCycle', options, firstCycle),
+          latestReadings: () =>
+            respondTo('latestReadings', options, [
+              probe('pipes', 17.5),
+              probe('air', 19.4),
+            ]),
           devices: () => respondTo('devices', options, [device(), heatTape()]),
         },
       },
@@ -125,7 +137,6 @@ describe('ZonesPage', () => {
 
   it('keeps every pushed device state, not only the newest', () => {
     const { page, realtime, render } = renderZonesPage();
-    vi.advanceTimersByTime(1);
     pushDevice(realtime, device({ isOn: true }));
     render();
     pushDevice(realtime, heatTape({ isOn: true }));
@@ -170,21 +181,64 @@ describe('ZonesPage', () => {
   });
 
   it('says it could not load the zones rather than that there are none', () => {
-    const { page } = renderZonesPage({ failingRequest: 'fetchZones' });
+    const { page } = renderZonesPage({ failingRequests: ['fetchZones'] });
     expect(page.textContent).toContain('Could not load the zones.');
     expect(page.textContent).not.toContain('No zones yet');
   });
 
   it('says which source failed rather than that a zone has no probes', () => {
-    const { page } = renderZonesPage({ failingRequest: 'nodes' });
+    const { page } = renderZonesPage({ failingRequests: ['nodes'] });
     expect(page.textContent).toContain('Could not load the nodes.');
     expect(page.textContent).not.toContain('No probes reporting');
   });
 
   it('waits for every source rather than saying a role has no device', () => {
-    const { page } = renderZonesPage({ pendingRequest: 'devices' });
+    const { page } = renderZonesPage({ pendingRequests: ['devices'] });
     expect(page.textContent).toContain('Loading zones…');
     expect(page.textContent).not.toContain('No device has this role');
+  });
+
+  it('names every source that failed together', () => {
+    const { page } = renderZonesPage({
+      failingRequests: ['nodes', 'latestReadings', 'fetchLatestRulesCycle'],
+    });
+    expect(page.textContent).toContain(
+      'Could not load the nodes, readings, rules cycle.',
+    );
+  });
+
+  it('draws from readings and a rules cycle pushed over the socket while their requests hang', () => {
+    const { page, realtime, render } = renderZonesPage({
+      pendingRequests: ['latestReadings', 'fetchLatestRulesCycle'],
+    });
+    expect(page.textContent).toContain('Loading zones…');
+    realtime.readings.set({ 'patji/pipes': probe('pipes', 17.5) });
+    realtime.latestRulesCycle.set(cycleOf([pumphouseEvaluation()]));
+    render();
+    expect(page.textContent).toContain('OFF · above setpoint');
+  });
+
+  it('recovers from a failed request when the socket reconnects', () => {
+    const options: RenderOptions = { failingRequests: ['devices'] };
+    const { page, realtime, render } = renderZonesPage(options);
+    expect(page.textContent).toContain('Could not load the devices.');
+    options.failingRequests = [];
+    realtime.reconnectCount.update((count) => count + 1);
+    render();
+    expect(page.textContent).not.toContain('Could not load');
+    expect(page.querySelectorAll('.device')).toHaveLength(2);
+  });
+
+  it('keeps showing devices but says so when refreshing them fails', () => {
+    const options: RenderOptions = {};
+    const { page, realtime, render } = renderZonesPage(options);
+    options.failingRequests = ['devices'];
+    realtime.reconnectCount.update((count) => count + 1);
+    render();
+    expect(page.textContent).toContain(
+      'Could not refresh the devices; what follows may be out of date.',
+    );
+    expect(page.querySelectorAll('.device')).toHaveLength(2);
   });
 
   it('names each zone in a heading above its rules', () => {
