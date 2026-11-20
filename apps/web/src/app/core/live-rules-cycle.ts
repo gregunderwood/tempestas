@@ -29,7 +29,7 @@ export function injectLiveRulesCycle(): LiveRulesCycle {
     cycle: computed(() =>
       pickNewerCycle(
         realtime.latestRulesCycle(),
-        source.latest()?.response ?? null,
+        source.latest()?.payload ?? null,
       ),
     ),
     sourceState: source.sourceState,
