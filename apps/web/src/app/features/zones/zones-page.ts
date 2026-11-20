@@ -3,7 +3,6 @@ import {
   Component,
   DestroyRef,
   computed,
-  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -15,10 +14,15 @@ import {
   type Device,
   type Node,
   type Reading,
-  type RulesEvaluation,
+  type RulesTick,
   type Zone,
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
+import {
+  NO_DEVICES,
+  withPushes,
+  type FetchedDevices,
+} from '../../core/device-pushes';
 import { RealtimeService } from '../../core/realtime.service';
 import { formatDuration, zoneCards } from './zone-view';
 
@@ -72,6 +76,19 @@ import { formatDuration, zoneCards } from './zone-view';
                 <span aria-hidden="true">&#9888;</span>
                 <strong>Not being evaluated.</strong> {{ zone.failure }}
               </p>
+            } @else if (zone.evaluationOld && zone.evaluatedAgoS !== null) {
+              <p class="alert" role="alert">
+                <span aria-hidden="true">&#9888;</span>
+                <strong
+                  >Rules last ran {{ age(zone.evaluatedAgoS) }} ago.</strong
+                >
+                What follows may no longer be true.
+              </p>
+            }
+            @for (problem of zone.problems; track $index) {
+              <p class="alert">
+                <span aria-hidden="true">&#9888;</span> {{ problem }}
+              </p>
             }
 
             <section class="probes" aria-label="Probes">
@@ -80,7 +97,7 @@ import { formatDuration, zoneCards } from './zone-view';
                 @for (p of zone.probes; track p.key) {
                   <li
                     class="probe"
-                    [class.probe--picked]="p.picked"
+                    [class.probe--picked]="p.tag"
                     [class.probe--quiet]="p.quiet"
                   >
                     <span class="probe__name">{{ p.label }}</span>
@@ -95,8 +112,8 @@ import { formatDuration, zoneCards } from './zone-view';
                         {{ age(p.ageS) }} ago
                       }
                     </span>
-                    @if (p.picked) {
-                      <span class="probe__tag">controlling</span>
+                    @if (p.tag) {
+                      <span class="probe__tag">{{ p.tag }}</span>
                     }
                   </li>
                 } @empty {
@@ -155,6 +172,11 @@ import { formatDuration, zoneCards } from './zone-view';
                   }
                 </header>
 
+                @if (rule.problem) {
+                  <p class="alert">
+                    <span aria-hidden="true">&#9888;</span> {{ rule.problem }}
+                  </p>
+                }
                 @for (bar of rule.bars; track bar.caption) {
                   <figure class="bar">
                     <figcaption>
@@ -200,7 +222,9 @@ import { formatDuration, zoneCards } from './zone-view';
                 @for (note of rule.notes; track $index) {
                   <p class="note">{{ note }}</p>
                 }
-                <p class="note">{{ rule.stale }}</p>
+                @if (rule.stale) {
+                  <p class="note">{{ rule.stale }}</p>
+                }
 
                 @if (rule.devices.length > 0) {
                   <ul class="devices" aria-label="Devices">
@@ -510,10 +534,14 @@ export class ZonesPage {
 
   private readonly zones = signal<Zone[]>([]);
   private readonly nodes = signal<Node[]>([]);
-  private readonly fetchedEvaluations = signal<RulesEvaluation[]>([]);
+  /** First paint only: the same message the socket pushes, failures included. */
+  private readonly fetchedTick = signal<RulesTick | null>(null);
   private readonly fetchedReadings = signal<Reading[]>([]);
-  /** The API's devices, with every pushed state applied on top - not only the newest. */
-  private readonly devices = signal<Device[]>([]);
+  private readonly fetchedDevices = signal<FetchedDevices>(NO_DEVICES);
+  /** Every push newer than the fetch, not only the newest one. */
+  private readonly devices = computed<Device[]>(() =>
+    withPushes(this.fetchedDevices(), this.realtime.devicePushes()),
+  );
   /** The page's only clock. Ages and cooldowns read it; nothing is fetched on it. */
   private readonly now = signal(Date.now());
 
@@ -528,10 +556,10 @@ export class ZonesPage {
   });
 
   readonly cards = computed(() => {
-    const tick = this.realtime.rulesTick();
+    const tick = newer(this.realtime.rulesTick(), this.fetchedTick());
     return zoneCards({
       zones: this.zones(),
-      evaluations: tick?.evaluations ?? this.fetchedEvaluations(),
+      evaluations: tick?.evaluations ?? [],
       failures: tick?.failingZones ?? [],
       nodes: this.nodes(),
       readings: this.readings(),
@@ -543,17 +571,14 @@ export class ZonesPage {
   constructor() {
     this.api.zones().subscribe((zones) => this.zones.set(zones));
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
-    this.api.lastEvaluation().subscribe((e) => this.fetchedEvaluations.set(e));
+    this.api.rulesTick().subscribe((t) => this.fetchedTick.set(t));
     this.api.latestReadings().subscribe((r) => this.fetchedReadings.set(r));
-    this.api.devices().subscribe((devices) => this.devices.set(devices));
-
-    effect(() => {
-      const pushed = this.realtime.deviceState();
-      if (!pushed) return;
-      this.devices.update((all) =>
-        all.map((d) => (d.id === pushed.id ? pushed : d)),
+    const requestedAt = Date.now();
+    this.api
+      .devices()
+      .subscribe((devices) =>
+        this.fetchedDevices.set({ devices, requestedAt }),
       );
-    });
 
     const timer = setInterval(() => this.now.set(Date.now()), 1_000);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
@@ -578,4 +603,11 @@ export class ZonesPage {
           { from: 0, width: pct(end) },
         ];
   }
+}
+
+/** Whichever cycle is more recent: the socket's, or the one fetched for first paint. */
+function newer(a: RulesTick | null, b: RulesTick | null): RulesTick | null {
+  if (!a) return b;
+  if (!b) return a;
+  return a.at >= b.at ? a : b;
 }

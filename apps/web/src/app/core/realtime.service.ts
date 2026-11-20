@@ -8,6 +8,7 @@ import {
   type RulesTick,
   type SystemStatus,
 } from '@tempestas/domain';
+import type { PushedDevice } from './device-pushes';
 
 /**
  * The socket feed, as signals.
@@ -25,8 +26,12 @@ export class RealtimeService implements OnDestroy {
   readonly readings = signal<Record<string, Reading>>({});
   readonly status = signal<SystemStatus | null>(null);
   readonly connected = signal(false);
-  /** The most recent device state pushed, for a screen to merge in. */
-  readonly deviceState = signal<Device | null>(null);
+  /**
+   * Every device state pushed, newest per device, with when it arrived. A map
+   * rather than "the latest one": two devices pushed back to back must both
+   * survive. Merge with `withPushes`.
+   */
+  readonly devicePushes = signal<ReadonlyMap<string, PushedDevice>>(new Map());
   /** The newest rules cycle - every zone's inputs and decisions. Replayed on connect. */
   readonly rulesTick = signal<RulesTick | null>(null);
 
@@ -48,7 +53,9 @@ export class RealtimeService implements OnDestroy {
       }));
     });
     this.socket.on(REALTIME_EVENTS.deviceState, (device: Device) => {
-      this.deviceState.set(device);
+      this.devicePushes.update((all) =>
+        new Map(all).set(device.id, { device, receivedAt: Date.now() }),
+      );
     });
     this.socket.on(REALTIME_EVENTS.systemStatus, (status: SystemStatus) => {
       this.status.set(status);

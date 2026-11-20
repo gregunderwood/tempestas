@@ -6,7 +6,13 @@ import {
 } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
-import { DeviceRole, type Device, type RulesTick } from '@tempestas/domain';
+import {
+  DeviceRole,
+  type Device,
+  type RulesTick,
+  type Zone,
+} from '@tempestas/domain';
+import type { PushedDevice } from '../../core/device-pushes';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import { ZonesPage } from './zones-page';
@@ -21,12 +27,33 @@ import {
 
 interface Live {
   rulesTick: WritableSignal<RulesTick | null>;
-  deviceState: WritableSignal<Device | null>;
+  devicePushes: WritableSignal<ReadonlyMap<string, PushedDevice>>;
 }
 
-function setup(): { el: HTMLElement; live: Live; render: () => void } {
+function push(live: Live, device: Device): void {
+  live.devicePushes.update((all) =>
+    new Map(all).set(device.id, { device, receivedAt: Date.now() }),
+  );
+}
+
+function setup(opts: { zones?: Zone[]; firstTick?: RulesTick | null } = {}): {
+  el: HTMLElement;
+  live: Live;
+  render: () => void;
+} {
   vi.setSystemTime(NOW);
-  const live: Live = { rulesTick: signal(null), deviceState: signal(null) };
+  const live: Live = {
+    rulesTick: signal(null),
+    devicePushes: signal(new Map()),
+  };
+  const firstTick =
+    opts.firstTick === undefined
+      ? {
+          at: NOW.toISOString(),
+          evaluations: [pumphouseEvaluation()],
+          failingZones: [],
+        }
+      : opts.firstTick;
   TestBed.configureTestingModule({
     imports: [ZonesPage],
     providers: [
@@ -35,9 +62,9 @@ function setup(): { el: HTMLElement; live: Live; render: () => void } {
       {
         provide: ApiService,
         useValue: {
-          zones: () => of([PUMPHOUSE]),
+          zones: () => of(opts.zones ?? [PUMPHOUSE]),
           nodes: () => of([node('patji', 'z-pump')]),
-          lastEvaluation: () => of([pumphouseEvaluation()]),
+          rulesTick: () => of(firstTick),
           latestReadings: () => of([probe('pipes', 17.5), probe('air', 19.4)]),
           devices: () =>
             of([
@@ -121,9 +148,10 @@ describe('ZonesPage', () => {
   // reverts the first. Here every push is kept.
   it('keeps every pushed device state, not only the newest', () => {
     const { el, live, render } = setup();
-    live.deviceState.set(device({ isOn: true }));
+    push(live, device({ isOn: true }));
     render();
-    live.deviceState.set(
+    push(
+      live,
       device({
         id: 'd-tape',
         name: 'Heat tape',
@@ -134,5 +162,37 @@ describe('ZonesPage', () => {
     );
     render();
     expect(el.querySelectorAll('.device--on')).toHaveLength(2);
+  });
+
+  // The page opened while the socket is still connecting: the first paint
+  // must already carry a zone the engine refused, not its last good decision.
+  it('shows a failing zone from first paint, before any socket message', () => {
+    const { el } = setup({
+      firstTick: {
+        at: NOW.toISOString(),
+        evaluations: [],
+        failingZones: [
+          { zoneSlug: 'pumphouse', reason: 'invalid rules_config' },
+        ],
+      },
+    });
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+      'invalid rules_config',
+    );
+    expect(el.textContent).not.toContain('OFF · above setpoint');
+  });
+
+  it('keeps rendering the other zones when one config cannot be drawn', () => {
+    const broken = {
+      ...PUMPHOUSE,
+      id: 'z-broken',
+      slug: 'broken',
+      displayName: 'Broken',
+      rulesConfig: null,
+    } as unknown as Zone;
+    const { el } = setup({ zones: [broken, PUMPHOUSE] });
+    expect(el.textContent).toContain('Broken');
+    expect(el.textContent).toContain("this zone's config cannot be drawn");
+    expect(el.textContent).toContain('OFF · above setpoint');
   });
 });

@@ -159,7 +159,7 @@ function setup(
         provide: RealtimeService,
         useValue: {
           readings: signal(opts.live ?? {}),
-          deviceState: signal(null),
+          devicePushes: signal(new Map()),
           status: signal(null),
           connected: signal(true),
         },

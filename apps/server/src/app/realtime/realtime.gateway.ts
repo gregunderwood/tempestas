@@ -89,12 +89,17 @@ export class RealtimeGateway
 
   /**
    * Cached and replayed, unlike device state: a rules cycle is a snapshot that
-   * the next one wholly replaces, so a replayed copy is at worst ten seconds
-   * old and never contradicts anything newer.
+   * the next one wholly replaces. A server that stops evaluating (demoted to
+   * follower) clears it, so a replayed copy is never older than the loop.
    */
   publishRulesTick(tick: RulesTick): void {
     this.lastTick = tick;
     this.emit(REALTIME_EVENTS.rulesEvaluation, tick);
+  }
+
+  /** Stop replaying a cycle this server no longer stands behind. */
+  clearRulesTick(): void {
+    this.lastTick = null;
   }
 
   connectedClients(): number {

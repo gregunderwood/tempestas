@@ -176,4 +176,18 @@ describe('RealtimeGateway rules ticks', () => {
       [REALTIME_EVENTS.rulesEvaluation, tick('2026-01-10T12:00:10.000Z')],
     ]);
   });
+
+  it('replays nothing once the cycle has been cleared', () => {
+    const gateway = new RealtimeGateway();
+    attach(gateway);
+    gateway.publishRulesTick(tick('2026-01-10T12:00:00.000Z'));
+    gateway.clearRulesTick();
+
+    const client = fakeClient();
+    gateway.handleConnection(client);
+    const replayed = (
+      client.emit as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((c) => c[0] === REALTIME_EVENTS.rulesEvaluation);
+    expect(replayed).toEqual([]);
+  });
 });
