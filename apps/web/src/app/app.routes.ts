@@ -19,6 +19,12 @@ export const appRoutes: Route[] = [
       import('./features/readings/readings-page').then((m) => m.ReadingsPage),
   },
   {
+    path: 'zones',
+    title: 'Zones - tempestas',
+    loadComponent: () =>
+      import('./features/zones/zones-page').then((m) => m.ZonesPage),
+  },
+  {
     path: 'devices',
     title: 'Devices - tempestas',
     loadComponent: () =>

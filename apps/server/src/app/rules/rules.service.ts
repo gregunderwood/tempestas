@@ -114,6 +114,14 @@ export class RulesService implements OnApplicationBootstrap {
       }
     }
 
+    this.realtime.publishRulesTick({
+      at: this.clock.now().toISOString(),
+      evaluations,
+      failingZones: [...this.failedZones].map(([zoneSlug, reason]) => ({
+        zoneSlug,
+        reason,
+      })),
+    });
     await this.publishStatus(evaluations);
     return evaluations;
   }
