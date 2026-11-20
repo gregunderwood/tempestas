@@ -3,6 +3,8 @@ import type { Repository } from 'typeorm';
 import {
   ApiErrorCode,
   DeviceRole,
+  type RulesCycle,
+  type RulesEvaluation,
   type ZoneRulesConfig,
 } from '@tempestas/domain';
 import { FixedClock } from '../common/clock';
@@ -136,12 +138,12 @@ function makeService(setup: Setup = {}) {
     counts: vi.fn().mockResolvedValue({ total: 2, online: 2, pending: 0 }),
   } as unknown as NodesService;
   const publishSystemStatus = vi.fn();
-  const publishRulesTick = vi.fn();
-  const clearRulesTick = vi.fn();
+  const publishRulesCycle = vi.fn();
+  const forgetRulesCycle = vi.fn();
   const realtime = {
     publishSystemStatus,
-    publishRulesTick,
-    clearRulesTick,
+    publishRulesCycle,
+    forgetRulesCycle,
   } as unknown as RealtimeGateway;
   const hardware = { isLeader: setup.isLeader ?? true } as {
     isLeader: boolean;
@@ -164,8 +166,8 @@ function makeService(setup: Setup = {}) {
     turnOff,
     findByRole,
     publishSystemStatus,
-    publishRulesTick,
-    clearRulesTick,
+    publishRulesCycle,
+    forgetRulesCycle,
     hardware,
     zoneRows,
   };
@@ -598,56 +600,46 @@ describe('a follower evaluates nothing', () => {
   });
 });
 
-// The zones page renders from this event alone after first paint, so it must
-// carry the whole cycle - and a zone that failed must be in it, not just absent.
-describe('rules tick fan-out', () => {
+function cycleOf(evaluations: RulesEvaluation[]): RulesCycle {
+  return { at: NOW.toISOString(), evaluations, failingZones: [] };
+}
+
+describe('publishing each rules cycle', () => {
   it('publishes every evaluation of the cycle in one message', async () => {
-    const { service, publishRulesTick } = makeService({
+    const { service, publishRulesCycle } = makeService({
       zones: [zone(), zone({ id: 'zone-2', slug: 'shed' })],
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
     });
     const evaluations = await service.evaluateAll();
 
-    expect(publishRulesTick).toHaveBeenCalledTimes(1);
-    expect(publishRulesTick).toHaveBeenCalledWith({
-      at: NOW.toISOString(),
-      evaluations,
-      failingZones: [],
-    });
+    expect(publishRulesCycle).toHaveBeenCalledTimes(1);
+    expect(publishRulesCycle).toHaveBeenCalledWith(cycleOf(evaluations));
   });
 
   it('names a zone that could not be evaluated, with the reason', async () => {
-    const { service, publishRulesTick } = makeService({
+    const { service, publishRulesCycle } = makeService({
       zones: [
         zone({ rulesConfig: rulesConfig({ timezone: 'Mars/Olympus_Mons' }) }),
       ],
     });
     await service.evaluateAll();
 
-    const tick = publishRulesTick.mock.calls[0][0];
-    expect(tick.evaluations).toEqual([]);
-    expect(tick.failingZones).toEqual([
+    const cycle = publishRulesCycle.mock.calls[0][0];
+    expect(cycle.evaluations).toEqual([]);
+    expect(cycle.failingZones).toEqual([
       { zoneSlug: 'greenhouse', reason: expect.stringMatching(/Mars/) },
     ]);
   });
-});
 
-describe('rules tick lifecycle', () => {
   it('serves the newest cycle for first paint', async () => {
     const { service } = makeService({
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
     });
-    expect(service.lastTick()).toBeNull();
+    expect(service.latestCycle()).toBeNull();
     const evaluations = await service.evaluateAll();
-    expect(service.lastTick()).toEqual({
-      at: NOW.toISOString(),
-      evaluations,
-      failingZones: [],
-    });
+    expect(service.latestCycle()).toEqual(cycleOf(evaluations));
   });
 
-  // Its slug is never evaluated again, so nothing would ever clear it: a
-  // phantom uncontrolled zone reported every ten seconds for good.
   it('forgets the failure of a zone that has since been deleted', async () => {
     const broken = zone({
       id: 'zone-broken',
@@ -656,31 +648,36 @@ describe('rules tick lifecycle', () => {
     });
     const { service, zoneRows } = makeService({ zones: [broken, zone()] });
     await service.evaluateAll();
-    expect(service.lastTick()?.failingZones.map((f) => f.zoneSlug)).toEqual([
-      'broken',
-    ]);
+    expect(
+      service.latestCycle()?.failingZones.map((failure) => failure.zoneSlug),
+    ).toEqual(['broken']);
 
     zoneRows.splice(0, 1);
     await service.evaluateAll();
-    expect(service.lastTick()?.failingZones).toEqual([]);
+    expect(service.latestCycle()?.failingZones).toEqual([]);
     expect(service.failingZones().has('broken')).toBe(false);
   });
 
-  // A demoted leader stops evaluating. Replaying its last cycle to every new
-  // browser would present hours-old decisions as current.
-  it('stops standing behind its last cycle once it is no longer the leader', async () => {
-    const { service, hardware, clearRulesTick } = makeService({
+  it('forgets its last cycle once it is no longer the leader', async () => {
+    const { service, hardware, forgetRulesCycle } = makeService({
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
     });
     await service.tick();
-    expect(service.lastTick()).not.toBeNull();
+    expect(service.latestCycle()).not.toBeNull();
 
     hardware.isLeader = false;
     await service.tick();
-    expect(service.lastTick()).toBeNull();
-    expect(clearRulesTick).toHaveBeenCalledTimes(1);
+    expect(service.latestCycle()).toBeNull();
+    expect(forgetRulesCycle).toHaveBeenCalledTimes(1);
 
     await service.tick();
-    expect(clearRulesTick).toHaveBeenCalledTimes(1);
+    expect(forgetRulesCycle).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes no cycle when a follower is asked to evaluate', async () => {
+    const { service, publishRulesCycle } = makeService({ isLeader: false });
+    await service.evaluateAll();
+    expect(publishRulesCycle).not.toHaveBeenCalled();
+    expect(service.latestCycle()).toBeNull();
   });
 });

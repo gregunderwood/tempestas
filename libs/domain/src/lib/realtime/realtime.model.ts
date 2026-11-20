@@ -1,7 +1,7 @@
 import type { Device } from '../devices/device.model';
 import type { DeviceRole } from '../devices/device.model';
 import type { Reading } from '../readings/reading.model';
-import type { RulesTick } from '../rules/rules.model';
+import type { RulesCycle } from '../rules/rules.model';
 
 /**
  * The socket.io contract to the browser.
@@ -13,7 +13,7 @@ export const REALTIME_EVENTS = {
   readingLatest: 'reading:latest',
   deviceState: 'device:state',
   systemStatus: 'system:status',
-  rulesEvaluation: 'rules:evaluation',
+  rulesCycle: 'rules:cycle',
 } as const;
 
 export type RealtimeEvent =
@@ -41,5 +41,5 @@ export interface RealtimePayloads {
   'reading:latest': Reading;
   'device:state': Device;
   'system:status': SystemStatus;
-  'rules:evaluation': RulesTick;
+  'rules:cycle': RulesCycle;
 }

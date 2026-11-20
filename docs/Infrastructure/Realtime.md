@@ -15,12 +15,12 @@ needs both, which is the whole reason for socket.io here.
 
 ## The events
 
-| Event              | Payload        | Emitted when                                            |
-| ------------------ | -------------- | ------------------------------------------------------- |
-| `reading:latest`   | `Reading`      | a sample is **persisted** — roughly every 10 s per node |
-| `device:state`     | `Device`       | a relay write succeeded, or `rulesEnabled` changed      |
-| `system:status`    | `SystemStatus` | once per rules evaluation cycle                         |
-| `rules:evaluation` | `RulesTick`    | once per rules evaluation cycle, on the leader only     |
+| Event            | Payload        | Emitted when                                            |
+| ---------------- | -------------- | ------------------------------------------------------- |
+| `reading:latest` | `Reading`      | a sample is **persisted** — roughly every 10 s per node |
+| `device:state`   | `Device`       | a relay write succeeded, or `rulesEnabled` changed      |
+| `system:status`  | `SystemStatus` | once per rules evaluation cycle                         |
+| `rules:cycle`    | `RulesCycle`   | once per rules evaluation cycle, on the leader only     |
 
 `REALTIME_EVENTS` and `RealtimePayloads` in `@tempestas/domain` are the contract; a client that
 imports them cannot mis-type a handler.
@@ -40,19 +40,19 @@ The timing is the interesting part, and it is the same discipline as everywhere 
   the relay never reached. This is the same ordering `drive()` uses for the database.
 - **`system:status` is one event per cycle, not per zone.** `staleRoles` is the union across zones,
   because a quiet sensor anywhere is worth surfacing everywhere.
-- **`rules:evaluation` is the whole cycle in one message**: every zone's evaluation (inputs,
+- **`rules:cycle` is the whole cycle in one message**: every zone's evaluation (inputs,
   decisions, what each device did) plus `failingZones`, the zones the engine refused and why. One
   message so a screen never shows two zones from different ticks, and so a zone that is not being
   evaluated - a heater nobody is controlling - is said in the same breath. Failures for zones that
-  no longer exist are dropped. `GET /api/rules/tick` returns the same message for first paint.
+  no longer exist are dropped. `GET /api/rules/latest-cycle` returns the same message for first paint.
 
 ## Replay on connect
 
 A new client immediately receives the last `reading:latest` **per sensor**, the last
-`system:status` and the last `rules:evaluation`, so a browser opening mid-cycle renders straight
+`system:status` and the last `rules:cycle`, so a browser opening mid-cycle renders straight
 away instead of showing an empty dashboard for ten seconds.
 
-The cached `rules:evaluation` is **cleared when the server stops being the leader**: a follower
+The cached `rules:cycle` is **cleared when the server stops being the leader**: a follower
 does not evaluate, and replaying the last cycle it ran would present old decisions as current.
 The zones page also flags any evaluation more than a minute old.
 
@@ -60,10 +60,10 @@ The zones page also flags any evaluation more than a minute old.
 `GET /api/devices`, and a cached copy replayed on connect could contradict it. A client renders
 devices from the API and patches them from the socket.
 
-The client keeps **every** push, per device, with when it arrived (`RealtimeService.devicePushes`),
-and `withPushes` applies each push newer than the page's `GET /api/devices` request. Keeping only
-the newest push lost the first of two devices switched back to back (#12); applying the response
-over a push that arrived before it showed an older state.
+The client keeps the newest push **per device**, with when it arrived (`RealtimeService.devicePushes`).
+`injectLiveDevices` fetches `GET /api/devices` and applies every push received after that request
+was sent, so two devices switched back to back both show, and a response never overwrites a newer
+push.
 
 ## `system:status` is a safety feature
 

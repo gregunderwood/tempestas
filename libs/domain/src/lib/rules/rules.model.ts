@@ -106,21 +106,13 @@ export interface RulesEvaluation {
   decisions: DecisionOutcome[];
 }
 
-/** A zone that could not be evaluated this cycle, and why. */
 export interface ZoneFailure {
   zoneSlug: string;
   reason: string;
 }
 
-/**
- * One rules cycle, pushed over the socket as `rules:evaluation`.
- *
- * The whole cycle in one message rather than one per zone, so a screen never
- * shows two zones from different ticks, and so a zone that failed to evaluate
- * is said in the same breath - a zone that is not being evaluated is a heater
- * nobody is controlling.
- */
-export interface RulesTick {
+/** Every zone in one message, so a screen never mixes zones from different cycles. */
+export interface RulesCycle {
   /** ISO-8601. */
   at: string;
   evaluations: RulesEvaluation[];
