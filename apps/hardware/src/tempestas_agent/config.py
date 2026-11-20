@@ -11,6 +11,7 @@ somebody could flip by accident.
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,9 +38,24 @@ class MqttConfig:
         return int(tail.split(":")[1]) if ":" in tail else 1883
 
 
+# A sensor id is an MQTT topic segment and the tail of a `sensor:<node>/<id>`
+# rule source. Narrower than MQTT allows, so it also reads well in a log line.
+SENSOR_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
+DS18B20_ROM = re.compile(r"^28-[0-9a-f]{12}$")
+SENSOR_KINDS = ("scd4x", "simulated", "world", "ds18b20")
+
+
+@dataclass(frozen=True)
+class ProbeConfig:
+    """One DS18B20, named by the ROM id it carries rather than by bus order."""
+
+    rom: str
+    sensor_id: str
+
+
 @dataclass(frozen=True)
 class SensorConfig:
-    kind: str = "scd4x"  # scd4x | simulated
+    kind: str = "scd4x"  # scd4x | simulated | world | ds18b20
     sensor_id: str = "scd4x-0"
     bus: int = 1
     address: int = 0x62
@@ -83,6 +99,12 @@ class SensorConfig:
     # because a 10-second window amplifies quantisation noise. 400 refuses
     # nothing on the clean day and 1.1% on a degraded one. Zero disables it.
     co2_max_change_ppm_per_min: float = 400.0
+    # ds18b20 only. Each probe becomes its own sensor; `sensor_id` above is
+    # unused for this kind, because there is no single sensor to name.
+    probes: tuple[ProbeConfig, ...] = ()
+    w1_root: str = "/sys/bus/w1/devices"
+    # A probe on a pipe cannot move this fast; a glitch can. Zero disables it.
+    temperature_max_change_c_per_min: float = 10.0
 
 
 @dataclass(frozen=True)
@@ -169,20 +191,32 @@ def load(path: str | Path | None = None, env: dict[str, str] | None = None) -> A
         co2_min_ppm=int(sensor_raw.get("co2_min_ppm", SensorConfig.co2_min_ppm)),
         co2_max_ppm=int(sensor_raw.get("co2_max_ppm", SensorConfig.co2_max_ppm)),
         automatic_self_calibration=bool(
-            sensor_raw.get(
-                "automatic_self_calibration", SensorConfig.automatic_self_calibration
-            )
+            sensor_raw.get("automatic_self_calibration", SensorConfig.automatic_self_calibration)
         ),
         co2_max_change_ppm_per_min=float(
+            sensor_raw.get("co2_max_change_ppm_per_min", SensorConfig.co2_max_change_ppm_per_min)
+        ),
+        probes=_probes(sensor_raw.get("probes", [])),
+        w1_root=sensor_raw.get("w1_root", SensorConfig.w1_root),
+        temperature_max_change_c_per_min=float(
             sensor_raw.get(
-                "co2_max_change_ppm_per_min", SensorConfig.co2_max_change_ppm_per_min
+                "temperature_max_change_c_per_min",
+                SensorConfig.temperature_max_change_c_per_min,
             )
         ),
     )
-    if sensor.kind not in {"scd4x", "simulated", "world"}:
+    if sensor.kind not in SENSOR_KINDS:
+        kinds = ", ".join(f'"{k}"' for k in SENSOR_KINDS)
+        raise ConfigError(f'sensor.kind must be one of {kinds}, not "{sensor.kind}"')
+    if sensor.kind == "ds18b20" and not sensor.probes:
         raise ConfigError(
-            f'sensor.kind must be "scd4x", "simulated" or "world", not "{sensor.kind}"'
+            'sensor.kind = "ds18b20" needs at least one [[sensor.probes]] '
+            "with a rom and a sensor_id"
         )
+    if sensor.probes and sensor.kind != "ds18b20":
+        # Probes on an SCD4x node would be silently ignored, and an ignored
+        # pipe probe is a pumphouse nobody is measuring.
+        raise ConfigError(f'sensor.probes is only read for kind "ds18b20", not "{sensor.kind}"')
     if sensor.co2_min_ppm >= sensor.co2_max_ppm:
         raise ConfigError(
             f"sensor.co2_min_ppm ({sensor.co2_min_ppm}) must be below "
@@ -190,8 +224,9 @@ def load(path: str | Path | None = None, env: dict[str, str] | None = None) -> A
         )
     if sensor.sample_interval_s < 5:
         # The SCD4x produces a reading every 5s in periodic mode; asking faster
-        # just returns the same one and burns I2C traffic.
-        raise ConfigError("sensor.sample_interval_s below 5s is pointless for an SCD4x")
+        # just returns the same one and burns I2C traffic. A DS18B20 takes
+        # 750ms per probe per conversion, so three of them need most of 3s.
+        raise ConfigError("sensor.sample_interval_s below 5s is pointless for these sensors")
 
     world_raw = raw.get("world", {})
     world = WorldConfig(
@@ -230,3 +265,35 @@ def load(path: str | Path | None = None, env: dict[str, str] | None = None) -> A
         world=world,
         deadman_s=float(raw.get("deadman_s", 30.0)),
     )
+
+
+def _probes(raw) -> tuple[ProbeConfig, ...]:
+    """Parse `[[sensor.probes]]`, refusing anything ambiguous about which is which."""
+    if not isinstance(raw, list):
+        raise ConfigError("sensor.probes must be a list of [[sensor.probes]] tables")
+    probes = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"sensor.probes[{i}] must be a table")
+        rom = str(entry.get("rom", "")).strip().lower()
+        sensor_id = str(entry.get("sensor_id", "")).strip()
+        if not DS18B20_ROM.match(rom):
+            raise ConfigError(
+                f'sensor.probes[{i}].rom "{rom}" is not a DS18B20 ROM id like 28-0123456789ab '
+                "(read it from /sys/bus/w1/devices/)"
+            )
+        if not SENSOR_ID.match(sensor_id):
+            raise ConfigError(
+                f'sensor.probes[{i}].sensor_id "{sensor_id}" must be letters, digits, '
+                '"_", "." or "-"'
+            )
+        probes.append(ProbeConfig(rom=rom, sensor_id=sensor_id))
+
+    # A duplicated ROM publishes one probe under two names; a duplicated name
+    # merges two probes into one sensor whose readings alternate between them.
+    for field_name in ("rom", "sensor_id"):
+        values = [getattr(p, field_name) for p in probes]
+        dupes = sorted({v for v in values if values.count(v) > 1})
+        if dupes:
+            raise ConfigError(f"sensor.probes repeats a {field_name}: {dupes}")
+    return tuple(probes)

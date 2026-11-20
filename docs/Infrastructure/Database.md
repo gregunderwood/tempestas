@@ -30,8 +30,9 @@ FK creation order is `zones → nodes → devices → sensor_readings`.
 
 ### `zones`
 
-The airspace, and the owner of `rules_config` (jsonb): thresholds, `enabledRoles`, and the per-role
-`sensorPolicy`. Operational policy that controls a heater lives server-side as data, never as consts
+The airspace, and the owner of `rules_config` (jsonb): a rule per role chosen from a fixed menu of
+kinds, `enabledRoles`, the `sensorPolicy` default, and the zone's `daylight` window — see
+[Rules and Climate](../Rules%20and%20Climate.md#a-zones-rules). It is validated on every evaluation. Operational policy that controls a heater lives server-side as data, never as consts
 in the browser bundle where a stale cache could disagree about a setpoint.
 
 ### `nodes`

@@ -19,6 +19,7 @@ commit rather than becoming a two-repo dance that will eventually be done wrong 
 - [../../apps/hardware/src/tempestas_agent/contract.py](../../apps/hardware/src/tempestas_agent/contract.py) — the Python mirror of the MQTT contract
 - [../../apps/hardware/src/tempestas_agent/agent.py](../../apps/hardware/src/tempestas_agent/agent.py) — announce, sample, judge commands, dead-man
 - [../../apps/hardware/src/tempestas_agent/sensor.py](../../apps/hardware/src/tempestas_agent/sensor.py) — raw SCD4x over I²C, and the closed-loop simulator
+- [../../apps/hardware/src/tempestas_agent/ds18b20.py](../../apps/hardware/src/tempestas_agent/ds18b20.py) — DS18B20 probes over the kernel's 1-Wire sysfs
 - [../../apps/hardware/src/tempestas_agent/gpio.py](../../apps/hardware/src/tempestas_agent/gpio.py) — the relay backends: `NoGpio`, `SimulatedGpio`, `LgpioBackend`
 - [../../apps/hardware/agent.example.toml](../../apps/hardware/agent.example.toml) — every option, with the reasoning
 
@@ -215,6 +216,31 @@ every configuration command returns `Errno 121 Remote I/O error`. So all configu
 read-back of it** has to happen inside the idle window at startup, which is why
 `applied_offset_c` is an attribute captured during `start()` rather than a method you can call
 later. `tests/test_sensor.py` pins that ordering with a fake bus that records command words.
+
+## DS18B20 probes
+
+patji, the pumphouse node, reads two or three waterproof DS18B20s on one 1-Wire bus (BCM4, the
+`w1-gpio` overlay) through `/sys/bus/w1/devices/<rom>/w1_slave`. A backend is a **sensor set**:
+it lists its sensors and returns a reading per sensor, and each probe is published as its own
+`sample` on its own topic. The single-sensor backends are wrapped by `SingleSensor` and did not
+change.
+
+- **Pinned by ROM id, never by bus order.** A probe on the bus that is not configured is logged
+  and ignored, so plugging one in cannot change what the rules read until somebody names it.
+- **Three plausible numbers that are not measurements are refused by name:** a CRC the kernel
+  marks `NO`, `85.000` (the power-on reset value, returned with a valid CRC after a brown-out),
+  and an **all-zero scratchpad**. That last one passes the CRC, because the CRC of zeros is
+  zero, and decodes as exactly 0 °C. A shorted data line reads that way, and it is a believable
+  pumphouse temperature.
+- Range -40 to 60 °C, and `RateGuard` per probe at 10 °C/min.
+- **A refused probe is absent, not published invalid.** The others still publish. The server's
+  `min` carries on with what remains, and `/api/health` names the probe that went quiet.
+- A failing probe logs once when it starts failing and once when it recovers, not every cycle.
+- CO2 and humidity go out as `valid: false, reason: "NOT_MEASURED"`, so the contract is
+  unchanged. `capabilities.sensors` declares `metrics: ["temperature"]` per probe, which is what
+  keeps empty dials off the dashboard.
+- A missing bus is logged at ERROR and is not fatal. The agent still owns the heater relays, and
+  their failsafe does not need a thermometer.
 
 ## Pitfalls
 

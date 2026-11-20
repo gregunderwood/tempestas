@@ -26,6 +26,7 @@ import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';
 import { resolveClimate, type NodeSample } from './climate-resolver';
 import { evaluateRules } from './rules.engine';
+import { parseZoneRulesConfig } from './rules-config';
 import { localTimeLabel, minutesSinceMidnight } from './local-time';
 
 /** 10 s, which is one evaluation per sensor sample - 8,640 a day. */
@@ -47,6 +48,7 @@ export class RulesService implements OnApplicationBootstrap {
   /** `${zoneId}:${role}` -> `${desired}:${reason}`, so repeats stay silent. */
   private readonly lastDecisions = new Map<string, string>();
   private readonly lastOwnership = new Map<string, string>();
+  private readonly failedZones = new Map<string, string>();
   private running = false;
 
   constructor(
@@ -64,7 +66,10 @@ export class RulesService implements OnApplicationBootstrap {
   /** Ownership is logged once at startup, and after that only when it changes. */
   async onApplicationBootstrap(): Promise<void> {
     for (const zone of await this.zones.find()) {
-      this.logOwnership(zone);
+      // A zone that does not parse is skipped here rather than crashing the
+      // bootstrap: its first evaluation reports it, loudly, ten seconds later.
+      const parsed = parseZoneRulesConfig(zone.rulesConfig);
+      if (parsed.ok) this.logOwnership(zone, parsed.config.enabledRoles);
     }
   }
 
@@ -95,10 +100,16 @@ export class RulesService implements OnApplicationBootstrap {
     for (const zone of zones) {
       try {
         evaluations.push(await this.evaluateZone(zone));
+        this.failedZones.delete(zone.slug);
       } catch (err: unknown) {
         // One zone with a hand-edited `rules_config` must not stop the others.
+        // Recorded as well as logged: a zone that is not being evaluated is
+        // a heater nobody is controlling, and the log is not where anybody
+        // looks first.
+        const message = err instanceof Error ? err.message : String(err);
+        this.failedZones.set(zone.slug, message);
         this.logger.error(
-          `Evaluation failed for zone "${zone.slug}": ${err instanceof Error ? err.message : err}`,
+          `Evaluation failed for zone "${zone.slug}": ${message}`,
         );
       }
     }
@@ -132,7 +143,14 @@ export class RulesService implements OnApplicationBootstrap {
 
   async evaluateZone(zone: ZoneEntity): Promise<RulesEvaluation> {
     const now = this.clock.now();
-    const config = zone.rulesConfig;
+    const parsed = parseZoneRulesConfig(zone.rulesConfig);
+    if (parsed.ok === false) {
+      // Nothing is dispatched for a zone whose config does not parse - not even
+      // the roles that look fine. Half-evaluating a zone hides that the other
+      // half is uncontrolled.
+      throw new Error(`invalid rules_config: ${parsed.errors.join('; ')}`);
+    }
+    const config = parsed.config;
 
     const samples = await this.latestSamplesForZone(zone.id);
     const { climateByRole, staleRoles } = resolveClimate(samples, config, now);
@@ -141,7 +159,7 @@ export class RulesService implements OnApplicationBootstrap {
       config.timezone,
     );
 
-    this.logOwnership(zone);
+    this.logOwnership(zone, config.enabledRoles);
 
     const decisions = evaluateRules({
       minutesSinceMidnightLocal,
@@ -190,6 +208,11 @@ export class RulesService implements OnApplicationBootstrap {
     return evaluation;
   }
 
+  /** Zones whose latest evaluation threw, by slug, with the reason. */
+  failingZones(): ReadonlyMap<string, string> {
+    return this.failedZones;
+  }
+
   /** One per zone, newest first. Empty until the first tick has run. */
   lastEvaluation(): RulesEvaluation[] {
     return [...this.lastEvaluations.values()].sort((a, b) =>
@@ -198,11 +221,14 @@ export class RulesService implements OnApplicationBootstrap {
   }
 
   /**
-   * The latest reading per admitted node in the zone.
+   * The latest reading per sensor on every admitted node in the zone.
    *
-   * `DISTINCT ON (node_id)` rather than a query per node: this runs every 10 s
-   * forever on an SD card, so it stays one indexed query however many nodes
-   * exist. A `pending` node is excluded here as well as at ingest - belt and
+   * Per SENSOR, not per node: the pumphouse node carries a probe per pipe, and
+   * `DISTINCT ON (node_id)` alone handed the engine whichever probe spoke last,
+   * so a frozen pipe could be hidden behind a warm one on the same node.
+   *
+   * `DISTINCT ON` rather than a query per sensor: this runs every 10 s forever
+   * on an SD card, so it stays one query however many sensors exist. A `pending` node is excluded here as well as at ingest - belt and
    * braces on the path that can start a burner.
    */
   private async latestSamplesForZone(zoneId: string): Promise<NodeSample[]> {
@@ -210,16 +236,19 @@ export class RulesService implements OnApplicationBootstrap {
       .createQueryBuilder('r')
       .innerJoin('r.node', 'n')
       .select('n.slug', 'slug')
+      .addSelect('r.sensorId', 'sensorId')
       .addSelect('r.temperature', 'temperature')
       .addSelect('r.co2', 'co2')
       .addSelect('r.createdAt', 'observedAt')
-      .distinctOn(['r.nodeId'])
+      .distinctOn(['r.nodeId', 'r.sensorId'])
       .where('n.zoneId = :zoneId', { zoneId })
       .andWhere('n.status = :status', { status: NodeStatus.Admitted })
       .orderBy('r.nodeId')
+      .addOrderBy('r.sensorId')
       .addOrderBy('r.createdAt', 'DESC')
       .getRawMany<{
         slug: string;
+        sensorId: string;
         temperature: number;
         co2: number | null;
         observedAt: Date | string;
@@ -227,6 +256,7 @@ export class RulesService implements OnApplicationBootstrap {
 
     return rows.map((row) => ({
       nodeId: row.slug,
+      sensorId: row.sensorId,
       temperatureC: Number(row.temperature),
       co2Ppm: row.co2 === null ? null : Number(row.co2),
       observedAt: new Date(row.observedAt),
@@ -350,8 +380,7 @@ export class RulesService implements OnApplicationBootstrap {
     this.logger.log(line);
   }
 
-  private logOwnership(zone: ZoneEntity): void {
-    const roles: readonly DeviceRole[] = zone.rulesConfig.enabledRoles;
+  private logOwnership(zone: ZoneEntity, roles: readonly DeviceRole[]): void {
     const signature = [...roles].sort().join(',');
     if (this.lastOwnership.get(zone.id) === signature) {
       return;

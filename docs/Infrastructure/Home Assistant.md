@@ -25,7 +25,7 @@ The shape in one line: **Home Assistant observes over MQTT. It never publishes t
 - [../../libs/domain/src/lib/hardware/mqtt-contract.ts](../../libs/domain/src/lib/hardware/mqtt-contract.ts) — the topics HA subscribes to, and the ones it must never publish on
 - [../../apps/server/src/app/rules/rules.service.ts](../../apps/server/src/app/rules/rules.service.ts) — computes `staleRoles` every tick; the source of the health topic
 - [../../apps/server/src/app/devices/devices.service.ts](../../apps/server/src/app/devices/devices.service.ts) — `drive()`, the single choke point every command funnels through
-- [../../libs/domain/src/lib/zones/zone.model.ts](../../libs/domain/src/lib/zones/zone.model.ts) — `RulesThresholds`, the only thing HA may ever write
+- [../../libs/domain/src/lib/zones/zone.model.ts](../../libs/domain/src/lib/zones/zone.model.ts) — the rule setpoints, the only thing HA may ever write
 
 ## Two stages, and only the first is worth doing soon
 
@@ -234,14 +234,14 @@ build at three things, all outside the safety envelope:
 
 - **Setpoints on a schedule** — seasonal photoperiod, a warmer night while seedlings are out.
 - **Outdoor context.** tempestas has no outdoor data source at all. "Hard freeze forecast tonight,
-  raise `co2NightOnTemp`" is unreachable without one.
+  raise `nightOnBelowC`" is unreachable without one.
 - **Alarm routing**, above.
 
-So the seam is **HA proposes, tempestas disposes**: HA may write `RulesThresholds`, never device
-state.
+So the seam is **HA proposes, tempestas disposes**: HA may write rule setpoints, never device
+state. The rule _kinds_ stay out of its reach.
 
 > [!danger] Clamp every setpoint the API accepts
-> A setpoint write is a burner command through a side door: `co2NightOnTemp: 40` runs the burner
+> A setpoint write is a burner command through a side door: `nightOnBelowC: 40` runs the burner
 > continuously and breaks no rule in `drive()`. The DTO must enforce per-field ranges server-side.
 > Without the clamps this seam is more dangerous than the device verbs it was meant to avoid.
 

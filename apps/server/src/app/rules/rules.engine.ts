@@ -1,10 +1,13 @@
 import {
   DeviceRole,
   type ClimateSample,
+  type Co2BurnerRule,
+  type DaylightWindow,
+  type RoleRule,
   type RuleDecision,
   type RuleReason,
   type RulesInput,
-  type RulesThresholds,
+  type StalePolicy,
 } from '@tempestas/domain';
 
 /**
@@ -17,31 +20,37 @@ import {
  * in the port: the Python original resolved local time from the host's *current*
  * UTC offset, so every historical query was an hour out across a DST boundary.
  *
- * The three rule bodies are fixed physics with hysteresis. There is deliberately
- * no rule DSL and no `Rule` entity - a predicate language with one user is a
- * liability when a mis-click controls a propane burner. The tripwire for
- * revisiting that: two rules needed on the SAME role with DIFFERENT bodies, or a
- * non-developer needing to author one.
+ * The rule bodies are a fixed menu - `RoleRule['kind']` - chosen per role by
+ * the zone's config, which supplies only numbers. There is deliberately no rule
+ * DSL: a predicate language with one user is a liability when a mis-click
+ * controls a propane burner. A new environment picks from the menu; a new kind
+ * of rule is a code change with tests.
  */
 
-/** Evaluated in this order, every time, so decisions and logs are comparable. */
-const EVALUATED_ROLES: readonly DeviceRole[] = [
+/**
+ * Evaluated in this order, every time, so decisions and logs are comparable.
+ * Never the order of the zone's `rules` object: Postgres reorders jsonb keys.
+ * Every role the enum has must appear here, or a zone that configures it is
+ * silently never evaluated - a spec asserts that.
+ */
+export const ROLE_ORDER: readonly DeviceRole[] = [
   DeviceRole.Lights,
   DeviceRole.Co2Generator,
   DeviceRole.ExhaustFan,
+  DeviceRole.Heater,
+  DeviceRole.HeatTape,
 ];
 
 export function evaluateRules(input: RulesInput): RuleDecision[] {
-  const { thresholds } = input.config;
-  const startMinutes = parseWallClock(thresholds.startTime);
-  const endMinutes = parseWallClock(thresholds.endTime);
-  const inWindow = isWithinWindow(
-    input.minutesSinceMidnightLocal,
-    startMinutes,
-    endMinutes,
+  const { config } = input;
+  // A role is decided if the zone owns it or carries a rule for it, so an
+  // unowned role still reports `role-not-owned` rather than vanishing.
+  const roles = ROLE_ORDER.filter(
+    (role) =>
+      config.rules[role] !== undefined || input.enabledRoles.includes(role),
   );
 
-  return EVALUATED_ROLES.map((role) => {
+  return roles.map((role) => {
     // Ownership is explicit, never inferred from which devices exist. An empty
     // device list must not mean the same thing as "the other controller owns
     // this" on a system that runs a heater in winter.
@@ -49,64 +58,87 @@ export function evaluateRules(input: RulesInput): RuleDecision[] {
       return noop(role, 'role-not-owned', []);
     }
 
+    const rule = config.rules[role];
+    if (!rule) {
+      // parseZoneRulesConfig refuses this before it can get here. If it ever
+      // does, the whole zone fails loudly rather than one owned role quietly
+      // doing nothing.
+      throw new Error(`Role "${role}" is enabled but has no rule`);
+    }
+
     const climate = input.climateByRole[role];
 
-    // Both of these hold last state. Neither automatic alternative is safe:
-    // failing everything off can freeze the greenhouse, forcing heat on can
-    // cook it. The distinction exists so the stale case can shout.
     if (input.staleRoles.includes(role)) {
-      return noop(role, 'sensor-stale', climate?.sourceNodeIds ?? []);
+      return onStale(role, rule.onStale, climate?.sourceNodeIds ?? []);
     }
     if (!climate) {
       return noop(role, 'no-sensor', []);
     }
 
-    switch (role) {
-      case DeviceRole.Lights:
-        return {
-          role,
-          ...lights(climate, thresholds, inWindow),
-          sourceNodeIds: climate.sourceNodeIds,
-        };
-      case DeviceRole.Co2Generator:
-        return {
-          role,
-          ...co2Generator(climate, thresholds, inWindow),
-          sourceNodeIds: climate.sourceNodeIds,
-        };
-      case DeviceRole.ExhaustFan:
-        return {
-          role,
-          ...exhaustFan(climate, thresholds),
-          sourceNodeIds: climate.sourceNodeIds,
-        };
-    }
+    return {
+      role,
+      ...apply(rule, climate, input.minutesSinceMidnightLocal, config.daylight),
+      sourceNodeIds: climate.sourceNodeIds,
+    };
   });
 }
 
 type Verdict = { desired: RuleDecision['desired']; reason: RuleReason };
 
-/**
- * Lights are a heat source as well as light, which is why they have 1 °C of
- * hysteresis and why they are temperature-driven at all.
- *
- * Deliberate change from the Python original: it read
- * `if self._light() and self._lights()`, so deleting one light row silently
- * disabled the other. Each device now stands alone.
- */
-function lights(
+function apply(
+  rule: RoleRule,
   climate: ClimateSample,
-  t: RulesThresholds,
-  inWindow: boolean,
+  minutes: number,
+  daylight: DaylightWindow | undefined,
 ): Verdict {
-  if (!inWindow) {
-    return { desired: 'off', reason: 'outside-window' };
+  switch (rule.kind) {
+    case 'thermostat':
+      return thermostat(rule.mode, rule.onAtC, rule.offAtC, climate);
+    case 'daylight-thermostat':
+      // Outside the window it is off however cold it is - the greenhouse
+      // lights are a heat source, but never at night.
+      return isDaytime(minutes, daylight)
+        ? thermostat(rule.mode, rule.onAtC, rule.offAtC, climate)
+        : { desired: 'off', reason: 'outside-window' };
+    case 'co2-burner':
+      return co2Burner(rule, climate, isDaytime(minutes, daylight));
   }
-  if (climate.temperatureC < t.lightsOnTemp) {
-    return { desired: 'on', reason: 'temp-below-setpoint' };
+}
+
+/**
+ * Stale sensors. `hold` is a no-op, exactly as before rule kinds existed;
+ * `on`/`off` drive the role and say why. All three are an incident: the
+ * caller logs ERROR and raises the banner for every stale role regardless.
+ */
+function onStale(
+  role: DeviceRole,
+  policy: StalePolicy,
+  sourceNodeIds: string[],
+): RuleDecision {
+  if (policy === 'hold') {
+    return noop(role, 'sensor-stale', sourceNodeIds);
   }
-  if (climate.temperatureC > t.lightsOffTemp) {
-    return { desired: 'off', reason: 'temp-above-setpoint' };
+  return { role, desired: policy, reason: 'stale-failsafe', sourceNodeIds };
+}
+
+/**
+ * A dead band, with every comparison strict so the setpoints themselves hold.
+ * Inside the band the answer is `noop`, not a guess: changing state there is
+ * what makes a relay chatter.
+ */
+function thermostat(
+  mode: 'heat' | 'cool',
+  onAtC: number,
+  offAtC: number,
+  climate: ClimateSample,
+): Verdict {
+  const t = climate.temperatureC;
+  if (mode === 'heat') {
+    if (t < onAtC) return { desired: 'on', reason: 'temp-below-setpoint' };
+    if (t > offAtC) return { desired: 'off', reason: 'temp-above-setpoint' };
+  } else {
+    if (t > onAtC) return { desired: 'on', reason: 'temp-above-setpoint' };
+    if (t < offAtC) return { desired: 'off', reason: 'temp-below-setpoint' };
   }
   return { desired: 'noop', reason: 'dead-band' };
 }
@@ -119,23 +151,23 @@ function lights(
  * useful AND the concentration is still below target. By night it is the
  * greenhouse's heat source and CO2 is irrelevant - pure frost protection.
  *
- * Neither branch has hysteresis. All anti-cycling comes from the device's own
- * `onDelayDuration` (300 s as wired), enforced in `DevicesService`.
+ * Neither temperature branch has hysteresis. Anti-cycling comes from the
+ * device's own `onDelayDuration` (300 s as wired), enforced in `DevicesService`.
  */
-function co2Generator(
+function co2Burner(
+  rule: Co2BurnerRule,
   climate: ClimateSample,
-  t: RulesThresholds,
-  inWindow: boolean,
+  daytime: boolean,
 ): Verdict {
-  if (!inWindow) {
+  if (!daytime) {
     // Night: CO2 is not consulted at all. A stale or dead CO2 sensor must never
     // be able to withhold heat on a cold night.
-    return climate.temperatureC < t.co2NightOnTemp
+    return climate.temperatureC < rule.nightOnBelowC
       ? { desired: 'on', reason: 'frost-protection' }
       : { desired: 'off', reason: 'temp-above-setpoint' };
   }
 
-  if (climate.temperatureC >= t.co2OffTemp) {
+  if (climate.temperatureC >= rule.dayOffAtC) {
     return { desired: 'off', reason: 'temp-above-setpoint' };
   }
 
@@ -146,27 +178,31 @@ function co2Generator(
   const co2 =
     climate.co2Ppm === null ? Number.POSITIVE_INFINITY : climate.co2Ppm;
 
-  // A dead band, as the other two roles have. Between the setpoints the
-  // burner HOLDS rather than being forced off: that is what turns a few
-  // seconds of burn per ignition into a useful run.
-  if (co2 >= t.co2OffPpm) {
+  // Between the setpoints the burner HOLDS rather than being forced off: that
+  // is what turns a few seconds of burn per ignition into a useful run.
+  if (co2 >= rule.co2OffPpm) {
     return { desired: 'off', reason: 'co2-at-threshold' };
   }
-  if (co2 < t.co2OnPpm) {
+  if (co2 < rule.co2OnPpm) {
     return { desired: 'on', reason: 'co2-below-threshold' };
   }
   return { desired: 'noop', reason: 'dead-band' };
 }
 
-/** Time-independent: an overheating greenhouse needs venting at 3am too. */
-function exhaustFan(climate: ClimateSample, t: RulesThresholds): Verdict {
-  if (climate.temperatureC > t.exhaustOnTemp) {
-    return { desired: 'on', reason: 'temp-above-setpoint' };
+function isDaytime(
+  minutes: number,
+  daylight: DaylightWindow | undefined,
+): boolean {
+  if (!daylight) {
+    // parseZoneRulesConfig requires a window for every kind that reads one.
+    // Guessing day or night here would pick a burner's branch at random.
+    throw new Error('This rule needs the zone to define a daylight window');
   }
-  if (climate.temperatureC < t.exhaustOffTemp) {
-    return { desired: 'off', reason: 'temp-below-setpoint' };
-  }
-  return { desired: 'noop', reason: 'dead-band' };
+  return isWithinWindow(
+    minutes,
+    parseWallClock(daylight.start),
+    parseWallClock(daylight.end),
+  );
 }
 
 function noop(

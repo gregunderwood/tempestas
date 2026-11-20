@@ -26,6 +26,12 @@ export interface PinObservation {
   known: boolean;
   /** The `ts` from the node's `gpio/state`, not our receive time. */
   observedAt: Date;
+  /**
+   * Published while we were listening, rather than a retained message the
+   * broker replayed when we subscribed. A live report is the current truth
+   * whatever its timestamp says; only a replay can be genuinely old.
+   */
+  live: boolean;
 }
 
 export interface ReconcileTarget extends DeviceTimes {
@@ -65,7 +71,7 @@ export function reconcilePinState(
   // A node's clock can run ahead of ours. Clamping forward-dated observations
   // to `now` keeps a skewed node from parking a device's cooldown in the
   // future, which would lock a heater out for as long as the skew.
-  const at =
+  let at =
     observation.observedAt.getTime() > now.getTime()
       ? now
       : observation.observedAt;
@@ -75,10 +81,23 @@ export function reconcilePinState(
     device.offAt?.getTime() ?? Number.NEGATIVE_INFINITY,
   );
   if (at.getTime() <= lastTransition) {
-    // Our row is at least as current as this observation - typically a retained
-    // `gpio/state` replayed on subscribe that predates a command we have since
-    // sent. Believing it would undo the newer truth.
-    return { action: 'none', reason: 'the device row is at least as current' };
+    if (!observation.live) {
+      // Our row is at least as current as this observation - a retained
+      // `gpio/state` replayed on subscribe that predates a command we have
+      // since sent. Believing it would undo the newer truth.
+      return {
+        action: 'none',
+        reason: 'the device row is at least as current',
+      };
+    }
+    // Live, yet dated before our row: the node's clock is behind, not the
+    // report. A Pi has no RTC and boots on the time it saved at shutdown
+    // until NTP answers. patji, 2026-11-18: rebooted 3.5 min slow, failed
+    // safe to ON, and its report predated the rule's last "off" - so the row
+    // stayed off, every tick was answered "already off", and the heater could
+    // never be turned off again. Dated at receipt, which only ever makes a
+    // cooldown start later than reality, never earlier.
+    at = now;
   }
 
   const hardwareOn = observation.level === device.onLevel;

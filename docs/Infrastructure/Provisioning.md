@@ -156,6 +156,29 @@ Do not enable the unit before the sensor is attached. `start()` reads the
 serial number, so with an empty bus the agent fails at startup and systemd
 crash-loops it.
 
+## ⚠ The broker must retry until WiFi is up
+
+`bind_interface wlan0` makes mosquitto **exit** if wlan0 has no address yet, and
+at boot on WiFi it often has none. The packaged unit restarts with no delay, so
+it spends its five starts inside a second and stays failed. On elantris that
+happened at the 2026-11-06 boot and went unnoticed for eleven days: broker
+down, agent down, every sensor stale. The server's reconnect spam then filled
+the 200 MB journal, so the evidence of the original failure had rotated away.
+
+Any box running the broker gets the drop-in:
+
+```bash
+sudo install -d -m 0755 /etc/systemd/system/mosquitto.service.d
+sudo install -m 0644 -o root -g root \
+  apps/hardware/systemd/mosquitto.service.d/10-tempestas-retry.conf \
+  /etc/systemd/system/mosquitto.service.d/
+sudo systemctl daemon-reload
+systemctl show mosquitto -p StartLimitIntervalUSec -p RestartUSec   # 0 and 5s
+```
+
+Verified by `SIGKILL`ing mosquitto six times in a row: it came back each time,
+one past the old limit.
+
 ## ⚠ Broker credentials: generate the hash ON the broker
 
 `mosquitto_passwd` writes a PBKDF2 iteration count into the hash, and the
@@ -168,9 +191,24 @@ So build entries with the broker's own tool:
 
 ```bash
 sudo mosquitto_passwd -b /etc/mosquitto/tempestas.passwd <user> '<password>'
-sudo chown root:root /etc/mosquitto/tempestas.passwd    # 2.0 warns, future versions refuse
+sudo chown mosquitto:mosquitto /etc/mosquitto/tempestas.passwd /etc/mosquitto/tempestas.acl
+sudo chmod 0600 /etc/mosquitto/tempestas.passwd /etc/mosquitto/tempestas.acl
 sudo systemctl reload mosquitto                          # keeps existing connections
 ```
+
+### ⚠ The broker's files belong to `mosquitto`, not root
+
+`mosquitto_passwd` warns that the file's owner "is not root". **Do not follow that warning.**
+The tool runs as root, but the broker drops to the `mosquitto` user and re-reads both files on
+every reload. Root-owned `0600` files are then unreadable, and the reload rejects **every**
+client: the server, every node, and the observer. Existing connections are dropped and none
+can come back. That happened on 2026-11-17, and the only symptom was `not authorised` for
+credentials that had not changed. `/api/health` still said `ok` for the first two minutes,
+until the newest reading aged out.
+
+The broker's own warning says the opposite ("owner is not mosquitto"), and the broker is the
+one that matters. After any change, check `tail /var/log/mosquitto/mosquitto.log` for
+ownership warnings, and that the server and nodes reconnected.
 
 ### ⚠ Verify with MQTT v5, never 3.1.1
 

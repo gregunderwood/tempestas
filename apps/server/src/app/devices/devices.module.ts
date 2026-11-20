@@ -8,9 +8,15 @@ import { NodeEntity } from '../nodes/models';
 import { PinTransitionLog } from './pin-transition-log.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([DeviceEntity, NodeEntity, PinTransitionEntity])],
+  imports: [
+    TypeOrmModule.forFeature([DeviceEntity, NodeEntity, PinTransitionEntity]),
+  ],
   controllers: [DevicesController],
-  providers: [DevicesService, PinTransitionLog, { provide: Clock, useClass: SystemClock }],
+  providers: [
+    DevicesService,
+    PinTransitionLog,
+    { provide: Clock, useClass: SystemClock },
+  ],
   exports: [DevicesService, PinTransitionLog],
 })
 export class DevicesModule {}

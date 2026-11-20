@@ -9,13 +9,30 @@ import type { NodeId } from '../nodes/node.model';
  */
 export type ReadingId = string;
 
+/**
+ * A node can carry several sensors - the pumphouse has a probe per pipe - so a
+ * reading is identified by node AND sensor. Anything that keeps "the latest
+ * reading" keyed by node alone silently shows one probe and hides the rest.
+ */
+export function sensorKey(reading: {
+  nodeId: NodeId;
+  sensorId: string;
+}): string {
+  return `${reading.nodeId}/${reading.sensorId}`;
+}
+
 export interface Reading {
   /** UUID. The old client typed this `number`, which was simply wrong. */
   id: ReadingId;
   nodeId: NodeId;
   sensorId: string;
   temperature: number;
-  humidity: number;
+  /**
+   * Null when the sensor has none to give: a DS18B20 measures temperature
+   * only, and an SCD4x can report an invalid one. No rule reads humidity, so
+   * unlike temperature its absence never drops the reading.
+   */
+  humidity: number | null;
   /**
    * Null when the sensor reported an invalid CO2 value. The node reports
    * validity honestly and never substitutes a last-known-good reading -
