@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Device } from '@tempestas/domain';
-import {
-  applyNewerPushes,
-  recordDevicePush,
-  type PushedDevice,
-} from './live-devices';
+import { recordDevicePush, type PushedDevice } from './device-pushes';
+import { applyNewerPushes } from './live-devices';
 
 const device = (id: string, isOn: boolean): Device =>
   ({ id, name: id, isOn }) as Device;

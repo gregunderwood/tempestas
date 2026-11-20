@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import type { RulesCycle, Zone } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
@@ -33,9 +33,13 @@ interface RenderedPage {
   render(): void;
 }
 
-function renderZonesPage(
-  options: { zones?: Zone[]; firstCycle?: RulesCycle | null } = {},
-): RenderedPage {
+interface RenderOptions {
+  zones?: Zone[];
+  zonesRequestFails?: boolean;
+  firstCycle?: RulesCycle | null;
+}
+
+function renderZonesPage(options: RenderOptions = {}): RenderedPage {
   vi.setSystemTime(NOW);
   const realtime = fakeRealtime();
   const firstCycle =
@@ -50,9 +54,12 @@ function renderZonesPage(
       {
         provide: ApiService,
         useValue: {
-          zones: () => of(options.zones ?? [PUMPHOUSE]),
+          zones: () =>
+            options.zonesRequestFails
+              ? throwError(() => new Error('offline'))
+              : of(options.zones ?? [PUMPHOUSE]),
           nodes: () => of([node('patji', 'z-pump')]),
-          rulesCycle: () => of(firstCycle),
+          fetchLatestRulesCycle: () => of(firstCycle),
           latestReadings: () => of([probe('pipes', 17.5), probe('air', 19.4)]),
           devices: () => of([device(), heatTape()]),
         },
@@ -83,7 +90,7 @@ describe('ZonesPage', () => {
     expect(page.textContent).toContain('Controls on the coldest probe');
     expect(page.textContent).toContain('OFF · above setpoint');
     expect(page.querySelectorAll('.bar__track')).toHaveLength(2);
-    expect(page.querySelector('.probe--picked')?.textContent).toContain(
+    expect(page.querySelector('.probe--controlling')?.textContent).toContain(
       'pipes',
     );
     expect(page.textContent).toContain('Read-only');
@@ -97,14 +104,14 @@ describe('ZonesPage', () => {
       desired: 'on',
       reason: 'temp-below-setpoint',
     };
-    realtime.rulesCycle.set(cycleOf([coldEvaluation]));
+    realtime.latestRulesCycle.set(cycleOf([coldEvaluation]));
     render();
     expect(page.textContent).toContain('ON · below setpoint');
   });
 
   it('puts a zone the rules engine refused on its card', () => {
     const { page, realtime, render } = renderZonesPage();
-    realtime.rulesCycle.set(PUMPHOUSE_REFUSED);
+    realtime.latestRulesCycle.set(PUMPHOUSE_REFUSED);
     render();
     expect(alertText(page)).toContain('invalid rules_config');
   });
@@ -136,5 +143,27 @@ describe('ZonesPage', () => {
     expect(page.textContent).toContain('Broken');
     expect(page.textContent).toContain("this zone's config cannot be drawn");
     expect(page.textContent).toContain('OFF · above setpoint');
+  });
+
+  it('says the rules have stopped once a minute passes with no new cycle', () => {
+    const { page, render } = renderZonesPage();
+    expect(alertText(page)).toBeUndefined();
+    vi.advanceTimersByTime(61_000);
+    render();
+    expect(alertText(page)).toContain('Rules have not run for over a minute.');
+  });
+
+  it('ages the subtitle with the clock', () => {
+    const { page, render } = renderZonesPage();
+    expect(page.textContent).toContain('rules ran 3 s ago');
+    vi.advanceTimersByTime(5_000);
+    render();
+    expect(page.textContent).toContain('rules ran 8 s ago');
+  });
+
+  it('says it could not load the zones rather than that there are none', () => {
+    const { page } = renderZonesPage({ zonesRequestFails: true });
+    expect(page.textContent).toContain('Could not load the zones.');
+    expect(page.textContent).not.toContain('No zones yet');
   });
 });

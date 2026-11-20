@@ -635,9 +635,9 @@ describe('publishing each rules cycle', () => {
     const { service } = makeService({
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
     });
-    expect(service.latestCycle()).toBeNull();
+    expect(service.findLatestRulesCycle()).toBeNull();
     const evaluations = await service.evaluateAll();
-    expect(service.latestCycle()).toEqual(cycleOf(evaluations));
+    expect(service.findLatestRulesCycle()).toEqual(cycleOf(evaluations));
   });
 
   it('forgets the failure of a zone that has since been deleted', async () => {
@@ -649,12 +649,14 @@ describe('publishing each rules cycle', () => {
     const { service, zoneRows } = makeService({ zones: [broken, zone()] });
     await service.evaluateAll();
     expect(
-      service.latestCycle()?.failingZones.map((failure) => failure.zoneSlug),
+      service
+        .findLatestRulesCycle()
+        ?.failingZones.map((failure) => failure.zoneSlug),
     ).toEqual(['broken']);
 
     zoneRows.splice(0, 1);
     await service.evaluateAll();
-    expect(service.latestCycle()?.failingZones).toEqual([]);
+    expect(service.findLatestRulesCycle()?.failingZones).toEqual([]);
     expect(service.failingZones().has('broken')).toBe(false);
   });
 
@@ -663,11 +665,11 @@ describe('publishing each rules cycle', () => {
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
     });
     await service.tick();
-    expect(service.latestCycle()).not.toBeNull();
+    expect(service.findLatestRulesCycle()).not.toBeNull();
 
     hardware.isLeader = false;
     await service.tick();
-    expect(service.latestCycle()).toBeNull();
+    expect(service.findLatestRulesCycle()).toBeNull();
     expect(forgetRulesCycle).toHaveBeenCalledTimes(1);
 
     await service.tick();
@@ -678,6 +680,6 @@ describe('publishing each rules cycle', () => {
     const { service, publishRulesCycle } = makeService({ isLeader: false });
     await service.evaluateAll();
     expect(publishRulesCycle).not.toHaveBeenCalled();
-    expect(service.latestCycle()).toBeNull();
+    expect(service.findLatestRulesCycle()).toBeNull();
   });
 });

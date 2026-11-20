@@ -45,7 +45,7 @@ export class RealtimeGateway
 
   private lastReadings = new Map<string, Reading>();
   private lastStatus: SystemStatus | null = null;
-  private latestCycle: RulesCycle | null = null;
+  private latestRulesCycle: RulesCycle | null = null;
   private clients = 0;
 
   handleConnection(client: Socket): void {
@@ -57,8 +57,8 @@ export class RealtimeGateway
     if (this.lastStatus) {
       client.emit(REALTIME_EVENTS.systemStatus, this.lastStatus);
     }
-    if (this.latestCycle) {
-      client.emit(REALTIME_EVENTS.rulesCycle, this.latestCycle);
+    if (this.latestRulesCycle) {
+      client.emit(REALTIME_EVENTS.rulesCycle, this.latestRulesCycle);
     }
     this.logger.debug(`Client connected (${this.clients} total)`);
   }
@@ -87,13 +87,13 @@ export class RealtimeGateway
     this.emit(REALTIME_EVENTS.systemStatus, status);
   }
 
-  publishRulesCycle(tick: RulesCycle): void {
-    this.latestCycle = tick;
-    this.emit(REALTIME_EVENTS.rulesCycle, tick);
+  publishRulesCycle(cycle: RulesCycle): void {
+    this.latestRulesCycle = cycle;
+    this.emit(REALTIME_EVENTS.rulesCycle, cycle);
   }
 
   forgetRulesCycle(): void {
-    this.latestCycle = null;
+    this.latestRulesCycle = null;
   }
 
   connectedClients(): number {

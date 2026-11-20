@@ -22,8 +22,8 @@ export class RulesController {
   }
 
   @Get('latest-cycle')
-  latestCycle(): { cycle: RulesCycle | null } {
-    return { cycle: this.rules.latestCycle() };
+  findLatestRulesCycle(): { cycle: RulesCycle | null } {
+    return { cycle: this.rules.findLatestRulesCycle() };
   }
 
   /**

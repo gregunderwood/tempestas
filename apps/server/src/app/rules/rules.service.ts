@@ -245,7 +245,7 @@ export class RulesService implements OnApplicationBootstrap {
     return this.failingZoneReasons;
   }
 
-  latestCycle(): RulesCycle | null {
+  findLatestRulesCycle(): RulesCycle | null {
     return this.latestRulesCycle;
   }
 

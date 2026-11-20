@@ -157,6 +157,7 @@ export function pumphouseEvaluation(
     observedAt: NOW.toISOString(),
     sourceNodeIds: ['patji'],
     sourceSensorIds: ['patji/air', 'patji/pipes'],
+    decidingSensorIds: ['patji/pipes'],
   };
   return {
     zoneId: 'z-pump',
