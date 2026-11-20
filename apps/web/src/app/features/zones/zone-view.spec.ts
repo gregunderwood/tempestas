@@ -242,6 +242,16 @@ describe('buildZoneCards shows nothing that is not true', () => {
     ]);
   });
 
+  it('does not tag a probe as deciding a role whose sensors went quiet', () => {
+    const evaluation = pumphouseEvaluation({
+      staleRoles: [DeviceRole.HeatTape],
+    });
+    expect(probeTagsOf(onlyCard({ cycle: cycleOf([evaluation]) }))).toEqual([
+      ['air', null],
+      ['pipes', 'controls Heater'],
+    ]);
+  });
+
   it('tags probes per role when a role overrides the zone policy', () => {
     const zone = zoneWith({
       heat_tape: {

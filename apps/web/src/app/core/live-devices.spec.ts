@@ -1,17 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { TestBed } from '@angular/core/testing';
-import { provideZonelessChangeDetection } from '@angular/core';
-import { of } from 'rxjs';
+import { describe, expect, it } from 'vitest';
 import type { Device } from '@tempestas/domain';
-import { fakeRealtime } from '../testing/fake-realtime';
-import { ApiService } from './api.service';
 import { recordDevicePush, type PushedDevice } from './device-pushes';
-import {
-  applyNewerPushes,
-  injectLiveDevices,
-  keepNewerFetch,
-} from './live-devices';
-import { RealtimeService } from './realtime.service';
+import { applyNewerPushes } from './live-devices';
 
 const device = (id: string, isOn: boolean): Device =>
   ({ id, name: id, isOn }) as Device;
@@ -31,7 +21,7 @@ const isOnOf = (devices: Device[]): boolean[] =>
 
 describe('applyNewerPushes', () => {
   const fetched = {
-    devices: [device('heater', false), device('tape', false)],
+    response: [device('heater', false), device('tape', false)],
     requestedAt: 1_000,
   };
 
@@ -46,9 +36,21 @@ describe('applyNewerPushes', () => {
   it('keeps a push received after the request was sent', () => {
     const merged = applyNewerPushes(
       fetched,
+      pushesOf([device('heater', true), 1_001]),
+    );
+    expect(isOnOf(merged)).toEqual([true, false]);
+  });
+
+  it('keeps a push received in the same millisecond the request was sent', () => {
+    const merged = applyNewerPushes(
+      fetched,
       pushesOf([device('heater', true), 1_000]),
     );
     expect(isOnOf(merged)).toEqual([true, false]);
+  });
+
+  it('has no devices before the first response', () => {
+    expect(applyNewerPushes(null, pushesOf())).toEqual([]);
   });
 
   it('lets a later fetch win over an older push', () => {
@@ -64,37 +66,6 @@ describe('applyNewerPushes', () => {
       fetched,
       pushesOf([device('ghost', true), 9_000]),
     );
-    expect(merged).toEqual(fetched.devices);
-  });
-});
-
-describe('keepNewerFetch', () => {
-  const older = { devices: [device('heater', false)], requestedAt: 1_000 };
-  const newer = { devices: [device('heater', true)], requestedAt: 2_000 };
-
-  it('ignores a response to an older request that arrives last', () => {
-    expect(keepNewerFetch(newer, older)).toBe(newer);
-    expect(keepNewerFetch(older, newer)).toBe(newer);
-  });
-});
-
-describe('injectLiveDevices', () => {
-  it('fetches the devices again every time the socket reconnects', () => {
-    const fetchDevices = vi.fn(() => of([device('heater', false)]));
-    const realtime = fakeRealtime();
-    TestBed.configureTestingModule({
-      providers: [
-        provideZonelessChangeDetection(),
-        { provide: ApiService, useValue: { devices: fetchDevices } },
-        { provide: RealtimeService, useValue: realtime },
-      ],
-    });
-    TestBed.runInInjectionContext(() => injectLiveDevices());
-    TestBed.tick();
-    expect(fetchDevices).toHaveBeenCalledTimes(1);
-
-    realtime.connectionCount.update((count) => count + 1);
-    TestBed.tick();
-    expect(fetchDevices).toHaveBeenCalledTimes(2);
+    expect(merged).toEqual(fetched.response);
   });
 });

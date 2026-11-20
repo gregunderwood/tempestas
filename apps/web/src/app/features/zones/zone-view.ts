@@ -406,13 +406,15 @@ function buildProbeLines(
     .map((reading) => toProbeReading(reading, hasSeveralNodes, input.now))
     .sort((first, second) => first.label.localeCompare(second.label));
 
-  const measuredRoles = findMeasuredRoles(zone, evaluation);
-  const controlledRolesByProbe = mapControlledRolesToProbes(measuredRoles);
+  const enabledRoles = zone.rulesConfig.enabledRoles ?? [];
+  const controlledRolesByProbe = mapControlledRolesToProbes(
+    findRolesDecidedByProbes(enabledRoles, evaluation),
+  );
   return probes.map((probe) => ({
     ...probe,
     tag: describeControlTag(
       controlledRolesByProbe.get(probe.key) ?? [],
-      measuredRoles.length,
+      enabledRoles.length,
     ),
   }));
 }
@@ -438,21 +440,25 @@ function toProbeReading(
   };
 }
 
-function findMeasuredRoles(
-  zone: Zone,
+function findRolesDecidedByProbes(
+  enabledRoles: readonly DeviceRole[],
   evaluation: RulesEvaluation | null,
 ): [DeviceRole, ClimateSample][] {
-  return (zone.rulesConfig.enabledRoles ?? []).flatMap((role) => {
-    const climate = evaluation?.climateByRole[role];
-    return climate ? [[role, climate] as [DeviceRole, ClimateSample]] : [];
+  if (!evaluation) return [];
+  return enabledRoles.flatMap((role) => {
+    const climate = evaluation.climateByRole[role];
+    const isDecidedByProbes = climate && !evaluation.staleRoles.includes(role);
+    return isDecidedByProbes
+      ? [[role, climate] as [DeviceRole, ClimateSample]]
+      : [];
   });
 }
 
 function mapControlledRolesToProbes(
-  measuredRoles: [DeviceRole, ClimateSample][],
+  decidedRoles: [DeviceRole, ClimateSample][],
 ): Map<string, string[]> {
   const controlledRolesByProbe = new Map<string, string[]>();
-  for (const [role, climate] of measuredRoles) {
+  for (const [role, climate] of decidedRoles) {
     for (const probeKey of climate.decidingSensorIds) {
       const controlledRoles = controlledRolesByProbe.get(probeKey) ?? [];
       controlledRolesByProbe.set(probeKey, [
@@ -466,10 +472,10 @@ function mapControlledRolesToProbes(
 
 function describeControlTag(
   controlledRoles: string[],
-  measuredRoleCount: number,
+  enabledRoleCount: number,
 ): string | null {
   if (controlledRoles.length === 0) return null;
-  if (controlledRoles.length === measuredRoleCount) return 'controlling';
+  if (controlledRoles.length === enabledRoleCount) return 'controlling';
   return `controls ${controlledRoles.join(', ')}`;
 }
 

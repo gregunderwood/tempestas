@@ -1,33 +1,26 @@
-import {
-  computed,
-  effect,
-  inject,
-  signal,
-  untracked,
-  type Signal,
-} from '@angular/core';
+import { computed, inject, type Signal } from '@angular/core';
 import type { Device } from '@tempestas/domain';
 import { ApiService } from './api.service';
 import type { PushedDevice } from './device-pushes';
-import type { RequestState } from './fetch-once';
+import {
+  injectLiveSource,
+  type FetchedResponse,
+  type SourceState,
+} from './live-source';
 import { RealtimeService } from './realtime.service';
-
-export interface FetchedDevices {
-  devices: Device[];
-  requestedAt: number;
-}
 
 export interface LiveDevices {
   devices: Signal<Device[]>;
-  requestState: Signal<RequestState>;
+  sourceState: Signal<SourceState>;
   refresh(): void;
 }
 
 export function applyNewerPushes(
-  fetched: FetchedDevices,
+  fetched: FetchedResponse<Device[]> | null,
   pushes: ReadonlyMap<string, PushedDevice>,
 ): Device[] {
-  return fetched.devices.map((fetchedDevice) => {
+  if (!fetched) return [];
+  return fetched.response.map((fetchedDevice) => {
     const pushed = pushes.get(fetchedDevice.id);
     // A push received after the request was sent is at least as new as the response.
     if (pushed !== undefined && pushed.receivedAt >= fetched.requestedAt) {
@@ -37,53 +30,15 @@ export function applyNewerPushes(
   });
 }
 
-export function keepNewerFetch(
-  known: FetchedDevices,
-  arriving: FetchedDevices,
-): FetchedDevices {
-  return arriving.requestedAt >= known.requestedAt ? arriving : known;
-}
-
 export function injectLiveDevices(): LiveDevices {
   const api = inject(ApiService);
   const realtime = inject(RealtimeService);
-  const fetched = signal<FetchedDevices>({ devices: [], requestedAt: 0 });
-  const requestState = signal<RequestState>('loading');
-
-  const refresh = (): void => {
-    const requestedAt = Date.now();
-    api.devices().subscribe({
-      next: (devices) => {
-        fetched.update((known) =>
-          keepNewerFetch(known, { devices, requestedAt }),
-        );
-        requestState.set('loaded');
-      },
-      error: () =>
-        requestState.update((state) =>
-          state === 'loading' ? 'failed' : state,
-        ),
-    });
-  };
-  refresh();
-  refreshOnEveryReconnect(realtime, refresh);
-
+  const source = injectLiveSource(() => api.devices());
   return {
     devices: computed(() =>
-      applyNewerPushes(fetched(), realtime.devicePushes()),
+      applyNewerPushes(source.latest(), realtime.devicePushes()),
     ),
-    requestState,
-    refresh,
+    sourceState: source.sourceState,
+    refresh: source.refresh,
   };
-}
-
-// The server replays no device state on connect, so a change made while offline only arrives by refetching.
-function refreshOnEveryReconnect(
-  realtime: RealtimeService,
-  refresh: () => void,
-): void {
-  const connectionsBeforeFetch = realtime.connectionCount();
-  effect(() => {
-    if (realtime.connectionCount() > connectionsBeforeFetch) untracked(refresh);
-  });
 }
