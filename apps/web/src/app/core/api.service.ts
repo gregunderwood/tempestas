@@ -10,7 +10,7 @@ import type {
   ReadingStats,
   ReadingsQuery,
   RulesEvaluation,
-  RulesTick,
+  RulesCycle,
   Zone,
 } from '@tempestas/domain';
 
@@ -94,18 +94,16 @@ export class ApiService {
 
   // ------------------------------------------------------------------ zones
 
-  /** Read-only. The rules each zone runs; there is no write API. */
   zones(): Observable<Zone[]> {
     return this.http.get<Zone[]>(`${this.base}/zones`);
   }
 
   // ------------------------------------------------------------------ rules
 
-  /** The newest whole rules cycle, failures included; null before the first. */
-  rulesTick(): Observable<RulesTick | null> {
+  rulesCycle(): Observable<RulesCycle | null> {
     return this.http
-      .get<{ tick: RulesTick | null }>(`${this.base}/rules/tick`)
-      .pipe(map((body) => body.tick));
+      .get<{ cycle: RulesCycle | null }>(`${this.base}/rules/latest-cycle`)
+      .pipe(map((body) => body.cycle));
   }
 
   /** Every input alongside every decision. The debugging endpoint. */
