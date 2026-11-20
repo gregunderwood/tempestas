@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { provideZonelessChangeDetection, signal } from '@angular/core';
+import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import {
@@ -12,6 +12,7 @@ import {
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
+import { fakeRealtime, pushDevice } from '../../testing/fake-realtime';
 import { Dashboard } from './dashboard';
 
 const NOW = new Date('2026-09-10T22:00:00.000Z');
@@ -104,6 +105,8 @@ function setup(
   pushed: Device[] = [],
 ): HTMLElement {
   vi.setSystemTime(NOW);
+  const realtime = fakeRealtime();
+  for (const pushedDevice of pushed) pushDevice(realtime, pushedDevice);
   TestBed.configureTestingModule({
     imports: [Dashboard],
     providers: [
@@ -117,23 +120,7 @@ function setup(
           nodes: () => of(nodes),
         },
       },
-      {
-        provide: RealtimeService,
-        useValue: {
-          readings: signal({}),
-          // Received after the fetch was sent, as a live push would be.
-          devicePushes: signal(
-            new Map(
-              pushed.map((d) => [
-                d.id,
-                { device: d, receivedAt: NOW.getTime() + 1 },
-              ]),
-            ),
-          ),
-          status: signal(null),
-          connected: signal(true),
-        },
-      },
+      { provide: RealtimeService, useValue: realtime },
     ],
   });
   const fixture = TestBed.createComponent(Dashboard);
@@ -254,8 +241,6 @@ describe('Dashboard', () => {
     expect(setup([]).textContent).toContain('No readings yet');
   });
 
-  // #12: the dashboard kept only the newest push, so when one rules decision
-  // switched two relays the first reverted to the stale fetched state.
   it('keeps every pushed device state, not only the newest', () => {
     const heater = device({ id: 'd1', name: 'Heater', isOn: false });
     const tape = device({ id: 'd2', name: 'Heat tape', isOn: false });

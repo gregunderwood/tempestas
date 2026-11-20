@@ -13,6 +13,7 @@ import type {
 import { NodeStatus } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
+import { fakeRealtime } from '../../testing/fake-realtime';
 import { NodeDetail } from './node-detail';
 
 function reading(over: Partial<Reading> = {}): Reading {
@@ -157,12 +158,7 @@ function setup(
       },
       {
         provide: RealtimeService,
-        useValue: {
-          readings: signal(opts.live ?? {}),
-          devicePushes: signal(new Map()),
-          status: signal(null),
-          connected: signal(true),
-        },
+        useValue: fakeRealtime({ readings: signal(opts.live ?? {}) }),
       },
     ],
   });

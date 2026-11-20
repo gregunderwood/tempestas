@@ -10,15 +10,14 @@ import { DatePipe } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
-import { RealtimeService } from '../../core/realtime.service';
-import {
-  NO_DEVICES,
-  withPushes,
-  type FetchedDevices,
-} from '../../core/device-pushes';
+import { injectLiveDevices } from '../../core/live-devices';
+import { injectLiveReadings } from '../../core/live-readings';
 import { Gauge } from '../../shared/gauge/gauge';
 import { metricsFor } from '../../shared/metrics';
-import { READING_QUIET_AFTER_S } from '../../shared/freshness';
+import {
+  READING_QUIET_AFTER_SECONDS,
+  secondsSince,
+} from '../../shared/freshness';
 import {
   sensorKey,
   type Device,
@@ -217,37 +216,20 @@ interface NodeCard {
 })
 export class Dashboard {
   private readonly api = inject(ApiService);
-  private readonly realtime = inject(RealtimeService);
   private readonly destroyRef = inject(DestroyRef);
 
-  private readonly fetchedReadings = signal<Reading[]>([]);
-  private readonly fetchedDevices = signal<FetchedDevices>(NO_DEVICES);
   private readonly nodes = signal<Node[]>([]);
   /** Re-read on every socket tick so ages advance without a poll of our own. */
   private readonly tick = signal(0);
 
-  /** The socket patches what the API established, never replaces it. */
-  private readonly readings = computed<Reading[]>(() => {
-    const live = this.realtime.readings();
-    const merged = new Map(
-      this.fetchedReadings().map((r) => [sensorKey(r), r]),
-    );
-    for (const [key, reading] of Object.entries(live)) {
-      merged.set(key, reading);
-    }
-    return [...merged.values()];
-  });
-
-  /** Every push newer than the fetch, not only the newest one (#12). */
-  private readonly devices = computed<Device[]>(() =>
-    withPushes(this.fetchedDevices(), this.realtime.devicePushes()),
-  );
+  private readonly readings = injectLiveReadings();
+  private readonly devices = injectLiveDevices().devices;
 
   readonly cards = computed<NodeCard[]>(() => {
     this.tick();
     const now = Date.now();
     const devices = this.devices();
-    const nodes = new Map(this.nodes().map((n) => [n.slug, n]));
+    const nodes = new Map(this.nodes().map((node) => [node.slug, node]));
 
     const byNode = new Map<string, Reading[]>();
     for (const reading of this.readings()) {
@@ -259,8 +241,8 @@ export class Dashboard {
 
     return [...byNode.entries()]
       .map(([nodeId, readings]) => {
-        const sorted = [...readings].sort((a, b) =>
-          a.sensorId.localeCompare(b.sensorId),
+        const sorted = [...readings].sort((first, second) =>
+          first.sensorId.localeCompare(second.sensorId),
         );
         const several = sorted.length > 1;
         const gauges = sorted.flatMap((reading) =>
@@ -274,15 +256,17 @@ export class Dashboard {
         const quiet = sorted
           .map((reading) => ({
             sensorId: reading.sensorId,
-            ageSeconds: Math.max(
-              0,
-              Math.round((now - new Date(reading.createdAt).getTime()) / 1000),
-            ),
+            ageSeconds: secondsSince(reading.createdAt, now),
           }))
-          .filter((q) => q.ageSeconds > READING_QUIET_AFTER_S);
+          .filter(
+            (quietSensor) =>
+              quietSensor.ageSeconds > READING_QUIET_AFTER_SECONDS,
+          );
         const latestAt = sorted
-          .map((r) => r.createdAt)
-          .reduce((a, b) => (new Date(a) > new Date(b) ? a : b));
+          .map((reading) => reading.createdAt)
+          .reduce((latest, candidate) =>
+            Date.parse(candidate) > Date.parse(latest) ? candidate : latest,
+          );
         return {
           nodeId,
           latestAt,
@@ -290,27 +274,21 @@ export class Dashboard {
           quiet,
           stale: quiet.length > 0,
           severalSensors: several,
-          devices: devices.filter((d) => d.nodeId === nodeId),
+          devices: devices.filter((device) => device.nodeId === nodeId),
         };
       })
-      .sort((a, b) => a.nodeId.localeCompare(b.nodeId));
+      .sort((first, second) => first.nodeId.localeCompare(second.nodeId));
   });
 
   constructor() {
-    this.api
-      .latestReadings()
-      .subscribe((readings) => this.fetchedReadings.set(readings));
-    const requestedAt = Date.now();
-    this.api
-      .devices()
-      .subscribe((devices) =>
-        this.fetchedDevices.set({ devices, requestedAt }),
-      );
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
 
     // An age that never advances is worse than no age at all: the card would
     // keep claiming a reading is fresh long after the node went quiet.
-    const timer = setInterval(() => this.tick.update((n) => n + 1), 10_000);
+    const timer = setInterval(
+      () => this.tick.update((count) => count + 1),
+      10_000,
+    );
     this.destroyRef.onDestroy(() => clearInterval(timer));
   }
 }

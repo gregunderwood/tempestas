@@ -5,10 +5,10 @@ import {
   sensorKey,
   type Device,
   type Reading,
-  type RulesTick,
+  type RulesCycle,
   type SystemStatus,
 } from '@tempestas/domain';
-import type { PushedDevice } from './device-pushes';
+import { recordDevicePush, type PushedDevice } from './live-devices';
 
 /**
  * The socket feed, as signals.
@@ -26,14 +26,8 @@ export class RealtimeService implements OnDestroy {
   readonly readings = signal<Record<string, Reading>>({});
   readonly status = signal<SystemStatus | null>(null);
   readonly connected = signal(false);
-  /**
-   * Every device state pushed, newest per device, with when it arrived. A map
-   * rather than "the latest one": two devices pushed back to back must both
-   * survive. Merge with `withPushes`.
-   */
   readonly devicePushes = signal<ReadonlyMap<string, PushedDevice>>(new Map());
-  /** The newest rules cycle - every zone's inputs and decisions. Replayed on connect. */
-  readonly rulesTick = signal<RulesTick | null>(null);
+  readonly rulesCycle = signal<RulesCycle | null>(null);
 
   private socket?: Socket;
 
@@ -53,15 +47,15 @@ export class RealtimeService implements OnDestroy {
       }));
     });
     this.socket.on(REALTIME_EVENTS.deviceState, (device: Device) => {
-      this.devicePushes.update((all) =>
-        new Map(all).set(device.id, { device, receivedAt: Date.now() }),
+      this.devicePushes.update((pushes) =>
+        recordDevicePush(pushes, device, Date.now()),
       );
     });
     this.socket.on(REALTIME_EVENTS.systemStatus, (status: SystemStatus) => {
       this.status.set(status);
     });
-    this.socket.on(REALTIME_EVENTS.rulesEvaluation, (tick: RulesTick) => {
-      this.rulesTick.set(tick);
+    this.socket.on(REALTIME_EVENTS.rulesCycle, (cycle: RulesCycle) => {
+      this.rulesCycle.set(cycle);
     });
   }
 
