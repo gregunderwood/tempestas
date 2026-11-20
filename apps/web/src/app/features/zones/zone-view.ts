@@ -52,11 +52,20 @@ export interface ThresholdBar {
   unit: string;
   segments: BarSegment[];
   labels: BarLabel[];
-  /** Null when there is no reading to place. */
-  marker: { pct: number; text: string } | null;
+  /** The reading in words, for the caption row: "now 20.6 °C" or "no reading". */
+  now: string;
+  /**
+   * Null when there is no reading to place. A reading outside the scale is
+   * pinned to that edge and drawn as an arrow, rather than stretching the scale
+   * until the thresholds - the part worth reading - are crushed into a corner.
+   */
+  marker: { pct: number; offScale: 'low' | 'high' | null } | null;
   /** The same picture as a sentence, for a screen reader. */
   description: string;
 }
+
+/** Threshold labels closer than this (percent of the bar) merge into one. */
+const MERGE_LABELS_BELOW_PCT = 20;
 
 export interface BarSpec {
   caption: string;
@@ -74,9 +83,11 @@ export interface BarSpec {
 export function thresholdBar(spec: BarSpec): ThresholdBar {
   const low = Math.min(spec.onAt, spec.offAt);
   const high = Math.max(spec.onAt, spec.offAt);
-  const pad = Math.max(spec.minPad, (high - low) * 0.75);
-  const min = Math.min(low - pad, spec.value ?? Infinity);
-  const max = Math.max(high + pad, spec.value ?? -Infinity);
+  // A fixed window around the thresholds: the scale never moves with the
+  // reading, so the same rule always draws the same bar.
+  const pad = Math.max(spec.minPad, (high - low) * 1.5);
+  const min = low - pad;
+  const max = high + pad;
   const pct = (v: number) => ((v - min) / (max - min)) * 100;
 
   const [lowKind, highKind]: [SegmentKind, SegmentKind] =
@@ -96,14 +107,27 @@ export function thresholdBar(spec: BarSpec): ThresholdBar {
     caption: spec.caption,
     unit: spec.unit,
     segments,
-    labels: [
-      { pct: pct(low), text: fmt(low) },
-      { pct: pct(high), text: fmt(high) },
-    ],
+    labels:
+      pct(high) - pct(low) < MERGE_LABELS_BELOW_PCT
+        ? [
+            {
+              pct: (pct(low) + pct(high)) / 2,
+              text: `${low.toFixed(spec.decimals)}–${fmt(high)}`,
+            },
+          ]
+        : [
+            { pct: pct(low), text: fmt(low) },
+            { pct: pct(high), text: fmt(high) },
+          ],
+    now,
     marker:
       spec.value === null
         ? null
-        : { pct: pct(spec.value), text: fmt(spec.value) },
+        : spec.value < min
+          ? { pct: 0, offScale: 'low' }
+          : spec.value > max
+            ? { pct: 100, offScale: 'high' }
+            : { pct: pct(spec.value), offScale: null },
     description:
       `${spec.caption}: on ${onWord} ${fmt(spec.onAt)}, ` +
       `off ${offWord} ${fmt(spec.offAt)}, holding in between; ${now}.`,

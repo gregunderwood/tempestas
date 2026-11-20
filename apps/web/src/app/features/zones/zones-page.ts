@@ -157,7 +157,10 @@ import { formatDuration, zoneCards } from './zone-view';
 
                 @for (bar of rule.bars; track bar.caption) {
                   <figure class="bar">
-                    <figcaption>{{ bar.caption }}</figcaption>
+                    <figcaption>
+                      <span>{{ bar.caption }}</span>
+                      <span class="bar__now">{{ bar.now }}</span>
+                    </figcaption>
                     <div
                       class="bar__track"
                       role="img"
@@ -171,9 +174,20 @@ import { formatDuration, zoneCards } from './zone-view';
                         ></span>
                       }
                       @if (bar.marker; as m) {
-                        <span class="bar__marker" [style.left.%]="m.pct">
-                          <span class="bar__marker-label">{{ m.text }}</span>
-                        </span>
+                        @if (m.offScale) {
+                          <span
+                            class="bar__offscale bar__offscale--{{
+                              m.offScale
+                            }}"
+                            aria-hidden="true"
+                            >{{ m.offScale === 'high' ? '▶' : '◀' }}</span
+                          >
+                        } @else {
+                          <span
+                            class="bar__marker"
+                            [style.left.%]="m.pct"
+                          ></span>
+                        }
                       }
                     </div>
                     <div class="bar__labels" aria-hidden="true">
@@ -358,12 +372,35 @@ import { formatDuration, zoneCards } from './zone-view';
       color: var(--temp-gauge-red);
     }
     .bar {
-      margin: 1.6rem 0 0.25rem;
+      margin: 0.75rem 0 0.25rem;
     }
     .bar figcaption {
-      font-size: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      font-size: 0.8rem;
+      margin-bottom: 0.3rem;
+    }
+    .bar figcaption > span:first-child {
       opacity: 0.7;
-      margin-bottom: 0.15rem;
+    }
+    .bar__now {
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .bar__offscale {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 0.85rem;
+      line-height: 1;
+      color: var(--mat-sys-on-surface);
+    }
+    .bar__offscale--high {
+      right: 2px;
+    }
+    .bar__offscale--low {
+      left: 2px;
     }
     .bar__track {
       position: relative;
@@ -403,16 +440,6 @@ import { formatDuration, zoneCards } from './zone-view';
       margin-left: -1.5px;
       background: var(--mat-sys-on-surface);
       border-radius: 2px;
-    }
-    .bar__marker-label {
-      position: absolute;
-      bottom: 100%;
-      left: 50%;
-      transform: translateX(-50%);
-      white-space: nowrap;
-      font-size: 0.8rem;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
     }
     .bar__labels {
       position: relative;
