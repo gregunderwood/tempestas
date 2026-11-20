@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { NEVER, of, throwError, type Observable } from 'rxjs';
 import type { RulesCycle, Zone } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
@@ -14,6 +14,7 @@ import { ZonesPage } from './zones-page';
 import {
   NOW,
   PUMPHOUSE,
+  PUMPHOUSE_REFUSED,
   cycleOf,
   device,
   heatTape,
@@ -21,11 +22,6 @@ import {
   probe,
   pumphouseEvaluation,
 } from './zone-fixtures';
-
-const PUMPHOUSE_REFUSED = cycleOf(
-  [],
-  [{ zoneSlug: 'pumphouse', reason: 'invalid rules_config' }],
-);
 
 interface RenderedPage {
   page: HTMLElement;
@@ -35,8 +31,21 @@ interface RenderedPage {
 
 interface RenderOptions {
   zones?: Zone[];
-  zonesRequestFails?: boolean;
   firstCycle?: RulesCycle | null;
+  failingRequest?: 'fetchZones' | 'nodes';
+  pendingRequest?: 'devices';
+}
+
+function respondTo<Body>(
+  request: string,
+  options: RenderOptions,
+  body: Body,
+): Observable<Body> {
+  if (options.failingRequest === request) {
+    return throwError(() => new Error('offline'));
+  }
+  if (options.pendingRequest === request) return NEVER;
+  return of(body);
 }
 
 function renderZonesPage(options: RenderOptions = {}): RenderedPage {
@@ -54,14 +63,12 @@ function renderZonesPage(options: RenderOptions = {}): RenderedPage {
       {
         provide: ApiService,
         useValue: {
-          zones: () =>
-            options.zonesRequestFails
-              ? throwError(() => new Error('offline'))
-              : of(options.zones ?? [PUMPHOUSE]),
-          nodes: () => of([node('patji', 'z-pump')]),
+          fetchZones: () =>
+            respondTo('fetchZones', options, options.zones ?? [PUMPHOUSE]),
+          nodes: () => respondTo('nodes', options, [node('patji', 'z-pump')]),
           fetchLatestRulesCycle: () => of(firstCycle),
           latestReadings: () => of([probe('pipes', 17.5), probe('air', 19.4)]),
-          devices: () => of([device(), heatTape()]),
+          devices: () => respondTo('devices', options, [device(), heatTape()]),
         },
       },
       { provide: RealtimeService, useValue: realtime },
@@ -118,6 +125,7 @@ describe('ZonesPage', () => {
 
   it('keeps every pushed device state, not only the newest', () => {
     const { page, realtime, render } = renderZonesPage();
+    vi.advanceTimersByTime(1);
     pushDevice(realtime, device({ isOn: true }));
     render();
     pushDevice(realtime, heatTape({ isOn: true }));
@@ -162,8 +170,28 @@ describe('ZonesPage', () => {
   });
 
   it('says it could not load the zones rather than that there are none', () => {
-    const { page } = renderZonesPage({ zonesRequestFails: true });
+    const { page } = renderZonesPage({ failingRequest: 'fetchZones' });
     expect(page.textContent).toContain('Could not load the zones.');
     expect(page.textContent).not.toContain('No zones yet');
+  });
+
+  it('says which source failed rather than that a zone has no probes', () => {
+    const { page } = renderZonesPage({ failingRequest: 'nodes' });
+    expect(page.textContent).toContain('Could not load the nodes.');
+    expect(page.textContent).not.toContain('No probes reporting');
+  });
+
+  it('waits for every source rather than saying a role has no device', () => {
+    const { page } = renderZonesPage({ pendingRequest: 'devices' });
+    expect(page.textContent).toContain('Loading zones…');
+    expect(page.textContent).not.toContain('No device has this role');
+  });
+
+  it('names each zone in a heading above its rules', () => {
+    const { page } = renderZonesPage();
+    expect(page.querySelector('h2')?.textContent).toContain('Pumphouse');
+    expect(
+      [...page.querySelectorAll('h3')].map((heading) => heading.textContent),
+    ).toEqual(['Heater', 'Heat tape']);
   });
 });

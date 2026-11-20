@@ -56,6 +56,11 @@ export interface ProbeLine {
   tag: string | null;
 }
 
+export interface RuleDecision {
+  headline: string;
+  tone: DecisionTone;
+}
+
 export interface RuleRow {
   role: DeviceRole;
   label: string;
@@ -63,7 +68,7 @@ export interface RuleRow {
   bars: ThresholdBar[];
   notes: string[];
   stalePolicy: string;
-  decision: { headline: string; tone: DecisionTone } | null;
+  decision: RuleDecision | null;
   devices: DeviceLine[];
   problem: string | null;
 }
@@ -72,6 +77,7 @@ export interface DaylightStrip {
   windowLabel: string;
   segments: { fromPercent: number; widthPercent: number }[];
   nowPercent: number | null;
+  screenReaderText: string;
 }
 
 export interface ZoneCard {
@@ -123,8 +129,7 @@ function buildZoneCard(
     failure,
     input.cycle?.evaluations ?? [],
   );
-  const rulesRanAt =
-    evaluation?.evaluatedAt ?? (failure ? input.cycle?.at : null);
+  const rulesRanAt = findRulesRanAt(evaluation, failure, input.cycle);
   const rulesRanAgoSeconds = rulesRanAt
     ? secondsSince(rulesRanAt, input.now)
     : null;
@@ -136,19 +141,38 @@ function buildZoneCard(
     timezone: String(config.timezone ?? ''),
     localTime: evaluation?.localTime ?? null,
     rulesRanAgoSeconds,
-    isRulesRunOld:
-      rulesRanAgoSeconds !== null &&
-      rulesRanAgoSeconds > RULES_RUN_OLD_AFTER_SECONDS,
+    isRulesRunOld: isRulesRunOld(rulesRanAgoSeconds),
     problems: daylight.problems,
-    policy: config.sensorPolicy?.default
-      ? describeSensorPolicy(config.sensorPolicy.default)
-      : 'No sensor policy',
+    policy: describeZonePolicy(config),
     probes: buildProbeLines(zone, evaluation, input),
     daylight: daylight.strip,
     rules: sortOwnedRolesFirst(config, ownedRoles).map((role) =>
       buildRuleRow(zone, role, ownedRoles.has(role), evaluation, input),
     ),
   };
+}
+
+function findRulesRanAt(
+  evaluation: RulesEvaluation | null,
+  failure: string | null,
+  cycle: RulesCycle | null,
+): string | null {
+  if (evaluation) return evaluation.evaluatedAt;
+  return failure ? (cycle?.at ?? null) : null;
+}
+
+function isRulesRunOld(rulesRanAgoSeconds: number | null): boolean {
+  return (
+    rulesRanAgoSeconds !== null &&
+    rulesRanAgoSeconds > RULES_RUN_OLD_AFTER_SECONDS
+  );
+}
+
+function describeZonePolicy(config: ZoneRulesConfig): string {
+  const defaultPolicy = config.sensorPolicy?.default;
+  return defaultPolicy
+    ? describeSensorPolicy(defaultPolicy)
+    : 'No sensor policy';
 }
 
 function buildUndrawableZoneCard(
@@ -222,10 +246,10 @@ function buildDaylight(
   const startMinute = parseHourMinute(config.daylight.start);
   const endMinute = parseHourMinute(config.daylight.end);
   if (startMinute === null || endMinute === null) {
-    const window = `"${String(config.daylight.start)}"–"${String(config.daylight.end)}"`;
+    const windowText = `"${String(config.daylight.start)}"–"${String(config.daylight.end)}"`;
     return {
       strip: null,
-      problems: [`daylight window ${window} is not HH:MM`],
+      problems: [`daylight window ${windowText} is not HH:MM`],
     };
   }
 
@@ -258,11 +282,22 @@ function buildDaylightStrip(
           widthPercent: toPercent(endMinute - startMinute),
         },
       ];
+  const windowLabel = `${formatHourMinute(startMinute)}–${formatHourMinute(endMinute)}`;
   return {
-    windowLabel: `${formatHourMinute(startMinute)}–${formatHourMinute(endMinute)}`,
+    windowLabel,
     segments,
     nowPercent: nowMinute === null ? null : toPercent(nowMinute),
+    screenReaderText: describeDaylightStrip(windowLabel, nowMinute),
   };
+}
+
+function describeDaylightStrip(
+  windowLabel: string,
+  nowMinute: number | null,
+): string {
+  const daylight = `Daylight ${windowLabel}`;
+  if (nowMinute === null) return daylight;
+  return `${daylight}, now ${formatHourMinute(Math.floor(nowMinute))}`;
 }
 
 function buildRuleRow(
@@ -278,12 +313,7 @@ function buildRuleRow(
     role,
     label: labelRole(role),
     isOwned,
-    decision: decision
-      ? {
-          headline: describeDecision(decision),
-          tone: chooseDecisionTone(decision),
-        }
-      : null,
+    decision: describeRuleDecision(decision),
     devices: buildRoleDeviceLines(zone, role, decision, input),
   };
 
@@ -291,9 +321,10 @@ function buildRuleRow(
     const rule = zone.rulesConfig.rules[role] as RoleRule;
     // Never another role's climate: it would show a healthy number for a probe that stopped reporting.
     const ownClimate = evaluation?.climateByRole[role] ?? null;
+    const isClimateStale = evaluation?.staleRoles.includes(role) ?? false;
     return {
       ...drawnWithoutRule,
-      ...buildRuleBars(rule, ownClimate),
+      ...buildRuleBars(rule, ownClimate, isClimateStale),
       stalePolicy: describeStalePolicy(rule.onStale),
       problem: null,
     };
@@ -306,6 +337,16 @@ function buildRuleRow(
       problem: `This rule cannot be drawn: ${readErrorMessage(error)}.`,
     };
   }
+}
+
+function describeRuleDecision(
+  decision: DecisionOutcome | null,
+): RuleDecision | null {
+  if (!decision) return null;
+  return {
+    headline: describeDecision(decision),
+    tone: chooseDecisionTone(decision),
+  };
 }
 
 function buildRoleDeviceLines(

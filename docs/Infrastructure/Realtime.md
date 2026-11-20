@@ -63,7 +63,11 @@ devices from the API and patches them from the socket.
 The client keeps the newest push **per device**, with when it arrived (`RealtimeService.devicePushes`).
 `injectLiveDevices` fetches `GET /api/devices` and applies every push received after that request
 was sent, so two devices switched back to back both show, and a response never overwrites a newer
-push.
+push. Because nothing replays device state, it **refetches on every reconnect**: a relay switched
+while the browser was offline would otherwise show its old state until the page was reloaded.
+
+`injectLiveReadings` keeps whichever reading per sensor is newer by `createdAt`, fetched or pushed,
+so a push cached before the socket dropped never hides a fresher fetch.
 
 ## `system:status` is a safety feature
 
