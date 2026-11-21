@@ -69,6 +69,18 @@ def test_mqtt_url_is_split_into_host_and_port(tmp_path):
     assert (config.mqtt.host, config.mqtt.port) == ("192.168.2.70", 1884)
 
 
+def test_refuses_an_mqtt_password_in_the_config_file(tmp_path):
+    body = 'node_id = "bench"\n[mqtt]\npassword = "in-the-wrong-place"\n'
+    with pytest.raises(ConfigError, match="MQTT_PASSWORD"):
+        load(write_config(tmp_path, body), environment={})
+
+
+def test_reads_the_mqtt_credential_from_the_environment(tmp_path):
+    environment = {"MQTT_USERNAME": "bench", "MQTT_PASSWORD": "from-agent-env"}
+    config = load(write_config(tmp_path, 'node_id = "bench"\n'), environment=environment)
+    assert (config.mqtt.username, config.mqtt.password) == ("bench", "from-agent-env")
+
+
 PROBES = """node_id = "pumphouse"
 [sensor]
 kind = "ds18b20"

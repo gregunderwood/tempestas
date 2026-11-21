@@ -80,7 +80,8 @@ Raspbian ships.
 4. **Agent environment**: `uv sync --extra gpio` in `apps/agent-linux`.
 
 5. **Secrets**, all `0600 root` under `/etc/tempestas/`: `db.env`,
-   `server.env`, `agent.env`. Credentials never go in `agent.toml`; systemd
+   `server.env`, `agent.env`. Credentials never go in `agent.toml`, and the
+   agent refuses to start with an `mqtt.password` there; systemd
    reads the env files as root before dropping privileges, which a hand-typed
    command cannot do without putting a password in shell history or `ps`.
 
