@@ -63,6 +63,8 @@ class NodeAgent:
             self.on_server_status(payload, is_retained)
         elif topic == contract.build_gpio_set_topic(node_id):
             self.on_command(payload, is_retained)
+        elif topic == contract.build_gpio_sync_topic(node_id):
+            self.ignore_sync_request()
 
     def on_command(self, payload, is_retained):
         verdict = judge_command(payload, is_retained, self.bound_controller, self.read_set_clock())
@@ -77,6 +79,9 @@ class NodeAgent:
             self.build_result_payload(command["id"], line_results),
         )
         self.publish_gpio_states(self.select_managed_pins(line_results))
+
+    def ignore_sync_request(self):
+        self.log("ignored a gpio/sync: this agent does not apply desired-state sync")
 
     def select_managed_pins(self, line_results):
         return [

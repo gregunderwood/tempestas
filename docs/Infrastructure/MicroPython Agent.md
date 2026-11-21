@@ -73,6 +73,10 @@ raises `COMMAND_EXPIRED`, an empty payload is ignored. The dead-man (600 s) driv
 then publishes the line states, then the alarm. A server `offline` status is logged and the lines
 are held, and a live `online` re-sends the hello, as on the Linux agent.
 
+A `gpio/sync` is subscribed to but never applied, as on the Linux agent: only a `gpio/set` drives
+a line. The Pico logs each one it ignores, so a sync sent to it shows up on the serial console
+rather than vanishing.
+
 ## Running the tests
 
 The device code is plain MicroPython with its hardware passed in, so the tests run under CPython
