@@ -405,13 +405,13 @@ coming on:
 > board brings the third probe and the real names. Readings persist every 10 s. patji admitted
 > to `pumphouse`, both devices created. Creating them found a server bug: a device made after
 > its node reported its pins started "off" while the relay was released (load ON), and the rule
-> was answered "already off" forever. Fixed in `f19b540` (a new device starts from the pin's last
+> was answered "already off" forever. Fixed in `979501b` (a new device starts from the pin's last
 > report) and verified live by deleting and recreating the tape while it was on.
 >
 > A reboot test then found a second one. patji has no RTC and came back 3.5 min slow; its
 > fail-safe report was dated before the rule's last "off", so the server took it for an old
 > retained replay and ignored it, and both loads stayed on with the server showing them off and
-> unable to turn them off. Fixed in `f89c139`: a live (non-retained) report is believed whatever
+> unable to turn them off. Fixed in `89ee63b`: a live (non-retained) report is believed whatever
 > its timestamp, dated at receipt. Rebooted again afterwards: back under rule control 10 s after
 > it reconnected.
 
