@@ -141,10 +141,16 @@ def _read_node_id(document: dict, environment) -> str:
 
 
 def _read_mqtt(section: dict, environment) -> MqttConfig:
+    # The config file is readable by the agent's user; the env file is 0600 root.
+    if "password" in section:
+        raise ConfigError(
+            "mqtt.password is not read from the config file: "
+            "set MQTT_PASSWORD in /etc/tempestas/agent.env"
+        )
     return MqttConfig(
         url=environment.get("MQTT_URL") or _read_setting(section, MqttConfig, "url"),
         username=environment.get("MQTT_USERNAME") or section.get("username"),
-        password=environment.get("MQTT_PASSWORD") or section.get("password"),
+        password=environment.get("MQTT_PASSWORD"),
         keepalive_s=_read_setting(section, MqttConfig, "keepalive_s", int),
     )
 
