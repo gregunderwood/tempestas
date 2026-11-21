@@ -1,4 +1,4 @@
-"""Must match apps/hardware's contract; tests/test_contract_matches_hardware_agent.py holds it there."""
+"""Must match apps/agent-linux's contract; tests/test_contract_matches_hardware_agent.py holds it there."""
 
 MQTT_CONTRACT_VERSION = "v1"
 MQTT_ROOT = "tempestas/" + MQTT_CONTRACT_VERSION

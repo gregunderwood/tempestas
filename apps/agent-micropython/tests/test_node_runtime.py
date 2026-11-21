@@ -27,7 +27,7 @@ class FakeNtp:
             raise self.failure
 
 
-def install_pico_modules(ntp):
+def install_device_modules(ntp):
     stubs = {
         "machine": types.SimpleNamespace(),
         "network": types.SimpleNamespace(STA_IF=0, WLAN=FakeWlan),
@@ -93,7 +93,7 @@ class QuietAgent:
 @pytest.fixture
 def runtime():
     ntp = FakeNtp()
-    module = install_pico_modules(ntp)
+    module = install_device_modules(ntp)
     clock = FakeClock()
     publisher = module.BrokerPublisher()
     connection = module.Connection(FakeWatchdog(), clock, QuietAgent(), publisher)

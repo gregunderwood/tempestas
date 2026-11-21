@@ -1,8 +1,8 @@
-# Node Agent
+# Linux Agent
 
 ## What it is
 
-`apps/hardware` — one Python process per node. It owns that box's sensor and (later)
+`apps/agent-linux` — one Python process per node. It owns that box's sensor and (later)
 its relays, and speaks the MQTT contract. Everything else in the system talks to hardware
 only through it.
 
@@ -16,17 +16,17 @@ commit rather than becoming a two-repo dance that will eventually be done wrong 
 
 ## Key files
 
-- [../../apps/hardware/src/tempestas_agent/contract.py](../../apps/hardware/src/tempestas_agent/contract.py) — the Python mirror of the MQTT contract
-- [../../apps/hardware/src/tempestas_agent/agent.py](../../apps/hardware/src/tempestas_agent/agent.py) — announce, sample, judge commands, dead-man
-- [../../apps/hardware/src/tempestas_agent/sensor.py](../../apps/hardware/src/tempestas_agent/sensor.py) — raw SCD4x over I²C, and the closed-loop simulator
-- [../../apps/hardware/src/tempestas_agent/ds18b20.py](../../apps/hardware/src/tempestas_agent/ds18b20.py) — DS18B20 probes over the kernel's 1-Wire sysfs
-- [../../apps/hardware/src/tempestas_agent/gpio.py](../../apps/hardware/src/tempestas_agent/gpio.py) — the relay backends: `NoGpio`, `SimulatedGpio`, `LgpioBackend`
-- [../../apps/hardware/agent.example.toml](../../apps/hardware/agent.example.toml) — every option, with the reasoning
+- [../../apps/agent-linux/src/tempestas_agent/contract.py](../../apps/agent-linux/src/tempestas_agent/contract.py) — the Python mirror of the MQTT contract
+- [../../apps/agent-linux/src/tempestas_agent/agent.py](../../apps/agent-linux/src/tempestas_agent/agent.py) — announce, sample, judge commands, dead-man
+- [../../apps/agent-linux/src/tempestas_agent/sensor.py](../../apps/agent-linux/src/tempestas_agent/sensor.py) — raw SCD4x over I²C, and the closed-loop simulator
+- [../../apps/agent-linux/src/tempestas_agent/ds18b20.py](../../apps/agent-linux/src/tempestas_agent/ds18b20.py) — DS18B20 probes over the kernel's 1-Wire sysfs
+- [../../apps/agent-linux/src/tempestas_agent/gpio.py](../../apps/agent-linux/src/tempestas_agent/gpio.py) — the relay backends: `NoGpio`, `SimulatedGpio`, `LgpioBackend`
+- [../../apps/agent-linux/agent.example.toml](../../apps/agent-linux/agent.example.toml) — every option, with the reasoning
 
 ## Running it
 
 ```bash
-cd apps/hardware
+cd apps/agent-linux
 uv sync --group dev
 uv run tempestas-agent --simulated                      # no hardware at all
 uv run tempestas-agent --config /etc/tempestas/agent.toml
@@ -97,13 +97,13 @@ Each one contradicts what was assumed, and each has a test and a comment next to
 
 ## Deployment
 
-The unit lives at [../../apps/hardware/systemd/tempestas-agent.service](../../apps/hardware/systemd/tempestas-agent.service)
+The unit lives at [../../apps/agent-linux/systemd/tempestas-agent.service](../../apps/agent-linux/systemd/tempestas-agent.service)
 and is installed by staging it in the repo checkout and then `sudo install`-ing it — never by
 piping content into a root-owned file, which is how a password once ended up inside `/etc/fstab`.
 
 ```bash
 sudo install -m 0644 -o root -g root \
-  ~/tempestas/apps/hardware/systemd/tempestas-agent.service /etc/systemd/system/
+  ~/tempestas/apps/agent-linux/systemd/tempestas-agent.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl restart tempestas-agent
 systemd-analyze verify /etc/systemd/system/tempestas-agent.service   # must be silent
 ```

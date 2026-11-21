@@ -1,9 +1,9 @@
-# Pico Agent
+# MicroPython Agent
 
 ## What it is
 
-`apps/pico` — a MicroPython agent for a Raspberry Pi Pico W. It speaks the same MQTT contract as
-the Python [Node Agent](Node%20Agent.md), so the server cannot tell the two apart beyond `kind` and
+`apps/agent-micropython` — a MicroPython agent for a Raspberry Pi Pico W. It speaks the same MQTT contract as
+the Python [Linux Agent](Linux%20Agent.md), so the server cannot tell the two apart beyond `kind` and
 `capabilities`. It is for a box that only needs a probe and a couple of relays, where a Pi would
 need an SD card, an OS and updates.
 
@@ -19,15 +19,15 @@ node leaves them **on**, the same as patji in the [Pumphouse](../Pumphouse.md).
 
 ## Key files
 
-- [../../apps/pico/device/node_agent.py](../../apps/pico/device/node_agent.py) — announce, judge commands, dead-man, readings; no hardware imports
-- [../../apps/pico/device/node_runtime.py](../../apps/pico/device/node_runtime.py) — boot, Wi-Fi, NTP, the broker connection, the main loop, the watchdog
-- [../../apps/pico/device/command_guard.py](../../apps/pico/device/command_guard.py) — every reason a `gpio/set` is refused
-- [../../apps/pico/device/tempestas_mqtt.py](../../apps/pico/device/tempestas_mqtt.py) — MQTT 3.1.1 at QoS 0 and 1, rewritten from `umqtt.simple` 1.8.1 (MIT); holds messages that arrive while a publish waits for its acknowledgement
-- [../../apps/pico/device/relay_lines.py](../../apps/pico/device/relay_lines.py) — driving and releasing the relay pins, with register readback
-- [../../apps/pico/device/ds18b20_probes.py](../../apps/pico/device/ds18b20_probes.py) — the probes, pinned by ROM, refusing the chip's fake readings
-- [../../apps/pico/device/contract.py](../../apps/pico/device/contract.py) — the MicroPython mirror of the contract
-- [../../apps/pico/device/settings.py](../../apps/pico/device/settings.py) — node id, broker, pins, probes, failsafe levels
-- [../../tools/deploy-pico.sh](../../tools/deploy-pico.sh) — copy it onto the board over USB
+- [../../apps/agent-micropython/device/node_agent.py](../../apps/agent-micropython/device/node_agent.py) — announce, judge commands, dead-man, readings; no hardware imports
+- [../../apps/agent-micropython/device/node_runtime.py](../../apps/agent-micropython/device/node_runtime.py) — boot, Wi-Fi, NTP, the broker connection, the main loop, the watchdog
+- [../../apps/agent-micropython/device/command_guard.py](../../apps/agent-micropython/device/command_guard.py) — every reason a `gpio/set` is refused
+- [../../apps/agent-micropython/device/tempestas_mqtt.py](../../apps/agent-micropython/device/tempestas_mqtt.py) — MQTT 3.1.1 at QoS 0 and 1, rewritten from `umqtt.simple` 1.8.1 (MIT); holds messages that arrive while a publish waits for its acknowledgement
+- [../../apps/agent-micropython/device/relay_lines.py](../../apps/agent-micropython/device/relay_lines.py) — driving and releasing the relay pins, with register readback
+- [../../apps/agent-micropython/device/ds18b20_probes.py](../../apps/agent-micropython/device/ds18b20_probes.py) — the probes, pinned by ROM, refusing the chip's fake readings
+- [../../apps/agent-micropython/device/contract.py](../../apps/agent-micropython/device/contract.py) — the MicroPython mirror of the contract
+- [../../apps/agent-micropython/device/settings.py](../../apps/agent-micropython/device/settings.py) — node id, broker, pins, probes, failsafe levels
+- [../../tools/deploy-agent-micropython.sh](../../tools/deploy-agent-micropython.sh) — copy it onto the board over USB
 
 ## The board
 
@@ -75,7 +75,7 @@ The device code is plain MicroPython with its hardware passed in, so the tests r
 with fakes:
 
 ```bash
-cd apps/pico
+cd apps/agent-micropython
 uv run pytest -q && uv run ruff check .
 ```
 
@@ -86,7 +86,7 @@ which is itself checked against the TypeScript, so a contract change that misses
 CPython is more forgiving than MicroPython. Before deploying, check that every file compiles:
 
 ```bash
-cd apps/pico/device
+cd apps/agent-micropython/device
 for file in *.py; do uv tool run --from mpy-cross mpy-cross -o /tmp/check.mpy "$file"; done
 ```
 
@@ -99,12 +99,12 @@ for file in *.py; do uv tool run --from mpy-cross mpy-cross -o /tmp/check.mpy "$
 2. **Remove the old tutorial scripts.** They hold the home Wi-Fi password in plain text:
    `uv tool run mpremote connect /dev/ttyACM0 rm switch.py + rm temp_sensor.py + rm web_server.py + rm async_web_server.py + rm -r lib/picozero`
 3. **Give it a broker account**, as patji has, with an ACL limited to its own node topics.
-4. **Write `apps/pico/device/credentials.py`** from `credentials.example.py`. It is gitignored.
+4. **Write `apps/agent-micropython/device/credentials.py`** from `credentials.example.py`. It is gitignored.
 
 ### Every deploy
 
 ```bash
-tools/deploy-pico.sh [/dev/ttyACM0]
+tools/deploy-agent-micropython.sh [/dev/ttyACM0]
 ```
 
 It runs the Pico's tests, hard-resets the board, catches it inside `main.py`'s 5 s boot grace,

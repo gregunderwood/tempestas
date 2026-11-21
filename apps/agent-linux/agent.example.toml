@@ -100,7 +100,7 @@ chip_label = "pinctrl-bcm2711"   # pinctrl-rp1 on a Pi 5. By label, never number
 #
 # This is also the level each line is CLAIMED at, and the bias is pulled toward
 # it - so the pad is never an output at a level nobody chose, and a released or
-# killed process leaves it here. See docs/Infrastructure/Node Agent.md.
+# killed process leaves it here. See docs/Infrastructure/Linux Agent.md.
 [gpio.failsafe]
 # 5 = 1
 # 6 = 1
