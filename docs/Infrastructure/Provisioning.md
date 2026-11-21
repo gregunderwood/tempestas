@@ -83,6 +83,12 @@ Raspbian ships.
    sudo systemd-analyze verify tempestas-server.service
    ```
 
+   Install them as they are in the repo, and never edit one on the box: an edit there is
+   invisible from here. Check a box with
+   `diff /etc/systemd/system/tempestas-agent.service ~/tempestas/apps/agent-linux/systemd/tempestas-agent.service`.
+   elantris once ran for two months without `EnvironmentFile=`, reading its broker login from
+   `agent.toml`, and the repo's own unit would not have started there until that was put right.
+
    ⚠ **Do not install them under a `umask 077` shell.** The files land `0600`
    root, and while systemd can still read them, nothing else can - including
    `systemctl cat`, which then fails with a bare "Permission denied" that looks
