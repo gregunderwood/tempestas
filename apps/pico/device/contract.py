@@ -73,6 +73,9 @@ QOS = {
     "serverStatus": (1, True),
 }
 
+# Nothing repeats these after a reconnect, unlike retained state, samples and the hello.
+HELD_WHILE_OFFLINE = ("alarm", "gpioResult")
+
 
 class AlarmCode:
     READBACK_MISMATCH = "READBACK_MISMATCH"

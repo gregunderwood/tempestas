@@ -33,6 +33,7 @@ WIFI_POWER_SAVE_OFF = 0xA11140
 MILLISECONDS_PER_SECOND = 1000
 BOOT_ID_BYTES = 6
 MAX_MESSAGES_HELD_OFFLINE = 20
+PINGS_PER_KEEPALIVE = 2
 
 
 def log(message):
@@ -56,23 +57,25 @@ class BrokerPublisher:
     def __init__(self):
         self.client = None
         self.held_messages = []
+        self.undelivered_messages = []
 
-    def publish(self, topic, text, is_retained, quality_of_service):
-        if self.client is None:
-            self.hold_if_worth_keeping(topic, text, is_retained, quality_of_service)
+    def publish(self, topic, text, is_retained, quality_of_service, should_hold_while_offline):
+        message = (topic, text, is_retained, quality_of_service)
+        if self.client is not None and self.try_publishing(message):
             return
+        if should_hold_while_offline:
+            self.hold(message)
+
+    def try_publishing(self, message):
         try:
-            self.client.publish(topic, text, is_retained, quality_of_service)
+            self.client.publish(*message)
         except Exception as error:
-            self.hold_if_worth_keeping(topic, text, is_retained, quality_of_service)
             self.drop("publish failed: %r" % error)
+            return False
+        return True
 
-    def hold_if_worth_keeping(self, topic, text, is_retained, quality_of_service):
-        # Alarms and results are QoS 1 and not retained; nothing else repeats them after a reconnect.
-        is_worth_keeping = quality_of_service > 0 and not is_retained
-        if not is_worth_keeping:
-            return
-        self.held_messages.append((topic, text, is_retained, quality_of_service))
+    def hold(self, message):
+        self.held_messages.append(message)
         if len(self.held_messages) > MAX_MESSAGES_HELD_OFFLINE:
             self.held_messages.pop(0)
 
@@ -80,12 +83,20 @@ class BrokerPublisher:
         held_messages = self.held_messages
         self.held_messages = []
         for topic, text, is_retained, quality_of_service in held_messages:
-            self.publish(topic, text, is_retained, quality_of_service)
+            self.publish(topic, text, is_retained, quality_of_service, True)
+
+    def take_undelivered_messages(self):
+        undelivered_messages = self.undelivered_messages
+        self.undelivered_messages = []
+        return undelivered_messages
 
     def drop(self, reason):
         log("dropping the broker connection: %s" % reason)
-        if self.client is not None:
-            self.client.close()
+        if self.client is None:
+            return
+        # Already acknowledged to the broker, so it will never send these again.
+        self.undelivered_messages.extend(self.client.take_deferred_messages())
+        self.client.close()
         self.client = None
 
 
@@ -173,13 +184,13 @@ class Connection:
             settings.KEEPALIVE_SECONDS,
         )
         quality_of_service, is_retained = contract.QOS["status"]
-        offline = json.dumps(self.agent.status_payload("offline"))
+        offline = json.dumps(self.agent.build_status_payload("offline"))
         client.set_last_will(contract.topic_status(node_id), offline, is_retained, quality_of_service)
         client.set_message_handler(self.deliver)
         try:
             client.connect(SOCKET_TIMEOUT_SECONDS)
-            for topic, subscription_qos in self.agent.subscriptions():
-                client.subscribe(topic, subscription_qos)
+            for topic, subscription_quality_of_service in self.agent.list_subscriptions():
+                client.subscribe(topic, subscription_quality_of_service)
         except Exception as error:
             log("broker connect failed: %r" % error)
             client.close()
@@ -197,6 +208,7 @@ class Connection:
             log("a message on %s could not be handled: %r" % (topic, error))
 
     def serve_pending_messages(self):
+        self.deliver_undelivered_messages()
         client = self.publisher.client
         if client is None:
             return
@@ -216,8 +228,13 @@ class Connection:
             if self.publisher.client is client:
                 self.publisher.drop("connection lost: %r" % error)
 
+    def deliver_undelivered_messages(self):
+        for topic, payload, is_retained in self.publisher.take_undelivered_messages():
+            self.deliver(topic, payload, is_retained)
+
     def ping_when_due(self, client):
-        ping_interval_milliseconds = settings.KEEPALIVE_SECONDS * MILLISECONDS_PER_SECOND // 2
+        keepalive_milliseconds = settings.KEEPALIVE_SECONDS * MILLISECONDS_PER_SECOND
+        ping_interval_milliseconds = keepalive_milliseconds // PINGS_PER_KEEPALIVE
         if self.clock.elapsed_since(self.last_ping_ticks) >= ping_interval_milliseconds:
             client.ping()
             self.last_ping_ticks = self.clock.ticks()

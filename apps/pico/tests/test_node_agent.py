@@ -71,7 +71,7 @@ class AgentUnderTest:
         )
 
     def levels(self):
-        return [self.relay_lines.level(pin) for pin in (HEATER_PIN, HEAT_TAPE_PIN)]
+        return [self.relay_lines.read_level(pin) for pin in (HEATER_PIN, HEAT_TAPE_PIN)]
 
     def alarm_codes(self):
         return [message.payload["code"] for message in self.publisher.on_topic("/alarm")]
@@ -209,3 +209,18 @@ def test_still_raises_the_alarm_when_failing_safe_before_the_clock_is_set():
     node.deliver("server", {"state": "offline"})
     assert node.alarm_codes() == [AlarmCode.SAFE_STATE_ENTERED]
     assert node.levels() == [RELEASED_LEVEL, RELEASED_LEVEL]
+
+
+def test_asks_to_hold_only_alarms_and_results_while_offline():
+    node = AgentUnderTest()
+    node.agent.announce()
+    node.heartbeat()
+    node.command(DRIVEN_LOW_LEVEL)
+    node.command(DRIVEN_LOW_LEVEL, issued_by="intruder")
+    node.agent.publish_readings()
+    held_topics = {
+        message.topic.split("/braize/")[-1]
+        for message in node.publisher.messages
+        if message.should_hold_while_offline
+    }
+    assert held_topics == {"gpio/result", "alarm"}

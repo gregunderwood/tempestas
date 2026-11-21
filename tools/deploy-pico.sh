@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
-#
-# Copy the Pico agent onto the board over USB and restart it.
-#
-# The board is hard-reset and caught in main.py's boot grace, before the agent arms a
-# watchdog that would otherwise reset it halfway through the copy.
-#
-#   tools/deploy-pico.sh [serial-port]
+# Copies inside main.py's boot grace, before an armed watchdog could reset the board mid-copy.
 
 set -euo pipefail
 
@@ -27,7 +21,7 @@ say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 mpremote() { "$UV" tool run mpremote connect "$PORT" "$@"; }
 
 wait_for_port() {
-  for _ in $(seq "$PORT_WAIT_SECONDS"); do
+  for attempt in $(seq "$PORT_WAIT_SECONDS"); do
     [ -e "$PORT" ] && return 0
     sleep 1
   done
