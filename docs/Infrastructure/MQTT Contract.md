@@ -73,10 +73,21 @@ sensibly without it, because a node on the previous minor will not send it. That
 promise of a minor; break it and the bump was a major.
 
 Each agent reports `agentName` (`agent-linux`, `agent-micropython`) and an `agentVersion` of
-`<major>.<minor>.<patch>+<commit>`, and declares `contractMinor` in its capabilities. The Nodes page
-shows a node whose minor differs from the server's as behind or ahead; it does not degrade health.
-The patch counts that agent's commits since the contract version last changed, so it never needs
-bumping by hand. [tools/describe-agent-version.sh](../../tools/describe-agent-version.sh) builds it.
+`<major>.<minor>.<patch>`, and declares `contractMinor` in its capabilities. The Nodes page shows a
+node whose minor differs from the server's as behind or ahead; it does not degrade health.
+
+The patch counts that agent's commits since the contract version last changed, so every change to
+an agent raises it, in order, without bumping it by hand. That only holds for released code, so
+anything else is marked: [tools/describe-agent-version.sh](../../tools/describe-agent-version.sh)
+builds the version, and the deploy scripts stamp it.
+
+| Deployed from            | Reports                   |
+| ------------------------ | ------------------------- |
+| `origin/main`, clean     | `1.0.4`                   |
+| Any other commit         | `1.0.4-dev+ecdbbe7`       |
+| With uncommitted changes | `1.0.4-dev+ecdbbe7.dirty` |
+
+A `-dev` version is never released code, and its commit is how to find what is on the node.
 
 An agent older than contract 1.0 sends neither field: it shows the bare version, and an absent
 `contractMinor` reads as 0.

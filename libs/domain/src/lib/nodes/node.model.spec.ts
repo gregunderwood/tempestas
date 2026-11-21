@@ -5,9 +5,9 @@ describe('describeAgent', () => {
     expect(
       describeAgent({
         agentName: 'agent-linux',
-        agentVersion: '1.0.3+abc1234',
+        agentVersion: '1.0.3',
       }),
-    ).toBe('agent-linux 1.0.3+abc1234');
+    ).toBe('agent-linux 1.0.3');
   });
 
   it('shows only the version for an agent that does not name itself', () => {

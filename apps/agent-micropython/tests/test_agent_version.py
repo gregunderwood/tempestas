@@ -29,14 +29,14 @@ def test_an_unstamped_board_says_so(unstamped):
     assert read_agent_version() == UNSTAMPED_VERSION
 
 
-def test_a_deployed_board_reports_the_stamped_commit(stamped_as):
-    stamped_as("0.1.0+861cde6")
-    assert read_agent_version() == "0.1.0+861cde6"
+def test_a_deployed_board_reports_the_stamped_version(stamped_as):
+    stamped_as("1.0.3")
+    assert read_agent_version() == "1.0.3"
 
 
 def test_hello_carries_the_stamped_version(stamped_as):
-    stamped_as("0.1.0+861cde6")
+    stamped_as("1.0.3")
     node = AgentUnderTest()
     node.agent.announce()
     hello = node.publisher.messages[1]
-    assert hello.payload["agentVersion"] == "0.1.0+861cde6"
+    assert hello.payload["agentVersion"] == "1.0.3"

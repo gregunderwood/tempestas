@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tools/describe-agent-version.sh <agent app dir>
-# Prints <contract major>.<contract minor>.<patch>+<commit>, with -dirty when that agent has uncommitted changes.
+# Prints <contract major>.<contract minor>.<patch>, and marks anything but a clean origin/main as -dev+<commit>.
 # The patch counts this agent's commits since its contract version last changed; see docs/Infrastructure/MQTT Contract.md.
 
 set -euo pipefail
@@ -28,10 +28,15 @@ fi
 
 CONTRACT_SET_AT="$(git -C "$REPO_ROOT" log -1 --format=%H -E -G "$CONTRACT_VERSION_LINE" -- "$CONTRACT_FILE")"
 PATCH="$(git -C "$REPO_ROOT" rev-list --count "${CONTRACT_SET_AT:+$CONTRACT_SET_AT..}HEAD" -- "$AGENT_DIR")"
-COMMIT="$(git -C "$AGENT_DIR" rev-parse --short=7 HEAD)"
+VERSION="$MAJOR.$MINOR.$PATCH"
+COMMIT="$(git -C "$REPO_ROOT" rev-parse --short=7 HEAD)"
+RELEASED_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short=7 --verify --quiet origin/main || true)"
+HAS_UNCOMMITTED_CHANGES="$(git -C "$AGENT_DIR" status --porcelain -- .)"
 
-if [ -n "$(git -C "$AGENT_DIR" status --porcelain -- .)" ]; then
-  COMMIT="$COMMIT-dirty"
+if [ -n "$HAS_UNCOMMITTED_CHANGES" ]; then
+  echo "$VERSION-dev+$COMMIT.dirty"
+elif [ "$COMMIT" != "$RELEASED_COMMIT" ]; then
+  echo "$VERSION-dev+$COMMIT"
+else
+  echo "$VERSION"
 fi
-
-echo "$MAJOR.$MINOR.$PATCH+$COMMIT"

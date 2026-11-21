@@ -31,15 +31,15 @@ def test_an_agent_not_deployed_by_the_script_says_so(unstamped):
     assert read_agent_version() == UNSTAMPED_VERSION
 
 
-def test_a_deployed_agent_reports_the_stamped_commit(stamped_as):
-    stamped_as("1.0.3+861cde6")
-    assert read_agent_version() == "1.0.3+861cde6"
+def test_a_deployed_agent_reports_the_stamped_version(stamped_as):
+    stamped_as("1.0.3")
+    assert read_agent_version() == "1.0.3"
 
 
 def test_hello_carries_the_stamped_version(stamped_as):
-    stamped_as("1.0.3+861cde6-dirty")
+    stamped_as("1.0.4-dev+861cde6.dirty")
     agent, _ = make_agent()
-    assert agent.hello_payload()["agentVersion"] == "1.0.3+861cde6-dirty"
+    assert agent.hello_payload()["agentVersion"] == "1.0.4-dev+861cde6.dirty"
 
 
 def test_hello_names_the_app_and_the_contract_minor():
