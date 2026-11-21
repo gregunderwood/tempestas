@@ -9,8 +9,8 @@ import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
+import { refreshAfterSuccess } from '../../core/refresh-after-success';
 import { NodeStatus, type Node } from '@tempestas/domain';
-import type { Observable } from 'rxjs';
 
 @Component({
   selector: 'temp-nodes-page',
@@ -90,15 +90,11 @@ export class NodesPage {
   }
 
   admit(node: Node): void {
-    this.refreshAfterSuccess(this.api.admitNode(node.id));
+    refreshAfterSuccess(this.api.admitNode(node.id), () => this.refresh());
   }
 
   disable(node: Node): void {
-    this.refreshAfterSuccess(this.api.disableNode(node.id));
-  }
-
-  private refreshAfterSuccess(request: Observable<unknown>): void {
-    request.subscribe({ next: () => this.refresh(), error: () => undefined });
+    refreshAfterSuccess(this.api.disableNode(node.id), () => this.refresh());
   }
 
   private refresh(): void {
