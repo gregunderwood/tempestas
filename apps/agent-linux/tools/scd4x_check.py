@@ -37,9 +37,10 @@ class Tally:
 def main() -> int:
     arguments = parse_arguments()
     if is_agent_service_active() and not arguments.force:
-        print("tempestas-agent is ACTIVE. It owns the sensor, and two readers")
-        print("interleave into nonsense. Stop it first:")
+        print("tempestas-agent is running, or systemd could not say. It owns the sensor,")
+        print("and two readers interleave into nonsense. Stop it first:")
         print("  sudo systemctl stop tempestas-agent")
+        print("If systemctl cannot answer, check by hand and rerun with --force.")
         return EXIT_AGENT_RUNNING
 
     sensor = Scd4xSensor(

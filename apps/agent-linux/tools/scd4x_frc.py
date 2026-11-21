@@ -33,8 +33,10 @@ def main() -> int:
         print(f"--target {arguments.target} is not a plausible reference. Outdoor air is ~425.")
         return EXIT_REFUSED
     if is_agent_service_active() and not arguments.force:
-        print("tempestas-agent is ACTIVE and owns the sensor. Stop it first:")
+        print("tempestas-agent is running, or systemd could not say. It owns the sensor.")
+        print("Stop it first:")
         print("  sudo systemctl stop tempestas-agent")
+        print("If systemctl cannot answer, check by hand and rerun with --force.")
         return EXIT_REFUSED
 
     sensor = Scd4xSensor(arguments.bus, arguments.address, offset_c=None, altitude_m=None)
