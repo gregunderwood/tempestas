@@ -15,7 +15,6 @@ import type { Reading } from '@tempestas/domain';
   imports: [MatTableModule, DecimalPipe, DatePipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <h1>Readings</h1>
     <table mat-table [dataSource]="readings()">
       <ng-container matColumnDef="node">
         <th mat-header-cell *matHeaderCellDef>Node</th>

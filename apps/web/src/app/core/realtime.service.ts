@@ -8,7 +8,12 @@ import {
   type RulesCycle,
   type SystemStatus,
 } from '@tempestas/domain';
-import { recordDevicePush, type PushedDevice } from './device-pushes';
+import {
+  appendDevicePush,
+  recordDevicePush,
+  type NumberedPush,
+  type PushedDevice,
+} from './device-pushes';
 
 /**
  * The socket feed, as signals.
@@ -28,6 +33,8 @@ export class RealtimeService implements OnDestroy {
   readonly connected = signal(false);
   readonly reconnectCount = signal(0);
   readonly devicePushes = signal<ReadonlyMap<string, PushedDevice>>(new Map());
+  /** Every push in arrival order, so two switches of one relay between reads are both seen. */
+  readonly recentDevicePushes = signal<readonly NumberedPush[]>([]);
   readonly latestRulesCycle = signal<RulesCycle | null>(null);
 
   private socket?: Socket;
@@ -49,12 +56,18 @@ export class RealtimeService implements OnDestroy {
       }));
     });
     this.socket.on(REALTIME_EVENTS.deviceState, (device: Device) => {
+      const receivedAt = Date.now();
       this.devicePushes.update((pushes) =>
-        recordDevicePush(pushes, device, Date.now()),
+        recordDevicePush(pushes, device, receivedAt),
+      );
+      this.recentDevicePushes.update((recentPushes) =>
+        appendDevicePush(recentPushes, { device, receivedAt }),
       );
     });
     this.socket.on(REALTIME_EVENTS.systemStatus, (status: SystemStatus) => {
       this.status.set(status);
+      // The server forgets its cycle when it stops leading but sends no event saying so.
+      if (status.isLeading === false) this.latestRulesCycle.set(null);
     });
     this.socket.on(REALTIME_EVENTS.rulesCycle, (cycle: RulesCycle) => {
       this.latestRulesCycle.set(cycle);

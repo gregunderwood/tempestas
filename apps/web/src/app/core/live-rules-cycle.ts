@@ -1,5 +1,5 @@
 import { computed, inject, type Signal } from '@angular/core';
-import type { RulesCycle } from '@tempestas/domain';
+import type { RulesCycle, SystemStatus } from '@tempestas/domain';
 import { ApiService } from './api.service';
 import { injectLiveSource, type SourceState } from './live-source';
 import { RealtimeService } from './realtime.service';
@@ -18,6 +18,16 @@ export function pickNewerCycle(
   return socketCycle.at >= fetchedCycle.at ? socketCycle : fetchedCycle;
 }
 
+/** A follower runs no rules, so whatever cycle it last saw is history, not the current state. */
+export function chooseCurrentCycle(
+  status: SystemStatus | null,
+  socketCycle: RulesCycle | null,
+  fetchedCycle: RulesCycle | null,
+): RulesCycle | null {
+  if (status?.isLeading === false) return null;
+  return pickNewerCycle(socketCycle, fetchedCycle);
+}
+
 export function injectLiveRulesCycle(): LiveRulesCycle {
   const api = inject(ApiService);
   const realtime = inject(RealtimeService);
@@ -27,7 +37,8 @@ export function injectLiveRulesCycle(): LiveRulesCycle {
   );
   return {
     cycle: computed(() =>
-      pickNewerCycle(
+      chooseCurrentCycle(
+        realtime.status(),
         realtime.latestRulesCycle(),
         source.latest()?.payload ?? null,
       ),
