@@ -35,7 +35,7 @@ for HOST in "${HOSTS[@]}"; do
     ssh "$HOST" "cat > $REMOTE_AGENT/src/tempestas_agent/deployed_version.py"
 
   say "$HOST: restarting (relays fail safe until the server drives them again)"
-  ssh -t "$HOST" "sudo systemctl restart tempestas-agent"
+  ssh -t "$HOST" "sudo systemctl restart tempestas-agent.service"
   sleep "$SETTLE_SECONDS"
   ssh "$HOST" "systemctl is-active tempestas-agent && journalctl -u tempestas-agent -n 5 --no-pager"
 done
