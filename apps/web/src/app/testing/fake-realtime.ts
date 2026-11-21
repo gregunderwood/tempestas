@@ -6,8 +6,7 @@ import type {
   SystemStatus,
 } from '@tempestas/domain';
 import {
-  appendDevicePush,
-  recordDevicePush,
+  storeDevicePush,
   type NumberedPush,
   type PushedDevice,
 } from '../core/device-pushes';
@@ -40,11 +39,5 @@ export function fakeRealtime(
 }
 
 export function pushDevice(realtime: FakeRealtime, device: Device): void {
-  const receivedAt = Date.now();
-  realtime.devicePushes.update((pushes) =>
-    recordDevicePush(pushes, device, receivedAt),
-  );
-  realtime.recentDevicePushes.update((recentPushes) =>
-    appendDevicePush(recentPushes, { device, receivedAt }),
-  );
+  storeDevicePush(realtime, device, Date.now());
 }

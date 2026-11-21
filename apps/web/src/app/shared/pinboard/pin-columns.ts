@@ -27,7 +27,6 @@ export function packIntoColumns<Item>(
   return columns.map((column) => column.items);
 }
 
-/** Pinned items stay in their columns with their latest version; only new items are placed. */
 export function keepColumnAssignment<Item>(
   columnKeys: readonly (readonly string[])[],
   items: readonly Item[],

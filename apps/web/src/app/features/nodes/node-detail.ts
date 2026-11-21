@@ -28,25 +28,40 @@ import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
 import { Gauge } from '../../shared/gauge/gauge';
 import { metricsFor, nodeMetrics } from '../../shared/metrics';
+import { LONGEST_TIMEOUT_MILLISECONDS } from '../../shared/time';
+import { isHeldOffByInterlock } from '../devices/device-hold';
 
-/**
- * How often the statistics are re-queried. Slow on purpose: a min or max a
- * minute old is not misleading, and each refresh is three periods of
- * aggregate queries against the readings table on an SD card.
- */
-const REFRESH_MS = 60_000;
+const STATS_REFRESH_MILLISECONDS = 60_000;
 
-/** setTimeout overflows past this and fires immediately. */
-const MAX_TIMEOUT_MS = 2_147_483_647;
+// A second past the boundary, so the server's own clock has certainly crossed it too.
+const BOUNDARY_SLACK_MILLISECONDS = 1_000;
+
+const ABSENT_FIGURE = '—';
+
+const PERIOD_NAMES: Record<SegmentStats['kind'], string> = {
+  day: 'Day',
+  night: 'Night',
+};
+
+const HOUR_MINUTE_FORMAT: Intl.DateTimeFormatOptions = {
+  hour: 'numeric',
+  minute: '2-digit',
+};
+
+const PERIOD_START_FORMAT: Intl.DateTimeFormatOptions = {
+  month: 'short',
+  day: 'numeric',
+  ...HOUR_MINUTE_FORMAT,
+};
 
 interface PeriodRow {
   period: string;
   span: string;
   inProgress: boolean;
-  min: number | null;
-  minAt: string | null;
-  max: number | null;
-  maxAt: string | null;
+  minimum: number | null;
+  minimumAt: string | null;
+  maximum: number | null;
+  maximumAt: string | null;
   average: number | null;
 }
 
@@ -54,7 +69,7 @@ interface MetricBlock {
   key: GaugeMetricKey;
   label: string;
   unit: string;
-  digits: string;
+  digitsInfo: string;
   periods: PeriodRow[];
 }
 
@@ -69,18 +84,6 @@ function describeNodeHeading(slug: string, node: Node | null) {
   };
 }
 
-/**
- * One node in detail: what it reads now, and what it has done over the last
- * 24 hours.
- *
- * The window is a rolling 24 hours because that is what the readings API
- * returns when given no `days` - a calendar day would make the first reading
- * after midnight sit alone against an empty min and max.
- *
- * Every figure here can legitimately be null and renders as an em-dash. A
- * window with no valid CO2 has no CO2 average, and showing 0 would read as
- * extremely low - the one direction that runs the burner.
- */
 @Component({
   selector: 'temp-node-detail',
   imports: [MatCardModule, DatePipe, RouterLink, Gauge],
@@ -91,18 +94,21 @@ function describeNodeHeading(slug: string, node: Node | null) {
     <mat-card appearance="outlined">
       <mat-card-header><mat-card-title>Now</mat-card-title></mat-card-header>
       <mat-card-content>
-        @for (s of sensors(); track s.key) {
+        @for (sensor of sensors(); track sensor.key) {
           <section class="sensor">
             @if (sensors().length > 1) {
-              <h3 class="sensor__name">{{ s.reading.sensorId }}</h3>
+              <h3 class="sensor__name">{{ sensor.reading.sensorId }}</h3>
             }
             <div class="gauges">
-              @for (metric of s.metrics; track metric) {
-                <temp-gauge [metricKey]="metric" [value]="s.reading[metric]" />
+              @for (metric of sensor.metrics; track metric) {
+                <temp-gauge
+                  [metricKey]="metric"
+                  [value]="sensor.reading[metric]"
+                />
               }
             </div>
             <p class="sub taken">
-              Taken {{ s.reading.createdAt | date: 'medium' }}
+              Taken {{ sensor.reading.createdAt | date: 'medium' }}
             </p>
           </section>
         } @empty {
@@ -118,35 +124,31 @@ function describeNodeHeading(slug: string, node: Node | null) {
         >
         <mat-card-content>
           <ul class="relays">
-            @for (d of devices(); track d.id) {
-              <li class="relay" [class.relay--on]="d.isOn">
+            @for (device of devices(); track device.id) {
+              <li class="relay" [class.relay--on]="device.isOn">
                 <div class="relay__head">
-                  <span class="relay__name">{{ d.name }}</span>
-                  <!-- In words, not colour: read on a phone in sunlight, and
-                       this one means a propane burner is alight. -->
-                  <span class="relay__state">{{ d.isOn ? 'ON' : 'off' }}</span>
+                  <span class="relay__name">{{ device.name }}</span>
+                  <span class="relay__state">{{
+                    device.isOn ? 'ON' : 'off'
+                  }}</span>
                 </div>
                 <div class="relay__facts">
-                  <span>BCM {{ d.gpio }}</span>
-                  @if (d.role) {
-                    <span>{{ d.role }}</span>
+                  <span>BCM {{ device.gpio }}</span>
+                  @if (device.role) {
+                    <span>{{ device.role }}</span>
                   }
-                  <!-- Whether anything is driving it is as important as its
-                       state: an idle relay under manual control and one the
-                       rules engine is deciding about look identical otherwise. -->
-                  <span>{{ d.rulesEnabled ? 'automatic' : 'manual' }}</span>
-                  @if (d.isOn && d.onAt) {
-                    <span>since {{ d.onAt | date: 'HH:mm' }}</span>
-                  } @else if (d.offAt) {
-                    <span>since {{ d.offAt | date: 'HH:mm' }}</span>
+                  <span>{{
+                    device.rulesEnabled ? 'automatic' : 'manual'
+                  }}</span>
+                  @if (findLastSwitchedAt(device); as switchedAt) {
+                    <span>since {{ switchedAt | date: 'HH:mm' }}</span>
                   }
                 </div>
-                <!-- The interlock is invisible otherwise, and "why is it not
-                     coming on?" is the question it produces. -->
-                @if (!d.isOn && !d.canTurnOn && d.canTurnOnAt) {
+                @if (isHeldOffByInterlock(device)) {
                   <div class="relay__hold">
-                    held off until {{ d.canTurnOnAt | date: 'HH:mm:ss' }} ({{
-                      d.onDelayDuration
+                    held off until
+                    {{ device.canTurnOnAt | date: 'HH:mm:ss' }} ({{
+                      device.onDelayDuration
                     }}s minimum off)
                   </div>
                 }
@@ -160,10 +162,12 @@ function describeNodeHeading(slug: string, node: Node | null) {
     <mat-card appearance="outlined">
       <mat-card-header>
         <mat-card-title>Day and night</mat-card-title>
-        @if (stats(); as s) {
+        @if (stats(); as dayNightStats) {
           <mat-card-subtitle>
-            Daylight {{ s.daylight.startTime }}–{{ s.daylight.endTime }} ·
-            {{ s.daylight.timezone }}
+            Daylight {{ dayNightStats.daylight.startTime }}–{{
+              dayNightStats.daylight.endTime
+            }}
+            · {{ dayNightStats.daylight.timezone }}
           </mat-card-subtitle>
         }
       </mat-card-header>
@@ -196,22 +200,24 @@ function describeNodeHeading(slug: string, node: Node | null) {
                         <span class="span">{{ row.span }}</span>
                       </th>
                       <td class="num">
-                        {{ fmt(row.min, block.digits) }}
-                        @if (row.minAt) {
+                        {{ formatFigure(row.minimum, block.digitsInfo) }}
+                        @if (row.minimumAt) {
                           <span class="at">{{
-                            row.minAt | date: 'HH:mm'
+                            row.minimumAt | date: 'HH:mm'
                           }}</span>
                         }
                       </td>
                       <td class="num">
-                        {{ fmt(row.max, block.digits) }}
-                        @if (row.maxAt) {
+                        {{ formatFigure(row.maximum, block.digitsInfo) }}
+                        @if (row.maximumAt) {
                           <span class="at">{{
-                            row.maxAt | date: 'HH:mm'
+                            row.maximumAt | date: 'HH:mm'
                           }}</span>
                         }
                       </td>
-                      <td class="num">{{ fmt(row.average, block.digits) }}</td>
+                      <td class="num">
+                        {{ formatFigure(row.average, block.digitsInfo) }}
+                      </td>
                     </tr>
                   }
                 </tbody>
@@ -225,9 +231,6 @@ function describeNodeHeading(slug: string, node: Node | null) {
   styles: `
     :host {
       display: block;
-    }
-    h1 {
-      margin-bottom: 0.25rem;
     }
     .crumb {
       margin-bottom: 0.5rem;
@@ -254,12 +257,10 @@ function describeNodeHeading(slug: string, node: Node | null) {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 0.25rem;
-      /* Three 9rem gauges plus gaps. Left alone they stretch across the card
-         and the reading stops looking like one grouped measurement. */
+      /* Three 9rem gauges and gaps, so they stay one grouped measurement. */
       max-width: 30rem;
     }
-    /* The gauge captions sit tight to the bottom of the arc, so without this
-       the timestamp reads as part of the CO2 label. */
+    /* Otherwise the timestamp reads as part of the CO2 gauge's caption. */
     .taken {
       margin-top: 1rem;
       margin-bottom: 0;
@@ -366,9 +367,6 @@ function describeNodeHeading(slug: string, node: Node | null) {
       font-size: 0.7rem;
       opacity: 0.6;
     }
-    /* The period still running reads differently from the completed one, and
-       mistaking a part-day average for a full one is the whole point of the
-       split. */
     .running .period {
       font-weight: 600;
       opacity: 1;
@@ -385,11 +383,6 @@ function describeNodeHeading(slug: string, node: Node | null) {
     .num {
       font-size: 1.05rem;
     }
-    .strong {
-      font-weight: 600;
-    }
-    /* The clock time of an extreme matters as much as its value: a 38 °C peak
-       at 14:00 is the greenhouse working, at 03:00 it is a fault. */
     .at {
       display: block;
       font-size: 0.7rem;
@@ -402,7 +395,7 @@ export class NodeDetail {
   private readonly api = inject(ApiService);
   private readonly pageHeading = inject(PageHeading);
 
-  /** Bound from the route, so the component works from a deep link. */
+  // Bound from the route, so the component works from a deep link.
   readonly slug = input.required<string>();
 
   private readonly destroyRef = inject(DestroyRef);
@@ -413,15 +406,12 @@ export class NodeDetail {
   private readonly allDevices = injectLiveDevices().devices;
   private readonly nodes = signal<Node[]>([]);
   protected readonly stats = signal<DayNightStats | null>(null);
+  protected readonly isHeldOffByInterlock = isHeldOffByInterlock;
 
   protected readonly node = computed(
     () => this.nodes().find((node) => node.slug === this.slug()) ?? null,
   );
 
-  /**
-   * The latest reading of each sensor on this node. The socket patches what
-   * the API established, never replaces it.
-   */
   protected readonly sensors = computed(() => {
     const node = this.node();
     return this.liveReadings()
@@ -439,52 +429,43 @@ export class NodeDetail {
   );
 
   protected readonly blocks = computed<MetricBlock[]>(() => {
-    // Newest first on screen. The API returns them chronologically, which is
-    // the sane order for a caller, but the period running now is the one being
-    // looked for and it belongs at the top.
-    const segments = [...(this.stats()?.periods ?? [])].reverse();
+    const segments = sortNewestFirst(this.stats()?.periods ?? []);
     if (segments.length === 0) return [];
-    // A pipe-probe node has no humidity: a block of dashes would read as a
-    // broken sensor rather than one that was never there.
-    return nodeMetrics(this.node()).map((key) => {
-      const metric = GAUGE_METRICS[key];
-      return {
-        key,
-        label: metric.label,
-        unit: metric.unit,
-        digits: `1.${metric.decimals}-${metric.decimals}`,
-        periods: segments.map((seg) => ({
-          period: periodLabel(seg),
-          span: periodSpan(seg),
-          inProgress: seg.inProgress,
-          min: seg.stats.min[key]?.[key] ?? null,
-          minAt: seg.stats.min[key]?.createdAt ?? null,
-          max: seg.stats.max[key]?.[key] ?? null,
-          maxAt: seg.stats.max[key]?.createdAt ?? null,
-          average: seg.stats.average[key],
-        })),
-      };
-    });
+    return nodeMetrics(this.node()).map((key) =>
+      buildMetricBlock(key, segments),
+    );
   });
 
-  private readonly decimal = new DecimalPipe('en-US');
-
-  /** An em-dash for anything absent. Never a zero. */
-  protected fmt(value: number | null, digits: string): string {
-    return value === null
-      ? '—'
-      : (this.decimal.transform(value, digits) ?? '—');
-  }
+  private readonly decimalPipe = new DecimalPipe('en-US');
 
   constructor() {
+    this.loadNodes();
+    this.showNodeInHeading();
+    this.followDayNightStats();
+    this.refreshStatsPeriodically();
+  }
+
+  protected formatFigure(value: number | null, digitsInfo: string): string {
+    if (value === null) return ABSENT_FIGURE;
+    return this.decimalPipe.transform(value, digitsInfo) ?? ABSENT_FIGURE;
+  }
+
+  protected findLastSwitchedAt(device: Device): string | null {
+    if (device.isOn && device.onAt) return device.onAt;
+    return device.offAt;
+  }
+
+  private loadNodes(): void {
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
+  }
+
+  private showNodeInHeading(): void {
     effect(() =>
       this.pageHeading.showPage(describeNodeHeading(this.slug(), this.node())),
     );
+  }
 
-    // Driven off the route parameter rather than read once: a required input
-    // has no value during construction, and moving between two nodes reuses
-    // this component instead of building a new one.
+  private followDayNightStats(): void {
     combineLatest([toObservable(this.slug), this.reload])
       .pipe(
         switchMap(([slug]) => this.api.dayNightStats({ nodeId: slug })),
@@ -494,65 +475,83 @@ export class NodeDetail {
         this.stats.set(stats);
         this.armBoundaryRefresh(stats.nextBoundary);
       });
+  }
 
-    // The gauges above are pushed over the socket, but these figures are a
-    // query. Without this the table silently freezes while the gauges keep
-    // moving - and the running period is by definition still accumulating, so
-    // it drifts further from the truth the longer the page is left open.
-    const slow = setInterval(() => this.reload.next(), REFRESH_MS);
+  private refreshStatsPeriodically(): void {
+    const statsRefreshInterval = setInterval(
+      () => this.reload.next(),
+      STATS_REFRESH_MILLISECONDS,
+    );
     this.destroyRef.onDestroy(() => {
-      clearInterval(slow);
+      clearInterval(statsRefreshInterval);
       clearTimeout(this.boundaryTimer);
     });
   }
 
-  /**
-   * Refresh the moment the running period ends, when every row shifts.
-   *
-   * The instant comes from the server, which owns the day/night boundary. A
-   * client that worked it out itself would be a second definition of night,
-   * free to disagree with the one driving the relay.
-   */
-  private armBoundaryRefresh(iso: string | null): void {
+  private armBoundaryRefresh(nextBoundary: string | null): void {
     clearTimeout(this.boundaryTimer);
-    if (!iso) return;
-    // A second past it, so the server's own clock has certainly crossed too.
-    const delay = new Date(iso).getTime() - Date.now() + 1000;
-    if (delay <= 0 || delay > MAX_TIMEOUT_MS) return;
+    if (!nextBoundary) return;
+    const delay =
+      new Date(nextBoundary).getTime() -
+      Date.now() +
+      BOUNDARY_SLACK_MILLISECONDS;
+    if (isOutsideTimeoutRange(delay)) return;
     this.boundaryTimer = setTimeout(() => this.reload.next(), delay);
   }
 }
 
-/**
- * Kind plus a marker for the one still running.
- *
- * Deliberately not "last night" or "previous day": with three periods on
- * screen, which night is "last" depends on whether it is currently night, and
- * a label that is right half the time is worse than one that never says. The
- * dated span underneath carries the identity.
- */
-function periodLabel(segment: SegmentStats): string {
-  if (segment.inProgress) {
-    return segment.kind === 'day' ? 'Day so far' : 'Night so far';
-  }
-  return segment.kind === 'day' ? 'Day' : 'Night';
+function isOutsideTimeoutRange(delay: number): boolean {
+  return delay <= 0 || delay > LONGEST_TIMEOUT_MILLISECONDS;
 }
 
-/** Dated, because two rows can be the same kind on different days. */
-function periodSpan(segment: SegmentStats): string {
-  const from = new Date(segment.from);
-  const started = from.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+function sortNewestFirst(segments: readonly SegmentStats[]): SegmentStats[] {
+  return [...segments].reverse();
+}
+
+function buildMetricBlock(
+  key: GaugeMetricKey,
+  segments: readonly SegmentStats[],
+): MetricBlock {
+  const metric = GAUGE_METRICS[key];
+  return {
+    key,
+    label: metric.label,
+    unit: metric.unit,
+    digitsInfo: `1.${metric.decimals}-${metric.decimals}`,
+    periods: segments.map((segment) => buildPeriodRow(segment, key)),
+  };
+}
+
+function buildPeriodRow(segment: SegmentStats, key: GaugeMetricKey): PeriodRow {
+  const { min: minimum, max: maximum, average } = segment.stats;
+  return {
+    period: labelPeriod(segment),
+    span: describePeriodSpan(segment),
+    inProgress: segment.inProgress,
+    minimum: minimum[key]?.[key] ?? null,
+    minimumAt: minimum[key]?.createdAt ?? null,
+    maximum: maximum[key]?.[key] ?? null,
+    maximumAt: maximum[key]?.createdAt ?? null,
+    average: average[key],
+  };
+}
+
+function labelPeriod(segment: SegmentStats): string {
+  const name = PERIOD_NAMES[segment.kind];
+  return segment.inProgress ? `${name} so far` : name;
+}
+
+function describePeriodSpan(segment: SegmentStats): string {
+  const started = new Date(segment.from).toLocaleString(
+    undefined,
+    PERIOD_START_FORMAT,
+  );
   if (segment.inProgress) {
     return `${started} – now`;
   }
-  const to = new Date(segment.to).toLocaleTimeString(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-  return `${started} – ${to}`;
+  const ended = new Date(segment.to).toLocaleTimeString(
+    undefined,
+    HOUR_MINUTE_FORMAT,
+  );
+  return `${started} – ${ended}`;
 }
