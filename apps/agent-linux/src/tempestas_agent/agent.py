@@ -14,6 +14,7 @@ from . import gpio as gpio_backends
 from . import sensor as sensor_backends
 from .config import AgentConfig
 from .ds18b20 import Ds18b20Sensors, Probe
+from .version import read_agent_version
 from .world_client import WorldClient
 
 log = logging.getLogger("tempestas.agent")
@@ -110,6 +111,7 @@ class Agent:
         self.gpio = gpio
         self._clock = clock
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
+        self.agent_version = read_agent_version()
         self.sample_sequence = 0
         self.bound_controller: str | None = None
         self.last_heartbeat_at: float | None = None
@@ -133,7 +135,7 @@ class Agent:
         return {
             **self._envelope("hello"),
             "kind": self.config.kind,
-            "agentVersion": self.config.agent_version,
+            "agentVersion": self.agent_version,
             "bootId": self.boot_id,
             "capabilities": self.capabilities(),
         }
