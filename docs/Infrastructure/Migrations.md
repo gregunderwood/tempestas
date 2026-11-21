@@ -89,14 +89,53 @@ public async up(queryRunner: QueryRunner): Promise<void> {
 One column, no surprises. A generated migration that also drops an index or rewrites an enum is
 telling you the entities and the database had drifted — understand it before you run it.
 
-### ✅ Prove the round trip
+### ✅ Let the gate prove the round trip
 
 ```bash
-npm run migration:run && npm run migration:revert && npm run migration:run
+npx nx run server:migration-round-trip     # part of the gate, and of tools/deploy.sh
 ```
 
-A migration whose `down` is wrong is discovered at the worst possible time. It costs ten seconds
-to check.
+A migration whose `down` is wrong is discovered at the worst possible time: during a rollback.
+[../../apps/server/src/migrations/round-trip/](../../apps/server/src/migrations/round-trip/) starts a
+throwaway `postgres:17` container and runs each migration in order: up, down, then up again, with
+`transaction: 'each'` as `tempestas-migrate@` does. After each step it compares a full `pg_dump`
+(schema and rows) with the one before, so a `down` that leaves a column or an enum value behind, or
+puts back the wrong value, fails and names that migration. The first failure stops the run.
+
+- **It runs on rows, not empty tables.**
+  [rows-added-after.ts](../../apps/server/src/migrations/round-trip/rows-added-after.ts) adds a
+  greenhouse zone, node, device, reading and pin transition as soon as the migration that creates
+  their table has passed. The rows are shaped so every `down` can express them. A migration that
+  changes data, or rebuilds an enum, gets a row to work on. Add rows there when a new table arrives.
+- **It connects as a non-superuser.** Migrations run as a `tempestas` role that owns its database
+  but is not a superuser. A migration that needs superuser rights, such as `CREATE EXTENSION`
+  for an untrusted extension, fails here instead of during a deploy.
+- **It does not try rows only the new code could write.** These are the rows a rollback meets in
+  production: a Pico node, a heater, a reading without humidity. The guarded `down`s refuse
+  those with a message, and their own specs cover that.
+- **It needs Docker.** It is its own target because each migration builds on the one before.
+
+A unit test also checks that [index.ts](../../apps/server/src/migrations/index.ts) lists every
+migration file. The bundle on elantris runs only what that file lists.
+
+### ✅ Mark a migration that cannot be undone
+
+```ts
+export class DropLegacyReadings1800000000000 extends IrreversibleMigration {
+  name = 'DropLegacyReadings1800000000000';
+  irreversibleBecause = 'it drops sensor_readings_legacy, which only the backup still has';
+
+  async up(queryRunner: QueryRunner) {
+    await queryRunner.query(`DROP TABLE "sensor_readings_legacy"`);
+  }
+}
+```
+
+Dropping data has no honest `down`. Extend
+[../../apps/server/src/migrations/irreversible-migration.ts](../../apps/server/src/migrations/irreversible-migration.ts)
+and say why. Its `down` refuses to run, with that reason and a pointer to the backup. The round trip
+then checks that a revert is refused and changes nothing. An unmarked migration whose `down` does not
+restore the database fails the gate.
 
 ### ✅ Add a doc comment when the column needs one
 
