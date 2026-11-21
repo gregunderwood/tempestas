@@ -43,9 +43,13 @@ def is_agent_service_active() -> bool:
             text=True,
             timeout=SYSTEMCTL_TIMEOUT_S,
         )
-        return completed.stdout.strip() == "active"
-    except Exception:
-        return False
+    except (OSError, subprocess.SubprocessError) as error:
+        # Guessing "not running" would let a tool open the I2C bus beside a live agent.
+        log.warning(
+            "could not ask systemd about %s, assuming it is running: %s", AGENT_SERVICE, error
+        )
+        return True
+    return completed.stdout.strip() == "active"
 
 
 class AlreadyRunning(RuntimeError):
