@@ -1,6 +1,5 @@
 import { DateTime } from 'luxon';
-
-const MINUTES_PER_HOUR = 60;
+import { MINUTES_PER_HOUR } from '../common/time-units';
 
 // Both fall-back 01:30s get the same number: "is it night?" has one answer at 01:30.
 export function minutesSinceMidnight(instant: Date, zone: string): number {

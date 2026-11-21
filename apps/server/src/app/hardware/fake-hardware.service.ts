@@ -20,6 +20,7 @@ import {
   type PinStateReport,
   type SensorSample,
 } from './hardware.service';
+import { MINUTES_PER_DAY } from '../common/time-units';
 import { toPinKey } from './pin-key';
 
 const SIM_PI_NODE_ID = 'sim-pi';
@@ -52,7 +53,6 @@ const FAN_COOLING_DEG_C_PER_MINUTE = 0.4;
 const CO2_CEILING_PPM = 2500;
 const CO2_NOISE_PPM = 4;
 
-const MINUTES_PER_DAY = 24 * 60;
 const START_MINUTE_OF_DAY = 6 * 60;
 const DIURNAL_MEAN_DEG_C = 18;
 const DIURNAL_AMPLITUDE_DEG_C = 7;

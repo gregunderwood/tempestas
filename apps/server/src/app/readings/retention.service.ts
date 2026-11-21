@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Clock } from '../common/clock';
+import { MILLISECONDS_PER_DAY } from '../common/time-units';
 import { SensorReadingEntity } from './models';
 
 // Small on purpose: each statement's write lock stays short on the SD card.
@@ -13,7 +14,6 @@ export const RETENTION_BATCH_SIZE = 5_000;
 const MAX_BATCHES_PER_RUN = 200;
 
 const DEFAULT_RETENTION_DAYS = 90;
-const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 // The subquery bounds how many rows one statement can touch, which a plain DELETE WHERE cannot.
 const DELETE_BATCH_OLDER_THAN = `DELETE FROM sensor_readings
