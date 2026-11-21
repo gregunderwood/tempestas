@@ -1,10 +1,6 @@
 import { DateTime } from 'luxon';
-import { isWithinWindow } from '../rules/rules.engine';
-import {
-  resolveSegments,
-  parseWallClockMinutes,
-  type Segments,
-} from './daylight-segments';
+import { isWithinWindow, parseWallClock } from '../rules/rules.engine';
+import { resolveSegments, type Segments } from './daylight-segments';
 
 const TIMEZONE = 'America/Vancouver';
 const DAY_START = '06:30';
@@ -21,20 +17,17 @@ function segmentsAt(nowIso: string): Segments {
   return result;
 }
 
-describe('parseWallClockMinutes', () => {
-  it.each([
-    ['00:00', 0],
-    ['06:30', 390],
-    ['18:30', 1110],
-    ['23:59', 1439],
-  ])('%s is %s minutes', (value, expected) => {
-    expect(parseWallClockMinutes(value)).toBe(expected);
-  });
-
+describe('wall-clock input', () => {
   it.each(['24:00', '12:60', '6:5', 'noon', ''])(
     'refuses %s rather than guessing',
     (value) => {
-      expect(() => parseWallClockMinutes(value)).toThrow(/wall-clock/);
+      const now = atLocal('2026-09-10T15:00');
+      expect(() => resolveSegments(now, value, DAY_END, TIMEZONE)).toThrow(
+        /wall-clock/,
+      );
+      expect(() => resolveSegments(now, DAY_START, value, TIMEZONE)).toThrow(
+        /wall-clock/,
+      );
     },
   );
 });
@@ -156,8 +149,8 @@ describe('resolveSegments agrees with the rules engine about now', () => {
     ['00:00', '12:00'],
     ['23:00', '01:00'],
   ])('for a %s-%s window, at every half hour', (startTime, endTime) => {
-    const start = parseWallClockMinutes(startTime);
-    const end = parseWallClockMinutes(endTime);
+    const start = parseWallClock(startTime);
+    const end = parseWallClock(endTime);
     for (let minutes = 0; minutes < 1440; minutes += 30) {
       const now = DateTime.fromISO('2026-09-10T00:00', { zone: TIMEZONE })
         .plus({ minutes })
