@@ -10,13 +10,14 @@ import {
 import { FixedClock } from '../common/clock';
 import type { DevicesService } from '../devices/devices.service';
 import type { DeviceEntity } from '../devices/models';
+import type { HardwareService } from '../hardware/hardware.service';
 import type { SensorReadingEntity } from '../readings/models';
 import type { NodesService } from '../nodes/nodes.service';
 import type { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { ZoneEntity } from '../zones/models';
 import { RulesService } from './rules.service';
 
-/** 20:04Z is 12:04 PST - inside the 06:30-18:30 day window. */
+// 20:04Z is 12:04 PST, inside the 06:30-18:30 day window.
 const NOW = new Date('2026-01-10T20:04:00Z');
 const OBSERVED = new Date('2026-01-10T20:03:30Z');
 
@@ -107,9 +108,7 @@ function makeService(setup: Setup = {}) {
     find: vi.fn(async () => zoneRows),
   } as unknown as Repository<ZoneEntity>;
 
-  // The DISTINCT ON query builder chain. Every method returns the builder;
-  // getRawMany resolves the rows the real query would produce.
-  const builder: Record<string, unknown> = {};
+  const queryBuilder: Record<string, unknown> = {};
   for (const method of [
     'innerJoin',
     'select',
@@ -120,11 +119,11 @@ function makeService(setup: Setup = {}) {
     'orderBy',
     'addOrderBy',
   ]) {
-    builder[method] = () => builder;
+    queryBuilder[method] = () => queryBuilder;
   }
-  builder['getRawMany'] = async () => samples;
+  queryBuilder['getRawMany'] = async () => samples;
   const readings = {
-    createQueryBuilder: () => builder,
+    createQueryBuilder: () => queryBuilder,
   } as unknown as Repository<SensorReadingEntity>;
 
   const turnOn = setup.turnOn ?? vi.fn().mockResolvedValue(undefined);
@@ -156,8 +155,7 @@ function makeService(setup: Setup = {}) {
     nodes,
     realtime,
     new FixedClock(setup.now ?? NOW),
-    // These cases are all about what a LEADER decides. Follower behaviour has
-    // its own test below, where the assertion is that nothing is evaluated.
+    // These cases are about what a leader decides; the follower has its own test.
     hardware as HardwareService,
   );
   return {
@@ -174,11 +172,8 @@ function makeService(setup: Setup = {}) {
   };
 }
 
-describe('Checkpoint 5', () => {
-  // THE checkpoint: with enabledRoles ['co2_generator'] and a lights device
-  // present, a cool greenhouse drives ONLY the burner. Ownership is explicit,
-  // so the lights row existing is not permission to drive it - which is what
-  // makes it safe to re-enter every device before the cutover.
+describe('zone ownership', () => {
+  // A lights row existing is not permission to drive it, which makes re-entering every device safe.
   it('drives only the burner when the zone owns only the burner', async () => {
     const { service, turnOn } = makeService({
       devicesByRole: {
@@ -200,7 +195,7 @@ describe('Checkpoint 5', () => {
     expect(turnOn).toHaveBeenCalledWith('dev-burner');
 
     const byRole = Object.fromEntries(
-      evaluation.decisions.map((d) => [d.role, d]),
+      evaluation.decisions.map((decision) => [decision.role, decision]),
     );
     expect(byRole[DeviceRole.Co2Generator]).toMatchObject({
       desired: 'on',
@@ -243,8 +238,7 @@ describe('dispatch outcomes', () => {
     ]);
   });
 
-  // The interlock lives in DevicesService and this is an in-process caller, so
-  // the refusal a rule gets is the same one a human gets from the API.
+  // The refusal a rule gets is the same one a human gets from the API.
   it('swallows the anti-short-cycle refusal and reports when it may retry', async () => {
     const turnOn = vi.fn().mockRejectedValue(
       new ConflictException({
@@ -317,8 +311,7 @@ describe('dispatch outcomes', () => {
     });
   });
 
-  // Every device sharing a (zone, role) gets the same decision, and one
-  // failure must not stop the rest.
+  // One failure must not stop the rest.
   it('drives every device sharing a role, independently', async () => {
     const turnOff = vi
       .fn()
@@ -344,14 +337,14 @@ describe('dispatch outcomes', () => {
 
     const [evaluation] = await service.evaluateAll();
     const fan = evaluation.decisions.find(
-      (d) => d.role === DeviceRole.ExhaustFan,
+      (decision) => decision.role === DeviceRole.ExhaustFan,
     );
 
     expect(fan).toMatchObject({
       desired: 'off',
       reason: 'temp-below-setpoint',
     });
-    expect(fan?.dispatched.map((d) => d.outcome)).toEqual([
+    expect(fan?.dispatched.map((dispatch) => dispatch.outcome)).toEqual([
       'failed',
       'applied',
     ]);
@@ -384,15 +377,14 @@ describe('the evaluation record', () => {
 
   it('is empty before the first evaluation, then retrievable', async () => {
     const { service } = makeService();
-    expect(service.lastEvaluation()).toEqual([]);
+    expect(service.findLastEvaluations()).toEqual([]);
     await service.evaluateAll();
-    expect(service.lastEvaluation()).toHaveLength(1);
+    expect(service.findLastEvaluations()).toHaveLength(1);
   });
 });
 
 describe('degraded conditions', () => {
-  // Stale sensors hold last state: neither failing everything off (which can
-  // freeze the greenhouse) nor forcing heat on (which can cook it) is safe.
+  // Failing off can freeze the greenhouse, and forcing heat on can cook it.
   it('holds last state and dispatches nothing when the sensors are stale', async () => {
     const { service, turnOn, turnOff } = makeService({
       samples: [
@@ -433,8 +425,6 @@ describe('degraded conditions', () => {
     expect(turnOn).not.toHaveBeenCalled();
   });
 
-  // A hand-edited rules_config on one zone must not stop the zone that runs
-  // the burner from being evaluated.
   it('keeps evaluating other zones when one zone is misconfigured', async () => {
     const broken = zone({
       id: 'zone-broken',
@@ -451,9 +441,7 @@ describe('degraded conditions', () => {
     expect(evaluations[0].zoneSlug).toBe('greenhouse');
   });
 
-  // A typo in hand-edited jsonb used to read as `undefined`, which every
-  // comparison treats as false: the role sat in its dead band forever and
-  // reported a calm-looking "dead-band". Now the zone is refused, whole.
+  // A typo used to read as undefined and sit calmly in its dead band; now the whole zone is refused.
   it('refuses a zone whose rules_config does not parse, and drives nothing', async () => {
     const typo = rulesConfig();
     (typo.rules[DeviceRole.Co2Generator] as unknown as Record<string, unknown>)[
@@ -467,7 +455,7 @@ describe('degraded conditions', () => {
     expect(await service.evaluateAll()).toEqual([]);
     expect(turnOn).not.toHaveBeenCalled();
     expect(turnOff).not.toHaveBeenCalled();
-    expect(service.failingZones().get('greenhouse')).toMatch(
+    expect(service.findFailingZones().get('greenhouse')).toMatch(
       /co2OnPmm is not a recognised setting/,
     );
   });
@@ -479,15 +467,14 @@ describe('degraded conditions', () => {
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
     });
     await service.evaluateAll();
-    expect(service.failingZones().has('greenhouse')).toBe(true);
+    expect(service.findFailingZones().has('greenhouse')).toBe(true);
 
     broken.rulesConfig = rulesConfig();
     await service.evaluateAll();
-    expect(service.failingZones().size).toBe(0);
+    expect(service.findFailingZones().size).toBe(0);
   });
 
-  // Bootstrap reads enabledRoles to log ownership. A broken zone there used to
-  // be an exception in onApplicationBootstrap - a server that will not start.
+  // A broken zone there used to stop the server starting.
   it('starts despite a zone with a broken config', async () => {
     const { service } = makeService({
       zones: [zone({ rulesConfig: {} as ZoneRulesConfig })],
@@ -499,10 +486,10 @@ describe('degraded conditions', () => {
     const { service } = makeService({
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
     });
-    const spy = vi.spyOn(service, 'evaluateAll');
+    const evaluateAll = vi.spyOn(service, 'evaluateAll');
 
     await Promise.all([service.tick(), service.tick()]);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(evaluateAll).toHaveBeenCalledTimes(1);
   });
 
   it('logs ownership on bootstrap without evaluating anything', async () => {
@@ -514,9 +501,7 @@ describe('degraded conditions', () => {
   });
 });
 
-// Layer 1 of the safety design holds last state when readings stop, and says so
-// out loud: "this is only sound if the alarm is actually visible." The banner is
-// driven by this event, so it is a required part of the feature.
+// Holding last state is only sound if the alarm is visible, and this event drives the banner.
 describe('system status fan-out', () => {
   it('publishes a healthy status once per cycle, not once per zone', async () => {
     const { service, publishSystemStatus } = makeService({
@@ -564,8 +549,7 @@ describe('system status fan-out', () => {
     );
   });
 
-  // A zone that throws must not take the status with it - that would remove the
-  // banner at exactly the moment something is wrong.
+  // Losing the status here would remove the banner exactly when something is wrong.
   it('still publishes a status when a zone fails to evaluate', async () => {
     const { service, publishSystemStatus } = makeService({
       zones: [
@@ -585,8 +569,7 @@ describe('system status fan-out', () => {
 
 describe('a follower evaluates nothing', () => {
   it('does not dispatch, even where a leader plainly would', async () => {
-    // Identical inputs. The ONLY difference between the two cases is the role,
-    // which is what makes this evidence rather than a tautology.
+    // Identical inputs except the role, which makes this evidence rather than a tautology.
     const leader = makeService({
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
     });
@@ -660,7 +643,7 @@ describe('publishing each rules cycle', () => {
     zoneRows.splice(0, 1);
     await service.evaluateAll();
     expect(service.findLatestRulesCycle()?.failingZones).toEqual([]);
-    expect(service.failingZones().has('broken')).toBe(false);
+    expect(service.findFailingZones().has('broken')).toBe(false);
   });
 
   it('forgets its last cycle once it is no longer the leader', async () => {

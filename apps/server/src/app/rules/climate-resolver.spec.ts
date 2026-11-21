@@ -9,10 +9,7 @@ const NOW = new Date('2026-01-10T12:00:00Z');
 const FRESH = new Date('2026-01-10T11:59:30Z'); // 30s old
 const OLD = new Date('2026-01-10T11:50:00Z'); //  10min old
 
-/**
- * The greenhouse's three roles. `byRole` lands on each rule's `sensor`, where a
- * per-role override now lives, so the tests below read as they always have.
- */
+// The greenhouse's three roles; `byRole` lands on each rule's own `sensor` override.
 function config(
   defaultPolicy: SensorPolicy,
   byRole: Partial<Record<DeviceRole, SensorPolicy>> = {},
@@ -58,7 +55,6 @@ function config(
   };
 }
 
-/** Two sensors, one at each end of the greenhouse. */
 function bothEnds(observedAt = FRESH): NodeSample[] {
   return [
     {
@@ -249,8 +245,7 @@ describe('invalid CO2', () => {
     });
   });
 
-  // Null survives only when NO node has a valid reading - which is the case the
-  // burner's daytime branch fails safe on.
+  // The case the burner's daytime branch fails safe on.
   it('stays null when no node has a valid CO2', () => {
     const samples: NodeSample[] = [
       {
@@ -291,8 +286,7 @@ describe('staleness', () => {
     ]);
   });
 
-  // "Hold last state" needs the last state to look at, and the UI needs to be
-  // able to say how old it is and which node went quiet.
+  // Holding last state needs the last state, and the UI shows how old it is.
   it('still carries the last known climate for a stale role', () => {
     const { climateByRole } = resolveClimate(
       bothEnds(OLD),
@@ -369,8 +363,7 @@ describe('no sensors at all', () => {
 });
 
 describe('which roles are resolved', () => {
-  // A zone resolves the roles it has rules for - a pumphouse has no lights to
-  // resolve, and a heater the old fixed list did not know about.
+  // A pumphouse has no lights to resolve, and a heater the old fixed list did not know.
   it('resolves exactly the roles the zone has rules for', () => {
     const pumphouse: ZoneRulesConfig = {
       enabledRoles: [DeviceRole.Heater],
@@ -395,8 +388,7 @@ describe('which roles are resolved', () => {
 });
 
 describe('role order', () => {
-  // Postgres returns jsonb keys shortest-first, so the order they were written
-  // in is gone by the time the zone is loaded.
+  // Postgres returns jsonb keys shortest-first, so the written order is gone.
   it('resolves in the fixed role order, not the order of the rules object', () => {
     const base = config({ source: 'mean', maxAgeMs: 60_000 });
     const reordered: ZoneRulesConfig = {
@@ -451,8 +443,7 @@ describe('several sensors on one node - the pumphouse', () => {
     ];
   }
 
-  // THE reason for per-sensor resolution. The pipe is the cold one; averaged
-  // or overwritten inside its node, the tape would stay off at 1.5 °C.
+  // Averaged or overwritten inside its node, the cold pipe would leave the tape off at 1.5 °C.
   it('takes the coldest PROBE, not one per node', () => {
     const { climateByRole } = resolveClimate(probes(), pumphouse, NOW);
     expect(climateByRole[DeviceRole.HeatTape]).toMatchObject({
@@ -508,8 +499,7 @@ describe('several sensors on one node - the pumphouse', () => {
     });
   });
 
-  // Control carries on with what is left - right, and silent, which is why
-  // the health endpoint names the dead probe.
+  // Right, and silent, which is why the health endpoint names the dead probe.
   it('carries on with the remaining probe when one goes quiet', () => {
     const { climateByRole, staleRoles } = resolveClimate(
       probes(OLD),
