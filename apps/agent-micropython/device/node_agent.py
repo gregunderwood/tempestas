@@ -7,8 +7,15 @@ from command_guard import judge_command, parse_json_object
 from iso_time import format_iso, is_clock_set
 
 MILLISECONDS_PER_SECOND = 1000
+ONLINE_STATE = "online"
 SERVER_OFFLINE_STATE = "offline"
 NOT_MEASURED = "NOT_MEASURED"
+CRITICAL_SEVERITY = "critical"
+INFO_SEVERITY = "info"
+PROBE_KIND = "ds18b20"
+TEMPERATURE_METRIC = "temperature"
+TEMPERATURE_DECIMAL_PLACES = 2
+KNOWN_LEVELS = (0, 1)
 
 
 class NodeAgent:
@@ -28,8 +35,9 @@ class NodeAgent:
         self.has_unpublished_states = False
 
     def announce(self):
-        """On every connect: online, hello, then the lines as they are."""
-        self.send("status", contract.build_status_topic(self.node_id), self.build_status_payload("online"))
+        self.send(
+            "status", contract.build_status_topic(self.node_id), self.build_status_payload(ONLINE_STATE)
+        )
         self.send("hello", contract.build_hello_topic(self.node_id), self.build_hello_payload())
         self.publish_gpio_states(self.relay_lines.lines)
 
@@ -86,7 +94,7 @@ class NodeAgent:
             self.log("ignored a command: %s" % verdict.reason)
             return
         self.log("refused a command: %s" % verdict.reason)
-        self.publish_alarm(verdict.alarm_code, "critical", verdict.reason)
+        self.publish_alarm(verdict.alarm_code, CRITICAL_SEVERITY, verdict.reason)
 
     def on_heartbeat(self, payload):
         heartbeat = parse_json_object(payload)
@@ -99,19 +107,17 @@ class NodeAgent:
         self.last_heartbeat_ticks = self.clock.ticks()
         if self.is_deadman_tripped:
             self.is_deadman_tripped = False
-            self.publish_alarm(contract.AlarmCode.DEADMAN_CLEARED, "info", "heartbeats resumed")
+            self.publish_alarm(contract.AlarmCode.DEADMAN_CLEARED, INFO_SEVERITY, "heartbeats resumed")
 
     def on_server_status(self, payload):
-        server_status = parse_json_object(payload)
-        if server_status is not None and server_status.get("state") == SERVER_OFFLINE_STATE:
+        if is_server_offline(parse_json_object(payload)):
             self.log("the server reported itself OFFLINE - entering failsafe now")
             self.enter_failsafe(contract.AlarmCode.SAFE_STATE_ENTERED, "server published offline")
 
     def check_deadman(self):
         if self.last_heartbeat_ticks is None or self.is_deadman_tripped:
             return False
-        silent_milliseconds = self.clock.elapsed_since(self.last_heartbeat_ticks)
-        if silent_milliseconds < self.settings.DEADMAN_SECONDS * MILLISECONDS_PER_SECOND:
+        if not self.is_heartbeat_overdue():
             return False
         self.is_deadman_tripped = True
         self.log("no heartbeat for %ds - entering failsafe" % self.settings.DEADMAN_SECONDS)
@@ -121,11 +127,15 @@ class NodeAgent:
         )
         return True
 
+    def is_heartbeat_overdue(self):
+        silent_milliseconds = self.clock.elapsed_since(self.last_heartbeat_ticks)
+        return silent_milliseconds >= self.settings.DEADMAN_SECONDS * MILLISECONDS_PER_SECOND
+
     def enter_failsafe(self, alarm_code, message):
         # Hardware first, then retained state, then the alarm, so whoever reacts sees the real lines.
         self.relay_lines.failsafe()
         self.publish_gpio_states(self.relay_lines.lines)
-        self.publish_alarm(alarm_code, "critical", message)
+        self.publish_alarm(alarm_code, CRITICAL_SEVERITY, message)
 
     def publish_readings(self):
         for reading in self.probes.read_all():
@@ -145,9 +155,10 @@ class NodeAgent:
             )
 
     def on_clock_set(self):
-        if self.has_unpublished_states:
-            self.has_unpublished_states = False
-            self.publish_gpio_states(self.relay_lines.lines)
+        if not self.has_unpublished_states:
+            return
+        self.has_unpublished_states = False
+        self.publish_gpio_states(self.relay_lines.lines)
 
     def publish_alarm(self, alarm_code, severity, message):
         self.send(
@@ -170,8 +181,8 @@ class NodeAgent:
             "sensors": [
                 {
                     "sensorId": sensor_id,
-                    "kind": "ds18b20",
-                    "metrics": ["temperature"],
+                    "kind": PROBE_KIND,
+                    "metrics": [TEMPERATURE_METRIC],
                     "sampleIntervalMs": sample_interval_milliseconds,
                 }
                 for sensor_id in self.probes.sensor_ids()
@@ -203,7 +214,11 @@ class NodeAgent:
         payload["sensor"] = reading.sensor_id
         payload["measurements"] = {
             "co2Ppm": build_unmeasured_metric("ppm"),
-            "tempC": {"value": round(reading.temperature_celsius, 2), "valid": True, "unit": "C"},
+            "tempC": {
+                "value": round(reading.temperature_celsius, TEMPERATURE_DECIMAL_PLACES),
+                "valid": True,
+                "unit": "C",
+            },
             "humidityPct": build_unmeasured_metric("%"),
         }
         payload["sensorStatus"] = {"ok": True, "consecutiveFailures": 0, "lastSuccessTs": self.now_iso()}
@@ -214,7 +229,7 @@ class NodeAgent:
         payload = self.build_envelope("gpioState")
         payload["pin"] = pin
         payload["level"] = level
-        payload["known"] = level in (0, 1)
+        payload["known"] = level in KNOWN_LEVELS
         return payload
 
     def build_result_payload(self, command_id, line_results):
@@ -237,6 +252,10 @@ class NodeAgent:
     def read_set_clock(self):
         epoch_seconds = self.clock.epoch_seconds()
         return epoch_seconds if is_clock_set(epoch_seconds) else None
+
+
+def is_server_offline(server_status):
+    return server_status is not None and server_status.get("state") == SERVER_OFFLINE_STATE
 
 
 def build_unmeasured_metric(unit):
