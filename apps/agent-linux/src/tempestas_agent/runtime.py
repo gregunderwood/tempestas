@@ -20,6 +20,7 @@ STOPPED_STATES = frozenset({"inactive", "failed"})
 RUNNING_STATES = frozenset(
     {"active", "activating", "deactivating", "reloading", "refreshing", "maintenance"}
 )
+DOCUMENTED_STATES = STOPPED_STATES | RUNNING_STATES
 
 
 def sd_notify(state: str) -> bool:
@@ -44,7 +45,7 @@ def is_agent_service_active() -> bool:
     state = read_agent_service_state()
     if state is None:
         return True
-    if state not in STOPPED_STATES | RUNNING_STATES:
+    if state not in DOCUMENTED_STATES:
         log.warning(
             "systemd gave no usable state for %s (%r), assuming it is running", AGENT_SERVICE, state
         )

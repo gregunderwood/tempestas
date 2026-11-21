@@ -108,13 +108,20 @@ class TestIsAgentServiceActive:
         assert is_agent_service_active() is True
 
     @pytest.mark.parametrize("answer", ["", "unknown"])
-    def test_a_systemctl_without_an_answer_reads_as_running(self, monkeypatch, answer):
+    def test_a_systemctl_without_an_answer_reads_as_running(self, monkeypatch, caplog, answer):
         replace_systemctl(monkeypatch, systemctl_answering(answer))
         assert is_agent_service_active() is True
+        assert "assuming it is running" in caplog.text
 
-    def test_a_missing_systemctl_reads_as_running(self, monkeypatch):
+    def test_a_missing_systemctl_reads_as_running(self, monkeypatch, caplog):
         replace_systemctl(monkeypatch, systemctl_raising(FileNotFoundError("systemctl")))
         assert is_agent_service_active() is True
+        assert "assuming it is running" in caplog.text
+
+    def test_a_documented_state_raises_no_warning(self, monkeypatch, caplog):
+        replace_systemctl(monkeypatch, systemctl_answering("activating"))
+        is_agent_service_active()
+        assert "assuming it is running" not in caplog.text
 
     def test_a_systemctl_timeout_reads_as_running(self, monkeypatch):
         timeout = subprocess.TimeoutExpired(["systemctl"], runtime.SYSTEMCTL_TIMEOUT_S)
