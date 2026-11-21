@@ -11,8 +11,11 @@ The first one is `braize`, the crawlspace node: one DS18B20, a heater and a heat
 node leaves them **on**, the same as patji in the [Pumphouse](../Pumphouse.md).
 
 > [!note] Status
-> Written and unit-tested off the board. Not yet installed: the firmware update, the broker
-> account and the bench test are still to do.
+> Bench-tested on braize (2026-11-20) against a throwaway broker, relays unloaded, MicroPython
+> 1.21.0: announce, samples, both relays with readback, every refusal, a retained replay after
+> reconnect, server-offline failsafe, the dead-man tripping at 600 s and clearing, a watchdog
+> reboot, a broker restart, and a Wi-Fi drop with a new DHCP lease. Not yet on elantris: the
+> firmware update, the broker account, admission and the lamp tests are still to do.
 
 ## Key files
 
@@ -122,6 +125,10 @@ interrupting the agent.
   `sg dialout -c "..."` gets around that without logging out.
 - **Physical pin numbers are not GP numbers.** GP20 is physical pin 26, not 25. Check against the
   pinout, not memory.
+- **A retained command is obeyed if the node is already connected.** The broker sets the retain
+  flag only when it replays a stored message to a new subscriber, so the guard catches the replay
+  after a reconnect, not a live one. The broker ACL is what stops a live command from anyone but
+  the server.
 - **`hello` is not retained**, as with the Python agent. A controller started after the node
   connected never sees its capabilities until the node reconnects; reset the Pico.
 - **Migrate the server before the first Pico connects.** Its kind, `pico`, is a Postgres enum value
