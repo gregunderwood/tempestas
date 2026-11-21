@@ -102,11 +102,6 @@ def judge_expiry(expires_at, now: datetime) -> CommandVerdict | None:
     return None
 
 
-def publish(client, message_kind: str, topic: str, payload: dict) -> None:
-    qos, retain = contract.QOS[message_kind]
-    client.publish(topic, json.dumps(payload), qos=qos, retain=retain)
-
-
 class Agent:
     def __init__(self, config: AgentConfig, client, sensor, gpio, clock=time.monotonic):
         self.config = config
@@ -241,7 +236,8 @@ class Agent:
         return True
 
     def publish(self, message_kind: str, topic: str, payload: dict) -> None:
-        publish(self.client, message_kind, topic, payload)
+        qos, retain = contract.QOS[message_kind]
+        self.client.publish(topic, json.dumps(payload), qos=qos, retain=retain)
 
     def publish_gpio_state(self, pins) -> None:
         for pin in pins:
