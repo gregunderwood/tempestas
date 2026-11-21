@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
-# Seed the sandbox to mirror production: one zone, both nodes admitted, and
-# every device wired as the real boxes are - polarity included.
-#
-# Seeded into BOTH databases. Per-box databases are the design, and the
-# follower needs the same rows to render the same UI; the difference between
-# the boxes is who may WRITE, not who may know.
+# Seed both boxes' databases like production: one zone, both nodes admitted, every device wired
+# with its real polarity. Both, because boxes differ in who may write, not in who may know.
 set -euo pipefail
 
 LEADER="${LEADER:-http://127.0.0.1:7010}"
@@ -37,15 +33,14 @@ for NAME in elantris greenhouse; do
   docker exec -i "tempestas-sandbox-$NAME" psql -q -U tempestas -d tempestas <<<"$ZONE_SQL"
 done
 
-# The admit route takes the node's UUID, not its slug - the slug is the MQTT
-# topic segment, and the two are deliberately different identifiers.
+# The admit route takes the node's UUID; the slug is only its MQTT topic segment.
 node_uuid() {
   curl -sf "$1/api/nodes" | python3 -c "
-import json,sys
-want = sys.argv[1]
-for n in json.load(sys.stdin):
-    if n.get('slug') == want:
-        print(n['id']); break
+import json, sys
+slug = sys.argv[1]
+for node in json.load(sys.stdin):
+    if node.get('slug') == slug:
+        print(node['id']); break
 " "$2"
 }
 
@@ -71,44 +66,39 @@ for API in "$LEADER" "$FOLLOWER"; do
   admit "$API" greenhouse || true
 done
 
-# Devices are created through the LEADER's API only. A follower refuses to
-# command, but it will happily hold rows - and creating them twice by hand is
-# exactly the config-divergence problem the two-tier design exists to solve.
-# Until replication is built, the sandbox seeds both the same way the operator
-# would: deliberately, from one place, into each.
-# zoneId is a UUID, and it differs between the two databases - independent
-# databases mean independent primary keys. Resolve it per box.
+# Independent databases mean independent primary keys, so the zone UUID is resolved per box.
 zone_uuid() {
   docker exec -i "tempestas-sandbox-$1" psql -qtAX -U tempestas -d tempestas \
     -c "select id from zones where slug = 'greenhouse';" | tr -d '[:space:]'
 }
 
-device() {
-  local api=$1 zoneid=$2 node=$3 name=$4 gpio=$5 onlevel=$6 role=$7 delay=$8
-  local out
-  out=$(curl -s -X POST "$api/api/devices" -H 'Content-Type: application/json' -d "{
-      \"nodeId\": \"$node\", \"zoneId\": \"$zoneid\", \"name\": \"$name\",
-      \"gpio\": $gpio, \"onLevel\": $onlevel, \"role\": $role,
+create_device() {
+  local api=$1 zone_id=$2 node=$3 name=$4 gpio=$5 on_level=$6 role=$7 delay=$8
+  local response
+  response=$(curl -s -X POST "$api/api/devices" -H 'Content-Type: application/json' -d "{
+      \"nodeId\": \"$node\", \"zoneId\": \"$zone_id\", \"name\": \"$name\",
+      \"gpio\": $gpio, \"onLevel\": $on_level, \"role\": $role,
       \"onDelayDuration\": $delay, \"rulesEnabled\": false
     }")
-  if grep -q '"id"' <<<"$out"; then
-    echo "   $name (BCM $gpio, ON=$onlevel)"
+  if grep -q '"id"' <<<"$response"; then
+    echo "   $name (BCM $gpio, ON=$on_level)"
   else
-    echo "   $name NOT created: $(head -c 160 <<<"$out")"
+    echo "   $name NOT created: $(head -c 160 <<<"$response")"
   fi
 }
 
+# Until config replication exists, each box gets the same rows, deliberately, from this one place.
 for pair in "$LEADER elantris" "$FOLLOWER greenhouse"; do
   set -- $pair; API=$1; BOX=$2
   ZONE=$(zone_uuid "$BOX")
   echo "==> devices on $API (zone $ZONE)"
-  #                          node        name             BCM onLevel role                 delay
-  device "$API" "$ZONE" elantris   "CO2 Generator"    5  0 '"co2_generator"' 300
-  device "$API" "$ZONE" greenhouse "HPS Lights"      21  0 '"lights"'        900
-  device "$API" "$ZONE" greenhouse "Exhaust Fan"     20  0 '"exhaust_fan"'    60
-  # ACTIVE-HIGH. The one row where copying the board default lights a lamp.
-  device "$API" "$ZONE" greenhouse "MH Light"        26  1 '"lights"'        900
-  device "$API" "$ZONE" greenhouse "Extra Relay"     12  0 'null'              0
+  #                                 node        name             BCM onLevel role                 delay
+  create_device "$API" "$ZONE" elantris   "CO2 Generator"    5  0 '"co2_generator"' 300
+  create_device "$API" "$ZONE" greenhouse "HPS Lights"      21  0 '"lights"'        900
+  create_device "$API" "$ZONE" greenhouse "Exhaust Fan"     20  0 '"exhaust_fan"'    60
+  # Active-HIGH: the one row where copying the board default lights a lamp.
+  create_device "$API" "$ZONE" greenhouse "MH Light"        26  1 '"lights"'        900
+  create_device "$API" "$ZONE" greenhouse "Extra Relay"     12  0 'null'              0
 done
 
 echo
