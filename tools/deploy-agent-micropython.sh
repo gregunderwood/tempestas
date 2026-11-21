@@ -15,7 +15,7 @@ AGENT_FILES=(
   iso_time.py relay_lines.py ds18b20_probes.py settings.py credentials.py
 )
 
-say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+source "$HERE/tools/lib/console.sh"
 mpremote() { "$UV" tool run mpremote connect "$PORT" "$@"; }
 
 wait_for_port() {

@@ -3,18 +3,21 @@
 
 set -euo pipefail
 
-DEFAULT_HOSTS=(elantris patji)
-HOSTS=("$@")
-[ "$#" -gt 0 ] || HOSTS=("${DEFAULT_HOSTS[@]}")
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE_PAYLOAD="/home/gunderwood/tempestas/install/deploy-privileges"
 PAYLOAD_FILES=(
+  "$HERE/tools/lib/console.sh"
+  "$HERE/apps/server/systemd/tempestas-migrate-requires-backup.conf"
   "$HERE/tools/host/install-deploy-privileges.sh"
   "$HERE/tools/host/backup-database.sh"
   "$HERE/apps/server/systemd/tempestas-backup.service"
 )
 
-say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+source "$HERE/tools/lib/console.sh"
+source "$HERE/tools/lib/remote-host.sh"
+
+HOSTS=("$@")
+[ "$#" -gt 0 ] || HOSTS=("${LINUX_HOSTS[@]}")
 
 for HOST in "${HOSTS[@]}"; do
   say "$HOST"

@@ -1,21 +1,45 @@
 # Sourced by the deploy scripts: checks on a host that need neither a password nor a guess.
 
+LINUX_HOSTS=(elantris patji)
 EXIT_HOST_UNREACHABLE=255
 
-# Exits unless every `systemctl ...` line is allowed WITHOUT a password; `sudo -l <cmd>` alone also passes a password-only rule.
+# Exits unless sudo would run every `systemctl ...` line as root WITHOUT a password; `sudo -l <cmd>` alone passes a password rule too.
 require_passwordless_systemctl() {
   local host="$1"
   shift
   local status=0
   ssh "$host" "bash -s -- $(printf '%q ' "$@")" <<'REMOTE' || status=$?
 systemctl_path="$(command -v systemctl)"
-passwordless_entries="$(sudo -n -l 2>/dev/null | tr '\n' ' ' | tr -s ' ' | sed 's/ (/\n(/g' | grep 'NOPASSWD:' | sed 's/ *$/,/')"
-if grep -qF 'NOPASSWD: ALL,' <<<"$passwordless_entries"; then
-  exit 0
-fi
+# One rule per line, as sudo lists them in sudoers order.
+rules="$(sudo -n -l 2>/dev/null | tr '\n' ' ' | tr -s ' ' | sed 's/ (/\n(/g' | grep '^(')"
+
+# Like sudo: the last rule naming the command (or ALL) decides, and a tag holds until the next one.
+read_password_tag() {
+  awk -v wanted="$1" '
+    {
+      is_root_runas = ($0 ~ /^\((root|ALL)[ :)]/)
+      tag = "PASSWD"
+      commands = substr($0, index($0, ")") + 1)
+      count = split(commands, items, ",")
+      for (i = 1; i <= count; i++) {
+        item = items[i]
+        while (match(item, /^ *[A-Z_]+: */)) {
+          name = substr(item, RSTART, RLENGTH)
+          gsub(/[ :]/, "", name)
+          if (name == "NOPASSWD" || name == "PASSWD") tag = name
+          item = substr(item, RSTART + RLENGTH)
+        }
+        gsub(/^ +| +$/, "", item)
+        if (is_root_runas && (item == wanted || item == "ALL")) verdict = tag
+      }
+    }
+    END { print verdict }
+  ' <<<"$rules"
+}
+
 missing=0
 for command in "$@"; do
-  if ! grep -qF " $systemctl_path $command," <<<"$passwordless_entries"; then
+  if [ "$(read_password_tag "$systemctl_path $command")" != NOPASSWD ]; then
     echo "  sudo $systemctl_path $command" >&2
     missing=1
   fi
