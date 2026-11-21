@@ -1,53 +1,45 @@
 import { DateTime } from 'luxon';
 import type { ReadingsQuery } from '@tempestas/domain';
 
-/**
- * Resolving a query into an absolute time window, as a pure function.
- *
- * This is where a specific old bug gets fixed. The Python default ran from
- * *yesterday* 23:59:59 to *today* 23:59:59 - a window that both starts a day
- * early and extends into the future, almost certainly by accident. The echoed
- * `to` then told the dashboard it was showing data up to a time that had not
- * happened yet.
- *
- * The rules here:
- *   - `to` is NEVER in the future. An explicit `to` is clamped to now.
- *   - `days=n` aligns `from` to the start of the local day n-1 days ago, so
- *     "last 7 days" means seven calendar days including today.
- *   - With no parameters at all it is a rolling 24 hours, not a calendar day.
- *   - A reversed range is refused rather than silently swapped.
- */
-
 export interface ReadingWindow {
   from: Date;
   to: Date;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+type WindowQuery = Pick<ReadingsQuery, 'days' | 'from' | 'to'>;
+
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export function resolveReadingWindow(
-  query: Pick<ReadingsQuery, 'days' | 'from' | 'to'>,
+  query: WindowQuery,
   now: Date,
   timezone: string,
 ): ReadingWindow {
-  const to = query.to ? clampToNow(parseInstant(query.to, 'to'), now) : now;
-
-  let from: Date;
-  if (query.from) {
-    from = parseInstant(query.from, 'from');
-  } else if (query.days !== undefined) {
-    from = startOfLocalDay(now, timezone, query.days - 1);
-  } else {
-    from = new Date(now.getTime() - DAY_MS);
-  }
-
-  if (from.getTime() > to.getTime()) {
-    // Swapping them would hide a client bug and quietly return the wrong data.
+  const to = resolveTo(query, now);
+  const from = resolveFrom(query, now, timezone);
+  if (isReversed(from, to)) {
     throw new RangeError(
       `Window starts after it ends: from=${from.toISOString()} to=${to.toISOString()}`,
     );
   }
   return { from, to };
+}
+
+function resolveTo(query: WindowQuery, now: Date): Date {
+  if (!query.to) return now;
+  return clampToNow(parseInstant(query.to, 'to'), now);
+}
+
+function resolveFrom(query: WindowQuery, now: Date, timezone: string): Date {
+  if (query.from) return parseInstant(query.from, 'from');
+  if (query.days !== undefined) {
+    return startOfLocalDay(now, timezone, query.days - 1);
+  }
+  return new Date(now.getTime() - MILLISECONDS_PER_DAY);
+}
+
+function isReversed(from: Date, to: Date): boolean {
+  return from.getTime() > to.getTime();
 }
 
 function parseInstant(value: string, field: 'from' | 'to'): Date {
@@ -69,7 +61,6 @@ function startOfLocalDay(now: Date, timezone: string, daysAgo: number): Date {
       `Invalid timezone "${timezone}": ${local.invalidReason ?? 'unknown'}`,
     );
   }
-  // Calendar arithmetic before startOf, so a DST day is 23 or 25 hours long
-  // rather than exactly 24 - which is the point of doing this in Luxon at all.
+  // Calendar arithmetic before startOf, so a DST day is 23 or 25 hours long.
   return local.minus({ days: daysAgo }).startOf('day').toJSDate();
 }
