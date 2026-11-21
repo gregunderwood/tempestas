@@ -53,8 +53,8 @@ def judge_command(payload, is_retained, bound_controller, now_seconds):
     if deadline < now_seconds:
         return refuse("command expired", contract.AlarmCode.COMMAND_EXPIRED)
 
-    if not has_lines(body):
-        return refuse("command has no lines")
+    if not has_well_formed_lines(body):
+        return refuse("command lines must be a non-empty list of {pin, level} integers")
     if not isinstance(body.get("id"), str):
         return refuse("command has no id")
     return accept()
@@ -68,6 +68,14 @@ def parse_json_object(payload):
     return body if isinstance(body, dict) else None
 
 
-def has_lines(body):
+def has_well_formed_lines(body):
     lines = body.get("lines")
-    return isinstance(lines, list) and len(lines) > 0
+    return isinstance(lines, list) and len(lines) > 0 and all(is_well_formed_line(line) for line in lines)
+
+
+def is_well_formed_line(line):
+    return isinstance(line, dict) and is_integer(line.get("pin")) and is_integer(line.get("level"))
+
+
+def is_integer(value):
+    return isinstance(value, int) and not isinstance(value, bool)

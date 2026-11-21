@@ -2,22 +2,28 @@
 
 from relay_lines import GPIO_OUT_REGISTER, GPIO_OUTPUT_ENABLE_REGISTER
 
-SET_CLOCK_EPOCH_SECONDS = 1795215600.0
+SET_CLOCK_EPOCH_SECONDS = 1795215600
+
+
+TICKS_PERIOD = 2**30
+HALF_TICKS_PERIOD = TICKS_PERIOD // 2
 
 
 class FakeClock:
+    """Ticks wrap as MicroPython's ticks_ms and ticks_diff do, about every 12.4 days."""
+
     def __init__(self, epoch_seconds=SET_CLOCK_EPOCH_SECONDS):
         self.now_milliseconds = 0
         self.epoch = epoch_seconds
 
     def ticks(self):
-        return self.now_milliseconds
+        return self.now_milliseconds % TICKS_PERIOD
 
     def elapsed_since(self, earlier_ticks):
-        return self.now_milliseconds - earlier_ticks
+        return (self.ticks() - earlier_ticks + HALF_TICKS_PERIOD) % TICKS_PERIOD - HALF_TICKS_PERIOD
 
     def epoch_seconds(self):
-        return self.epoch + self.now_milliseconds / 1000
+        return self.epoch + self.now_milliseconds // 1000
 
     def advance_seconds(self, seconds):
         self.now_milliseconds += int(seconds * 1000)
