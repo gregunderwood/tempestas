@@ -1,11 +1,15 @@
 import { inject } from 'vitest';
-import { DataSource, type MigrationInterface, type QueryRunner } from 'typeorm';
+import { DataSource, type QueryRunner } from 'typeorm';
 import { postgresConnectionOptions } from '../../app/common/postgres-connection';
 import * as migrations from '..';
 import {
   IrreversibleMigration,
   isIrreversible,
 } from '../irreversible-migration';
+import {
+  readMigrationTimestamp,
+  type MigrationClass,
+} from '../migration-timestamp';
 import { addRowsAfter } from './rows-added-after';
 import {
   SUPERUSER,
@@ -13,9 +17,6 @@ import {
   type ThrowawayPostgres,
 } from './throwaway-postgres';
 
-type MigrationClass = new () => MigrationInterface;
-
-const TRAILING_TIMESTAMP = /\d+$/;
 // Comments carry the pg_dump version, and \restrict carries a key that is random per dump.
 const VOLATILE_DUMP_LINE = /^(--|\\restrict |\\unrestrict )/;
 const MIGRATIONS_TABLE_COUNTER =
@@ -33,12 +34,9 @@ class MarkedIrreversibleFixture9999999999999 extends IrreversibleMigration {
 const throwawayPostgres = inject('throwawayPostgres');
 
 const migrationsInOrder: MigrationClass[] = Object.values(migrations).sort(
-  (first, second) => readTimestamp(first) - readTimestamp(second),
+  (first, second) =>
+    readMigrationTimestamp(first.name) - readMigrationTimestamp(second.name),
 );
-
-function readTimestamp(migrationClass: MigrationClass): number {
-  return Number(TRAILING_TIMESTAMP.exec(migrationClass.name)?.[0]);
-}
 
 function connectWith(migrationsSoFar: MigrationClass[]): DataSource {
   const settings: Record<string, string> = {

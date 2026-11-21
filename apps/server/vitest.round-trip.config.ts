@@ -16,7 +16,6 @@ export default defineConfig({
     // Each migration builds on the one before, so later failures would only repeat the first.
     bail: 1,
     testTimeout: 60_000,
-    hookTimeout: 90_000,
     reporters: ['default'],
   },
 });
