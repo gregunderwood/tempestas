@@ -1,0 +1,125 @@
+# Pico Agent
+
+## What it is
+
+`apps/pico` — a MicroPython agent for a Raspberry Pi Pico W. It speaks the same MQTT contract as
+the Python [Node Agent](Node%20Agent.md), so the server cannot tell the two apart beyond `kind` and
+`capabilities`. It is for a box that only needs a probe and a couple of relays, where a Pi would
+need an SD card, an OS and updates.
+
+The first one is the crawlspace node: one DS18B20, a heater and a heat tape, both wired so a dead
+node leaves them **on**, the same as patji in the [Pumphouse](../Pumphouse.md).
+
+> [!note] Status
+> Written and unit-tested off the board. Not yet installed: the firmware update, the broker
+> account and the bench test are still to do.
+
+## Key files
+
+- [../../apps/pico/device/node_agent.py](../../apps/pico/device/node_agent.py) — announce, judge commands, dead-man, readings; no hardware imports
+- [../../apps/pico/device/node_runtime.py](../../apps/pico/device/node_runtime.py) — boot, Wi-Fi, NTP, the broker connection, the main loop, the watchdog
+- [../../apps/pico/device/command_guard.py](../../apps/pico/device/command_guard.py) — every reason a `gpio/set` is refused
+- [../../apps/pico/device/relay_lines.py](../../apps/pico/device/relay_lines.py) — driving and releasing the relay pins, with register readback
+- [../../apps/pico/device/ds18b20_probes.py](../../apps/pico/device/ds18b20_probes.py) — the probes, pinned by ROM, refusing the chip's fake readings
+- [../../apps/pico/device/contract.py](../../apps/pico/device/contract.py) — the MicroPython mirror of the contract
+- [../../apps/pico/device/settings.py](../../apps/pico/device/settings.py) — node id, broker, pins, probes, failsafe levels
+- [../../tools/deploy-pico.sh](../../tools/deploy-pico.sh) — copy it onto the board over USB
+
+## The board
+
+| Thing    | Pin                    | Notes                                                               |
+| -------- | ---------------------- | ------------------------------------------------------------------- |
+| DS18B20  | GP16                   | ROM `28-3ce1d4436ee8` (`28e86e43d4e13c66` as MicroPython prints it) |
+| Relay K1 | GP20 (physical pin 26) | Heater, through a contactor: 750 W on low is too much for the relay |
+| Relay K2 | GP18 (physical pin 24) | Heat tape                                                           |
+
+The relay board is a "2 Relay Module": two Songle SRD-05VDC-SL-C with optocoupler inputs, active
+low, JD-VCC jumper fitted. **Pin driven low energises the relay. Pin released (an input) lets it
+go.** The agent never drives a pin high: from 3.3 V into a 5 V optocoupler, high is not reliably
+off, and released is.
+
+Level 1 is released, which is also what a reset, a crash or an unpowered Pico does. Both loads hang
+off the NC contacts, so level 1 is **load on** and is the failsafe for both lines.
+
+## How it differs from the Python agent
+
+- **No real-time clock.** The Pico's clock starts at 1970 on every boot. Until NTP has set it, every
+  command is refused quietly (no alarm), because `expiresAt` cannot be judged. `hasRtc` is `false`.
+- **A hardware watchdog.** The loop feeds it; a hang anywhere resets the board within 8 s, and a
+  reset releases every pin.
+- **Readback from the registers.** `level()` reads the SIO output-enable and output registers, not
+  a cached value, so a `gpioResult` reports what the pin is doing.
+- **No rate guard on the probes yet.** The Python DS18B20 driver refuses a jump of more than
+  10 °C/min. This one refuses the power-on 85 °C, all-zero and out-of-range readings, but not a
+  plausible-looking spike.
+- **One thread.** Messages, sampling and the dead-man share one loop. A probe conversion (750 ms) is
+  the longest stall.
+
+Everything else on the command path matches the Python agent: a retained command is dropped with
+`RETAINED_COMMAND_DROPPED`, a foreign `issuedBy` raises `CONTROLLER_CONFLICT`, an expired command
+raises `COMMAND_EXPIRED`, an empty payload is ignored. The dead-man (600 s) and a server `offline`
+status both drive the failsafe, then publish the line states, then the alarm.
+
+## Running the tests
+
+The device code is plain MicroPython with its hardware passed in, so the tests run under CPython
+with fakes:
+
+```bash
+cd apps/pico
+uv run pytest -q && uv run ruff check .
+```
+
+Nx wires `lint`, `test` and `format`, with `implicitDependencies: ["domain", "hardware"]`.
+`tests/test_contract_matches_hardware_agent.py` compares this contract with the Python agent's,
+which is itself checked against the TypeScript, so a contract change that misses the Pico fails.
+
+CPython is more forgiving than MicroPython. Before deploying, check that every file compiles:
+
+```bash
+cd apps/pico/device
+for file in *.py; do uv tool run --from mpy-cross mpy-cross -o /tmp/check.mpy "$file"; done
+```
+
+## Installing
+
+### Once per board
+
+1. **Update MicroPython.** Hold BOOTSEL while plugging in, then copy the current `RPI_PICO_W`
+   UF2 from micropython.org onto the `RPI-RP2` drive.
+2. **Remove the old tutorial scripts.** They hold the home Wi-Fi password in plain text:
+   `uv tool run mpremote connect /dev/ttyACM0 rm switch.py + rm temp_sensor.py + rm web_server.py + rm async_web_server.py + rm -r lib/picozero`
+3. **Give it a broker account**, as patji has, with an ACL limited to its own node topics.
+4. **Write `apps/pico/device/credentials.py`** from `credentials.example.py`. It is gitignored.
+
+### Every deploy
+
+```bash
+tools/deploy-pico.sh [/dev/ttyACM0]
+```
+
+It runs the Pico's tests, hard-resets the board, catches it inside `main.py`'s 5 s boot grace,
+copies the agent and resets again. Watch it with
+`uv tool run mpremote connect /dev/ttyACM0 resume repl` — `resume` stops mpremote from
+interrupting the agent.
+
+## Pitfalls
+
+- **The watchdog survives Ctrl-C.** Interrupt a running agent and the board resets itself 8 s later.
+  To work in the REPL, reset the board and press Ctrl-C during the boot grace.
+- **`credentials.py` sits in plain text on the Pico's flash.** Anyone with a USB cable can read it.
+  That is why the broker account is limited to the node's own topics.
+- **Serial access needs `dialout`.** A session started before joining the group still lacks it;
+  `sg dialout -c "..."` gets around that without logging out.
+- **Physical pin numbers are not GP numbers.** GP20 is physical pin 26, not 25. Check against the
+  pinout, not memory.
+- **`hello` is not retained**, as with the Python agent. A controller started after the node
+  connected never sees its capabilities until the node reconnects; reset the Pico.
+- **The node kind is `esp32` for now.** `NodeKind` has no `pico`, and adding one needs a migration.
+
+## When to update this file
+
+- A guard, the dead-man or the failsafe behaviour changes
+- A pin, a probe or the relay board changes
+- The deploy script or the install steps change
+- The rate guard is ported, or the node kind gets its own value
