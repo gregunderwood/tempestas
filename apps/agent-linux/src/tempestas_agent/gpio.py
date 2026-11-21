@@ -1,28 +1,4 @@
-"""GPIO backends.
-
-A node with no `gpio.lines` gets `NoGpio` and never opens a chip; that is still
-the posture for a sensor-only box, and it is structural rather than a flag.
-
-`LgpioBackend` is the real one. Every non-obvious thing in it was measured on
-elantris against the wired board rather than read out of a datasheet, and the
-measurements are recorded next to the code that depends on them, because three
-of them contradict what was assumed:
-
-  * Claiming a line sets its direction and its level in one call, so there is no
-    window where the pad is an output at the wrong level. Claim at the failsafe.
-  * **A second claim on a line this handle already holds silently keeps the old
-    level.** It returns success and changes nothing. So claim happens once.
-  * **Releasing a line does not revert the pad.** `gpio_free`, and a `SIGKILL` of
-    the whole process, both leave the pad an output still driving its last level
-    with its bias intact - verified with `pinctrl get`. That cuts both ways: a
-    process killed at the safe level holds the safe level, and one killed with a
-    burner energised holds *that* until systemd restarts it and the claim below
-    drives the failsafe. It is why claiming at the failsafe matters more than
-    preserving state across a restart, and why the server re-asserts the full
-    desired state on its heartbeat instead of sending one-shot toggles.
-
-See docs/Safety.md and docs/Hardware.md.
-"""
+"""GPIO backends; see "The GPIO backend" in docs/Infrastructure/Linux Agent.md."""
 
 from __future__ import annotations
 
@@ -33,17 +9,20 @@ import os
 import struct
 from typing import Protocol
 
+from .world_client import WorldUnreachable
+
 log = logging.getLogger("tempestas.agent")
 
-# struct gpiochip_info { char name[32]; char label[32]; __u32 lines; } - the
-# kernel's own chardev ABI, stable since 4.8, and what `gpiodetect` reads.
+VALID_LEVELS = (0, 1)
+
+# struct gpiochip_info { char name[32]; char label[32]; __u32 lines; }, stable since 4.8.
 _GPIO_GET_CHIPINFO_IOCTL = 0x8044B401
 _CHIPINFO = struct.Struct("32s32sI")
+_GPIOCHIP_PREFIX = "/dev/gpiochip"
 
-# Bit 0 of a line's flags means "held by another userspace consumer". It does
-# NOT cover kernel drivers: BCM 2 and 3 are the I2C bus and still report 0 here.
-# The claim itself is the enforcement; this check only buys a better message.
+# Held by another userspace consumer; kernel drivers such as I2C on BCM 2 and 3 still read 0.
 _LINE_IN_USE = 1
+_LGPIO_OK = 0
 
 
 class GpioUnavailable(RuntimeError):
@@ -61,11 +40,15 @@ class GpioBackend(Protocol):
         """The last known level, or None for unknown. Unknown is NOT off."""
         ...
 
-    def failsafe(self) -> None:
-        """Drive every managed line to its configured safe level."""
-        ...
-
+    def failsafe(self) -> None: ...
     def close(self) -> None: ...
+
+
+def refuse_invalid_write(pin: int, level: int, managed_pins) -> None:
+    if pin not in managed_pins:
+        raise GpioUnavailable(f"pin {pin} is not managed by this agent")
+    if level not in VALID_LEVELS:
+        raise ValueError(f"level must be 0 or 1, not {level!r}")
 
 
 class NoGpio:
@@ -101,17 +84,21 @@ class SimulatedGpio:
         self._failsafe: dict[int, int] = {}
         self.closed = False
 
+    @property
+    def failsafe_levels(self) -> dict[int, int]:
+        return self._failsafe
+
+    @property
+    def line_count(self) -> int:
+        return len(self._levels)
+
     def claim(self, lines: tuple[int, ...], failsafe: dict[int, int]) -> None:
         self._failsafe = dict(failsafe)
-        # Claimed but never written is UNKNOWN, not off. Pretending to know is
-        # exactly the lie the readback rules exist to prevent.
+        # Claimed but never written is UNKNOWN, not off.
         self._levels = {pin: None for pin in lines}
 
     def write(self, pin: int, level: int) -> None:
-        if pin not in self._levels:
-            raise GpioUnavailable(f"pin {pin} is not managed by this agent")
-        if level not in (0, 1):
-            raise ValueError(f"level must be 0 or 1, not {level!r}")
+        refuse_invalid_write(pin, level, self._levels)
         self._levels[pin] = level
 
     def level(self, pin: int) -> int | None:
@@ -122,48 +109,40 @@ class SimulatedGpio:
             self._levels[pin] = level
 
     def close(self) -> None:
-        # Deliberately does NOT release the lines. On real hardware freeing a
-        # line lets it float back to its pull-down, which energises an
-        # active-LOW relay - so shutdown drives the failsafe and holds it.
+        # Never releases: a freed line floats to its pull-down and energises an active-LOW relay.
         self.closed = True
 
     def describe(self) -> str:
-        return f"simulated gpio ({len(self._levels)} lines)"
+        return f"simulated gpio ({self.line_count} lines)"
 
 
-def decode_chipinfo(buf: bytes) -> tuple[str, str, int]:
+def decode_chipinfo(reply: bytes) -> tuple[str, str, int]:
     """Unpack a `gpiochip_info` reply into (name, label, line count)."""
-    name, label, lines = _CHIPINFO.unpack(buf)
-    return (
-        name.split(b"\0", 1)[0].decode("ascii", "replace"),
-        label.split(b"\0", 1)[0].decode("ascii", "replace"),
-        lines,
-    )
+    name, label, lines = _CHIPINFO.unpack(reply)
+    return _decode_c_string(name), _decode_c_string(label), lines
+
+
+def _decode_c_string(field: bytes) -> str:
+    return field.split(b"\0", 1)[0].decode("ascii", "replace")
 
 
 def read_chip_label(path: str) -> str:
-    buf = bytearray(_CHIPINFO.size)
+    reply = bytearray(_CHIPINFO.size)
     with open(path, "rb") as chip:
-        fcntl.ioctl(chip.fileno(), _GPIO_GET_CHIPINFO_IOCTL, buf)
-    return decode_chipinfo(bytes(buf))[1]
+        fcntl.ioctl(chip.fileno(), _GPIO_GET_CHIPINFO_IOCTL, reply)
+    return decode_chipinfo(bytes(reply))[1]
 
 
 def resolve_chip(label: str) -> int:
-    """Find the chardev number whose chip carries `label`.
-
-    By label, never by number, and never by the /dev/gpiochip4 alias: on a Pi 4
-    that path is a symlink to gpiochip0 and on a Pi 5 it is a real chip. One
-    build has to be right on both, and opening the wrong chip would not fail -
-    it would drive line 5 of `raspberrypi-exp-gpio` and report success.
-    """
+    # By label, never number: /dev/gpiochip4 is a symlink on a Pi 4 and a real chip on a Pi 5.
     found: dict[str, int] = {}
-    for path in sorted(glob.glob("/dev/gpiochip*")):
+    for path in sorted(glob.glob(f"{_GPIOCHIP_PREFIX}*")):
         if os.path.islink(path):
             continue
         try:
-            found[read_chip_label(path)] = int(path.removeprefix("/dev/gpiochip"))
-        except (OSError, ValueError) as err:
-            log.warning("could not read chip info from %s: %s", path, err)
+            found[read_chip_label(path)] = int(path.removeprefix(_GPIOCHIP_PREFIX))
+        except (OSError, ValueError) as error:
+            log.warning("could not read chip info from %s: %s", path, error)
     if label not in found:
         raise GpioUnavailable(
             f"no gpiochip is labelled {label!r}; found {sorted(found) or 'none'}. "
@@ -186,78 +165,24 @@ class LgpioBackend:
 
     def claim(self, lines: tuple[int, ...], failsafe: dict[int, int]) -> None:
         if self._handle is not None:
-            # Measured: a second claim on a held line returns success and leaves
-            # the level alone. Re-claiming to "reset" a pin would therefore be a
-            # silent no-op on a relay, so it is refused outright.
+            # Measured: a second claim on a held line reports success and leaves the level alone.
             raise GpioUnavailable("lines are already claimed; this backend claims exactly once")
         missing = sorted(set(lines) - set(failsafe))
         if missing:
-            # config.load already refuses this, but a line reaching the kernel
-            # with nobody having decided its safe level is worth two checks.
             raise GpioUnavailable(f"no failsafe level declared for lines {missing}")
 
-        if self._lgpio is None:
-            import lgpio
-
-            self._lgpio = lgpio
-        self._chip = self._resolve(self._chip_label)
-        self._handle = self._lgpio.gpiochip_open(self._chip)
+        self._open_chip()
         self._failsafe = dict(failsafe)
-
         claimed: list[int] = []
         for pin in lines:
-            level = failsafe[pin]
-            self._refuse_if_held(pin)
-            try:
-                # Direction, level and bias in one call: the pad is never an
-                # output at a level nobody chose.
-                self._lgpio.gpio_claim_output(self._handle, pin, level, self._bias(level))
-            except Exception as err:  # lgpio.error, whose type we do not import
-                raise GpioBusy(
-                    f"could not claim BCM {pin} on {self._chip_label}: {err}. "
-                    f"Claimed so far and left at their safe level: {claimed or 'none'}"
-                ) from err
+            self._claim_at_failsafe(pin, failsafe[pin], claimed)
             claimed.append(pin)
-            # Verify the pad before anything else in this process runs. A claim
-            # that reports success but reads back wrong is a broken board, and
-            # the startup path is the cheapest place to find that out.
-            readback = self.level(pin)
-            if readback != level:
-                raise GpioUnavailable(
-                    f"BCM {pin} claimed at its safe level {level} but reads back {readback}"
-                )
+            self._verify_claimed_level(pin, failsafe[pin])
         self._managed = tuple(lines)
         log.info("claimed %s on %s at their failsafe levels", list(self._managed), self.describe())
 
-    def _bias(self, level: int) -> int:
-        """Pull the pad toward the SAFE level, not toward any fixed direction.
-
-        The internal pull is ~50 kOhm, far too weak to hold an opto-isolator
-        input on its own - external pull-ups are mitigation 2 and this is
-        mitigation 3. It earns its place because the bias survives both a
-        release and a kill, so it is the state the pad settles into once no
-        software is left to have an opinion.
-        """
-        return self._lgpio.SET_PULL_UP if level else self._lgpio.SET_PULL_DOWN
-
-    def _refuse_if_held(self, pin: int) -> None:
-        try:
-            status, _offset, flags, name, user = self._lgpio.gpio_get_line_info(self._handle, pin)
-        except Exception as err:  # noqa: BLE001 - advisory only; the claim enforces
-            log.warning("could not read line info for BCM %s: %s", pin, err)
-            return
-        if status == 0 and flags & _LINE_IN_USE:
-            raise GpioBusy(
-                f"BCM {pin} ({name}) is already held by {user or 'another process'}. "
-                f"Two writers on one relay line is the failure that produces impossible "
-                f"states - refusing to start."
-            )
-
     def write(self, pin: int, level: int) -> None:
-        if pin not in self._managed:
-            raise GpioUnavailable(f"pin {pin} is not managed by this agent")
-        if level not in (0, 1):
-            raise ValueError(f"level must be 0 or 1, not {level!r}")
+        refuse_invalid_write(pin, level, self._managed)
         self._lgpio.gpio_write(self._handle, pin, level)
 
     def level(self, pin: int) -> int | None:
@@ -266,46 +191,71 @@ class LgpioBackend:
             return None
         try:
             value = self._lgpio.gpio_read(self._handle, pin)
-        except Exception as err:  # noqa: BLE001 - unknown is a valid answer here
-            log.error("could not read back BCM %s: %s", pin, err)
+        except Exception as error:  # noqa: BLE001 - unknown is a valid answer here
+            log.error("could not read back BCM %s: %s", pin, error)
             return None
         # lgpio reports failures as negative returns when exceptions are off.
-        return value if value in (0, 1) else None
+        return value if value in VALID_LEVELS else None
 
     def failsafe(self) -> None:
-        """Drive every managed line to its safe level. Deliberately never raises.
-
-        The dead-man calls this and then publishes its alarm; raising here would
-        lose the alarm, which is the one message a human needs when this path
-        runs. Every line is attempted even if an earlier one fails.
-        """
+        # Never raises: the dead-man publishes its alarm after this, and a raise would lose it.
         for pin, level in self._failsafe.items():
             try:
                 self._lgpio.gpio_write(self._handle, pin, level)
-            except Exception as err:  # noqa: BLE001 - logged per line, never swallowed
-                log.error("FAILSAFE FAILED on BCM %s -> %s: %s", pin, level, err)
+            except Exception as error:  # noqa: BLE001 - logged per line, never swallowed
+                log.error("FAILSAFE FAILED on BCM %s -> %s: %s", pin, level, error)
 
     def close(self) -> None:
-        """Drive the safe level and stop. No `gpio_free`, no `gpiochip_close`.
-
-        Freeing is the dangerous operation in the old system's shutdown path, and
-        there is nothing to gain by it: the process is about to exit, and the pad
-        holds whatever it was last driving either way.
-        """
+        # No gpio_free or gpiochip_close: freeing is what hurt the old system, and gains nothing.
         self.failsafe()
 
     def describe(self) -> str:
-        return f"lgpio {self._chip_label} (/dev/gpiochip{self._chip})"
+        return f"lgpio {self._chip_label} ({_GPIOCHIP_PREFIX}{self._chip})"
+
+    def _open_chip(self) -> None:
+        if self._lgpio is None:
+            import lgpio
+
+            self._lgpio = lgpio
+        self._chip = self._resolve(self._chip_label)
+        self._handle = self._lgpio.gpiochip_open(self._chip)
+
+    def _claim_at_failsafe(self, pin: int, level: int, claimed: list[int]) -> None:
+        self._refuse_if_held(pin)
+        try:
+            self._lgpio.gpio_claim_output(self._handle, pin, level, self._bias_toward(level))
+        except Exception as error:  # lgpio.error, whose type we do not import
+            raise GpioBusy(
+                f"could not claim BCM {pin} on {self._chip_label}: {error}. "
+                f"Claimed so far and left at their safe level: {claimed or 'none'}"
+            ) from error
+
+    def _verify_claimed_level(self, pin: int, level: int) -> None:
+        readback = self.level(pin)
+        if readback != level:
+            raise GpioUnavailable(
+                f"BCM {pin} claimed at its safe level {level} but reads back {readback}"
+            )
+
+    def _bias_toward(self, level: int) -> int:
+        return self._lgpio.SET_PULL_UP if level else self._lgpio.SET_PULL_DOWN
+
+    def _refuse_if_held(self, pin: int) -> None:
+        try:
+            status, _offset, flags, name, user = self._lgpio.gpio_get_line_info(self._handle, pin)
+        except Exception as error:  # noqa: BLE001 - advisory only; the claim enforces
+            log.warning("could not read line info for BCM %s: %s", pin, error)
+            return
+        if status == _LGPIO_OK and flags & _LINE_IN_USE:
+            raise GpioBusy(
+                f"BCM {pin} ({name}) is already held by {user or 'another process'}. "
+                f"Two writers on one relay line is the failure that produces impossible "
+                f"states - refusing to start."
+            )
 
 
 class WorldGpio:
-    """Simulated lines that also drive the SHARED greenhouse.
-
-    Composes SimulatedGpio rather than reimplementing it, so claim-once,
-    unknown-until-written, failsafe-on-close and refuse-unmanaged-pin all
-    behave exactly as they do on real hardware. Only the side effect differs:
-    a write also lands in the world every other agent is reading from.
-    """
+    """SimulatedGpio whose writes also drive the shared greenhouse simulator."""
 
     def __init__(self, node_id: str, client) -> None:
         self._node_id = node_id
@@ -314,20 +264,10 @@ class WorldGpio:
 
     def claim(self, lines: tuple[int, ...], failsafe: dict[int, int]) -> None:
         self._local.claim(lines, failsafe)
-        # Claiming at the failsafe level is what real hardware does, so the
-        # world must see it too - otherwise the sandbox starts every run with
-        # lines the agent thinks are safe and the world thinks are unknown.
+        # Real hardware claims at the failsafe, so the world has to start there too.
         for pin, level in failsafe.items():
             self._push(pin, level)
             self._local.write(pin, level)
-
-    def _push(self, pin: int, level: int) -> None:
-        from .world_client import WorldUnreachable
-
-        try:
-            self._client.set_level(self._node_id, pin, level)
-        except WorldUnreachable as exc:
-            raise GpioUnavailable(f"world rejected {self._node_id}:{pin}={level}: {exc}") from exc
 
     def write(self, pin: int, level: int) -> None:
         self._local.write(pin, level)
@@ -338,13 +278,12 @@ class WorldGpio:
 
     def failsafe(self) -> None:
         self._local.failsafe()
-        for pin, level in self._local._failsafe.items():
+        for pin, level in self._local.failsafe_levels.items():
             try:
                 self._push(pin, level)
-            except GpioUnavailable as exc:
-                # Never raise out of failsafe. It runs on dead-man expiry and
-                # on shutdown, and a crash there is strictly worse than a log.
-                log.error("failsafe could not reach the world for pin %s: %s", pin, exc)
+            except GpioUnavailable as error:
+                # Never raises: this runs on dead-man expiry and on shutdown.
+                log.error("failsafe could not reach the world for pin %s: %s", pin, error)
 
     def close(self) -> None:
         self.failsafe()
@@ -355,7 +294,15 @@ class WorldGpio:
         return self._local.closed
 
     def describe(self) -> str:
-        return f"world gpio for {self._node_id} ({len(self._local._levels)} lines)"
+        return f"world gpio for {self._node_id} ({self._local.line_count} lines)"
+
+    def _push(self, pin: int, level: int) -> None:
+        try:
+            self._client.set_level(self._node_id, pin, level)
+        except WorldUnreachable as error:
+            raise GpioUnavailable(
+                f"world rejected {self._node_id}:{pin}={level}: {error}"
+            ) from error
 
 
 def build(lines: tuple[int, ...], chip_label: str, simulated: bool):

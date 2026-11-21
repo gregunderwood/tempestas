@@ -1,8 +1,4 @@
-"""The sandbox backends must behave exactly like the hardware ones.
-
-A sandbox that is more forgiving than the greenhouse is worse than none: it
-produces green tests for code that will fail on a relay board.
-"""
+"""The sandbox backends must be no more forgiving than the hardware ones."""
 
 from __future__ import annotations
 
@@ -14,28 +10,24 @@ from tempestas_agent.world_client import WorldUnreachable
 
 
 class FakeClient:
-    def __init__(self, site=None, fail=False):
+    def __init__(self, site=None, is_failing=False):
         self.site = site or {"co2_ppm": 1200.0, "temperature_c": 24.0, "humidity_pct": 55.0}
-        self.fail = fail
+        self.is_failing = is_failing
         self.writes: list[tuple[str, int, int]] = []
 
     def read_site(self, position):
-        if self.fail:
+        if self.is_failing:
             raise WorldUnreachable("down")
         return dict(self.site, position=position)
 
     def set_level(self, node_id, pin, level):
-        if self.fail:
+        if self.is_failing:
             raise WorldUnreachable("down")
         self.writes.append((node_id, pin, level))
 
 
 def test_claim_pushes_the_failsafe_level_to_the_world() -> None:
-    """The world must start where the agent thinks the pins are.
-
-    Real hardware claims AT the failsafe level. If the world stayed at unknown
-    the sandbox would begin every run already disagreeing with itself.
-    """
+    # Real hardware claims at the failsafe level, so the world has to start there too.
     client = FakeClient()
     gpio = WorldGpio("greenhouse", client)
     gpio.claim((21, 26), {21: 1, 26: 0})
@@ -63,32 +55,29 @@ def test_a_bad_level_is_refused() -> None:
 
 
 def test_an_unreachable_world_fails_the_write_rather_than_lying() -> None:
-    """Silent divergence between agent and world is the one unacceptable outcome."""
     client = FakeClient()
     gpio = WorldGpio("elantris", client)
     gpio.claim((5,), {5: 1})
-    client.fail = True
+    client.is_failing = True
 
     with pytest.raises(GpioUnavailable):
         gpio.write(5, 0)
 
 
 def test_failsafe_never_raises_even_when_the_world_is_gone() -> None:
-    """failsafe() runs on dead-man expiry and on shutdown. Crashing there is worse."""
     client = FakeClient()
     gpio = WorldGpio("elantris", client)
     gpio.claim((5,), {5: 1})
     gpio.write(5, 0)
-    client.fail = True
+    client.is_failing = True
 
-    gpio.failsafe()          # must not raise
-    gpio.close()             # must not raise
+    gpio.failsafe()  # must not raise
+    gpio.close()  # must not raise
     assert gpio.level(5) == 1, "local state still went safe"
 
 
 def test_sensor_reports_invalid_rather_than_inventing_a_reading() -> None:
-    """A confidently wrong number is worse than a null - Safety rule 4."""
-    sensor = WorldSensor(FakeClient(fail=True), "canopy")
+    sensor = WorldSensor(FakeClient(is_failing=True), "canopy")
     reading = sensor.read()
 
     assert reading is not None
@@ -98,7 +87,6 @@ def test_sensor_reports_invalid_rather_than_inventing_a_reading() -> None:
 
 
 def test_sensor_applies_its_offset_like_the_real_one() -> None:
-    """The offset lives agent-side so the calibration path is the same in both."""
     client = FakeClient(site={"co2_ppm": 900.0, "temperature_c": 24.0, "humidity_pct": 50.0})
     assert WorldSensor(client, "canopy").read().temperature_c.value == 24.0
     assert WorldSensor(client, "canopy", offset_c=4.0).read().temperature_c.value == 20.0

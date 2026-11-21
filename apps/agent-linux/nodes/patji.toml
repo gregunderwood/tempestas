@@ -1,23 +1,11 @@
-# patji - the Pi Zero W v1.1, reflashed to heat the pumphouse. The host and
-# the node keep the name; the zone it is admitted to is `pumphouse`.
-#
-# Agent only. The server, Postgres and the broker are on elantris. See
-# docs/Pumphouse.md for the wiring and the reasoning behind every number here.
-#
-# Deploy to /home/<user>/tempestas/etc/agent.toml on the box.
-# Credentials live in /etc/tempestas/agent.env (0600 root), never here:
-#   MQTT_USERNAME=patji
-#   MQTT_PASSWORD=...        (generated on elantris, see Provisioning)
+# patji: the Pi Zero W heating the pumphouse. Wiring and every number here: docs/Pumphouse.md.
+# Deploy to /home/<user>/tempestas/etc/agent.toml; credentials live in /etc/tempestas/agent.env.
 
 node_id = "patji"
 kind = "rpi"
 agent_version = "0.1.0"
 
-# "Hold, then on." Both loads hang off the relay board's NC contacts, so both
-# fail to ON, and one node-wide timer gives the hold with no agent change. A
-# WiFi blip shorter than ten minutes changes nothing; a dead elantris means the
-# heater and the tape run until somebody looks. On costs electricity, off costs
-# the pipes.
+# "Hold, then on": both loads hang off NC contacts, so a dead elantris leaves them running.
 deadman_s = 600.0
 
 [mqtt]
@@ -27,10 +15,7 @@ url = "mqtt://192.168.2.70:1883"
 kind = "ds18b20"
 sample_interval_s = 10.0
 
-# Pinned by ROM id, never by bus order. Read each id at bring-up with ONE probe
-# plugged in at a time (`ls /sys/bus/w1/devices/`), and label the cable end
-# with its sensor_id. These placeholders are refused by the config check on
-# purpose: the agent will not start until they are real.
+# Pinned by ROM id, never by bus order; label each cable end with its sensor_id.
 [[sensor.probes]]
 rom = "28-3ce1d443663c"
 sensor_id = "pipes"
@@ -39,21 +24,17 @@ sensor_id = "pipes"
 rom = "28-3ce1d4436bd1"
 sensor_id = "air"
 
-# The third probe, not soldered yet. Name it for where it ends up; any number
-# of probes works, and the zone takes the coldest. Uncomment with its real ROM.
+# The third probe, not soldered yet. Uncomment with its real ROM.
 # [[sensor.probes]]
 # rom = "28-zzzzzzzzzzzz"
 # sensor_id = "floor"
 
 [gpio]
-# BCM5 -> IN1 -> heater (through the JQX-62F 110VAC contactor)
-# BCM6 -> IN2 -> heat tape
+# BCM5 -> IN1 -> heater (through the JQX-62F 110VAC contactor); BCM6 -> IN2 -> heat tape.
 lines = [5, 6]
 chip_label = "pinctrl-bcm2835"   # Pi Zero W v1.1, BCM2835
 
 [gpio.failsafe]
-# 1 = HIGH = relay de-energised (the board is active-LOW) = NC closed = load
-# ON. config.txt drives both high from boot (`gpio=5,6=op,dh`) so the loads
-# are on before this process exists, too.
+# 1 de-energises the active-LOW relay, closing NC: load ON. config.txt drives both high from boot.
 5 = 1
 6 = 1

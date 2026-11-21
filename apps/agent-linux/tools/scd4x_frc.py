@@ -1,137 +1,132 @@
 #!/usr/bin/env python3
-"""Forced recalibration: tell the sensor what it should be reading.
-
-    sudo systemctl stop tempestas-agent
-    uv run python tools/scd4x_frc.py --target 425
-    sudo systemctl start tempestas-agent
-
-WHEN to use this: the sensor's baseline has gone wrong and you can put it in
-air of known concentration. On elantris, a failing sensor emitted spurious
-readings near 300 ppm; ASC took the lowest of those for fresh air at 400 and
-biased everything about 115 ppm high. Disabling ASC stopped the drift but froze
-the error - only an FRC undoes it.
-
-WHEN NOT to: if you cannot say what the air actually is. A wrong reference does
-not fail, it just moves the error, and the result looks exactly as authoritative
-as a good one. Guessing here is worse than the drift.
-
-Getting the reference right
----------------------------
-Outdoor air is about 420-430 ppm and rising a couple of ppm a year. A greenhouse
-approaches it only with the door open and enough time to mix - and a crop in
-daylight pulls it BELOW outdoor, while a closed house at night sits well above.
-So ventilate, wait, and prefer a moment when nothing is being enriched.
-"""
+"""Forced recalibration; see "Forced recalibration" in docs/Infrastructure/Linux Agent.md first."""
 
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 import time
+from functools import partial
 
 sys.path.insert(0, str(__file__.rsplit("/tools/", 1)[0] + "/src"))
 
+from tempestas_agent.runtime import is_agent_service_active  # noqa: E402
 from tempestas_agent.sensor import Scd4xSensor  # noqa: E402
 
-SETTLE_S = 240  # datasheet wants 3+ minutes of periodic measurement; take 4
-
-
-def agent_is_running() -> bool:
-    try:
-        out = subprocess.run(
-            ["systemctl", "is-active", "tempestas-agent"],
-            capture_output=True, text=True, timeout=5,
-        )
-        return out.stdout.strip() == "active"
-    except Exception:
-        return False
+SETTLE_S = 240  # the datasheet wants 3+ minutes of periodic measurement; take 4
+SAMPLE_SPACING_S = 10
+PLAUSIBLE_TARGET_PPM = (300, 2000)
+STABILITY_WINDOW = 6
+MAX_SPREAD_PPM = 40
+MAX_DRIFT_PPM_PER_MIN = 0.5
+SUSPICIOUS_CORRECTION_PPM = 250
+SECONDS_PER_MINUTE = 60.0
+EXIT_OK = 0
+EXIT_UNSTABLE = 1
+EXIT_REFUSED = 2
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(prog="scd4x_frc")
-    p.add_argument("--target", type=int, required=True, help="known ppm of the air it is in")
-    p.add_argument("--bus", type=int, default=1)
-    p.add_argument("--address", type=lambda s: int(s, 0), default=0x62)
-    p.add_argument("--settle", type=int, default=SETTLE_S)
-    p.add_argument("--persist", action="store_true", help="survive a power cycle")
-    p.add_argument("--force", action="store_true")
-    args = p.parse_args()
-
-    if not 300 <= args.target <= 2000:
-        print(f"--target {args.target} is not a plausible reference. Outdoor air is ~425.")
-        return 2
-    if agent_is_running() and not args.force:
+    arguments = parse_arguments()
+    lowest_target, highest_target = PLAUSIBLE_TARGET_PPM
+    if not lowest_target <= arguments.target <= highest_target:
+        print(f"--target {arguments.target} is not a plausible reference. Outdoor air is ~425.")
+        return EXIT_REFUSED
+    if is_agent_service_active() and not arguments.force:
         print("tempestas-agent is ACTIVE and owns the sensor. Stop it first:")
         print("  sudo systemctl stop tempestas-agent")
-        return 2
+        return EXIT_REFUSED
 
-    sensor = Scd4xSensor(args.bus, args.address, offset_c=None, altitude_m=None)
+    sensor = Scd4xSensor(arguments.bus, arguments.address, offset_c=None, altitude_m=None)
     sensor.start()
     print(f"  {sensor.describe()}")
 
-    print(f"settling for {args.settle}s of periodic measurement ...")
-    readings: list[float] = []
-    deadline = time.time() + args.settle
-    while time.time() < deadline:
-        time.sleep(10)
-        r = sensor.read()
-        if r and r.co2_ppm.valid:
-            readings.append(r.co2_ppm.value)
-            print(f"    {r.co2_ppm.value:>6.0f} ppm   {r.temperature_c.value:>5}C")
+    readings = collect_settling_readings(sensor, arguments.settle)
+    if not is_reference_stable(readings, arguments.settle):
+        return EXIT_UNSTABLE
 
-    if len(readings) < 6:
+    apply_recalibration(sensor, arguments.target)
+    persist_or_warn(sensor, arguments.persist)
+    report_reading_after(sensor, arguments.target)
+    sensor.stop()
+    return EXIT_OK
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="scd4x_frc")
+    parser.add_argument("--target", type=int, required=True, help="known ppm of the air it is in")
+    parser.add_argument("--bus", type=int, default=1)
+    parser.add_argument("--address", type=partial(int, base=0), default=0x62)
+    parser.add_argument("--settle", type=int, default=SETTLE_S)
+    parser.add_argument("--persist", action="store_true", help="survive a power cycle")
+    parser.add_argument("--force", action="store_true")
+    return parser.parse_args()
+
+
+def collect_settling_readings(sensor: Scd4xSensor, settle_s: int) -> list[float]:
+    print(f"settling for {settle_s}s of periodic measurement ...")
+    readings: list[float] = []
+    deadline = time.time() + settle_s
+    while time.time() < deadline:
+        time.sleep(SAMPLE_SPACING_S)
+        reading = sensor.read()
+        if reading is not None and reading.co2_ppm.valid:
+            readings.append(reading.co2_ppm.value)
+            print(f"    {reading.co2_ppm.value:>6.0f} ppm   {reading.temperature_c.value:>5}C")
+    return readings
+
+
+def is_reference_stable(readings: list[float], settle_s: int) -> bool:
+    if len(readings) < STABILITY_WINDOW:
         print(f"only {len(readings)} usable readings - too unstable to calibrate against.")
         print("Fix the sensor before calibrating it.")
-        return 1
+        return False
 
-    # A drifting reading means the air is still changing, and calibrating
-    # against a moving reference just bakes in whatever it happened to be.
-    recent = readings[-6:]
+    recent = readings[-STABILITY_WINDOW:]
     spread = max(recent) - min(recent)
     mean = sum(recent) / len(recent)
-    print(f"  last 6: mean {mean:.0f} ppm, spread {spread:.0f} ppm")
-    if spread > 40:
+    print(f"  last {STABILITY_WINDOW}: mean {mean:.0f} ppm, spread {spread:.0f} ppm")
+    if spread > MAX_SPREAD_PPM:
         print(f"  spread {spread:.0f} ppm is too wide - the air has not settled. Wait longer.")
-        return 1
+        return False
 
-    # Spread alone is not enough, and this cost a calibration on 2026-09-12:
-    # readings fell 599 -> 571 across the settle, a steady 1.5 ppm/min, while
-    # the last six sat within 11 ppm of each other and passed. Air still on its
-    # way somewhere is not a reference, however smooth it looks.
-    drift_per_min = (readings[-1] - readings[0]) / (args.settle / 60.0)
+    # Spread alone is not enough: air still on its way somewhere is not a reference.
+    drift_per_min = (readings[-1] - readings[0]) / (settle_s / SECONDS_PER_MINUTE)
     print(f"  trend: {drift_per_min:+.1f} ppm/min across the settle")
-    if abs(drift_per_min) > 0.5:
+    if abs(drift_per_min) > MAX_DRIFT_PPM_PER_MIN:
         print("  The air is still MOVING. Calibrating now bakes in wherever it")
         print("  happened to be, not where it is going. Ventilate and wait for")
         print("  it to flatten, then re-run.")
-        return 1
+        return False
+    return True
 
-    print(f"applying forced recalibration to {args.target} ppm ...")
-    correction = sensor.forced_recalibration(args.target)
+
+def apply_recalibration(sensor: Scd4xSensor, target_ppm: int) -> None:
+    print(f"applying forced recalibration to {target_ppm} ppm ...")
+    correction = sensor.forced_recalibration(target_ppm)
     print(f"  correction applied: {correction:+d} ppm")
-    # The chip reports the ADJUSTMENT it made, so the sign is the opposite of
-    # the error it was carrying. Getting this backwards in a calibration log is
-    # how a future reader concludes the wrong thing about the sensor.
-    was = "high" if correction < 0 else "low"
-    print(f"  (it had been reading {was} by {abs(correction)} ppm)")
-    if abs(correction) > 250:
+    # The chip reports the adjustment it made, so its sign is opposite to the error it carried.
+    direction = "high" if correction < 0 else "low"
+    print(f"  (it had been reading {direction} by {abs(correction)} ppm)")
+    if abs(correction) > SUSPICIOUS_CORRECTION_PPM:
         print("  A correction this large is a reason to DISTRUST the sensor, not to")
         print("  trust the calibration. Check the reference was right.")
 
-    if args.persist:
+
+def persist_or_warn(sensor: Scd4xSensor, should_persist: bool) -> None:
+    if should_persist:
         sensor.persist_settings()
         print("  persisted to EEPROM (survives a power cycle)")
-    else:
-        print("  NOT persisted - it will be lost on power loss. Re-run with --persist")
-        print("  once you are satisfied the result is right.")
+        return
+    print("  NOT persisted - it will be lost on power loss. Re-run with --persist")
+    print("  once you are satisfied the result is right.")
 
-    time.sleep(10)
+
+def report_reading_after(sensor: Scd4xSensor, target_ppm: int) -> None:
+    time.sleep(SAMPLE_SPACING_S)
     after = sensor.read()
-    if after and after.co2_ppm.valid:
-        print(f"  reading now: {after.co2_ppm.value:.0f} ppm (target was {args.target})")
-    sensor.stop()
-    return 0
+    if after is not None and after.co2_ppm.valid:
+        print(f"  reading now: {after.co2_ppm.value:.0f} ppm (target was {target_ppm})")
 
 
 if __name__ == "__main__":
