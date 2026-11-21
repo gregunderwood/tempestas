@@ -37,6 +37,9 @@ export class NodeEntity {
   @Column({ type: 'jsonb' })
   capabilities!: NodeCapabilities;
 
+  @Column({ type: 'text', name: 'agent_name', nullable: true })
+  agentName!: string | null;
+
   @Column({ type: 'text', name: 'agent_version', nullable: true })
   agentVersion!: string | null;
 

@@ -78,7 +78,9 @@ function node(slug: string, sensors: Record<string, MetricKey[]>): Node {
     status: NodeStatus.Admitted,
     online: true,
     lastSeenAt: null,
+    agentName: null,
     agentVersion: null,
+    contractStanding: 'current',
     capabilities: {
       contractVersion: 1,
       hasRtc: true,

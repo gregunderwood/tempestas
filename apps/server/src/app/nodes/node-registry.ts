@@ -1,5 +1,7 @@
 import {
+  MQTT_CONTRACT_MINOR,
   NodeStatus,
+  type ContractStanding,
   type NodeCapabilities,
   type NodeId,
   type NodeKind,
@@ -8,6 +10,7 @@ import {
 export interface HelloFacts {
   nodeId: NodeId;
   kind: NodeKind;
+  agentName: string | null;
   agentVersion: string;
   capabilities: NodeCapabilities;
   bootId: string;
@@ -18,6 +21,7 @@ export interface RegisteredNode {
   slug: NodeId;
   status: NodeStatus;
   kind: NodeKind;
+  agentName: string | null;
   agentVersion: string | null;
   capabilities: NodeCapabilities;
   bootId: string | null;
@@ -28,6 +32,7 @@ export interface NewNodeFields {
   displayName: string;
   status: NodeStatus;
   kind: NodeKind;
+  agentName: string | null;
   agentVersion: string;
   capabilities: NodeCapabilities;
   bootId: string;
@@ -38,6 +43,7 @@ export interface NewNodeFields {
 // No `status`, `displayName`, `location` or `zoneId`: a hello must never write a human-owned field.
 export interface HelloPatch {
   kind: NodeKind;
+  agentName: string | null;
   agentVersion: string;
   capabilities: NodeCapabilities;
   bootId: string;
@@ -62,7 +68,9 @@ const HELLO_CHANGE_DETECTORS: readonly [HelloOutcome, HelloChangeDetector][] = [
   ],
   [
     'agent-upgraded',
-    (existing, hello) => existing.agentVersion !== hello.agentVersion,
+    (existing, hello) =>
+      existing.agentName !== hello.agentName ||
+      existing.agentVersion !== hello.agentVersion,
   ],
 ];
 
@@ -85,6 +93,7 @@ export function newNodeFromHello(hello: HelloFacts): NewNodeFields {
     displayName: hello.nodeId,
     status: NodeStatus.Pending,
     kind: hello.kind,
+    agentName: hello.agentName,
     agentVersion: hello.agentVersion,
     capabilities: hello.capabilities,
     bootId: hello.bootId,
@@ -100,6 +109,7 @@ export function patchFromHello(
   return {
     patch: {
       kind: hello.kind,
+      agentName: hello.agentName,
       agentVersion: hello.agentVersion,
       capabilities: hello.capabilities,
       bootId: hello.bootId,
@@ -108,6 +118,16 @@ export function patchFromHello(
     },
     outcomes: classifyHello(existing, hello),
   };
+}
+
+export function findContractStanding(
+  capabilities: NodeCapabilities,
+): ContractStanding {
+  const nodeMinor = capabilities.contractMinor ?? 0;
+  if (nodeMinor < MQTT_CONTRACT_MINOR) {
+    return 'behind';
+  }
+  return nodeMinor > MQTT_CONTRACT_MINOR ? 'ahead' : 'current';
 }
 
 export function pinsWithdrawn(

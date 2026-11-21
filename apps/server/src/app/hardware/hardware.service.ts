@@ -35,6 +35,8 @@ export interface SensorSample {
 export interface NodeHello {
   nodeId: NodeId;
   kind: NodeKind;
+  /** Null from agents that predate contract 1.0's agent name. */
+  agentName: string | null;
   agentVersion: string;
   capabilities: NodeCapabilities;
   /** Changes on every node restart, so a bounce is detectable. */

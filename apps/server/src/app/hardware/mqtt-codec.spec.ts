@@ -48,6 +48,7 @@ function helloPayload(overrides: Record<string, unknown> = {}) {
     node: 'elantris',
     ts: '2026-01-10T11:59:59Z',
     kind: NodeKind.RaspberryPi,
+    agentName: 'agent-linux',
     agentVersion: '1.0.0',
     bootId: 'boot-1',
     capabilities: {
@@ -252,6 +253,19 @@ describe('decodeHello', () => {
         kind: NodeKind.RaspberryPi,
       },
     });
+  });
+
+  it('carries the agent name', () => {
+    expect(decodeHello(helloPayload(), 'elantris', NOW)).toMatchObject({
+      value: { agentName: 'agent-linux' },
+    });
+  });
+
+  // Agents older than contract 1.0's agent name still say hello.
+  it('accepts a hello without an agent name', () => {
+    expect(
+      decodeHello(helloPayload({ agentName: undefined }), 'elantris', NOW),
+    ).toMatchObject({ ok: true, value: { agentName: null } });
   });
 
   // Without a bootId a reboot is undetectable and the reading dedupe loses its scope.
