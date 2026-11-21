@@ -1,14 +1,7 @@
-import type { Device } from '../devices/device.model';
-import type { DeviceRole } from '../devices/device.model';
+import type { Device, DeviceRole } from '../devices/device.model';
 import type { Reading } from '../readings/reading.model';
 import type { RulesCycle } from '../rules/rules.model';
 
-/**
- * The socket.io contract to the browser.
- *
- * Named events on one socket, rather than the old system's bare `rxjs/webSocket`
- * feed with no envelope and no reconnect. A Pi on home WiFi needs both.
- */
 export const REALTIME_EVENTS = {
   readingLatest: 'reading:latest',
   deviceState: 'device:state',
@@ -19,31 +12,23 @@ export const REALTIME_EVENTS = {
 export type RealtimeEvent =
   (typeof REALTIME_EVENTS)[keyof typeof REALTIME_EVENTS];
 
-/**
- * What the dashboard needs to raise the banner that makes "hold last state" a
- * sound policy. Layer 1 of the safety design depends on a human noticing, so
- * this is a required part of the feature rather than telemetry.
- */
+/** Feeds the stale banner, which the safety design relies on a human noticing. */
 export interface SystemStatus {
-  /** ISO-8601. */
   at: string;
-  /** True when any owned role's sensors have gone quiet. Drives the banner. */
   sensorStale: boolean;
   staleRoles: DeviceRole[];
   nodesOnline: number;
   nodesTotal: number;
-  /** Nodes that have announced themselves and wait for a human to admit them. */
+  /** Announced, waiting for a human to admit them. */
   nodesPending: number;
   /** False on a follower, which runs no rules and switches nothing. */
   isLeading: boolean;
-  /** ISO-8601, or null before the first evaluation. */
   lastEvaluationAt: string | null;
 }
 
-/** The payload of each event, so the client cannot mis-type a handler. */
 export interface RealtimePayloads {
-  'reading:latest': Reading;
-  'device:state': Device;
-  'system:status': SystemStatus;
-  'rules:cycle': RulesCycle;
+  [REALTIME_EVENTS.readingLatest]: Reading;
+  [REALTIME_EVENTS.deviceState]: Device;
+  [REALTIME_EVENTS.systemStatus]: SystemStatus;
+  [REALTIME_EVENTS.rulesCycle]: RulesCycle;
 }

@@ -1,16 +1,8 @@
 import type { NodeId } from '../nodes/node.model';
 
-/** The literal electrical level written to the pad. */
 export type GpioLevel = 0 | 1;
 
-/**
- * What a device is FOR, which is what automation binds to.
- *
- * The old system resolved devices by display-name string ('Lights',
- * 'CO2 Generator'), so renaming a device in the UI silently disabled its rule.
- * Roles are not unique - several devices may share one, and all of them receive
- * the same decision, each still filtered by its own `rulesEnabled`.
- */
+/** What automation binds to, never the display name. Several devices may share one. */
 export enum DeviceRole {
   Lights = 'lights',
   Co2Generator = 'co2_generator',
@@ -31,12 +23,7 @@ export interface Device {
   onDelayDuration: number;
   onAt: string | null;
   offAt: string | null;
-  /**
-   * The level that means ON for this device. Active-high vs active-low is
-   * per-device data, not a constant: four of the five existing relays are
-   * active-LOW, one is active-HIGH. Replaces the old `on_state`, which arrived
-   * over the wire as bool, string or int depending on the code path.
-   */
+  /** Per device, because the existing relays mix active-high and active-low. */
   onLevel: GpioLevel;
   rulesEnabled: boolean;
   role: DeviceRole | null;

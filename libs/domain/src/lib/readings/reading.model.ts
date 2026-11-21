@@ -1,19 +1,10 @@
-import type { NodeId } from '../nodes/node.model';
+import type { MetricKey, NodeId } from '../nodes/node.model';
 
-/**
- * All wire timestamps are ISO-8601 strings, never `Date`.
- *
- * The old API emitted `created_at` as the naive string "%m/%d/%Y, %H:%M:%S",
- * which forced three separate `new Date(`${x} UTC`)` hacks in the Angular
- * client. Typing these as `string` makes that hack unwriteable.
- */
 export type ReadingId = string;
 
-/**
- * A node can carry several sensors - the pumphouse has a probe per pipe - so a
- * reading is identified by node AND sensor. Anything that keeps "the latest
- * reading" keyed by node alone silently shows one probe and hides the rest.
- */
+type PerMetric<Value> = Record<MetricKey, Value>;
+
+/** A node can carry several sensors, so a reading keyed by node alone hides all but one. */
 export function sensorKey(reading: {
   nodeId: NodeId;
   sensorId: string;
@@ -22,58 +13,34 @@ export function sensorKey(reading: {
 }
 
 export interface Reading {
-  /** UUID. The old client typed this `number`, which was simply wrong. */
   id: ReadingId;
   nodeId: NodeId;
   sensorId: string;
   temperature: number;
-  /**
-   * Null when the sensor has none to give: a DS18B20 measures temperature
-   * only, and an SCD4x can report an invalid one. No rule reads humidity, so
-   * unlike temperature its absence never drops the reading.
-   */
+  /** Null when the sensor has none, e.g. a DS18B20. No rule reads it, so it never drops the reading. */
   humidity: number | null;
-  /**
-   * Null when the sensor reported an invalid CO2 value. The node reports
-   * validity honestly and never substitutes a last-known-good reading -
-   * a dead sensor stuck on a low value would otherwise run the burner forever.
-   */
+  /** Null when invalid, never a last-known-good: a stuck low value would run the burner forever. */
   co2: number | null;
   /** ISO-8601. Server-stamped on receipt: an ESP32 has no RTC. */
   createdAt: string;
 }
 
-/**
- * Null where the window contains no usable value - an empty window has no
- * average, and CO2 has none if every reading in the window was invalid. The old
- * `Stats` type was `any`, so this arrived at the client as NaN.
- */
-export interface ReadingAverages {
-  temperature: number | null;
-  humidity: number | null;
-  co2: number | null;
-}
+/** Null where the window holds no usable value. */
+export type ReadingAverages = PerMetric<number | null>;
 
-/** min/max are whole readings so the UI can link to the record that produced them. */
-export interface ReadingExtremes {
-  temperature: Reading | null;
-  humidity: Reading | null;
-  co2: Reading | null;
-}
+/** Whole readings, so the UI can link to the record that produced them. */
+export type ReadingExtremes = PerMetric<Reading | null>;
 
 export interface ReadingStats {
   min: ReadingExtremes;
   max: ReadingExtremes;
   average: ReadingAverages;
-  /** Echoed back so the dashboard can label the window it is showing. */
   from: string;
   to: string;
 }
 
-/** One contiguous daylight or night period, with its statistics. */
 export interface SegmentStats {
   kind: 'day' | 'night';
-  /** ISO-8601. */
   from: string;
   to: string;
   /** True for the period still running, whose `to` is now. */
@@ -81,30 +48,11 @@ export interface SegmentStats {
   stats: ReadingStats;
 }
 
-/**
- * The last few alternating daylight and night periods, oldest first, ending
- * with the one still running. By day that reads previous day, last night,
- * today so far; by night, previous night, yesterday's daylight, tonight so
- * far.
- *
- * There is deliberately no combined 24-hour figure. A window that spans both
- * averages two different jobs together - the burner is CO2 enrichment by day
- * and the greenhouse's heat source by night - and the result describes neither.
- * A 4 °C minimum is the night rule working or a midday fault, and only the
- * period it belongs to says which.
- *
- * Empty when the zone's daylight window is zero-length, since there are then no
- * alternating periods to show.
- */
+/** Deliberately no combined 24-hour figure: the burner does a different job by day and by night. */
 export interface DayNightStats {
   /** Oldest first. The last entry is the period still running. */
   periods: SegmentStats[];
-  /**
-   * ISO-8601: when the running period ends and these figures are superseded.
-   *
-   * Sent so a client can refresh exactly then without carrying its own copy of
-   * the day/night boundary logic. Null when there are no periods.
-   */
+  /** When the running period ends, so a client can refresh without its own boundary logic. */
   nextBoundary: string | null;
   daylight: {
     /** Local wall-clock, inclusive. */
@@ -127,13 +75,8 @@ export interface ReadingsQuery {
   nodeId?: NodeId;
   /** Only with `nodeId`: a sensor id is unique on its node, not across nodes. */
   sensorId?: string;
-  /** Newest first unless asked; oldest first is how a client finds where a window began. */
   order?: ReadingOrder;
-  /**
-   * Rows to return. Bounded on purpose: 90 days of retention at
-   * one sample per node per 10 s is over three quarters of a million rows, and
-   * the dashboard asks for stats over a window rather than the window itself.
-   */
+  /** Bounded on purpose: retention holds far more rows than any screen should fetch. */
   limit?: number;
 }
 

@@ -18,7 +18,7 @@ including the QoS and retain flags as a const object — so they cannot drift in
 
 ## Key files
 
-- [../../libs/domain/src/lib/hardware/mqtt-contract.ts](../../libs/domain/src/lib/hardware/mqtt-contract.ts) — topics, payloads, `mqttQos`, and the safety rules as a header comment
+- [../../libs/domain/src/lib/hardware/mqtt-contract.ts](../../libs/domain/src/lib/hardware/mqtt-contract.ts) — topics, payloads and `mqttQos`
 - [../../apps/server/src/app/hardware/hardware.service.ts](../../apps/server/src/app/hardware/hardware.service.ts) — the abstract seam every consumer injects
 - [../../apps/server/src/app/hardware/fake-hardware.service.ts](../../apps/server/src/app/hardware/fake-hardware.service.ts) — the simulator that implements it
 
@@ -40,10 +40,10 @@ tempestas/v1/server/status                            server LWT   QoS1  retain=
 `{nodeId}` is the node's **slug**, which is also its broker ACL subject. The server subscribes to
 `tempestas/v1/node/+/#` to catch every node at once.
 
-## The four rules in the contract file
+## The four rules of the contract
 
-These are in the header comment of `mqtt-contract.ts` because they are protocol requirements, not
-implementation preferences. Full reasoning in [Safety](../Safety.md).
+These are protocol requirements, not implementation preferences, and every change to
+`mqtt-contract.ts` must keep them. Full reasoning in [Safety](../Safety.md).
 
 1. **Commands are never retained** — and the retain flag alone does **not** enforce it. See
    [the retained-command trap](#the-retained-command-trap) below, which is the most important thing
