@@ -16,11 +16,7 @@ export class NodeEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  /**
-   * Immutable after admission: it is the MQTT topic segment and the ACL subject.
-   * Renaming it would orphan the node's whole topic subtree. `displayName` is
-   * the editable one.
-   */
+  // Immutable: it is the MQTT topic segment and the ACL subject. `displayName` is the editable one.
   @Column({ type: 'text', unique: true })
   slug!: string;
 
@@ -30,15 +26,11 @@ export class NodeEntity {
   @Column({ type: 'text', nullable: true })
   location!: string | null;
 
-  /** Display only. Nothing in the server may branch on this. */
+  // Display only. Nothing in the server may branch on this.
   @Column({ type: 'enum', enum: NodeKind, default: NodeKind.RaspberryPi })
   kind!: NodeKind;
 
-  /**
-   * An unknown node that says hello lands here as `pending`: it receives no
-   * commands and its readings are discarded until a human admits it. A stray
-   * ESP32 on the LAN must not be able to inject a reading that starts a burner.
-   */
+  // Pending until a human admits it, so a stray ESP32 cannot inject a reading that starts a burner.
   @Column({ type: 'enum', enum: NodeStatus, default: NodeStatus.Pending })
   status!: NodeStatus;
 
@@ -48,15 +40,11 @@ export class NodeEntity {
   @Column({ type: 'text', name: 'agent_version', nullable: true })
   agentVersion!: string | null;
 
-  /**
-   * Changes on every restart of the node's agent, so a bounce is detectable
-   * across a restart of the SERVER too - which is why it is a column and not
-   * an in-memory map. Phase 7 uses a changed bootId to re-assert pin state.
-   */
+  // A column, not memory, so a node's bounce is detectable across a server restart too.
   @Column({ type: 'text', name: 'boot_id', nullable: true })
   bootId!: string | null;
 
-  /** Driven by the retained LWT, persisted so the list view is one query. */
+  // Driven by the retained LWT, persisted so the list view is one query.
   @Column({ type: 'boolean', default: false })
   online!: boolean;
 

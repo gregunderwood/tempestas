@@ -55,19 +55,18 @@ function node(overrides: Partial<NodeEntity> = {}): NodeEntity {
   } as NodeEntity;
 }
 
-/** An in-memory nodes table, so the lifecycle is asserted end to end. */
 function makeService(initial: NodeEntity[] = [], zones: ZoneEntity[] = []) {
   const rows = [...initial];
   let nextId = 1;
 
-  const nodeRepo = {
+  const nodeRepository = {
     findOne: vi.fn(
       async ({ where }: { where: { slug?: string; id?: string } }) => {
         return (
           rows.find(
-            (r) =>
-              (where.slug !== undefined && r.slug === where.slug) ||
-              (where.id !== undefined && r.id === where.id),
+            (row) =>
+              (where.slug !== undefined && row.slug === where.slug) ||
+              (where.id !== undefined && row.id === where.id),
           ) ?? null
         );
       },
@@ -87,7 +86,6 @@ function makeService(initial: NodeEntity[] = [], zones: ZoneEntity[] = []) {
     }),
   } as unknown as Repository<NodeEntity>;
 
-  // The two aggregates behind deviceCount / latestReadingAt.
   const aggregate = {
     select: () => aggregate,
     addSelect: () => aggregate,
@@ -95,29 +93,29 @@ function makeService(initial: NodeEntity[] = [], zones: ZoneEntity[] = []) {
     groupBy: () => aggregate,
     getRawMany: async () => [],
   };
-  const deviceRepo = {
+  const deviceRepository = {
     createQueryBuilder: () => aggregate,
   } as unknown as Repository<DeviceEntity>;
-  const readingRepo = {
+  const readingRepository = {
     createQueryBuilder: () => aggregate,
   } as unknown as Repository<SensorReadingEntity>;
-  const zoneRepo = {
+  const zoneRepository = {
     findOne: vi.fn(
       async ({ where }: { where: { id: string } }) =>
-        zones.find((z) => z.id === where.id) ?? null,
+        zones.find((zone) => zone.id === where.id) ?? null,
     ),
   } as unknown as Repository<ZoneEntity>;
   const hardware = {} as unknown as HardwareService;
 
   const service = new NodesService(
-    nodeRepo,
-    deviceRepo,
-    readingRepo,
-    zoneRepo,
+    nodeRepository,
+    deviceRepository,
+    readingRepository,
+    zoneRepository,
     hardware,
     new SystemClock(),
   );
-  return { service, rows, nodeRepo };
+  return { service, rows, nodeRepository };
 }
 
 describe('NodesService hello ingest', () => {
@@ -134,7 +132,6 @@ describe('NodesService hello ingest', () => {
     });
   });
 
-  // The gate would be theatre if a node could re-announce its way past it.
   it('never changes the status of a node that already exists', async () => {
     for (const status of [
       NodeStatus.Pending,
@@ -186,7 +183,6 @@ describe('NodesService availability', () => {
     expect(rows[0]).toMatchObject({ online: true, lastSeenAt: AT });
   });
 
-  // "Offline since" is only answerable if an LWT does not count as a sighting.
   it('does not treat an LWT as a sighting', async () => {
     const seen = new Date('2026-01-10T11:00:00Z');
     const { service, rows } = makeService([
@@ -200,8 +196,6 @@ describe('NodesService availability', () => {
     expect(rows[0]).toMatchObject({ online: false, lastSeenAt: seen });
   });
 
-  // Registration carries capabilities, and only `hello` has them. A retained
-  // status for an unknown slug must not conjure a half-built row.
   it('ignores a status for a node that has never said hello', async () => {
     const { service, rows } = makeService();
     await service.handleAvailability({ nodeId: 'ghost', online: true, at: AT });
@@ -244,9 +238,9 @@ describe('NodesService admission lifecycle', () => {
     const { service, rows } = makeService([
       node({ status: NodeStatus.Pending }),
     ]);
-    const dto = await service.admit('node-uuid', {});
+    const admitted = await service.admit('node-uuid', {});
     expect(rows[0].status).toBe(NodeStatus.Admitted);
-    expect(dto.status).toBe(NodeStatus.Admitted);
+    expect(admitted.status).toBe(NodeStatus.Admitted);
   });
 
   it('is idempotent, so a double-clicked admit button is not an error', async () => {
@@ -300,8 +294,6 @@ describe('NodesService admission lifecycle', () => {
     expect(rows).toHaveLength(0);
   });
 
-  // sensor_readings cascades on node delete, so this would silently destroy
-  // history. `disable` is the operation that means "stop trusting this".
   it('refuses to delete an admitted node', async () => {
     const { service, rows } = makeService([node()]);
     await expect(service.remove('node-uuid')).rejects.toBeInstanceOf(
