@@ -22,8 +22,7 @@ node leaves them **on**, the same as patji in the [Pumphouse](../Pumphouse.md).
 - [../../apps/pico/device/node_agent.py](../../apps/pico/device/node_agent.py) — announce, judge commands, dead-man, readings; no hardware imports
 - [../../apps/pico/device/node_runtime.py](../../apps/pico/device/node_runtime.py) — boot, Wi-Fi, NTP, the broker connection, the main loop, the watchdog
 - [../../apps/pico/device/command_guard.py](../../apps/pico/device/command_guard.py) — every reason a `gpio/set` is refused
-- [../../apps/pico/device/mqtt_session.py](../../apps/pico/device/mqtt_session.py) — holds messages that arrive while a publish waits for its acknowledgement
-- [../../apps/pico/device/lib/tempestas_mqtt.py](../../apps/pico/device/lib/tempestas_mqtt.py) — `umqtt.simple` 1.8.1, renamed and with its changes marked
+- [../../apps/pico/device/tempestas_mqtt.py](../../apps/pico/device/tempestas_mqtt.py) — MQTT 3.1.1 at QoS 0 and 1, rewritten from `umqtt.simple` 1.8.1 (MIT); holds messages that arrive while a publish waits for its acknowledgement
 - [../../apps/pico/device/relay_lines.py](../../apps/pico/device/relay_lines.py) — driving and releasing the relay pins, with register readback
 - [../../apps/pico/device/ds18b20_probes.py](../../apps/pico/device/ds18b20_probes.py) — the probes, pinned by ROM, refusing the chip's fake readings
 - [../../apps/pico/device/contract.py](../../apps/pico/device/contract.py) — the MicroPython mirror of the contract
@@ -115,8 +114,8 @@ interrupting the agent.
   will not catch a float creeping back in.
 - **`ticks_diff` wraps after about 6.2 days.** Only compare stamps that are refreshed more often
   than that. `FakeClock` wraps the same way, so the tests can show it.
-- **Firmware modules shadow `/lib`.** `sys.path` is `['', '.frozen', '/lib']`, which is why the
-  MQTT client is `tempestas_mqtt`, a name no firmware freezes in.
+- **Firmware modules shadow `/lib`.** `sys.path` is `['', '.frozen', '/lib']`, so the agent's
+  files sit at the root, and the MQTT client is `tempestas_mqtt`, a name no firmware freezes in.
 - **The watchdog survives Ctrl-C.** Interrupt a running agent and the board resets itself 8 s later.
   To work in the REPL, reset the board and press Ctrl-C during the boot grace.
 - **`credentials.py` sits in plain text on the Pico's flash.** Anyone with a USB cable can read it.

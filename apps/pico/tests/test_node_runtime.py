@@ -61,7 +61,7 @@ class FakeClient:
     def publish(self, topic, text, is_retained, quality_of_service):
         self.published_topics.append(topic)
 
-    def check_msg(self):
+    def serve_one_message(self):
         if self.failure is not None:
             raise self.failure
 
@@ -203,7 +203,7 @@ def test_tells_the_agent_when_ntp_has_set_the_clock(runtime):
 
 def test_a_client_dropped_by_its_own_handler_is_not_dropped_twice(runtime):
     class ClientDroppedMidMessage(FakeClient):
-        def check_msg(self):
+        def serve_one_message(self):
             runtime.publisher.drop("publish failed")
             raise AttributeError("'NoneType' object has no attribute 'write'")
 
