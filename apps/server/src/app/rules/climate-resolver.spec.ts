@@ -354,9 +354,9 @@ describe('deciding sensors per measurement', () => {
       config({ source: 'min' }),
       NOW,
     );
-    expect(climateByRole[DeviceRole.Co2Generator]?.co2DecidingSensorIds).toEqual(
-      ['elantris/s', 'north-end/s'],
-    );
+    expect(
+      climateByRole[DeviceRole.Co2Generator]?.co2DecidingSensorIds,
+    ).toEqual(['elantris/s', 'north-end/s']);
   });
 });
 
