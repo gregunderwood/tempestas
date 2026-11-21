@@ -1,17 +1,7 @@
-# Install to /etc/mosquitto/tempestas.acl
-#
-# Authentication says who a client is. This file is the only thing that says
-# whose relays it may command. Without it one leaked node credential commands
-# every node on the bus, including the one holding the burner.
-#
-# Mosquitto matches in order and denies anything not granted. Reload with
-# `sudo systemctl reload mosquitto` - a restart is not needed for ACL changes.
+# Install to /etc/mosquitto/tempestas.acl; `sudo systemctl reload mosquitto` applies it.
+# Anything not granted is denied. Identities and why: docs/Safety.md.
 
-# ------------------------------------------------------------ the controller
-#
-# The only legitimate publisher of a command. The node refuses an issuedBy that
-# is not its bound controller, but that check runs AFTER delivery; this is the
-# layer that stops the message arriving at all.
+# The only legitimate publisher of a command; the node's issuedBy check runs after delivery.
 user tempestas-server
 topic write tempestas/v1/server/status
 topic write tempestas/v1/node/+/gpio/set
@@ -24,12 +14,8 @@ topic read tempestas/v1/node/+/gpio/result
 topic read tempestas/v1/node/+/gpio/state/+
 topic read tempestas/v1/node/+/alarm
 
-# ------------------------------------------------------------ elantris
-#
-# Write is scoped to its OWN subtree, so this credential cannot publish a
-# sample as another node - which is the same threat the admission gate covers
-# from the other side. Note it gets no write on gpio/set at all: a node that
-# could command itself would make the controller's ownership meaningless.
+# Each node writes only its own subtree and never gpio/set, so it cannot command itself.
+# It reads the server's status so it can fail safe the moment the server's last will fires.
 user elantris
 topic write tempestas/v1/node/elantris/hello
 topic write tempestas/v1/node/elantris/status
@@ -40,16 +26,8 @@ topic write tempestas/v1/node/elantris/alarm
 topic read tempestas/v1/node/elantris/gpio/set
 topic read tempestas/v1/node/elantris/gpio/sync
 topic read tempestas/v1/node/elantris/control/heartbeat
-# The server's own LWT. A node watches it so it can fail safe immediately
-# rather than waiting out its dead-man when the brain dies.
 topic read tempestas/v1/server/status
 
-# ------------------------------------------------------------ greenhouse
-#
-# The far-end Pi 5. Same shape as elantris and for the same reasons - own
-# subtree only, no write on gpio/set. It drives more lines than elantris does
-# (HPS via a contactor, the exhaust fans, and the MH light on its own
-# active-HIGH module), which makes the scoping matter more here, not less.
 user greenhouse
 topic write tempestas/v1/node/greenhouse/hello
 topic write tempestas/v1/node/greenhouse/status
@@ -62,33 +40,11 @@ topic read tempestas/v1/node/greenhouse/gpio/sync
 topic read tempestas/v1/node/greenhouse/control/heartbeat
 topic read tempestas/v1/server/status
 
-# ------------------------------------------------------------ greenhouse-server
-#
-# The FOLLOWER's server. Read-only across the tree and nothing else.
-#
-# A follower ingests everything and commands nothing. CONTROLLER_ROLE=follower
-# already stops it heartbeating, registering an LWT, or dispatching - this is
-# the same statement made by the broker, so the flag does not have to be
-# trusted alone. Promotion then means a deliberate credential change as well as
-# a config change, which is the right amount of friction for handing over a
-# burner.
-#
-# Its own identity rather than sharing `tempestas-observer`, so one box's
-# credential can be revoked without silencing every watcher.
+# The follower's server reads only, so promoting it takes a credential change as well as config.
 user greenhouse-server
 topic read tempestas/v1/#
 
-# ------------------------------------------------------------ patji
-#
-# The Pi Zero W, reflashed to heat the pumphouse zone: DS18B20 probes, a
-# heater (through a 110VAC contactor) and heat tape. Same shape as elantris -
-# own subtree only, and no write on gpio/set, so this credential can neither
-# command its own relays nor speak as another node.
-#
-# Its old sensor-only block was replaced by this one. To add a sensor-only node,
-# copy this block, substitute the slug, and drop the four gpio lines: a node
-# with `lines = []` advertises no GPIO capability, and the ACL then says the
-# same thing from the other side.
+# A sensor-only node copies this block and drops the four gpio lines.
 user patji
 topic write tempestas/v1/node/patji/hello
 topic write tempestas/v1/node/patji/status
@@ -101,9 +57,7 @@ topic read tempestas/v1/node/patji/gpio/sync
 topic read tempestas/v1/node/patji/control/heartbeat
 topic read tempestas/v1/server/status
 
-# ------------------------------------------------------------ braize
-#
-# The crawlspace Pico W. Its password is in plain text on the board, so its own subtree only.
+# Its password is in plain text on the board.
 user braize
 topic write tempestas/v1/node/braize/hello
 topic write tempestas/v1/node/braize/status
@@ -116,15 +70,6 @@ topic read tempestas/v1/node/braize/gpio/sync
 topic read tempestas/v1/node/braize/control/heartbeat
 topic read tempestas/v1/server/status
 
-# ------------------------------------------------------------ observers
-#
-# Read-only across the whole tree, for the soak logger and anything else that
-# watches without acting. It exists because the node credential deliberately
-# cannot read: `elantris` may WRITE its samples and may not subscribe to them,
-# so a diagnostic tool cannot borrow the node's identity and quietly gain a
-# publish right it has no use for.
-#
-# No write rule at all. Not even on its own subtree - there is nothing an
-# observer should ever put on this bus.
+# For loggers and watchers, which cannot borrow a node credential because nodes cannot read.
 user tempestas-observer
 topic read tempestas/v1/#
