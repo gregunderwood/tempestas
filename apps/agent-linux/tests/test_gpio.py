@@ -170,7 +170,7 @@ def test_a_level_that_is_not_zero_or_one_is_refused():
         hardware.write(5, 2)
 
 
-# Reporting a burner relay as off because a read errored is the alternative.
+# Unknown is a real answer: the alternative is reporting a burner relay off because a read errored.
 def test_a_failed_readback_reports_unknown_rather_than_a_level():
     fake = FakeLgpio()
     hardware = backend(fake)
