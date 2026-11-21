@@ -28,12 +28,10 @@ import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
 import { Gauge } from '../../shared/gauge/gauge';
 import { metricsFor, nodeMetrics } from '../../shared/metrics';
+import { LONGEST_TIMEOUT_MILLISECONDS } from '../../shared/time';
 import { isHeldOffByInterlock } from '../devices/device-hold';
 
 const STATS_REFRESH_MILLISECONDS = 60_000;
-
-// setTimeout overflows past this and fires immediately.
-const MAXIMUM_TIMEOUT_MILLISECONDS = 2_147_483_647;
 
 // A second past the boundary, so the server's own clock has certainly crossed it too.
 const BOUNDARY_SLACK_MILLISECONDS = 1_000;
@@ -503,7 +501,7 @@ export class NodeDetail {
 }
 
 function isOutsideTimeoutRange(delay: number): boolean {
-  return delay <= 0 || delay > MAXIMUM_TIMEOUT_MILLISECONDS;
+  return delay <= 0 || delay > LONGEST_TIMEOUT_MILLISECONDS;
 }
 
 function sortNewestFirst(segments: readonly SegmentStats[]): SegmentStats[] {
