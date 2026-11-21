@@ -155,7 +155,7 @@ interface RenderedDashboard {
   refresh(): void;
 }
 
-function setup(options: DashboardSetup = {}): RenderedDashboard {
+function renderDashboard(options: DashboardSetup = {}): RenderedDashboard {
   vi.setSystemTime(NOW);
   const realtime = fakeRealtime();
   const readingsQueries: ReadingsQuery[] = [];
@@ -234,14 +234,18 @@ afterEach(() => vi.useRealTimers());
 
 describe('Dashboard hero', () => {
   it('says all is well when every zone decided normally', () => {
-    const { page } = setup({ cycle: cycleOf([pumphouseEvaluation()]) });
+    const { page } = renderDashboard({
+      cycle: cycleOf([pumphouseEvaluation()]),
+    });
     expect(page.querySelector('.hero__state')?.textContent).toContain(
       'All zones running normally',
     );
   });
 
   it('shows a tile per zone and role, with its reading, decision and age', () => {
-    const { page } = setup({ cycle: cycleOf([pumphouseEvaluation()]) });
+    const { page } = renderDashboard({
+      cycle: cycleOf([pumphouseEvaluation()]),
+    });
     expect(textsOf(page, '.tile')).toEqual([
       'pumphouse · Heater 17.5 °C OFF · above setpoint decided 3 s ago',
       'pumphouse · Heat tape 17.5 °C OFF · above setpoint decided 3 s ago',
@@ -262,7 +266,7 @@ describe('Dashboard hero', () => {
         },
       ],
     };
-    const { page } = setup({ cycle: cycleOf([evaluation]) });
+    const { page } = renderDashboard({ cycle: cycleOf([evaluation]) });
     expect(textsOf(page, '.tile__unapplied')).toEqual([
       'Not switched: automation off for this device',
     ]);
@@ -270,7 +274,7 @@ describe('Dashboard hero', () => {
 
   it('shows an em-dash in a tile whose reading is unknown', () => {
     const evaluation = pumphouseEvaluation({ climateByRole: {} });
-    const { page } = setup({ cycle: cycleOf([evaluation]) });
+    const { page } = renderDashboard({ cycle: cycleOf([evaluation]) });
     expect(textsOf(page, '.tile__reading')).toEqual(['—', '—']);
   });
 
@@ -294,7 +298,7 @@ describe('Dashboard hero', () => {
       sourceSensorIds: ['elantris/scd4x-0'],
       decidingSensorIds: ['elantris/scd4x-0'],
     };
-    const { page } = setup({ cycle: cycleOf([evaluation]) });
+    const { page } = renderDashboard({ cycle: cycleOf([evaluation]) });
     expect(textsOf(page, '.tile__reading')).toEqual(['—']);
   });
 
@@ -304,12 +308,12 @@ describe('Dashboard hero', () => {
       ...evaluation.decisions[1],
       reason: 'role-not-owned',
     };
-    const { page } = setup({ cycle: cycleOf([evaluation]) });
+    const { page } = renderDashboard({ cycle: cycleOf([evaluation]) });
     expect(page.querySelectorAll('.tile')).toHaveLength(1);
   });
 
   it('leads with the socket being down', () => {
-    const { page } = setup({
+    const { page } = renderDashboard({
       isConnected: false,
       cycle: cycleOf([pumphouseEvaluation()]),
     });
@@ -319,7 +323,9 @@ describe('Dashboard hero', () => {
   });
 
   it('says when this server only follows', () => {
-    const { page } = setup({ status: statusOf({ isLeading: false }) });
+    const { page } = renderDashboard({
+      status: statusOf({ isLeading: false }),
+    });
     expect(page.querySelector('.hero__state')?.textContent).toContain(
       'another server runs the rules',
     );
@@ -329,21 +335,21 @@ describe('Dashboard hero', () => {
     const evaluation = pumphouseEvaluation({
       staleRoles: [DeviceRole.Heater],
     });
-    const { page } = setup({ cycle: cycleOf([evaluation]) });
+    const { page } = renderDashboard({ cycle: cycleOf([evaluation]) });
     expect(page.querySelector('.hero__state')?.textContent).toContain(
       'Sensors quiet in pumphouse',
     );
   });
 
   it('shows an em-dash for nodes online before the first status', () => {
-    const { page } = setup({ status: null });
+    const { page } = renderDashboard({ status: null });
     expect(page.querySelector('.hero__facts')?.textContent).toContain(
       '— nodes online',
     );
   });
 
   it('follows a rules cycle pushed over the socket', () => {
-    const rendered = setup({ cycle: null });
+    const rendered = renderDashboard({ cycle: null });
     expect(rendered.page.querySelector('.hero__state')?.textContent).toContain(
       'Waiting for the first rules cycle',
     );
@@ -357,7 +363,7 @@ describe('Dashboard hero', () => {
 
 describe('Dashboard stat cards', () => {
   it('shows a card per node with a figure for each metric', () => {
-    const { page } = setup();
+    const { page } = renderDashboard();
     expect(textsOf(page, '.stat__value')).toEqual([
       '23.7 °C',
       '62.0 %',
@@ -367,7 +373,7 @@ describe('Dashboard stat cards', () => {
 
   // Zero reads as extremely low, which is the direction that runs the burner.
   it('shows an em-dash for an unknown CO₂, its trend and its range', () => {
-    const { page } = setup({ readings: [reading({ co2: null })] });
+    const { page } = renderDashboard({ readings: [reading({ co2: null })] });
     const stats = page.querySelectorAll('.stat');
     const co2 = stats[2];
     expect(co2.querySelector('.stat__value')?.textContent).toContain('—');
@@ -377,12 +383,12 @@ describe('Dashboard stat cards', () => {
   });
 
   it('shows an em-dash trend until the period has a first reading', () => {
-    const { page } = setup();
+    const { page } = renderDashboard();
     expect(textsOf(page, '.stat__trend')).toEqual(['—', '—', '—']);
   });
 
   it('shows the change since the running period began', () => {
-    const { page } = setup({
+    const { page } = renderDashboard({
       dayNight: dayStartingAt(DAY_BEGAN),
       periodStartReadings: [
         reading({
@@ -408,7 +414,7 @@ describe('Dashboard stat cards', () => {
 
   it('fills in trends once the new period has its first reading', () => {
     const baseline = reading({ temperature: 22.5, createdAt: minutesAgo(1) });
-    const rendered = setup({
+    const rendered = renderDashboard({
       dayNight: dayStartingAt(new Date(NOW.getTime() - MINUTE_MILLISECONDS)),
       periodStartResponses: [[], [baseline]],
     });
@@ -422,7 +428,7 @@ describe('Dashboard stat cards', () => {
   });
 
   it("asks for each sensor's first reading since the period began, however late it came", () => {
-    const { readingsQueries } = setup({
+    const { readingsQueries } = renderDashboard({
       dayNight: dayStartingAt(DAY_BEGAN),
       readings: [probe('28-a', 3.1), probe('28-b', 4.2)],
       nodes: [
@@ -443,7 +449,7 @@ describe('Dashboard stat cards', () => {
   });
 
   it('gives a probe that comes back mid-period its own baseline', () => {
-    const rendered = setup({
+    const rendered = renderDashboard({
       dayNight: dayStartingAt(DAY_BEGAN),
       readings: [
         probe('28-a', 3.1),
@@ -472,7 +478,7 @@ describe('Dashboard stat cards', () => {
 
   it('tries the trend baseline again after a failed request', () => {
     const baseline = reading({ temperature: 22.5, createdAt: minutesAgo(1) });
-    const rendered = setup({
+    const rendered = renderDashboard({
       dayNight: dayStartingAt(DAY_BEGAN),
       periodStartResponses: ['fail', [baseline]],
     });
@@ -484,13 +490,15 @@ describe('Dashboard stat cards', () => {
   });
 
   it('places each figure within its range', () => {
-    const { page } = setup({ readings: [reading({ temperature: 25 })] });
+    const { page } = renderDashboard({
+      readings: [reading({ temperature: 25 })],
+    });
     const fill = page.querySelector<HTMLElement>('.stat__range-fill');
     expect(fill?.style.width).toBe('50%');
   });
 
   it('says how long ago a fresh node read', () => {
-    const { page } = setup({
+    const { page } = renderDashboard({
       readings: [reading({ createdAt: minutesAgo(0.5) })],
     });
     expect(page.querySelector('.age')?.textContent).toContain('Read 30 s ago');
@@ -498,7 +506,7 @@ describe('Dashboard stat cards', () => {
   });
 
   it('marks a card whose reading has stopped arriving', () => {
-    const { page } = setup({
+    const { page } = renderDashboard({
       readings: [reading({ createdAt: minutesAgo(10) })],
     });
     expect(page.querySelector('.age')?.textContent).toContain(
@@ -508,7 +516,7 @@ describe('Dashboard stat cards', () => {
   });
 
   it('names the probe that has stopped reporting', () => {
-    const { text } = setup({
+    const { text } = renderDashboard({
       readings: [
         probe('28-a', 3.1),
         probe('28-b', 4.2, { createdAt: minutesAgo(10) }),
@@ -522,7 +530,7 @@ describe('Dashboard stat cards', () => {
   });
 
   it('shows only the metrics each sensor declares, captioned by sensor', () => {
-    const { page } = setup({
+    const { page } = renderDashboard({
       readings: [probe('28-a', 3.1), probe('28-b', 4.2)],
       nodes: [
         node('pumphouse', { '28-a': ['temperature'], '28-b': ['temperature'] }),
@@ -533,12 +541,12 @@ describe('Dashboard stat cards', () => {
   });
 
   it('does not caption the figures of a single-sensor node', () => {
-    expect(setup().page.querySelector('.stat__sensor')).toBeNull();
+    expect(renderDashboard().page.querySelector('.stat__sensor')).toBeNull();
   });
 
   // Colour alone is not readable in sunlight, and this one means a burner is alight.
   it('states an energised relay in words', () => {
-    const { page } = setup({
+    const { page } = renderDashboard({
       readings: [reading()],
       devices: [
         device({ nodeId: 'elantris', isOn: true, onAt: NOW.toISOString() }),
@@ -548,19 +556,23 @@ describe('Dashboard stat cards', () => {
   });
 
   it('shows an idle relay as off', () => {
-    const { page } = setup({ devices: [device({ nodeId: 'elantris' })] });
+    const { page } = renderDashboard({
+      devices: [device({ nodeId: 'elantris' })],
+    });
     expect(page.querySelector('.relay__state')?.textContent?.trim()).toBe(
       'off',
     );
   });
 
   it('only lists relays belonging to that node', () => {
-    const { text } = setup({ devices: [device({ name: 'Other Relay' })] });
+    const { text } = renderDashboard({
+      devices: [device({ name: 'Other Relay' })],
+    });
     expect(text()).not.toContain('Other Relay');
   });
 
   function relayStateOnSince(onAt: string): string {
-    const { page } = setup({
+    const { page } = renderDashboard({
       devices: [device({ nodeId: 'elantris', isOn: true, onAt })],
     });
     return page.querySelector('.relay__state')?.textContent ?? '';
@@ -581,7 +593,7 @@ describe('Dashboard stat cards', () => {
   it('keeps every pushed device state, not only the newest', () => {
     const heater = device({ id: 'd1', nodeId: 'elantris' });
     const tape = device({ id: 'd2', nodeId: 'elantris', name: 'Heat tape' });
-    const { page } = setup({
+    const { page } = renderDashboard({
       devices: [heater, tape],
       pushed: [
         { ...heater, isOn: true },
@@ -592,7 +604,7 @@ describe('Dashboard stat cards', () => {
   });
 
   it('follows a reading pushed over the socket', () => {
-    const rendered = setup();
+    const rendered = renderDashboard();
     rendered.realtime.readings.set({
       'elantris/scd4x-0': reading({ temperature: 30.1 }),
     });
@@ -601,7 +613,9 @@ describe('Dashboard stat cards', () => {
   });
 
   it('says so plainly when there is nothing to show', () => {
-    expect(setup({ readings: [] }).text()).toContain('No readings yet');
+    expect(renderDashboard({ readings: [] }).text()).toContain(
+      'No readings yet',
+    );
   });
 });
 
@@ -611,11 +625,11 @@ describe('Dashboard attention panel', () => {
   }
 
   it('says nothing needs you when all is well', () => {
-    expect(setup().text()).toContain('Nothing needs you.');
+    expect(renderDashboard().text()).toContain('Nothing needs you.');
   });
 
   it('lists nodes waiting to be admitted, linked to the nodes page', () => {
-    const rendered = setup({ status: statusOf({ nodesPending: 2 }) });
+    const rendered = renderDashboard({ status: statusOf({ nodesPending: 2 }) });
     expect(attentionOf(rendered)).toEqual([
       '2 nodes are waiting to be admitted.',
     ]);
@@ -627,12 +641,14 @@ describe('Dashboard attention panel', () => {
   });
 
   it('lists a follower that is not leading', () => {
-    const rendered = setup({ status: statusOf({ isLeading: false }) });
+    const rendered = renderDashboard({
+      status: statusOf({ isLeading: false }),
+    });
     expect(attentionOf(rendered)[0]).toContain('follower');
   });
 
   it('lists a probe that has gone quiet', () => {
-    const rendered = setup({
+    const rendered = renderDashboard({
       readings: [probe('28-a', 3.1, { createdAt: minutesAgo(5) })],
     });
     expect(attentionOf(rendered)).toEqual([
@@ -643,7 +659,7 @@ describe('Dashboard attention panel', () => {
   it('lists a zone whose rules failed, and a decision that warns', () => {
     const warning = pumphouseEvaluation();
     warning.decisions[0] = { ...warning.decisions[0], reason: 'sensor-stale' };
-    const rendered = setup({
+    const rendered = renderDashboard({
       cycle: cycleOf(
         [warning],
         [{ zoneSlug: 'cellar', reason: 'no zone row' }],
@@ -656,7 +672,7 @@ describe('Dashboard attention panel', () => {
   });
 
   it('follows a status pushed over the socket', () => {
-    const rendered = setup();
+    const rendered = renderDashboard();
     rendered.realtime.status.set(statusOf({ nodesPending: 1 }));
     rendered.refresh();
     expect(attentionOf(rendered)).toEqual([
@@ -675,14 +691,14 @@ describe('Dashboard activity panel', () => {
   }
 
   it('says nothing has changed yet', () => {
-    expect(setup().text()).toContain(
+    expect(renderDashboard().text()).toContain(
       'Nothing has changed since the app opened.',
     );
   });
 
   it('records a relay switch pushed over the socket, with its clock time', () => {
     const heater = device({ nodeId: 'elantris' });
-    const rendered = setup({ devices: [heater], pushed: [heater] });
+    const rendered = renderDashboard({ devices: [heater], pushed: [heater] });
     const switchedAt = NOW.toISOString();
     pushDevice(rendered.realtime, { ...heater, isOn: true, onAt: switchedAt });
     rendered.refresh();
@@ -692,7 +708,7 @@ describe('Dashboard activity panel', () => {
   });
 
   it('records a decision that changed between two cycles, newest first', () => {
-    const rendered = setup();
+    const rendered = renderDashboard();
     rendered.realtime.latestRulesCycle.set(cycleOf([pumphouseEvaluation()]));
     rendered.refresh();
 
@@ -725,7 +741,7 @@ describe('Dashboard activity panel', () => {
 
   it('shows when the rules last ran', () => {
     const cycle = cycleOf([pumphouseEvaluation()]);
-    const { text } = setup({ cycle });
+    const { text } = renderDashboard({ cycle });
     expect(text()).toContain(`Rules last ran at ${clockTime(cycle.at)}`);
   });
 });

@@ -24,6 +24,18 @@ function minutesAgo(minutes: number): string {
   return new Date(NOW.getTime() - minutes * MINUTE_MILLISECONDS).toISOString();
 }
 
+function startLog(knownDevices: Device[] = []) {
+  const realtime = fakeRealtime();
+  TestBed.configureTestingModule({
+    providers: [
+      provideZonelessChangeDetection(),
+      { provide: RealtimeService, useValue: realtime },
+      { provide: ApiService, useValue: { devices: () => of(knownDevices) } },
+    ],
+  });
+  return { log: TestBed.inject(ActivityLog), realtime };
+}
+
 describe('describeSwitch', () => {
   it('reports a device whose state changed since the last push', () => {
     const push = { device: device({ isOn: true }), receivedAt: NOW.getTime() };
@@ -54,15 +66,7 @@ describe('describeSwitch', () => {
 
 describe('ActivityLog', () => {
   it(`keeps only the newest ${ACTIVITY_LOG_LENGTH} entries`, () => {
-    const realtime = fakeRealtime();
-    TestBed.configureTestingModule({
-      providers: [
-        provideZonelessChangeDetection(),
-        { provide: RealtimeService, useValue: realtime },
-        { provide: ApiService, useValue: { devices: () => of([]) } },
-      ],
-    });
-    const log = TestBed.inject(ActivityLog);
+    const { log, realtime } = startLog();
     const switchCount = ACTIVITY_LOG_LENGTH + 5;
     for (let switchNumber = 1; switchNumber <= switchCount; switchNumber++) {
       pushDevice(realtime, device({ isOn: switchNumber % 2 === 0 }));
@@ -110,15 +114,7 @@ describe('describeCycleChanges', () => {
 
 describe('ActivityLog switches', () => {
   it('records both switches when two arrive between reads', () => {
-    const realtime = fakeRealtime();
-    TestBed.configureTestingModule({
-      providers: [
-        provideZonelessChangeDetection(),
-        { provide: RealtimeService, useValue: realtime },
-        { provide: ApiService, useValue: { devices: () => of([]) } },
-      ],
-    });
-    const log = TestBed.inject(ActivityLog);
+    const { log, realtime } = startLog();
     pushDevice(realtime, device({ isOn: false }));
     TestBed.tick();
 
@@ -134,18 +130,6 @@ describe('ActivityLog switches', () => {
 });
 
 describe('ActivityLog at start', () => {
-  function startLog(knownDevices: Device[]) {
-    const realtime = fakeRealtime();
-    TestBed.configureTestingModule({
-      providers: [
-        provideZonelessChangeDetection(),
-        { provide: RealtimeService, useValue: realtime },
-        { provide: ApiService, useValue: { devices: () => of(knownDevices) } },
-      ],
-    });
-    return { log: TestBed.inject(ActivityLog), realtime };
-  }
-
   // The switch time is the controller's clock and a phone's can be minutes out.
   it("records a relay's first switch however far the phone's clock is out", () => {
     const { log, realtime } = startLog([device({ isOn: false })]);
@@ -166,15 +150,7 @@ describe('ActivityLog at start', () => {
 
 describe('ActivityLog across a spell as follower', () => {
   it('compares nothing with the cycle from before the server stopped leading', () => {
-    const realtime = fakeRealtime();
-    TestBed.configureTestingModule({
-      providers: [
-        provideZonelessChangeDetection(),
-        { provide: RealtimeService, useValue: realtime },
-        { provide: ApiService, useValue: { devices: () => of([]) } },
-      ],
-    });
-    const log = TestBed.inject(ActivityLog);
+    const { log, realtime } = startLog();
     realtime.latestRulesCycle.set(cycleOf([pumphouseEvaluation()]));
     TestBed.tick();
     realtime.latestRulesCycle.set(null);

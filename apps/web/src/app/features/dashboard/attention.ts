@@ -58,11 +58,11 @@ function listLeadershipProblems(status: SystemStatus | null): AttentionItem[] {
 function listWaitingNodes(status: SystemStatus | null): AttentionItem[] {
   const waiting = status?.nodesPending ?? 0;
   if (waiting === 0) return [];
-  const nodes = waiting === 1 ? '1 node is' : `${waiting} nodes are`;
+  const waitingNodes = waiting === 1 ? '1 node is' : `${waiting} nodes are`;
   return [
     {
       key: 'pending',
-      text: `${nodes} waiting to be admitted.`,
+      text: `${waitingNodes} waiting to be admitted.`,
       link: '/nodes',
     },
   ];
