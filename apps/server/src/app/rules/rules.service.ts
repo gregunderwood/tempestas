@@ -77,11 +77,22 @@ export class RulesService implements OnApplicationBootstrap {
 
   @Interval(EVALUATION_INTERVAL_MS)
   async tick(): Promise<void> {
+    try {
+      await this.runTick();
+    } catch (error: unknown) {
+      // The interval timer catches nothing, so a rejection here would take the server down.
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Rules tick failed: ${message}`);
+    }
+  }
+
+  private async runTick(): Promise<void> {
     // A follower evaluates nothing. Not because its decisions would be wrong,
     // but because acting on them is the leader's job alone - and a rules engine
     // that runs and then fails to dispatch just fills the log with refusals.
     if (!this.hardware.isLeader) {
       this.forgetCycleAsFollower();
+      await this.publishStatus([]);
       return;
     }
     // A slow database must not queue evaluations behind each other; the next
@@ -120,7 +131,11 @@ export class RulesService implements OnApplicationBootstrap {
     }
 
     this.forgetFailuresOfRemovedZones(zones);
-    if (this.hardware.isLeader) this.publishCycle(evaluations);
+    if (!this.hardware.isLeader) {
+      await this.publishStatus([]);
+      return evaluations;
+    }
+    this.publishCycle(evaluations);
     await this.publishStatus(evaluations);
     return evaluations;
   }
@@ -169,6 +184,8 @@ export class RulesService implements OnApplicationBootstrap {
       staleRoles,
       nodesOnline: counts.online,
       nodesTotal: counts.total,
+      nodesPending: counts.pending,
+      isLeading: this.hardware.isLeader,
       lastEvaluationAt: latest ?? null,
     });
   }

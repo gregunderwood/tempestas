@@ -29,6 +29,8 @@ const STATUS: SystemStatus = {
   staleRoles: [],
   nodesOnline: 1,
   nodesTotal: 2,
+  nodesPending: 0,
+  isLeading: true,
   lastEvaluationAt: '2026-01-10T12:00:00.000Z',
 };
 

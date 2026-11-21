@@ -7,6 +7,7 @@ import {
   type DayNightStats,
   type Reading,
   type ReadingAverages,
+  ReadingOrder,
   type ReadingStats,
   type ReadingsQuery,
   type SegmentStats,
@@ -24,6 +25,11 @@ import { resolveReadingWindow, type ReadingWindow } from './reading-window';
 import { parseZoneRulesConfig } from '../rules/rules-config';
 
 const DEFAULT_LIMIT = 500;
+
+const CREATED_AT_DIRECTION: Record<ReadingOrder, 'ASC' | 'DESC'> = {
+  [ReadingOrder.NewestFirst]: 'DESC',
+  [ReadingOrder.OldestFirst]: 'ASC',
+};
 
 /**
  * The read side of `sensor_readings`.
@@ -46,7 +52,10 @@ export class ReadingsService {
   async findAll(query: ReadingsQuery): Promise<Reading[]> {
     const window = this.window(query);
     const rows = await this.scoped(query, window)
-      .orderBy('r.createdAt', 'DESC')
+      .orderBy(
+        'r.createdAt',
+        CREATED_AT_DIRECTION[query.order ?? ReadingOrder.NewestFirst],
+      )
       .limit(query.limit ?? DEFAULT_LIMIT)
       .getMany();
     return rows.map(toDto);
@@ -234,6 +243,9 @@ export class ReadingsService {
     if (query.nodeId) {
       // The slug, as everywhere on the wire.
       builder.andWhere('n.slug = :slug', { slug: query.nodeId });
+    }
+    if (query.sensorId) {
+      builder.andWhere('r.sensorId = :sensorId', { sensorId: query.sensorId });
     }
     return builder;
   }
