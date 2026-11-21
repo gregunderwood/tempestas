@@ -9,36 +9,36 @@ REMOTE="/home/gunderwood/tempestas"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 EXIT_MIGRATIONS_PENDING=3
-REQUIRED_SUDO_COMMANDS=(
-  "/usr/bin/systemctl start tempestas-migrate@show.service"
-  "/usr/bin/systemctl restart tempestas-server.service"
+REQUIRED_SYSTEMCTL_LINES=(
+  "start tempestas-migrate@show.service"
+  "reset-failed tempestas-server.service"
+  "restart tempestas-server.service"
 )
+
+source "$HERE/tools/lib/remote-host.sh"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
-# Checked up front: a missing rule would otherwise stop the deploy at a password prompt it cannot show.
-require_passwordless_sudo() {
-  for command in "${REQUIRED_SUDO_COMMANDS[@]}"; do
-    if ! ssh "$HOST" "sudo -n -l $command" >/dev/null 2>&1; then
-      echo "$HOST will not run '$command' without a password." >&2
-      echo "Run tools/install-deploy-privileges.sh $HOST first." >&2
-      exit 1
-    fi
-  done
-}
-
-# Prints migrate:show's output and exits with its status. A unit that failed before node ran reads as 1, never 0.
-show_migrations() {
-  ssh "$HOST" '
-    cursor="$(journalctl --show-cursor -n 0 -o cat | sed -n "s/^-- cursor: //p")"
-    if sudo -n systemctl start tempestas-migrate@show.service; then
-      status=0
-    else
-      status="$(systemctl show -p ExecMainStatus --value tempestas-migrate@show.service)"
-      [ "${status:-0}" != 0 ] || status=1
-    fi
-    journalctl -u tempestas-migrate@show.service --after-cursor="$cursor" -o cat
-    exit "$status"'
+# A stale status from an earlier run, or a signal number, must never read as "pending" or "nothing pending".
+show_migrations_and_exit_with_their_status() {
+  ssh "$HOST" bash -s <<'REMOTE'
+unit=tempestas-migrate@show.service
+read_property() { systemctl show -p "$1" --value "$unit"; }
+EXITED_NORMALLY=1
+started_before="$(read_property ExecMainStartTimestampMonotonic)"
+checked_since="$(date +%s)"
+if sudo -n systemctl start "$unit"; then
+  status=0
+elif [ "$(read_property ExecMainStartTimestampMonotonic)" != "$started_before" ] &&
+  [ "$(read_property ExecMainCode)" = "$EXITED_NORMALLY" ]; then
+  status="$(read_property ExecMainStatus)"
+  [ "$status" != 0 ] || status=1
+else
+  status=1
+fi
+journalctl -u "$unit" --since "@$checked_since" -o cat
+exit "$status"
+REMOTE
 }
 
 warn_new_build_not_running() {
@@ -60,7 +60,7 @@ if lsof -ti tcp:7000 -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 say "Checking $HOST lets this deploy run without a password"
-require_passwordless_sudo
+require_passwordless_systemctl "$HOST" "${REQUIRED_SYSTEMCTL_LINES[@]}"
 
 say "Shipping to $HOST"
 rsync -a --delete "$HERE/dist/apps/server/" "$HOST:$REMOTE/dist/apps/server/"
@@ -73,7 +73,7 @@ ssh "$HOST" "cd $REMOTE/dist/apps/server && /usr/local/bin/npm ci --omit=dev --n
 
 # Checked before the restart: the new code on an unmigrated schema crash-loops the server.
 say "Migrations"
-if show_migrations; then
+if show_migrations_and_exit_with_their_status; then
   migration_status=0
 else
   migration_status=$?
@@ -95,4 +95,5 @@ if [ "$migration_status" -ne 0 ]; then
 fi
 
 say "Restarting"
-ssh "$HOST" "sudo -n systemctl restart tempestas-server.service && sleep 3 && systemctl is-active tempestas-server"
+# A server that crash-looped into its start limit refuses a plain restart.
+ssh "$HOST" "sudo -n systemctl reset-failed tempestas-server.service; sudo -n systemctl restart tempestas-server.service && sleep 3 && systemctl is-active tempestas-server"

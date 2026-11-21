@@ -5,7 +5,7 @@ set -euo pipefail
 
 PAYLOAD="$1"
 DEPLOY_USER="${SUDO_USER:?run this through sudo, so the deploy user is known}"
-SYSTEMCTL=/usr/bin/systemctl
+SYSTEMCTL="$(command -v systemctl)"
 UNIT_DIR=/etc/systemd/system
 SUDOERS_FILE=/etc/sudoers.d/tempestas-deploy
 LIBRARY_DIR=/usr/local/lib/tempestas
