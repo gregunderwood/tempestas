@@ -14,6 +14,7 @@ every list below, and why "it compiles and the tests pass" is not the bar here.
 - The MQTT topics, payloads, QoS or retain flags → Read [./docs/Infrastructure/MQTT Contract.md](./docs/Infrastructure/MQTT%20Contract.md)
 - Node registration, admission, capabilities, `pending` → Read [./docs/Infrastructure/Nodes.md](./docs/Infrastructure/Nodes.md)
 - The Python agent on a node (`apps/hardware`) → Read [./docs/Infrastructure/Node Agent.md](./docs/Infrastructure/Node%20Agent.md)
+- The MicroPython agent on a Pico W (`apps/pico`) → Read [./docs/Infrastructure/Pico Agent.md](./docs/Infrastructure/Pico%20Agent.md)
 - Home Assistant, external automation, or "could HA run the rules instead?" → Read [./docs/Infrastructure/Home Assistant.md](./docs/Infrastructure/Home%20Assistant.md)
 - Smart plugs, vendor sensors, pumps, "can we just plug it in?" → Read [./docs/Infrastructure/Off-the-shelf devices.md](./docs/Infrastructure/Off-the-shelf%20devices.md)
 - Entities, schema decisions, queries → Read [./docs/Infrastructure/Database.md](./docs/Infrastructure/Database.md)
@@ -35,7 +36,7 @@ docker compose up -d                  # local Postgres 17 on :5433
 npm run migration:run                 # apply migrations
 npx nx serve server                   # API on :7000, HARDWARE_DRIVER=fake
 npx nx serve web                      # Angular dev server (on the Mac, never on the Pi)
-npx nx run-many -t lint,test,build    # the gate — all five projects, Python included
+npx nx run-many -t lint,test,build    # the gate — every project, Python included
 npx nx test server --coverage         # also the gate: thresholds are checked ONLY here
 npx nx test server                    # one project
 npx prettier --write .                # format
