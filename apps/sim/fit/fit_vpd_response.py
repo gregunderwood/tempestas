@@ -1,57 +1,8 @@
 #!/usr/bin/env python3
-"""Find the VPD at which this greenhouse actually assimilates the most carbon.
+"""Find the leaf VPD at which this greenhouse takes up the most CO2; method in README.md.
 
     uv run python fit/fit_vpd_response.py readings.json \
         --transitions transitions.json --lights 07:00-19:00
-
-The published 1.2-1.6 kPa band is somebody else's crop in somebody else's
-house. This measures yours, using the fact that a sealed greenhouse is a
-whole-plant gas exchange chamber: CO2 falling under light IS photosynthesis,
-and the rate it falls at is the number to maximise.
-
-Two stages, because the second is meaningless without the first.
-
-CALIBRATION, at night
----------------------
-In the dark with the burner off there is no photosynthesis, so
-
-    dC/dt = k (C_out - C) + R
-
-with k the leak coefficient and R respiration. Both are unknown, but dC/dt is
-observed across a RANGE of C as the house fills overnight - so regressing
-dC/dt against C gives the slope -k and, from the intercept, R.
-
-This matters more than it looks. The 0.034 leak coefficient in
-greenhouse-model.json was fitted from DAYTIME decay with a live crop, so it
-already has photosynthesis baked into it. Using it to correct for leakage and
-then extracting photosynthesis would be circular, and would report an
-assimilation near zero no matter what the plants were doing.
-
-MEASUREMENT, under light
-------------------------
-With the burner off and the lights on,
-
-    N = k (C_out - C) - dC/dt
-
-This N is NET uptake, not gross assimilation. The full balance for a lit
-sealed house is dC/dt = k(C_out - C) + R - A, so the expression above equals
-A - R: photosynthesis less respiration. Respiration is deliberately not added
-back. Net is what the crop actually removes from the air and what growth
-tracks, and the daytime R is not the night R anyway - leaves respire in the
-light and the soil is warmer - so adding the night figure would trade a clean
-measured quantity for a worse-founded estimate of a gross one.
-
-Each window yields one (VPD, A) pair. Plot A against VPD: it climbs while the
-stomata are open and rolls over when the plant starts closing them. The peak is
-the answer, and the roll-over is the ceiling worth staying under.
-
-What this cannot separate
--------------------------
-Light level and temperature move with VPD over a day and both drive A on their
-own. Windows are therefore reported with their light hour and temperature so
-like can be compared with like - a single day's curve will mostly be measuring
-the sun. Several days, and comparing windows at matched hour and temperature,
-is what makes it a VPD curve rather than a daylight curve.
 """
 
 from __future__ import annotations
@@ -60,32 +11,48 @@ import argparse
 import json
 import math
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta, timezone
 
 LOCAL = timezone(timedelta(hours=-7))
 
-
-# Background CO2 the greenhouse leaks toward. Global average is ~420 ppm; the
-# site sits in a valley with no nearby traffic, and the canopy sensor bottoms
-# out near 440 on a well-ventilated afternoon, so 420 is the right order and
-# the fits are not sensitive to +/-20.
+# The canopy sensor bottoms out near 440 on a ventilated afternoon; the fits tolerate +/-20.
 OUTDOOR_PPM = 420.0
 
+MIN_MINUTE_BUCKETS = 8
+MIN_PAIRWISE_SLOPES = 8
+MIN_PAIR_SPAN_MINUTES = 2.0
+PAIR_SPAN_FRACTION_OF_WINDOW = 4.0
+NORMAL_MAD_TO_STANDARD_DEVIATION = 1.4826
+OUTLIER_STANDARD_DEVIATIONS = 3.5
+MIN_INLIERS = 3
+MIN_SAMPLES_PER_WINDOW = 20
 
-def es_kpa(temp_c: float) -> float:
-    """Saturation vapour pressure, kPa. Magnus, the form the docs use."""
-    return 0.6112 * math.exp((17.62 * temp_c) / (243.12 + temp_c))
+MIN_DARK_WINDOWS = 6
+MIN_SEPARABLE_SPREAD_PPM = 150
+MIN_CALIBRATION_R_SQUARED = 0.25
+VENTILATED_BELOW_OUTDOOR_PPM = 40
+VENTILATED_ABOVE_OUTDOOR_PPM = 150
+VPD_BINS_PER_KPA = 4
+
+MAGNUS_COEFFICIENT_KPA = 0.6112
+MAGNUS_TEMPERATURE_FACTOR = 17.62
+MAGNUS_TEMPERATURE_OFFSET_C = 243.12
+
+
+def saturation_pressure_kpa(temp_c: float) -> float:
+    """Saturation vapour pressure in kPa, by the Magnus form the docs use."""
+    return MAGNUS_COEFFICIENT_KPA * math.exp(
+        (MAGNUS_TEMPERATURE_FACTOR * temp_c) / (MAGNUS_TEMPERATURE_OFFSET_C + temp_c)
+    )
 
 
 def vpd_kpa(temp_c: float, rh_pct: float, leaf_offset_c: float) -> float:
-    """Leaf vapour pressure deficit.
-
-    The air inside a leaf is saturated at LEAF temperature, which under lamps
-    runs above air temperature - by ~2 C in still air, ~1 C with strong canopy
-    airflow. The plant responds to this gradient, not to the air-only one.
-    """
-    return es_kpa(temp_c + leaf_offset_c) - (rh_pct / 100.0) * es_kpa(temp_c)
+    """Leaf VPD: the leaf interior is saturated at leaf temperature, not air temperature."""
+    return saturation_pressure_kpa(temp_c + leaf_offset_c) - (
+        rh_pct / 100.0
+    ) * saturation_pressure_kpa(temp_c)
 
 
 @dataclass(frozen=True)
@@ -98,158 +65,121 @@ class Sample:
 
 @dataclass(frozen=True)
 class Window:
-    """One usable stretch of readings, reduced to the numbers that matter."""
-
     start: datetime
     minutes: float
     co2_mid: float
-    dcdt: float          # ppm/min, signed
+    co2_slope_ppm_per_minute: float
     vpd: float
     temp_c: float
-    n: int
+    sample_count: int
+
+
+@dataclass(frozen=True)
+class RobustLine:
+    intercept: float
+    slope: float
+    r_squared: float
+    outlier_indices: list[int]
+
+
+def pairwise_slopes(
+    points: list[tuple[float, float]], is_far_enough: Callable[[float], bool]
+) -> list[float]:
+    return [
+        (later[1] - earlier[1]) / (later[0] - earlier[0])
+        for index, earlier in enumerate(points)
+        for later in points[index + 1 :]
+        if is_far_enough(later[0] - earlier[0])
+    ]
 
 
 def robust_slope(samples: list[Sample]) -> float | None:
-    """Theil-Sen slope in ppm/min, over minute-medians.
-
-    Two deliberate choices, both learned the hard way.
-
-    Minute-medians first: the SCD41 reports every 10s as an integer, and
-    overnight drift is around 0.5 ppm/min - about 0.08 ppm per sample. Nearly
-    every consecutive pair differs by zero, so any estimator built on adjacent
-    samples reads exactly 0 no matter how long the window is. Collapsing to
-    one median per minute spends the sampling rate on noise rejection instead
-    of on a resolution it cannot deliver. Median, not mean, because a single
-    489 ppm spike (2026-09-13) would drag a minute's mean by 80 ppm.
-
-    Theil-Sen over pairs spanning at least a quarter of the window: the
-    baseline has to be long enough that the real change clears the noise.
-    Pairs of neighbours are where the previous version of this went wrong.
-    """
+    """Theil-Sen slope in ppm/min over minute-medians; why both, see README.md."""
     buckets: dict[int, list[float]] = {}
-    t0 = samples[0].at
-    for s in samples:
-        minute = int((s.at - t0).total_seconds() // 60)
-        buckets.setdefault(minute, []).append(s.co2_ppm)
-    pts = sorted((m, statistics.median(v)) for m, v in buckets.items())
-    if len(pts) < 8:
+    first_at = samples[0].at
+    for sample in samples:
+        minute = int((sample.at - first_at).total_seconds() // 60)
+        buckets.setdefault(minute, []).append(sample.co2_ppm)
+    minute_medians = sorted(
+        (minute, statistics.median(values)) for minute, values in buckets.items()
+    )
+    if len(minute_medians) < MIN_MINUTE_BUCKETS:
         return None
 
-    min_gap = max(2.0, (pts[-1][0] - pts[0][0]) / 4.0)
-    slopes = [
-        (b[1] - a[1]) / (b[0] - a[0])
-        for i, a in enumerate(pts)
-        for b in pts[i + 1:]
-        if b[0] - a[0] >= min_gap
-    ]
-    return statistics.median(slopes) if len(slopes) >= 8 else None
+    window_span = minute_medians[-1][0] - minute_medians[0][0]
+    min_gap = max(MIN_PAIR_SPAN_MINUTES, window_span / PAIR_SPAN_FRACTION_OF_WINDOW)
+    slopes = pairwise_slopes(minute_medians, lambda gap: gap >= min_gap)
+    return statistics.median(slopes) if len(slopes) >= MIN_PAIRWISE_SLOPES else None
 
 
-def fit_line(points: list[tuple[float, float]]) -> tuple[float, float, float]:
-    """Least squares y = a + b x, returning (a, b, r2)."""
-    n = len(points)
-    sx = sum(p[0] for p in points)
-    sy = sum(p[1] for p in points)
-    sxx = sum(p[0] * p[0] for p in points)
-    sxy = sum(p[0] * p[1] for p in points)
-    denom = n * sxx - sx * sx
-    b = (n * sxy - sx * sy) / denom
-    a = (sy - b * sx) / n
-    mean = sy / n
-    ss_tot = sum((p[1] - mean) ** 2 for p in points)
-    ss_res = sum((p[1] - (a + b * p[0])) ** 2 for p in points)
-    return a, b, (1 - ss_res / ss_tot if ss_tot else 0.0)
-
-
-def fit_line_robust(
-    points: list[tuple[float, float]],
-) -> tuple[float, float, float, list[int]]:
-    """Theil-Sen line: (intercept, slope, r2 over inliers, outlier indices).
-
-    Least squares is not safe here. The calibration runs on 10-20 window
-    points, and one bad window - an unlogged burner span, a door opened at
-    dawn - lands far off the trend and drags the slope with it. A synthetic
-    night with ten clean points and one such outlier fitted +0.028 by least
-    squares where the truth was -0.005: not merely wrong, sign-inverted.
-    Theil-Sen takes the median of pairwise slopes, so a minority of bad
-    windows cannot move it, and recovers -0.00501 on that same input.
-
-    r2 is then measured over inliers only. Against every point it would be
-    dominated by the very outliers the fit was built to ignore - the same
-    synthetic scores -0.36 that way, rejecting a fit that was correct to
-    three digits. Outliers are returned rather than discarded quietly: a
-    window that does not fit a dark sealed house is usually telling you
-    something happened in the greenhouse, and that is worth printing.
-    """
-    slopes = [
-        (b[1] - a[1]) / (b[0] - a[0])
-        for i, a in enumerate(points)
-        for b in points[i + 1:]
-        if b[0] != a[0]
-    ]
+def fit_line_robust(points: list[tuple[float, float]]) -> RobustLine:
+    """Theil-Sen, with R^2 over inliers; least squares sign-inverts on one bad window."""
+    slopes = pairwise_slopes(points, lambda gap: gap != 0)
     if not slopes:
-        return 0.0, 0.0, 0.0, []
+        return RobustLine(0.0, 0.0, 0.0, [])
     slope = statistics.median(slopes)
     intercept = statistics.median(y - slope * x for x, y in points)
 
-    resid = [y - (intercept + slope * x) for x, y in points]
-    mad = statistics.median(abs(r) for r in resid)
-    # 1.4826 puts MAD on the same scale as a standard deviation for normal
-    # noise; 3.5 of those is loose enough not to trim honest scatter.
-    limit = 3.5 * 1.4826 * mad if mad > 0 else float("inf")
-    outliers = [i for i, r in enumerate(resid) if abs(r) > limit]
+    residuals = [y - (intercept + slope * x) for x, y in points]
+    median_absolute_deviation = statistics.median(abs(residual) for residual in residuals)
+    limit = (
+        OUTLIER_STANDARD_DEVIATIONS * NORMAL_MAD_TO_STANDARD_DEVIATION * median_absolute_deviation
+        if median_absolute_deviation > 0
+        else float("inf")
+    )
+    outliers = [index for index, residual in enumerate(residuals) if abs(residual) > limit]
 
-    inliers = [p_ for i, p_ in enumerate(points) if i not in set(outliers)]
-    if len(inliers) < 3:
-        return intercept, slope, 0.0, outliers
+    inliers = [point for index, point in enumerate(points) if index not in set(outliers)]
+    if len(inliers) < MIN_INLIERS:
+        return RobustLine(intercept, slope, 0.0, outliers)
     mean = statistics.fmean(y for _, y in inliers)
-    ss_tot = sum((y - mean) ** 2 for _, y in inliers)
-    ss_res = sum((y - (intercept + slope * x)) ** 2 for _, (x, y) in enumerate(inliers))
-    return intercept, slope, (1 - ss_res / ss_tot if ss_tot else 0.0), outliers
+    total_sum_of_squares = sum((y - mean) ** 2 for _, y in inliers)
+    residual_sum_of_squares = sum((y - (intercept + slope * x)) ** 2 for x, y in inliers)
+    r_squared = 1 - residual_sum_of_squares / total_sum_of_squares if total_sum_of_squares else 0.0
+    return RobustLine(intercept, slope, r_squared, outliers)
+
+
+def parse_utc(text: str) -> datetime:
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def is_complete_reading(reading: dict) -> bool:
+    return all(reading.get(key) is not None for key in ("co2", "temperature", "humidity"))
 
 
 def load_samples(path: str) -> list[Sample]:
-    out = []
-    with open(path) as fh:
-        raw = json.load(fh)
-    for r in raw:
-        if r.get("co2") is None or r.get("temperature") is None:
-            continue
-        if r.get("humidity") is None:
-            continue
-        out.append(
-            Sample(
-                at=datetime.fromisoformat(r["createdAt"].replace("Z", "+00:00")),
-                temp_c=float(r["temperature"]),
-                rh_pct=float(r["humidity"]),
-                co2_ppm=float(r["co2"]),
-            )
+    with open(path) as readings_file:
+        readings = json.load(readings_file)
+    samples = [
+        Sample(
+            at=parse_utc(reading["createdAt"]),
+            temp_c=float(reading["temperature"]),
+            rh_pct=float(reading["humidity"]),
+            co2_ppm=float(reading["co2"]),
         )
-    out.sort(key=lambda s: s.at)
-    return out
+        for reading in readings
+        if is_complete_reading(reading)
+    ]
+    samples.sort(key=lambda sample: sample.at)
+    return samples
 
 
 def burner_spans(path: str | None, pin: int) -> list[tuple[datetime, datetime]]:
-    """When the burner was ENERGISED, from the recorded relay history.
-
-    Reads `energised` rather than `level`: the level that means on is per
-    device, and BCM 26 on the far end is active-HIGH while everything else is
-    active-LOW.
-    """
+    """When the burner was energised, by `energised` since the ON level is per device."""
     if not path:
         return []
-    with open(path) as fh:
-        raw = json.load(fh)
-    rows = sorted(
-        (datetime.fromisoformat(r["observedAt"].replace("Z", "+00:00")), r["energised"])
-        for r in raw
-        if r["pin"] == pin and r["energised"] is not None
+    with open(path) as transitions_file:
+        transitions = json.load(transitions_file)
+    events = sorted(
+        (parse_utc(transition["observedAt"]), transition["energised"])
+        for transition in transitions
+        if transition["pin"] == pin and transition["energised"] is not None
     )
     spans, opened = [], None
-    for at, on in rows:
-        if on and opened is None:
+    for at, is_energised in events:
+        if is_energised and opened is None:
             opened = at
-        elif not on and opened is not None:
+        elif not is_energised and opened is not None:
             spans.append((opened, at))
             opened = None
     if opened is not None:
@@ -258,17 +188,33 @@ def burner_spans(path: str | None, pin: int) -> list[tuple[datetime, datetime]]:
 
 
 def burner_quiet(at: datetime, spans, settle_min: float) -> bool:
-    """True when the burner is off AND has been for long enough to stop counting.
-
-    The transport lag means CO2 keeps arriving for minutes after the relay
-    opens - measured at 1.6 min to the overshoot peak. A window that starts too
-    soon after a burn is measuring the tail of the burn, not the crop.
-    """
+    """Off, and long enough ago that CO2 still in transit has arrived."""
     settle = timedelta(minutes=settle_min)
-    return all(not (a <= at <= b + settle) for a, b in spans)
+    return all(not (start <= at <= end + settle) for start, end in spans)
 
 
-def windows(
+def is_lit(at: datetime, lights: tuple[time, time] | None) -> bool:
+    local = at.astimezone(LOCAL).time()
+    return lights is not None and lights[0] <= local < lights[1]
+
+
+def summarise_window(
+    start: datetime, chunk: list[Sample], minutes: float, rate: float, leaf_offset: float
+) -> Window:
+    return Window(
+        start=start,
+        minutes=minutes,
+        co2_mid=statistics.median([sample.co2_ppm for sample in chunk]),
+        co2_slope_ppm_per_minute=rate,
+        vpd=statistics.median(
+            [vpd_kpa(sample.temp_c, sample.rh_pct, leaf_offset) for sample in chunk]
+        ),
+        temp_c=statistics.median([sample.temp_c for sample in chunk]),
+        sample_count=len(chunk),
+    )
+
+
+def collect_windows(
     samples: list[Sample],
     spans,
     *,
@@ -278,200 +224,274 @@ def windows(
     leaf_offset: float,
     settle_min: float,
 ) -> list[Window]:
-    out: list[Window] = []
+    collected: list[Window] = []
     span = timedelta(minutes=minutes)
-    i = 0
-    while i < len(samples):
-        start = samples[i].at
-        chunk = [s for s in samples if start <= s.at < start + span]
-        if len(chunk) < 20:
-            i += 1
+    index = 0
+    while index < len(samples):
+        start = samples[index].at
+        chunk = [sample for sample in samples if start <= sample.at < start + span]
+        if len(chunk) < MIN_SAMPLES_PER_WINDOW:
+            index += 1
             continue
-        local = start.astimezone(LOCAL).time()
-        lit = lights is not None and lights[0] <= local < lights[1]
-        if dark == lit:                       # wrong half of the day
-            i += len(chunk)
+        index += len(chunk)
+        is_wrong_half_of_day = dark == is_lit(start, lights)
+        if is_wrong_half_of_day:
             continue
-        if not all(burner_quiet(s.at, spans, settle_min) for s in chunk):
-            i += len(chunk)
+        if not all(burner_quiet(sample.at, spans, settle_min) for sample in chunk):
             continue
         rate = robust_slope(chunk)
         if rate is None:
-            i += len(chunk)
             continue
-        out.append(
-            Window(
-                start=start,
-                minutes=minutes,
-                co2_mid=statistics.median([s.co2_ppm for s in chunk]),
-                dcdt=rate,
-                vpd=statistics.median(
-                    [vpd_kpa(s.temp_c, s.rh_pct, leaf_offset) for s in chunk]
-                ),
-                temp_c=statistics.median([s.temp_c for s in chunk]),
-                n=len(chunk),
-            )
-        )
-        i += len(chunk)
-    return out
+        collected.append(summarise_window(start, chunk, minutes, rate, leaf_offset))
+    return collected
 
 
-def main() -> int:
-    p = argparse.ArgumentParser(prog="fit_vpd_response")
-    p.add_argument("readings", help="tempestas readings JSON")
-    p.add_argument("--transitions", help="pin_transitions JSON (burner state)")
-    p.add_argument("--pin", type=int, default=5, help="burner GPIO pin")
-    p.add_argument("--lights", default="07:00-19:00", help="HH:MM-HH:MM local")
-    p.add_argument("--window", type=float, default=15.0,
-                   help="minutes per measurement window")
-    p.add_argument("--after", help="ignore measurement windows before this local "
-                                   "time, e.g. '2026-09-24 07:00'")
-    p.add_argument("--before", help="ignore measurement windows after this local time")
-    p.add_argument("--calib-window", type=float, default=60.0,
-                   help="minutes per night-calibration window; long by default "
-                        "because overnight drift is slow and needs the baseline")
-    p.add_argument("--leaf-offset", type=float, default=1.0,
-                   help="leaf minus air, C. ~1 with strong airflow, ~2 still")
-    p.add_argument("--settle", type=float, default=8.0,
-                   help="minutes to ignore after the burner stops")
-    p.add_argument("--leak-k", type=float,
-                   help="known leak coefficient /min, skipping night calibration")
-    args = p.parse_args()
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="fit_vpd_response")
+    parser.add_argument("readings", help="tempestas readings JSON")
+    parser.add_argument("--transitions", help="pin_transitions JSON (burner state)")
+    parser.add_argument("--pin", type=int, default=5, help="burner GPIO pin")
+    parser.add_argument("--lights", default="07:00-19:00", help="HH:MM-HH:MM local")
+    parser.add_argument("--window", type=float, default=15.0, help="minutes per measurement window")
+    parser.add_argument(
+        "--after",
+        help="ignore measurement windows before this local time, e.g. '2026-09-24 07:00'",
+    )
+    parser.add_argument("--before", help="ignore measurement windows after this local time")
+    parser.add_argument(
+        "--calib-window",
+        type=float,
+        default=60.0,
+        help="minutes per night-calibration window; long by default "
+        "because overnight drift is slow and needs the baseline",
+    )
+    parser.add_argument(
+        "--leaf-offset",
+        type=float,
+        default=1.0,
+        help="leaf minus air, C. ~1 with strong airflow, ~2 still",
+    )
+    parser.add_argument(
+        "--settle", type=float, default=8.0, help="minutes to ignore after the burner stops"
+    )
+    parser.add_argument(
+        "--leak-k", type=float, help="known leak coefficient /min, skipping night calibration"
+    )
+    return parser.parse_args()
 
-    a, b = args.lights.split("-")
-    lights = (time.fromisoformat(a), time.fromisoformat(b))
 
-    samples = load_samples(args.readings)
-    if not samples:
-        print("no usable readings")
-        return 1
-    spans = burner_spans(args.transitions, args.pin)
-    print(f"{len(samples)} readings  {samples[0].at.astimezone(LOCAL):%m-%d %H:%M}"
-          f" -> {samples[-1].at.astimezone(LOCAL):%m-%d %H:%M}")
-    print(f"{len(spans)} burner spans; lights {args.lights}")
+def parse_lights(text: str) -> tuple[time, time]:
+    lights_on, lights_off = text.split("-")
+    return (time.fromisoformat(lights_on), time.fromisoformat(lights_off))
 
-    # ---- stage 1: calibrate leak and respiration in the dark -------------
-    night = windows(samples, spans, minutes=args.calib_window, lights=lights, dark=True,
-                    leaf_offset=args.leaf_offset, settle_min=args.settle)
+
+def print_not_separable(night: list[Window], spread: float) -> None:
+    equilibrium_ppm = statistics.median([window.co2_mid for window in night])
+    print()
+    print(
+        f"  NOT SEPARABLE: CO2 only moved {spread:.0f} ppm and sat near {equilibrium_ppm:.0f} ppm."
+    )
+    print("  At equilibrium respiration exactly balances leakage, so dC/dt is ~0")
+    print("  at every concentration and there is no slope to fit. All such a")
+    print(
+        f"  night tells you is the ratio  R = k x ({equilibrium_ppm:.0f} - {OUTDOOR_PPM:.0f})"
+        f" = {equilibrium_ppm - OUTDOOR_PPM:.0f} k"
+    )
+    print()
+    print("  Either the sensor is flat-lining (check it), or this really was a")
+    print("  settled night - in which case perturb it: run the burner at night")
+    print("  to ~1200 ppm and let it decay in the dark, where dC/dt varies with")
+    print("  C and both constants fall out of one regression.")
+    print()
+    print("  Once you have it:  --leak-k <value>")
+
+
+def print_poor_fit(r_squared: float, calibration_window_minutes: float) -> None:
+    print()
+    print(f"  POOR FIT (R2 = {r_squared:.2f}): CO2 moved, but not in a way the leak model")
+    print("  explains. Usual causes: a vent or door opened during the night, the")
+    print("  burner ran without being logged, or the window is too short for the")
+    print(f"  drift ({calibration_window_minutes:.0f} min - try --calib-window 90).")
+
+
+def calibrate_leak(
+    samples: list[Sample], spans, lights: tuple[time, time], arguments: argparse.Namespace
+) -> float | None:
+    """Stage 1: leak coefficient and respiration from dark, burner-off windows."""
+    night = collect_windows(
+        samples,
+        spans,
+        minutes=arguments.calib_window,
+        lights=lights,
+        dark=True,
+        leaf_offset=arguments.leaf_offset,
+        settle_min=arguments.settle,
+    )
     print(f"\nCALIBRATION - {len(night)} dark windows")
-    if len(night) < 6:
+    if len(night) < MIN_DARK_WINDOWS:
         print("  too few to fit. Need a night with the burner off and CO2 moving.")
-        return 1
-    pts = [(w.co2_mid, w.dcdt) for w in night]
-    spread = max(p_[0] for p_ in pts) - min(p_[0] for p_ in pts)
-    intercept, slope, r2, outliers = fit_line_robust(pts)
-    k = -slope
+        return None
+    points = [(window.co2_mid, window.co2_slope_ppm_per_minute) for window in night]
+    spread = max(point[0] for point in points) - min(point[0] for point in points)
+    line = fit_line_robust(points)
+    leak = -line.slope
     print(f"  CO2 spanned {spread:.0f} ppm across the dark windows")
-    print(f"  dC/dt = {intercept:+.3f} {slope:+.5f} * C      R2 = {r2:.3f}"
-          f"  ({len(pts) - len(outliers)}/{len(pts)} windows)")
-    for i in outliers:
-        w = night[i]
-        print(f"    rejected {w.start.astimezone(LOCAL):%m-%d %H:%M}  "
-              f"C={w.co2_mid:.0f} dC/dt={w.dcdt:+.2f} - something happened here")
+    print(
+        f"  dC/dt = {line.intercept:+.3f} {line.slope:+.5f} * C      R2 = {line.r_squared:.3f}"
+        f"  ({len(points) - len(line.outlier_indices)}/{len(points)} windows)"
+    )
+    for index in line.outlier_indices:
+        window = night[index]
+        print(
+            f"    rejected {window.start.astimezone(LOCAL):%m-%d %H:%M}  "
+            f"C={window.co2_mid:.0f} dC/dt={window.co2_slope_ppm_per_minute:+.2f}"
+            " - something happened here"
+        )
 
-    if args.leak_k is not None:
-        k = args.leak_k
-        print(f"  overridden: k = {k:.5f} /min (--leak-k)")
-    elif spread < 150:
-        eq = statistics.median([w.co2_mid for w in night])
-        print()
-        print(f"  NOT SEPARABLE: CO2 only moved {spread:.0f} ppm and sat near {eq:.0f} ppm.")
-        print("  At equilibrium respiration exactly balances leakage, so dC/dt is ~0")
-        print("  at every concentration and there is no slope to fit. All such a")
-        print(f"  night tells you is the ratio  R = k x ({eq:.0f} - {OUTDOOR_PPM:.0f})"
-              f" = {eq - OUTDOOR_PPM:.0f} k")
-        print()
-        print("  Either the sensor is flat-lining (check it), or this really was a")
-        print("  settled night - in which case perturb it: run the burner at night")
-        print("  to ~1200 ppm and let it decay in the dark, where dC/dt varies with")
-        print("  C and both constants fall out of one regression.")
-        print()
-        print("  Once you have it:  --leak-k <value>")
-        return 1
-    elif k <= 0 or r2 < 0.25:
-        print()
-        print(f"  POOR FIT (R2 = {r2:.2f}): CO2 moved, but not in a way the leak model")
-        print("  explains. Usual causes: a vent or door opened during the night, the")
-        print("  burner ran without being logged, or the window is too short for the")
-        print(f"  drift ({args.calib_window:.0f} min - try --calib-window 90).")
-        return 1
-    c_out_plus_r = intercept / k
-    print(f"  leak coefficient k ......... {k:.5f} /min")
-    print(f"  (C_out + R/k) .............. {c_out_plus_r:.0f} ppm")
+    if arguments.leak_k is not None:
+        leak = arguments.leak_k
+        print(f"  overridden: k = {leak:.5f} /min (--leak-k)")
+    elif spread < MIN_SEPARABLE_SPREAD_PPM:
+        print_not_separable(night, spread)
+        return None
+    elif leak <= 0 or line.r_squared < MIN_CALIBRATION_R_SQUARED:
+        print_poor_fit(line.r_squared, arguments.calib_window)
+        return None
+    print(f"  leak coefficient k ......... {leak:.5f} /min")
+    print(f"  (C_out + R/k) .............. {line.intercept / leak:.0f} ppm")
     print(f"  With outdoor air near {OUTDOOR_PPM:.0f} ppm, the excess is respiration:")
-    resp = intercept - k * OUTDOOR_PPM
-    print(f"  respiration R .............. {resp:+.2f} ppm/min")
+    respiration = line.intercept - leak * OUTDOOR_PPM
+    print(f"  respiration R .............. {respiration:+.2f} ppm/min")
+    return leak
 
-    # ---- stage 2: assimilation under light -------------------------------
-    day = windows(samples, spans, minutes=args.window, lights=lights, dark=False,
-                  leaf_offset=args.leaf_offset, settle_min=args.settle)
-    if args.after or args.before:
-        # Applied to the measurement stage only: calibration still wants the
-        # whole night, while the sealed run being measured is a few hours
-        # inside it.
-        lo = datetime.fromisoformat(args.after).replace(tzinfo=LOCAL) if args.after else None
-        hi = datetime.fromisoformat(args.before).replace(tzinfo=LOCAL) if args.before else None
-        day = [w for w in day
-               if (lo is None or w.start >= lo) and (hi is None or w.start <= hi)]
 
-    print(f"\nMEASUREMENT - {len(day)} lit windows with the burner quiet")
+def parse_local_bound(text: str | None) -> datetime | None:
+    return datetime.fromisoformat(text).replace(tzinfo=LOCAL) if text else None
 
-    # The mass balance only closes on a sealed house. An open vent or a running
-    # exhaust fan exchanges air far faster than the sealed-night k, so
-    # k(C_out - C) understates removal by an order of magnitude and every
-    # assimilation figure below becomes noise around zero.
-    #
-    # Neither the vents nor the legacy exhaust fan are logged, so infer it:
-    # a lit greenhouse full of plants that is holding station near outdoor air
-    # is being ventilated, because a sealed one would be drawn well below it.
-    # Pinned NEAR outdoor is the tell, not merely low: a sealed house drawn
-    # below ambient is proof of sealing, since incoming air cannot pull it
-    # there. Only the band around outdoor is ambiguous, and inside that band
-    # assimilation is CO2-limited anyway, so little is lost by refusing it.
-    lit_co2 = statistics.median([w.co2_mid for w in day]) if day else 0.0
-    if day and OUTDOOR_PPM - 40 <= lit_co2 <= OUTDOOR_PPM + 150:
-        print(f"  median CO2 across those windows: {lit_co2:.0f} ppm")
-        print()
-        print("  REFUSING TO FIT - the greenhouse was open.")
-        print(f"  Lit, planted, and still sitting near outdoor air ({OUTDOOR_PPM:.0f} ppm)")
-        print("  means air was being exchanged far faster than the sealed-night")
-        print(f"  k of {k:.5f}/min. The leak term would understate removal by an")
-        print("  order of magnitude and every assimilation figure would be noise.")
-        print()
-        print("  Assimilation is only measurable on a closed house: vents shut,")
-        print("  exhaust fans off, CO2 drawn down from an enriched start. That is")
-        print("  the same sealed run being planned for the humidity question, so")
-        print("  capture this from it - a couple of lit hours sealed, with the")
-        print("  burner left off once the house is charged, is enough.")
-        return 1
-    if not day:
-        print("  none. The burner may be running through the whole photoperiod.")
-        return 1
+
+def keep_between(windows: list[Window], after: str | None, before: str | None) -> list[Window]:
+    """Measurement only: calibration still wants the whole night around the run."""
+    earliest = parse_local_bound(after)
+    latest = parse_local_bound(before)
+    return [
+        window
+        for window in windows
+        if (earliest is None or window.start >= earliest)
+        and (latest is None or window.start <= latest)
+    ]
+
+
+def is_ventilated(lit_co2_ppm: float) -> bool:
+    """A lit, planted house pinned near outdoor air is exchanging it; a sealed one draws below."""
+    return (
+        OUTDOOR_PPM - VENTILATED_BELOW_OUTDOOR_PPM
+        <= lit_co2_ppm
+        <= OUTDOOR_PPM + VENTILATED_ABOVE_OUTDOOR_PPM
+    )
+
+
+def print_refusal_for_open_house(lit_co2_ppm: float, leak: float) -> None:
+    print(f"  median CO2 across those windows: {lit_co2_ppm:.0f} ppm")
+    print()
+    print("  REFUSING TO FIT - the greenhouse was open.")
+    print(f"  Lit, planted, and still sitting near outdoor air ({OUTDOOR_PPM:.0f} ppm)")
+    print("  means air was being exchanged far faster than the sealed-night")
+    print(f"  k of {leak:.5f}/min. The leak term would understate removal by an")
+    print("  order of magnitude and every assimilation figure would be noise.")
+    print()
+    print("  Assimilation is only measurable on a closed house: vents shut,")
+    print("  exhaust fans off, CO2 drawn down from an enriched start. That is")
+    print("  the same sealed run being planned for the humidity question, so")
+    print("  capture this from it - a couple of lit hours sealed, with the")
+    print("  burner left off once the house is charged, is enough.")
+
+
+def print_uptake_table(day: list[Window], leak: float) -> list[tuple[Window, float]]:
     print(f"  {'when':>11} {'VPD':>6} {'temp':>6} {'CO2':>6} {'dC/dt':>8} {'net':>8}")
-    rows = []
-    for w in day:
-        # net uptake (A - R); see the module docstring on why R is not added
-        assim = k * (OUTDOOR_PPM - w.co2_mid) - w.dcdt
-        rows.append((w, assim))
-        print(f"  {w.start.astimezone(LOCAL):%m-%d %H:%M} {w.vpd:>6.2f} "
-              f"{w.temp_c:>5.1f}C {w.co2_mid:>6.0f} {w.dcdt:>+8.1f} {assim:>+8.1f}")
+    uptakes = []
+    for window in day:
+        # Net uptake (A - R): respiration in the light is not the night figure, so it stays out.
+        net_uptake = leak * (OUTDOOR_PPM - window.co2_mid) - window.co2_slope_ppm_per_minute
+        uptakes.append((window, net_uptake))
+        print(
+            f"  {window.start.astimezone(LOCAL):%m-%d %H:%M} {window.vpd:>6.2f} "
+            f"{window.temp_c:>5.1f}C {window.co2_mid:>6.0f} "
+            f"{window.co2_slope_ppm_per_minute:>+8.1f} {net_uptake:>+8.1f}"
+        )
+    return uptakes
 
-    # ---- the curve --------------------------------------------------------
+
+def print_uptake_curve(uptakes: list[tuple[Window, float]]) -> None:
     print("\nNET CO2 UPTAKE vs VPD  (ppm/min, higher is better)")
     bins: dict[float, list[float]] = {}
-    for w, assim in rows:
-        bins.setdefault(round(w.vpd * 4) / 4, []).append(assim)
+    for window, net_uptake in uptakes:
+        bins.setdefault(round(window.vpd * VPD_BINS_PER_KPA) / VPD_BINS_PER_KPA, []).append(
+            net_uptake
+        )
     for vpd in sorted(bins):
-        v = bins[vpd]
-        bar = "#" * max(0, int(statistics.median(v)))
-        print(f"  {vpd:>5.2f} kPa  n={len(v):<3} median {statistics.median(v):>+7.1f}  {bar}")
-    best = max(bins, key=lambda k_: statistics.median(bins[k_]))
+        bin_uptakes = bins[vpd]
+        median_uptake = statistics.median(bin_uptakes)
+        bar = "#" * max(0, int(median_uptake))
+        print(f"  {vpd:>5.2f} kPa  n={len(bin_uptakes):<3} median {median_uptake:>+7.1f}  {bar}")
+    best = max(bins, key=lambda vpd: statistics.median(bins[vpd]))
     print(f"\n  best bin: {best:.2f} kPa")
     print("  Treat one day's curve as provisional - light, temperature and CO2")
     print("  itself all move with VPD across a drawdown. Compare windows at")
     print("  matched hour, temperature and CO2 across several days before")
     print("  believing a peak.")
+
+
+def measure_uptake(
+    samples: list[Sample],
+    spans,
+    lights: tuple[time, time],
+    leak: float,
+    arguments: argparse.Namespace,
+) -> int:
+    """Stage 2: net uptake under light with the burner quiet, binned by VPD."""
+    day = collect_windows(
+        samples,
+        spans,
+        minutes=arguments.window,
+        lights=lights,
+        dark=False,
+        leaf_offset=arguments.leaf_offset,
+        settle_min=arguments.settle,
+    )
+    if arguments.after or arguments.before:
+        day = keep_between(day, arguments.after, arguments.before)
+
+    print(f"\nMEASUREMENT - {len(day)} lit windows with the burner quiet")
+    lit_co2_ppm = statistics.median([window.co2_mid for window in day]) if day else 0.0
+    if day and is_ventilated(lit_co2_ppm):
+        print_refusal_for_open_house(lit_co2_ppm, leak)
+        return 1
+    if not day:
+        print("  none. The burner may be running through the whole photoperiod.")
+        return 1
+    print_uptake_curve(print_uptake_table(day, leak))
     return 0
+
+
+def main() -> int:
+    arguments = parse_arguments()
+    lights = parse_lights(arguments.lights)
+
+    samples = load_samples(arguments.readings)
+    if not samples:
+        print("no usable readings")
+        return 1
+    spans = burner_spans(arguments.transitions, arguments.pin)
+    print(
+        f"{len(samples)} readings  {samples[0].at.astimezone(LOCAL):%m-%d %H:%M}"
+        f" -> {samples[-1].at.astimezone(LOCAL):%m-%d %H:%M}"
+    )
+    print(f"{len(spans)} burner spans; lights {arguments.lights}")
+
+    leak = calibrate_leak(samples, spans, lights, arguments)
+    if leak is None:
+        return 1
+    return measure_uptake(samples, spans, lights, leak, arguments)
 
 
 if __name__ == "__main__":

@@ -1,17 +1,12 @@
-"""Sim time, so a seven-minute burn cycle can be watched in seven seconds.
-
-Kept separate from the world because the world must stay pure: it is told how
-many minutes elapsed, it never asks.
-
-Speed matters for more than impatience. The rules engine branches on local wall
-time - day and night segments, DST boundaries - and those paths are unreachable
-in a test that runs at 1x. A DST bug has already shipped once here.
-"""
+"""Sim time, kept apart from the world so the world is told how long passed and never asks."""
 
 from __future__ import annotations
 
 import time
 from datetime import datetime, timedelta, timezone
+
+MINUTES_PER_HOUR = 60
+SECONDS_PER_MINUTE = 60.0
 
 
 class SimClock:
@@ -28,21 +23,22 @@ class SimClock:
         return self._speed
 
     def set_speed(self, speed: float) -> None:
-        """Re-anchor first, so changing speed never rewinds or jumps sim time."""
         if speed <= 0:
             raise ValueError("speed must be positive")
-        self._start = self.now()
-        self._anchor = self._monotonic()
+        self._reanchor(self.now())
         self._speed = speed
 
     def jump(self, minutes: float) -> None:
-        self._start = self.now() + timedelta(minutes=minutes)
+        self._reanchor(self.now() + timedelta(minutes=minutes))
+
+    def _reanchor(self, start: datetime) -> None:
+        self._start = start
         self._anchor = self._monotonic()
 
     def now(self) -> datetime:
-        elapsed = (self._monotonic() - self._anchor) * self._speed
-        return self._start + timedelta(seconds=elapsed)
+        elapsed_seconds = (self._monotonic() - self._anchor) * self._speed
+        return self._start + timedelta(seconds=elapsed_seconds)
 
-    def minute_of_day(self, tz: timezone | None = None) -> float:
-        local = self.now().astimezone(tz) if tz else self.now()
-        return local.hour * 60 + local.minute + local.second / 60.0
+    def minute_of_day(self, zone: timezone | None = None) -> float:
+        local = self.now().astimezone(zone) if zone else self.now()
+        return local.hour * MINUTES_PER_HOUR + local.minute + local.second / SECONDS_PER_MINUTE
