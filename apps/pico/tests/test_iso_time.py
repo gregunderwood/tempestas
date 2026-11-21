@@ -3,13 +3,19 @@ from datetime import UTC, date, datetime
 from iso_time import count_days_since_epoch, format_iso, is_clock_set, parse_iso
 
 
-def test_reads_the_server_toisostring_form_with_milliseconds():
-    expected = datetime(2026, 11, 20, 23, 18, 16, 282000, tzinfo=UTC).timestamp()
+def test_reads_the_server_toisostring_form_dropping_the_milliseconds():
+    expected = int(datetime(2026, 11, 20, 23, 18, 16, tzinfo=UTC).timestamp())
     assert parse_iso("2026-11-20T23:18:16.282Z") == expected
 
 
+def test_stays_in_integers_because_the_pico_floats_are_32_bit():
+    fifteen_seconds_apart = [parse_iso("2026-11-20T23:18:16.282Z"), parse_iso("2026-11-20T23:18:31Z")]
+    assert all(type(seconds) is int for seconds in fifteen_seconds_apart)
+    assert fifteen_seconds_apart[1] - fifteen_seconds_apart[0] == 15
+
+
 def test_reads_a_utc_offset_and_whole_seconds():
-    expected = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC).timestamp()
+    expected = int(datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC).timestamp())
     assert parse_iso("2026-01-02T03:04:05+00:00") == expected
 
 
@@ -22,6 +28,9 @@ def test_refuses_anything_it_cannot_read_as_utc():
         "2026-11-20T23:18:16-07:00",
         "not a time at allZ",
         "2026/11/20T23:18:16Z",
+        "2026-11-20T23:18:16.Z",
+        "2026-11-20T23:18:16.2x2Z",
+        "2026-11-20T23:18:1.5Z",
     ]:
         assert parse_iso(text) is None
 

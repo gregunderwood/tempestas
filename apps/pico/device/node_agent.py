@@ -13,6 +13,7 @@ from iso_time import format_iso, is_clock_set
 
 MILLISECONDS_PER_SECOND = 1000
 SERVER_OFFLINE_STATE = "offline"
+NOT_MEASURED = "NOT_MEASURED"
 
 
 class NodeAgent:
@@ -65,11 +66,16 @@ class NodeAgent:
             contract.topic_gpio_result(self.node_id()),
             self.result_payload(command["id"], line_results),
         )
-        self.publish_gpio_states([line_result["pin"] for line_result in line_results])
+        self.publish_gpio_states(self.managed_pins_of(line_results))
+
+    def managed_pins_of(self, line_results):
+        return [
+            line_result["pin"] for line_result in line_results if line_result["pin"] in self.relay_lines.lines
+        ]
 
     def apply_line(self, line):
-        pin = int(line["pin"])
-        requested = int(line["level"])
+        pin = line["pin"]
+        requested = line["level"]
         try:
             self.relay_lines.write(pin, requested)
             readback = self.relay_lines.level(pin)
@@ -224,4 +230,4 @@ class NodeAgent:
 
 
 def not_measured(unit):
-    return {"value": None, "valid": False, "unit": unit, "reason": "NOT_MEASURED"}
+    return {"value": None, "valid": False, "unit": unit, "reason": NOT_MEASURED}

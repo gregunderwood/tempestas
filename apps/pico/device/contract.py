@@ -1,7 +1,7 @@
 """The MQTT contract, MicroPython side.
 
-Mirrors libs/domain/src/lib/hardware/mqtt-contract.ts; tests/test_contract_matches_typescript.py
-fails when the two drift.
+Mirrors apps/hardware/src/tempestas_agent/contract.py, which mirrors the TypeScript;
+tests/test_contract_matches_hardware_agent.py fails when the two drift.
 """
 
 MQTT_CONTRACT_VERSION = "v1"

@@ -15,7 +15,7 @@ DEVICE="$HERE/apps/pico/device"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 PORT_WAIT_SECONDS=10
 AGENT_FILES=(
-  main.py node_runtime.py node_agent.py command_guard.py contract.py
+  main.py node_runtime.py node_agent.py mqtt_session.py command_guard.py contract.py
   iso_time.py relay_lines.py ds18b20_probes.py settings.py credentials.py
 )
 
@@ -38,6 +38,10 @@ fi
 
 say "Gate"
 (cd "$HERE/apps/pico" && "$UV" run ruff check . && "$UV" run pytest -q)
+
+say "Fetching mpremote"
+# Fetched before the reset, so none of the boot grace is spent downloading it.
+"$UV" tool run mpremote version
 
 say "Resetting the board"
 mpremote reset || true
