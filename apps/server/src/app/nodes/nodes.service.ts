@@ -26,6 +26,7 @@ import { DeviceEntity } from '../devices/models';
 import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';
 import { NodeEntity } from './models';
+import type { NodeOperatorFieldsDto } from './dto/node-operator-fields.dto';
 import type { AdmitNodeDto } from './dto/admit-node.dto';
 import type { UpdateNodeDto } from './dto/update-node.dto';
 import {
@@ -34,31 +35,64 @@ import {
   patchFromHello,
   pinsWithdrawn,
   type HelloFacts,
+  type HelloOutcome,
   isNodeOnline,
   NODE_OFFLINE_AFTER_MS,
 } from './node-registry';
 
-/** Why a sample was refused. Carried so the log line can say which it was. */
 export type SampleRejection = 'unknown-node' | 'pending' | 'disabled';
 
 export type SampleResolution =
   | { accepted: true; node: NodeEntity }
   | { accepted: false; reason: SampleRejection };
 
-/**
- * The node registry: the only writer of a node's identity, and the gate every
- * inbound reading passes through.
- *
- * Two subscriptions drive it - `hello` (a node announcing what it is) and
- * availability (its LWT). Both are funnelled through one serial queue: they
- * arrive from the broker with no ordering guarantee between them, and a `hello`
- * racing its own status message must not produce two rows for one slug.
- */
+interface NodeCounts {
+  total: number;
+  online: number;
+  pending: number;
+}
+
+interface HelloContext {
+  node: NodeEntity;
+  previousCapabilities: NodeCapabilities;
+  facts: HelloFacts;
+}
+
+type HelloOutcomeReporter = (context: HelloContext) => void | Promise<void>;
+
+const COUNT_ONLINE_NODES = `COUNT(*) FILTER (WHERE node.online AND (
+           node.last_seen_at >= :cutoff
+           OR EXISTS (
+             SELECT 1 FROM sensor_readings reading
+             WHERE reading.node_id = node.id AND reading.created_at >= :cutoff
+           )
+         ))`;
+
+const COUNT_PENDING_NODES = `COUNT(*) FILTER (WHERE node.status = 'pending')`;
+
+// hello and availability share one serial queue: the broker does not order them.
 @Injectable()
 export class NodesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NodesService.name);
   private readonly subscriptions = new Subscription();
   private queue: Promise<unknown> = Promise.resolve();
+
+  private readonly helloOutcomeReporters: Record<
+    HelloOutcome,
+    HelloOutcomeReporter
+  > = {
+    rebooted: ({ facts }) =>
+      this.logger.log(
+        `Node "${facts.nodeId}" rebooted (bootId ${facts.bootId})`,
+      ),
+    'capabilities-changed': (context) => this.reportWithdrawnPins(context),
+    'agent-upgraded': ({ facts }) =>
+      this.logger.log(
+        `Node "${facts.nodeId}" agent is now ${facts.agentVersion}`,
+      ),
+    seen: ({ facts }) =>
+      this.logger.debug(`Node "${facts.nodeId}" re-announced, unchanged`),
+  };
 
   constructor(
     @InjectRepository(NodeEntity)
@@ -80,8 +114,8 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       ),
     );
     this.subscriptions.add(
-      this.hardware.availability$.subscribe((a) =>
-        this.enqueue(() => this.handleAvailability(a)),
+      this.hardware.availability$.subscribe((availability) =>
+        this.enqueue(() => this.handleAvailability(availability)),
       ),
     );
   }
@@ -90,32 +124,13 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     this.subscriptions.unsubscribe();
   }
 
-  /**
-   * One task at a time, and a failure never breaks the chain: an unreachable
-   * database during one `hello` must not silently unsubscribe the registry for
-   * the rest of the process's life.
-   */
-  private enqueue(task: () => Promise<void>): void {
-    this.queue = this.queue.then(task).catch((err: unknown) => {
-      this.logger.error(
-        `Registry task failed: ${err instanceof Error ? err.message : err}`,
-      );
-    });
-  }
-
   async handleHello(hello: NodeHello): Promise<void> {
-    const facts = toFacts(hello);
+    const facts = toHelloFacts(hello);
     const existing = await this.nodes.findOne({
       where: { slug: facts.nodeId },
     });
-
     if (!existing) {
-      await this.nodes.save(this.nodes.create(newNodeFromHello(facts)));
-      // WARN, not LOG: this is the one registry event that needs a human.
-      this.logger.warn(
-        `Node "${facts.nodeId}" announced itself and is PENDING - it receives no commands and ` +
-          `its readings are DISCARDED until it is admitted.`,
-      );
+      await this.registerPendingNode(facts);
       return;
     }
 
@@ -124,139 +139,54 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     Object.assign(existing, patch);
     await this.nodes.save(existing);
 
-    // Every applicable outcome, not just the loudest: an agent restarting with
-    // new capabilities is both a reboot and a capability change, and reporting
-    // only the reboot once hid a node dropping every pin it had.
     for (const outcome of outcomes) {
-      switch (outcome) {
-        case 'rebooted':
-          this.logger.log(
-            `Node "${facts.nodeId}" rebooted (bootId ${facts.bootId})`,
-          );
-          break;
-        case 'capabilities-changed':
-          await this.reportWithdrawnPins(existing, previousCapabilities, facts);
-          break;
-        case 'agent-upgraded':
-          this.logger.log(
-            `Node "${facts.nodeId}" agent is now ${facts.agentVersion}`,
-          );
-          break;
-        case 'seen':
-          this.logger.debug(`Node "${facts.nodeId}" re-announced, unchanged`);
-          break;
-      }
+      await this.helloOutcomeReporters[outcome]({
+        node: existing,
+        previousCapabilities,
+        facts,
+      });
     }
-  }
-
-  /**
-   * Name the devices a capability change just orphaned.
-   *
-   * Without this the only symptom is every drive attempt failing at the node,
-   * once per rules tick, with nothing in the log connecting it to the cause.
-   */
-  private async reportWithdrawnPins(
-    node: NodeEntity,
-    previous: NodeCapabilities,
-    facts: HelloFacts,
-  ): Promise<void> {
-    const withdrawn = pinsWithdrawn(previous, facts.capabilities);
-    if (withdrawn.length === 0) {
-      this.logger.warn(`Node "${facts.nodeId}" changed its capabilities`);
-      return;
-    }
-
-    const onNode = await this.devices.find({ where: { nodeId: node.id } });
-    const orphaned = onNode.filter((d) => withdrawn.includes(d.gpio));
-    if (orphaned.length === 0) {
-      this.logger.warn(
-        `Node "${facts.nodeId}" withdrew pins [${withdrawn.join(', ')}]; nothing was bound to them`,
-      );
-      return;
-    }
-    this.logger.error(
-      `Node "${facts.nodeId}" withdrew pins [${withdrawn.join(', ')}], ORPHANING ` +
-        orphaned.map((d) => `"${d.name}" (pin ${d.gpio})`).join(', ') +
-        ` - every attempt to drive them will fail at the node until this is resolved`,
-    );
   }
 
   async handleAvailability(availability: NodeAvailability): Promise<void> {
-    const row = await this.nodes.findOne({
+    const node = await this.nodes.findOne({
       where: { slug: availability.nodeId },
     });
-    if (!row) {
-      // Registration happens on `hello`, which is the only channel carrying
-      // capabilities. A retained status for a slug we have never met is either
-      // a node that has not re-announced yet or a stale retained message.
+    if (!node) {
+      // Only `hello` carries capabilities, so a status alone never registers a node.
       this.logger.debug(
         `Ignoring status for unregistered node "${availability.nodeId}"`,
       );
       return;
     }
 
-    const changed = row.online !== availability.online;
-    row.online = availability.online;
-    // Only an ONLINE transition is a sighting. Leaving lastSeenAt alone on an
-    // LWT is what makes "offline since" answerable at all.
-    if (availability.online) row.lastSeenAt = availability.at;
-    await this.nodes.save(row);
+    const hasChanged = node.online !== availability.online;
+    node.online = availability.online;
+    // Only an online transition is a sighting, which is what makes "offline since" answerable.
+    if (availability.online) node.lastSeenAt = availability.at;
+    await this.nodes.save(node);
 
-    if (!changed) return;
-    if (availability.online) {
-      this.logger.log(`Node "${row.slug}" is online`);
-    } else {
-      // Stale is not off. The pins of a node that dropped are UNKNOWN.
-      this.logger.warn(
-        `Node "${row.slug}" went OFFLINE - its pin states are now unknown, not off`,
-      );
-    }
+    if (!hasChanged) return;
+    this.logAvailabilityChange(node);
   }
 
-  /**
-   * The gate. Called for every inbound sample, and the reason a stray node on
-   * the WiFi cannot inject a reading that starts a burner.
-   */
   async resolveForSample(nodeId: NodeId): Promise<SampleResolution> {
     const node = await this.nodes.findOne({ where: { slug: nodeId } });
     if (!node) return { accepted: false, reason: 'unknown-node' };
     if (!acceptsSamples(node.status)) {
-      return {
-        accepted: false,
-        reason: node.status === NodeStatus.Disabled ? 'disabled' : 'pending',
-      };
+      return { accepted: false, reason: rejectionFor(node.status) };
     }
     return { accepted: true, node };
   }
 
-  /**
-   * Three numbers, one query. `findAll` costs three round-trips because it
-   * decorates each node with aggregates; the status tick and the health probe
-   * only need the counts, and they run every 10 s and on every curl.
-   */
-  async counts(): Promise<{ total: number; online: number; pending: number }> {
-    // The same rule as `isNodeOnline`, in SQL. If these two disagree the health
-    // endpoint contradicts the nodes screen, which is exactly the kind of
-    // divergence this system keeps having to hunt down.
-    //
-    // EXISTS over the (node_id, created_at) index rather than MAX() over the
-    // table: we only need to know whether anything landed since the cutoff, and
-    // this stays cheap as the readings table grows.
+  // The SQL twin of `isNodeOnline`: if they disagree, the health endpoint contradicts the nodes screen.
+  async counts(): Promise<NodeCounts> {
     const cutoff = new Date(this.clock.now().getTime() - NODE_OFFLINE_AFTER_MS);
     const row = await this.nodes
-      .createQueryBuilder('n')
+      .createQueryBuilder('node')
       .select('COUNT(*)', 'total')
-      .addSelect(
-        `COUNT(*) FILTER (WHERE n.online AND (
-           n.last_seen_at >= :cutoff
-           OR EXISTS (
-             SELECT 1 FROM sensor_readings sr
-             WHERE sr.node_id = n.id AND sr.created_at >= :cutoff
-           )
-         ))`,
-        'online',
-      )
-      .addSelect(`COUNT(*) FILTER (WHERE n.status = 'pending')`, 'pending')
+      .addSelect(COUNT_ONLINE_NODES, 'online')
+      .addSelect(COUNT_PENDING_NODES, 'pending')
       .setParameter('cutoff', cutoff)
       .getRawOne<{ total: string; online: string; pending: string }>();
 
@@ -268,163 +198,236 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
   }
 
   async findAll(): Promise<Node[]> {
-    const rows = await this.nodes.find({ order: { slug: 'ASC' } });
-    return this.decorate(rows);
+    const entities = await this.nodes.find({ order: { slug: 'ASC' } });
+    return this.decorate(entities);
   }
 
   async findOne(id: string): Promise<Node> {
-    const [dto] = await this.decorate([await this.findOneEntity(id)]);
-    return dto;
+    const [node] = await this.decorate([await this.findOneEntity(id)]);
+    return node;
   }
 
   async findOneEntity(id: string): Promise<NodeEntity> {
-    const row = await this.nodes.findOne({ where: { id } });
-    if (!row) {
+    const node = await this.nodes.findOne({ where: { id } });
+    if (!node) {
       throw new NotFoundException({
         code: ApiErrorCode.NotFound,
         message: `Node ${id} not found`,
       });
     }
-    return row;
+    return node;
   }
 
-  /**
-   * The one click. Idempotent on purpose - a double-click on an admit button
-   * must not raise a 409 at the operator.
-   */
-  async admit(id: string, dto: AdmitNodeDto): Promise<Node> {
-    const row = await this.findOneEntity(id);
-    const was = row.status;
-    await this.applyHumanFields(row, dto);
-    row.status = NodeStatus.Admitted;
-    await this.nodes.save(row);
-
-    if (was !== NodeStatus.Admitted) {
-      this.logger.warn(
-        `Node "${row.slug}" ADMITTED (was ${was}) - its readings will now persist and it may be commanded`,
-      );
-    }
-    return this.findOne(id);
-  }
-
-  /**
-   * The terminal state for a node that should never be believed: unlike
-   * deleting it, a `hello` cannot bring it back, because a hello never moves
-   * status. Its devices stop being drivable via the same `acceptsCommands` gate.
-   */
-  async disable(id: string): Promise<Node> {
-    const row = await this.findOneEntity(id);
-    const was = row.status;
-    row.status = NodeStatus.Disabled;
-    await this.nodes.save(row);
-    if (was !== NodeStatus.Disabled) {
-      this.logger.warn(
-        `Node "${row.slug}" DISABLED (was ${was}) - no commands, no readings`,
-      );
-    }
-    return this.findOne(id);
-  }
-
-  async update(id: string, dto: UpdateNodeDto): Promise<Node> {
-    const row = await this.findOneEntity(id);
-    await this.applyHumanFields(row, dto);
-    await this.nodes.save(row);
-    return this.findOne(id);
-  }
-
-  /**
-   * Only a pending node. `sensor_readings` cascades on node delete, so deleting
-   * an admitted node would silently take its history with it - `disable` is the
-   * operation that means "stop trusting this", and it keeps the data.
-   */
-  async remove(id: string): Promise<void> {
-    const row = await this.findOneEntity(id);
-    if (row.status !== NodeStatus.Pending) {
-      throw new ConflictException({
-        code: ApiErrorCode.NodeNotDeletable,
-        message: `Node "${row.slug}" is ${row.status}; only a pending node may be deleted. Disable it instead.`,
-        details: { status: row.status },
-      });
-    }
-    await this.nodes.remove(row);
-    this.logger.warn(
-      `Pending node "${row.slug}" deleted; it will return as pending if it says hello again`,
+  // Idempotent on purpose: a double-clicked admit button must not raise a 409 at the operator.
+  admit(id: string, admission: AdmitNodeDto): Promise<Node> {
+    return this.moveToStatus(
+      id,
+      NodeStatus.Admitted,
+      (node, previousStatus) =>
+        `Node "${node.slug}" ADMITTED (was ${previousStatus}) - its readings will now persist and it may be commanded`,
+      (node) => this.applyOperatorFields(node, admission),
     );
   }
 
-  private async applyHumanFields(
-    row: NodeEntity,
-    dto: AdmitNodeDto | UpdateNodeDto,
-  ): Promise<void> {
-    if (dto.zoneId !== undefined) {
-      const zone = await this.zones.findOne({ where: { id: dto.zoneId } });
-      if (!zone) {
-        throw new NotFoundException({
-          code: ApiErrorCode.NotFound,
-          message: `Zone ${dto.zoneId} not found`,
-        });
-      }
-      row.zoneId = zone.id;
-    }
-    if (dto.displayName !== undefined) row.displayName = dto.displayName;
-    if (dto.location !== undefined) row.location = dto.location;
+  disable(id: string): Promise<Node> {
+    return this.moveToStatus(
+      id,
+      NodeStatus.Disabled,
+      (node, previousStatus) =>
+        `Node "${node.slug}" DISABLED (was ${previousStatus}) - no commands, no readings`,
+    );
   }
 
-  /**
-   * `deviceCount` and `latestReadingAt` come from two grouped aggregates rather
-   * than a per-node query, so the nodes list stays three round-trips regardless
-   * of how many nodes exist.
-   */
-  private async decorate(rows: NodeEntity[]): Promise<Node[]> {
-    if (rows.length === 0) return [];
-    const ids = rows.map((r) => r.id);
+  async update(id: string, changes: UpdateNodeDto): Promise<Node> {
+    const node = await this.findOneEntity(id);
+    await this.applyOperatorFields(node, changes);
+    await this.nodes.save(node);
+    return this.findOne(id);
+  }
 
-    const counts = await this.devices
-      .createQueryBuilder('d')
-      .select('d.nodeId', 'nodeId')
-      .addSelect('COUNT(*)', 'count')
-      .where('d.nodeId IN (:...ids)', { ids })
-      .groupBy('d.nodeId')
-      .getRawMany<{ nodeId: string; count: string }>();
+  // Only a pending node: deleting cascades its readings, and `disable` is the reject that keeps them.
+  async remove(id: string): Promise<void> {
+    const node = await this.findOneEntity(id);
+    if (node.status !== NodeStatus.Pending) {
+      throw new ConflictException({
+        code: ApiErrorCode.NodeNotDeletable,
+        message: `Node "${node.slug}" is ${node.status}; only a pending node may be deleted. Disable it instead.`,
+        details: { status: node.status },
+      });
+    }
+    await this.nodes.remove(node);
+    this.logger.warn(
+      `Pending node "${node.slug}" deleted; it will return as pending if it says hello again`,
+    );
+  }
 
-    const latest = await this.readings
-      .createQueryBuilder('r')
-      .select('r.nodeId', 'nodeId')
-      .addSelect('MAX(r.createdAt)', 'latest')
-      .where('r.nodeId IN (:...ids)', { ids })
-      .groupBy('r.nodeId')
-      .getRawMany<{ nodeId: string; latest: Date | string }>();
+  private enqueue(task: () => Promise<void>): void {
+    this.queue = this.queue.then(task).catch((error: unknown) => {
+      this.logger.error(
+        `Registry task failed: ${error instanceof Error ? error.message : error}`,
+      );
+    });
+  }
 
-    const countBy = new Map(counts.map((c) => [c.nodeId, Number(c.count)]));
-    const latestBy = new Map(latest.map((l) => [l.nodeId, new Date(l.latest)]));
+  private async registerPendingNode(facts: HelloFacts): Promise<void> {
+    await this.nodes.save(this.nodes.create(newNodeFromHello(facts)));
+    this.logger.warn(
+      `Node "${facts.nodeId}" announced itself and is PENDING - it receives no commands and ` +
+        `its readings are DISCARDED until it is admitted.`,
+    );
+  }
+
+  private async reportWithdrawnPins({
+    node,
+    previousCapabilities,
+    facts,
+  }: HelloContext): Promise<void> {
+    const withdrawn = pinsWithdrawn(previousCapabilities, facts.capabilities);
+    if (withdrawn.length === 0) {
+      this.logger.warn(`Node "${facts.nodeId}" changed its capabilities`);
+      return;
+    }
+
+    const devicesOnNode = await this.devices.find({
+      where: { nodeId: node.id },
+    });
+    const orphaned = devicesOnNode.filter((device) =>
+      withdrawn.includes(device.gpio),
+    );
+    if (orphaned.length === 0) {
+      this.logger.warn(
+        `Node "${facts.nodeId}" withdrew pins [${withdrawn.join(', ')}]; nothing was bound to them`,
+      );
+      return;
+    }
+    this.logger.error(
+      `Node "${facts.nodeId}" withdrew pins [${withdrawn.join(', ')}], ORPHANING ` +
+        orphaned
+          .map((device) => `"${device.name}" (pin ${device.gpio})`)
+          .join(', ') +
+        ` - every attempt to drive them will fail at the node until this is resolved`,
+    );
+  }
+
+  private logAvailabilityChange(node: NodeEntity): void {
+    if (node.online) {
+      this.logger.log(`Node "${node.slug}" is online`);
+      return;
+    }
+    this.logger.warn(
+      `Node "${node.slug}" went OFFLINE - its pin states are now unknown, not off`,
+    );
+  }
+
+  private async moveToStatus(
+    id: string,
+    targetStatus: NodeStatus,
+    describeTransition: (
+      node: NodeEntity,
+      previousStatus: NodeStatus,
+    ) => string,
+    applyFields?: (node: NodeEntity) => Promise<void>,
+  ): Promise<Node> {
+    const node = await this.findOneEntity(id);
+    const previousStatus = node.status;
+    await applyFields?.(node);
+    node.status = targetStatus;
+    await this.nodes.save(node);
+    if (previousStatus !== targetStatus) {
+      this.logger.warn(describeTransition(node, previousStatus));
+    }
+    return this.findOne(id);
+  }
+
+  private async applyOperatorFields(
+    node: NodeEntity,
+    fields: NodeOperatorFieldsDto,
+  ): Promise<void> {
+    if (fields.zoneId !== undefined) {
+      node.zoneId = await this.findZoneId(fields.zoneId);
+    }
+    if (fields.displayName !== undefined) node.displayName = fields.displayName;
+    if (fields.location !== undefined) node.location = fields.location;
+  }
+
+  private async findZoneId(zoneId: string): Promise<string> {
+    const zone = await this.zones.findOne({ where: { id: zoneId } });
+    if (!zone) {
+      throw new NotFoundException({
+        code: ApiErrorCode.NotFound,
+        message: `Zone ${zoneId} not found`,
+      });
+    }
+    return zone.id;
+  }
+
+  // Two grouped aggregates, so the nodes list stays three round-trips however many nodes exist.
+  private async decorate(nodes: NodeEntity[]): Promise<Node[]> {
+    if (nodes.length === 0) return [];
+    const ids = nodes.map((node) => node.id);
+    const deviceCounts = await this.countDevicesByNode(ids);
+    const latestReadings = await this.findLatestReadingByNode(ids);
     const now = this.clock.now();
 
-    return rows.map((row) => ({
-      id: row.id,
-      slug: row.slug,
-      displayName: row.displayName,
-      location: row.location,
-      kind: row.kind,
-      status: row.status,
-      online: isNodeOnline(
-        {
-          online: row.online,
-          lastSeenAt: row.lastSeenAt,
-          latestReadingAt: latestBy.get(row.id) ?? null,
-        },
-        now,
-      ),
-      lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
-      agentVersion: row.agentVersion,
-      capabilities: row.capabilities,
-      zoneId: row.zoneId,
-      deviceCount: countBy.get(row.id) ?? 0,
-      latestReadingAt: latestBy.get(row.id)?.toISOString() ?? null,
-    }));
+    return nodes.map((node) => {
+      const latestReadingAt = latestReadings.get(node.id) ?? null;
+      return {
+        id: node.id,
+        slug: node.slug,
+        displayName: node.displayName,
+        location: node.location,
+        kind: node.kind,
+        status: node.status,
+        online: isNodeOnline(
+          {
+            online: node.online,
+            lastSeenAt: node.lastSeenAt,
+            latestReadingAt,
+          },
+          now,
+        ),
+        lastSeenAt: node.lastSeenAt?.toISOString() ?? null,
+        agentVersion: node.agentVersion,
+        capabilities: node.capabilities,
+        zoneId: node.zoneId,
+        deviceCount: deviceCounts.get(node.id) ?? 0,
+        latestReadingAt: latestReadingAt?.toISOString() ?? null,
+      };
+    });
+  }
+
+  private async countDevicesByNode(
+    ids: string[],
+  ): Promise<Map<string, number>> {
+    const rows = await this.devices
+      .createQueryBuilder('device')
+      .select('device.nodeId', 'nodeId')
+      .addSelect('COUNT(*)', 'count')
+      .where('device.nodeId IN (:...ids)', { ids })
+      .groupBy('device.nodeId')
+      .getRawMany<{ nodeId: string; count: string }>();
+    return new Map(rows.map((row) => [row.nodeId, Number(row.count)]));
+  }
+
+  private async findLatestReadingByNode(
+    ids: string[],
+  ): Promise<Map<string, Date>> {
+    const rows = await this.readings
+      .createQueryBuilder('reading')
+      .select('reading.nodeId', 'nodeId')
+      .addSelect('MAX(reading.createdAt)', 'latest')
+      .where('reading.nodeId IN (:...ids)', { ids })
+      .groupBy('reading.nodeId')
+      .getRawMany<{ nodeId: string; latest: Date | string }>();
+    return new Map(rows.map((row) => [row.nodeId, new Date(row.latest)]));
   }
 }
 
-function toFacts(hello: NodeHello): HelloFacts {
+function rejectionFor(status: NodeStatus): SampleRejection {
+  return status === NodeStatus.Disabled ? 'disabled' : 'pending';
+}
+
+function toHelloFacts(hello: NodeHello): HelloFacts {
   return {
     nodeId: hello.nodeId,
     kind: hello.kind,

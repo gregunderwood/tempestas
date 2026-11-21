@@ -182,7 +182,7 @@ Use the injected Nest `Logger`, never `console.log`. Log level carries meaning h
 
 **Log on change, not per evaluation.** At 8,640 evaluations a day, INFO-per-evaluation buries
 everything and fills the SD card. Where a repeating event must be visible, log the first and then
-a rate-limited summary carrying a count — see `ReadingsIngestService.noteDiscard`.
+a rate-limited summary carrying a count — see `ReadingsIngestService.recordDiscard`.
 
 ### Comments
 
