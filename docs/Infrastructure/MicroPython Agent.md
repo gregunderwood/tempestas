@@ -71,7 +71,7 @@ Everything else on the command path matches the Linux agent: a retained command 
 `RETAINED_COMMAND_DROPPED`, a foreign `issuedBy` raises `CONTROLLER_CONFLICT`, an expired command
 raises `COMMAND_EXPIRED`, an empty payload is ignored. The dead-man (600 s) drives the failsafe,
 then publishes the line states, then the alarm. A server `offline` status is logged and the lines
-are held, as on the Linux agent.
+are held, and a live `online` re-sends the hello, as on the Linux agent.
 
 ## Running the tests
 
@@ -150,8 +150,9 @@ timeout range differs, and its Wi-Fi takes no `pm` setting.
   flag only when it replays a stored message to a new subscriber, so the guard catches the replay
   after a reconnect, not a live one. The broker ACL is what stops a live command from anyone but
   the server.
-- **`hello` is not retained**, as with the Linux agent. A controller started after the node
-  connected never sees its capabilities until the node reconnects; reset the Pico.
+- **`hello` is not retained**, as with the Linux agent. The node re-sends it when
+  `server/status` turns `online`, so a controller that starts after the node connected still
+  hears it.
 - **Migrate the server before the first Pico connects.** Its kind, `pico`, is a Postgres enum value
   added by `AddPicoNodeKind`; an unmigrated server fails to store the hello.
 

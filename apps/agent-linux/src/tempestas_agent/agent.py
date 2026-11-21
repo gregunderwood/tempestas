@@ -24,6 +24,8 @@ MILLISECONDS_PER_SECOND = 1000
 SEVERITY_CRITICAL = "critical"
 SEVERITY_INFO = "info"
 SCD4X_METRICS = ("temperature", "humidity", "co2")
+SERVER_ONLINE = "online"
+SERVER_OFFLINE = "offline"
 
 
 def format_current_time() -> str:
@@ -89,6 +91,11 @@ def judge_command(
 
 def is_retained_clear(payload: bytes) -> bool:
     return payload.strip() == b""
+
+
+def is_server_back_online(state: str | None, retained: bool) -> bool:
+    # A retained online is the replay on our own connect, which announce has already answered.
+    return state == SERVER_ONLINE and not retained
 
 
 def judge_expiry(expires_at, now: datetime) -> CommandVerdict | None:
@@ -217,6 +224,25 @@ class Agent:
             self.publish_alarm(
                 contract.AlarmCode.DEADMAN_CLEARED, SEVERITY_INFO, "heartbeats resumed"
             )
+
+    def on_server_status(self, payload: bytes, retained: bool) -> None:
+        try:
+            body = json.loads(payload)
+        except (ValueError, UnicodeDecodeError):
+            return
+        state = body.get("state") if isinstance(body, dict) else None
+        if is_server_back_online(state, retained):
+            log.info("the server came back online - saying hello again")
+            self.say_hello()
+        elif state == SERVER_OFFLINE:
+            # A deploy restarts the server too; the dead-man decides whether it is really gone.
+            log.warning(
+                "the server reported itself offline - holding the lines for the dead-man (%.0fs)",
+                self.config.deadman_s,
+            )
+
+    def say_hello(self) -> None:
+        self.publish("hello", contract.build_hello_topic(self.config.node_id), self.hello_payload())
 
     def enter_failsafe(self, code: str, message: str) -> None:
         # Hardware, then the retained state, then the alarm: whoever reacts already has the truth.

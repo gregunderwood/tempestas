@@ -40,8 +40,11 @@ class NodeAgent:
         self.send(
             "status", contract.build_status_topic(self.node_id), self.build_status_payload(ONLINE_STATE)
         )
-        self.send("hello", contract.build_hello_topic(self.node_id), self.build_hello_payload())
+        self.send_hello()
         self.publish_gpio_states(self.relay_lines.lines)
+
+    def send_hello(self):
+        self.send("hello", contract.build_hello_topic(self.node_id), self.build_hello_payload())
 
     def list_subscriptions(self):
         node_id = self.node_id
@@ -57,7 +60,7 @@ class NodeAgent:
         if topic == contract.build_heartbeat_topic(node_id):
             self.on_heartbeat(payload)
         elif topic == contract.SERVER_STATUS_TOPIC:
-            self.on_server_status(payload)
+            self.on_server_status(payload, is_retained)
         elif topic == contract.build_gpio_set_topic(node_id):
             self.on_command(payload, is_retained)
 
@@ -111,8 +114,12 @@ class NodeAgent:
             self.is_deadman_tripped = False
             self.publish_alarm(contract.AlarmCode.DEADMAN_CLEARED, INFO_SEVERITY, "heartbeats resumed")
 
-    def on_server_status(self, payload):
-        if is_server_offline(parse_json_object(payload)):
+    def on_server_status(self, payload, is_retained):
+        server_status = parse_json_object(payload)
+        if is_server_back_online(server_status, is_retained):
+            self.log("the server came back online - saying hello again")
+            self.send_hello()
+        elif is_server_offline(server_status):
             # A deploy restarts the server too; the dead-man decides whether it is really gone.
             self.log(
                 "the server reported itself offline - holding the lines for the dead-man (%ds)"
@@ -264,6 +271,11 @@ class NodeAgent:
 def read_quality_of_service(message_name):
     quality_of_service, _is_retained = contract.QOS[message_name]
     return quality_of_service
+
+
+def is_server_back_online(server_status, is_retained):
+    # A retained online is the replay on our own connect, which announce has already answered.
+    return not is_retained and server_status is not None and server_status.get("state") == ONLINE_STATE
 
 
 def is_server_offline(server_status):

@@ -206,6 +206,31 @@ def test_still_fails_safe_on_the_deadman_after_the_server_goes_offline():
     assert node.levels() == [RELEASED_LEVEL, RELEASED_LEVEL]
 
 
+def test_says_hello_again_when_the_server_comes_back_online():
+    node = AgentUnderTest()
+    node.deliver("server", {"state": "offline"})
+    node.deliver("server", {"state": "online"})
+    hellos = node.publisher.on_topic("/hello")
+    assert [(hello.payload["bootId"], hello.is_retained) for hello in hellos] == [("boot-1", False)]
+    assert hellos[0].payload["capabilities"]["gpio"]["pins"] == [HEATER_PIN, HEAT_TAPE_PIN]
+
+
+def test_does_not_repeat_the_hello_for_the_retained_online_replayed_on_connect():
+    node = AgentUnderTest()
+    node.agent.announce()
+    node.deliver("server", {"state": "online"}, is_retained=True)
+    assert len(node.publisher.on_topic("/hello")) == 1
+
+
+def test_a_server_coming_back_online_leaves_the_lines_alone():
+    node = AgentUnderTest()
+    node.heartbeat()
+    node.command(DRIVEN_LOW_LEVEL)
+    node.deliver("server", {"state": "online"})
+    assert node.levels() == [DRIVEN_LOW_LEVEL, RELEASED_LEVEL]
+    assert node.alarm_codes() == []
+
+
 def test_publishes_each_reading_with_a_rising_sequence():
     node = AgentUnderTest()
     node.agent.publish_readings()

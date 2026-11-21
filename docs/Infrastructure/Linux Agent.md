@@ -216,7 +216,10 @@ The config **refuses to start** if any managed line has no declared safe level. 
 has decided about is not acceptable on a board where one of them is a propane burner.
 
 The agent also watches the server's own LWT, but `server/status = offline` only logs a warning: a
-deploy restarts the server, so the dead-man alone decides when the lines fail safe.
+deploy restarts the server, so the dead-man alone decides when the lines fail safe. When the
+status turns `online` again the agent re-sends its `hello`, so a server that was down while the
+node restarted still learns the new boot id. The retained `online` replayed on the agent's own
+connect is skipped, since the connect has just announced.
 
 ## The sensor
 
@@ -368,9 +371,10 @@ change.
   reads the level from before the agent's own restart, not the failsafe its claim just applied.
 - **A graceful stop publishes `status: offline` explicitly.** MQTT suppresses the will on a
   clean disconnect, so without that the node is left looking online forever.
-- **`hello` is not retained,** so a node announces only on its own MQTT connect. A controller that
-  starts while the node is already connected sees the retained `status` but never the capabilities,
-  and cannot admit it. Restart the agent to make it re-announce.
+- **`hello` is not retained,** so a node announces on its own MQTT connect and again whenever
+  `server/status` turns `online`. Without the second, a node that restarted while the server was
+  down kept its old boot id on the server, and every sample was dropped as a duplicate of the old
+  boot's `seq`.
 - **`systemctl stop` is a clean exit and does NOT trigger `Restart=on-failure`.** Stopping the
   agent therefore leaves the pads holding whatever they last drove, with nothing supervising them.
   Drive the failsafe before a long stop, or expect `relay-check.py` to be what turns things off.
