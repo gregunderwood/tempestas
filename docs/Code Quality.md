@@ -11,7 +11,7 @@ invariants which keep a burner safe are visible in the code rather than remember
 
 ## Key files
 
-- [../tsconfig.base.json](../tsconfig.base.json) — strict, and the `@tempestas/domain` path alias
+- [../tsconfig.base.json](../tsconfig.base.json) — the `@tempestas/domain` path alias; `strict` is set in each project's own `tsconfig.json`
 - [../eslint.config.mjs](../eslint.config.mjs) — `@nx/enforce-module-boundaries`, including the banned imports inside `libs/domain`
 - [../.prettierrc](../.prettierrc) — single quotes, 2-space tabs
 - [../.nvmrc](../.nvmrc) / `engines` in [../package.json](../package.json) — Node 22, kept in step
@@ -22,7 +22,7 @@ invariants which keep a burner safe are visible in the code rather than remember
 ### Final-step commands (always run before declaring work done)
 
 ```bash
-npx nx run-many -t lint,test,build,migration-round-trip     # the gate
+npx nx run-many -t lint,typecheck,test,build,migration-round-trip     # the gate
 npx nx test server --coverage          # the thresholds are only checked here
 npx prettier --write .                 # format
 ```
@@ -30,7 +30,9 @@ npx prettier --write .                 # format
 **`test` alone is not enough.** Vitest transpiles without typechecking, so a type error passes a
 green test run and only fails in the webpack/Angular builds. Phase 4.5 shipped two of them —
 `Object.hasOwn` against a `lib: es2020` target, and a union that needed `=== false` to narrow —
-both invisible until `build` ran.
+both invisible until `build` ran. The builds exclude specs, so a type error in a spec is caught
+only by `typecheck`, which checks each project's `tsconfig.spec.json` as well as its app or lib
+config.
 
 ### TypeScript
 
@@ -250,7 +252,7 @@ The docs and the commit history are the time capsule.
 
 ## Pitfalls
 
-- **`npx nx run-many -t lint,test,build,migration-round-trip` is non-negotiable.** See above — `test` cannot see a type error.
+- **`npx nx run-many -t lint,typecheck,test,build,migration-round-trip` is non-negotiable.** See above — `test` cannot see a type error.
 - **`libs/domain` bans `rxjs`.** An observable in the shared contract would drag a framework into
   the Python-facing types. Streams are a server concern.
 - **Postgres reorders `jsonb` keys.** Never compare a jsonb column with `JSON.stringify`; compare
