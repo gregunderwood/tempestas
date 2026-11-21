@@ -1,6 +1,6 @@
 import pytest
 
-from fakes import FakeMachine
+from fakes import FakeMachine, load_board
 from relay_lines import DRIVEN_LOW_LEVEL, RELEASED_LEVEL, ReleasedWhenHighLines, UnmanagedPin
 
 HEATER_PIN = 20
@@ -10,7 +10,8 @@ HEAT_TAPE_PIN = 18
 def build_lines():
     machine = FakeMachine()
     failsafe_levels = {HEATER_PIN: RELEASED_LEVEL, HEAT_TAPE_PIN: RELEASED_LEVEL}
-    return machine, ReleasedWhenHighLines(machine, (HEATER_PIN, HEAT_TAPE_PIN), failsafe_levels)
+    board = load_board("pico_w", machine)
+    return machine, ReleasedWhenHighLines(machine, board, (HEATER_PIN, HEAT_TAPE_PIN), failsafe_levels)
 
 
 def test_level_zero_drives_the_pin_low_and_reads_back_zero():

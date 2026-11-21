@@ -8,10 +8,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEVICE="$HERE/apps/agent-micropython/device"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 PORT_WAIT_SECONDS=10
-# The RP2040's WATCHDOG CTRL register; bit 30 is ENABLE, and once set it cannot be cleared.
-REFUSE_IF_WATCHDOG_ARMED="import machine
-if machine.mem32[0x40058000] & (1 << 30):
-    raise RuntimeError('watchdog already armed: missed the boot grace, run the deploy again')"
+BOARD="$(sed -n 's/^BOARD = "\(.*\)"$/\1/p' "$DEVICE/settings.py")"
+BOARD_FILE="boards/$BOARD.py"
 AGENT_FILES=(
   main.py node_runtime.py node_agent.py tempestas_mqtt.py command_guard.py contract.py
   iso_time.py relay_lines.py ds18b20_probes.py settings.py credentials.py
@@ -28,6 +26,11 @@ wait_for_port() {
   echo "$PORT did not come back after the reset." >&2
   exit 1
 }
+
+if [ ! -f "$DEVICE/$BOARD_FILE" ]; then
+  echo "settings.BOARD is \"$BOARD\", but there is no device/$BOARD_FILE." >&2
+  exit 1
+fi
 
 if [ ! -f "$DEVICE/credentials.py" ]; then
   echo "No apps/agent-micropython/device/credentials.py. Copy credentials.example.py and fill it in." >&2
@@ -46,7 +49,9 @@ mpremote reset || true
 sleep 1
 wait_for_port
 
-say "Copying the agent"
-(cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + cp "${AGENT_FILES[@]}" : + reset)
+say "Copying the agent for the $BOARD board"
+REFUSE_IF_WATCHDOG_ARMED="$(cat "$DEVICE/$BOARD_FILE")
+refuse_if_watchdog_armed()"
+(cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + cp "${AGENT_FILES[@]}" : + cp "$BOARD_FILE" :board.py + reset)
 
 say "Done. Watch it with: uv tool run mpremote connect $PORT resume repl"
