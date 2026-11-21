@@ -32,6 +32,7 @@ UNANSWERED_PINGS_BEFORE_DROPPING = 2
 WIFI_POWER_SAVE_OFF = 0xA11140
 MILLISECONDS_PER_SECOND = 1000
 BOOT_ID_BYTES = 6
+MAX_MESSAGES_HELD_OFFLINE = 20
 
 
 def log(message):
@@ -54,14 +55,32 @@ class BrokerPublisher:
 
     def __init__(self):
         self.client = None
+        self.held_messages = []
 
     def publish(self, topic, text, is_retained, quality_of_service):
         if self.client is None:
+            self.hold_if_worth_keeping(topic, text, is_retained, quality_of_service)
             return
         try:
             self.client.publish(topic, text, is_retained, quality_of_service)
         except Exception as error:
+            self.hold_if_worth_keeping(topic, text, is_retained, quality_of_service)
             self.drop("publish failed: %r" % error)
+
+    def hold_if_worth_keeping(self, topic, text, is_retained, quality_of_service):
+        # Alarms and results are QoS 1 and not retained; nothing else repeats them after a reconnect.
+        is_worth_keeping = quality_of_service > 0 and not is_retained
+        if not is_worth_keeping:
+            return
+        self.held_messages.append((topic, text, is_retained, quality_of_service))
+        if len(self.held_messages) > MAX_MESSAGES_HELD_OFFLINE:
+            self.held_messages.pop(0)
+
+    def send_held_messages(self):
+        held_messages = self.held_messages
+        self.held_messages = []
+        for topic, text, is_retained, quality_of_service in held_messages:
+            self.publish(topic, text, is_retained, quality_of_service)
 
     def drop(self, reason):
         log("dropping the broker connection: %s" % reason)
@@ -125,10 +144,12 @@ class Connection:
         if not self.is_clock_sync_due():
             return
         self.last_clock_attempt_ticks = self.clock.ticks()
+        self.watchdog.feed()
         try:
             ntptime.settime()
             self.is_clock_synced = True
             log("clock set from NTP")
+            self.agent.on_clock_set()
         except Exception as error:
             log("NTP failed: %r" % error)
 
@@ -168,6 +189,7 @@ class Connection:
         self.publisher.client = client
         self.last_ping_ticks = self.clock.ticks()
         self.agent.announce()
+        self.publisher.send_held_messages()
 
     def deliver(self, topic, payload, is_retained):
         try:
@@ -186,11 +208,14 @@ class Connection:
             self.publisher.drop("broker stopped answering pings")
             return
         try:
-            while client.check_msg() is not None:
+            while self.publisher.client is client and client.check_msg() is not None:
                 self.watchdog.feed()
-            self.ping_when_due(client)
+            if self.publisher.client is client:
+                self.ping_when_due(client)
         except Exception as error:
-            self.publisher.drop("connection lost: %r" % error)
+            # A handler may already have dropped this client; the tail of its message then fails too.
+            if self.publisher.client is client:
+                self.publisher.drop("connection lost: %r" % error)
 
     def ping_when_due(self, client):
         ping_interval_milliseconds = settings.KEEPALIVE_SECONDS * MILLISECONDS_PER_SECOND // 2

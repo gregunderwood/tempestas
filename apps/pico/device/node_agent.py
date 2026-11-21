@@ -24,6 +24,7 @@ class NodeAgent:
         self.bound_controller = None
         self.last_heartbeat_ticks = None
         self.is_deadman_tripped = False
+        self.has_unpublished_states = False
 
     def announce(self):
         """On every connect: online, hello, then the lines as they are."""
@@ -131,10 +132,19 @@ class NodeAgent:
             self.send("sample", topic, self.sample_payload(reading))
 
     def publish_gpio_states(self, pins):
+        if self.read_set_clock() is None:
+            # A retained state dated 1970 would lose to the server's own row when it is replayed.
+            self.has_unpublished_states = True
+            return
         for pin in pins:
             self.send(
                 "gpioState", contract.topic_gpio_state(self.node_id(), pin), self.gpio_state_payload(pin)
             )
+
+    def on_clock_set(self):
+        if self.has_unpublished_states:
+            self.has_unpublished_states = False
+            self.publish_gpio_states(self.relay_lines.lines)
 
     def publish_alarm(self, alarm_code, severity, message):
         self.send(

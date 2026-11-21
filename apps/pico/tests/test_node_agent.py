@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from contract import SERVER_STATUS_TOPIC, AlarmCode
 from ds18b20_probes import Ds18b20Probes
-from fakes import FakeBusSensors, FakeClock, FakeMachine, FakePublisher, RecordingLog
+from fakes import SET_CLOCK_EPOCH_SECONDS, FakeBusSensors, FakeClock, FakeMachine, FakePublisher, RecordingLog
 from iso_time import format_iso
 from node_agent import NodeAgent
 from relay_lines import DRIVEN_LOW_LEVEL, RELEASED_LEVEL, ReleasedWhenHighLines
@@ -192,3 +192,20 @@ def test_reports_an_unmanaged_pin_as_failed_and_publishes_no_state_for_it():
     assert result["ok"] is False
     assert result["lines"][0]["readback"] is None
     assert node.publisher.on_topic("/gpio/state/99") == []
+
+
+def test_holds_back_line_state_until_ntp_has_set_the_clock():
+    node = AgentUnderTest(FakeClock(epoch_seconds=0))
+    node.agent.announce()
+    assert node.publisher.on_topic("/gpio/state/20") == []
+    node.clock.epoch = SET_CLOCK_EPOCH_SECONDS
+    node.agent.on_clock_set()
+    states = node.publisher.on_topic("/gpio/state/20") + node.publisher.on_topic("/gpio/state/18")
+    assert [state.payload["ts"][:4] for state in states] == ["2026", "2026"]
+
+
+def test_still_raises_the_alarm_when_failing_safe_before_the_clock_is_set():
+    node = AgentUnderTest(FakeClock(epoch_seconds=0))
+    node.deliver("server", {"state": "offline"})
+    assert node.alarm_codes() == [AlarmCode.SAFE_STATE_ENTERED]
+    assert node.levels() == [RELEASED_LEVEL, RELEASED_LEVEL]

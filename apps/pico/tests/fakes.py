@@ -113,11 +113,14 @@ class FakeBusSensors:
             raise self.bus_failure
         self.conversions += 1
 
-    def read_temp(self, rom):
+    def read_scratch(self, rom):
         temperature = self.temperatures_by_rom[rom]
         if isinstance(temperature, Exception):
             raise temperature
-        return temperature
+        if isinstance(temperature, bytes):
+            return temperature
+        sixteenths = round(temperature * 16) & 0xFFFF
+        return bytes((sixteenths & 0xFF, sixteenths >> 8, 0x4B, 0x46, 0x7F, 0xFF, 0x0C, 0x10, 0x00))
 
 
 class RecordingLog:
