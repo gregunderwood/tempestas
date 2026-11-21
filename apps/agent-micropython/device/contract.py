@@ -18,44 +18,44 @@ SCHEMAS = {
 SUPPORTED_MAJOR = 1
 
 
-def node_root(node_id):
+def build_node_root(node_id):
     return MQTT_ROOT + "/node/" + node_id
 
 
-def topic_hello(node_id):
-    return node_root(node_id) + "/hello"
+def build_hello_topic(node_id):
+    return build_node_root(node_id) + "/hello"
 
 
-def topic_status(node_id):
-    return node_root(node_id) + "/status"
+def build_status_topic(node_id):
+    return build_node_root(node_id) + "/status"
 
 
-def topic_sample(node_id, sensor_id):
-    return node_root(node_id) + "/sensor/" + sensor_id + "/sample"
+def build_sample_topic(node_id, sensor_id):
+    return build_node_root(node_id) + "/sensor/" + sensor_id + "/sample"
 
 
-def topic_gpio_set(node_id):
-    return node_root(node_id) + "/gpio/set"
+def build_gpio_set_topic(node_id):
+    return build_node_root(node_id) + "/gpio/set"
 
 
-def topic_gpio_sync(node_id):
-    return node_root(node_id) + "/gpio/sync"
+def build_gpio_sync_topic(node_id):
+    return build_node_root(node_id) + "/gpio/sync"
 
 
-def topic_gpio_state(node_id, pin):
-    return node_root(node_id) + "/gpio/state/" + str(pin)
+def build_gpio_state_topic(node_id, pin):
+    return build_node_root(node_id) + "/gpio/state/" + str(pin)
 
 
-def topic_gpio_result(node_id):
-    return node_root(node_id) + "/gpio/result"
+def build_gpio_result_topic(node_id):
+    return build_node_root(node_id) + "/gpio/result"
 
 
-def topic_heartbeat(node_id):
-    return node_root(node_id) + "/control/heartbeat"
+def build_heartbeat_topic(node_id):
+    return build_node_root(node_id) + "/control/heartbeat"
 
 
-def topic_alarm(node_id):
-    return node_root(node_id) + "/alarm"
+def build_alarm_topic(node_id):
+    return build_node_root(node_id) + "/alarm"
 
 
 SERVER_STATUS_TOPIC = MQTT_ROOT + "/server/status"

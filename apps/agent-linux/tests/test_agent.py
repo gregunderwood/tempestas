@@ -313,7 +313,7 @@ class TestFailsafePublishesState:
         agent, _gpio, client = self._agent()
         agent.enter_failsafe(contract.AlarmCode.SAFE_STATE_ENTERED, "x")
         kinds = [
-            contract.schema_major(json.loads(p)["schema"]) and json.loads(p)["schema"]
+            contract.read_schema_major(json.loads(p)["schema"]) and json.loads(p)["schema"]
             for _t, p in client.published
         ]
         assert kinds.index("gpioState/1") < kinds.index("alarm/1")

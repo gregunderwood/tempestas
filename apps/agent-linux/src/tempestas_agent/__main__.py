@@ -42,7 +42,7 @@ def build_client(agent: Agent) -> mqtt.Client:
 
     qos, retain = contract.QOS["status"]
     client.will_set(
-        contract.topic_status(cfg.node_id),
+        contract.build_status_topic(cfg.node_id),
         json.dumps(agent.status_payload("offline")),
         qos=qos,
         retain=retain,
@@ -61,14 +61,14 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
 
         qos, retain = contract.QOS["status"]
         client.publish(
-            contract.topic_status(cfg.node_id),
+            contract.build_status_topic(cfg.node_id),
             json.dumps(agent.status_payload("online")),
             qos=qos,
             retain=retain,
         )
         hqos, hretain = contract.QOS["hello"]
         client.publish(
-            contract.topic_hello(cfg.node_id),
+            contract.build_hello_topic(cfg.node_id),
             json.dumps(agent.hello_payload()),
             qos=hqos,
             retain=hretain,
@@ -82,28 +82,28 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
 
         client.subscribe(
             [
-                (contract.topic_gpio_set(cfg.node_id), 1),
-                (contract.topic_gpio_sync(cfg.node_id), 1),
-                (contract.topic_heartbeat(cfg.node_id), 0),
+                (contract.build_gpio_set_topic(cfg.node_id), 1),
+                (contract.build_gpio_sync_topic(cfg.node_id), 1),
+                (contract.build_heartbeat_topic(cfg.node_id), 0),
                 (contract.SERVER_STATUS_TOPIC, 1),
             ]
         )
 
     def on_message(_client, _userdata, msg):
         topic = msg.topic
-        if topic == contract.topic_heartbeat(cfg.node_id):
+        if topic == contract.build_heartbeat_topic(cfg.node_id):
             agent.on_heartbeat(msg.payload)
             return
         if topic == contract.SERVER_STATUS_TOPIC:
             _on_server_status(agent, msg.payload)
             return
-        if topic == contract.topic_gpio_set(cfg.node_id):
+        if topic == contract.build_gpio_set_topic(cfg.node_id):
             result = agent.on_command(msg.payload, retained=bool(msg.retain))
             if result is None:
                 return
             rqos, rretain = contract.QOS["gpioResult"]
             client.publish(
-                contract.topic_gpio_result(cfg.node_id),
+                contract.build_gpio_result_topic(cfg.node_id),
                 json.dumps(result),
                 qos=rqos,
                 retain=rretain,
@@ -197,7 +197,7 @@ def main() -> int:
             for sensor_id, reading in sensor.read_all():
                 qos, retain = contract.QOS["sample"]
                 client.publish(
-                    contract.topic_sample(config.node_id, sensor_id),
+                    contract.build_sample_topic(config.node_id, sensor_id),
                     json.dumps(agent.sample_payload(sensor_id, reading)),
                     qos=qos,
                     retain=retain,
@@ -210,7 +210,7 @@ def main() -> int:
         # or this node is left looking online forever.
         qos, retain = contract.QOS["status"]
         client.publish(
-            contract.topic_status(config.node_id),
+            contract.build_status_topic(config.node_id),
             json.dumps(agent.status_payload("offline")),
             qos=qos,
             retain=retain,
