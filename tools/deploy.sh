@@ -6,9 +6,8 @@
 # on a 3.7 GiB box and would put Postgres and the burner controller in reach of
 # the OOM killer - see docs/Safety.md.
 #
-# Migrations are NOT run: they are a deliberate manual step, because a schema
-# change against the only copy of the greenhouse's history deserves a human
-# reading `migration:show` first. This script prints the command and stops.
+# Migrations are shown, never run: a schema change against the only copy of the
+# greenhouse's history deserves a human reading the list and taking a backup first.
 #
 #   tools/deploy.sh [host]
 
@@ -17,6 +16,9 @@ set -euo pipefail
 HOST="${1:-elantris}"
 REMOTE="/home/gunderwood/tempestas"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MIGRATE="sudo systemd-run --quiet --pipe --wait --uid=gunderwood \
+-p EnvironmentFile=/etc/tempestas/server.env -E NODE_ENV=production \
+/usr/local/bin/node $REMOTE/dist/apps/server/main.js"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
@@ -52,7 +54,7 @@ ssh "$HOST" "cd $REMOTE/dist/apps/server && /usr/local/bin/npm ci --omit=dev --n
 say "Restarting"
 ssh "$HOST" "sudo systemctl restart tempestas-server && sleep 3 && systemctl is-active tempestas-server"
 
-say "Pending migrations"
-echo "Not run by this script. On $HOST:"
-echo "  cd $REMOTE && npm run migration:show   # read it first"
-echo "  cd $REMOTE && npm run migration:run"
+say "Migrations (shown, not run)"
+ssh "$HOST" "$MIGRATE migrate:show"
+echo "To apply any pending above, back up first, then (docs/Infrastructure/Migrations.md):"
+echo "  ssh $HOST $MIGRATE migrate:run"
