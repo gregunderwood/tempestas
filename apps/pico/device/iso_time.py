@@ -7,6 +7,15 @@ SECONDS_PER_HOUR = 3600
 SECONDS_PER_DAY = 86400
 FIRST_YEAR_OF_A_SET_CLOCK = 2024
 UTC_SUFFIXES = ("Z", "+00:00")
+# (start, end, lowest, highest) for year, month, day, hour, minute, second.
+FIELDS = (
+    (0, 4, 1970, 9999),
+    (5, 7, 1, 12),
+    (8, 10, 1, 31),
+    (11, 13, 0, 23),
+    (14, 16, 0, 59),
+    (17, 19, 0, 59),
+)
 
 
 def format_iso(epoch_seconds):
@@ -25,17 +34,12 @@ def parse_iso(text):
     without_zone = strip_utc_suffix(text)
     if without_zone is None or len(without_zone) < 19:
         return None
-    try:
-        year = int(without_zone[0:4])
-        month = int(without_zone[5:7])
-        day = int(without_zone[8:10])
-        hour = int(without_zone[11:13])
-        minute = int(without_zone[14:16])
-        second = int(without_zone[17:19])
-    except ValueError:
-        return None
     if not has_iso_separators(without_zone) or not is_fraction_of_a_second(without_zone[19:]):
         return None
+    values = [read_field(without_zone, field) for field in FIELDS]
+    if None in values:
+        return None
+    year, month, day, hour, minute, second = values
     days = count_days_since_epoch(year, month, day)
     return days * SECONDS_PER_DAY + hour * SECONDS_PER_HOUR + minute * SECONDS_PER_MINUTE + second
 
@@ -45,6 +49,15 @@ def strip_utc_suffix(text):
         if text.endswith(suffix):
             return text[: len(text) - len(suffix)]
     return None
+
+
+def read_field(text, field):
+    start, end, lowest, highest = field
+    digits = text[start:end]
+    if not digits.isdigit():
+        return None
+    value = int(digits)
+    return value if lowest <= value <= highest else None
 
 
 def is_fraction_of_a_second(text):

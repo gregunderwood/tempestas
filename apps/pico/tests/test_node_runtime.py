@@ -56,6 +56,10 @@ class FakeClient:
         self.failure = failure
         self.is_closed = False
         self.unanswered_pings = 0
+        self.published_topics = []
+
+    def publish(self, topic, text, is_retained, quality_of_service):
+        self.published_topics.append(topic)
 
     def check_msg(self):
         if self.failure is not None:
@@ -68,6 +72,10 @@ class FakeClient:
 class QuietAgent:
     def __init__(self, failure=None):
         self.failure = failure
+        self.clock_set_count = 0
+
+    def on_clock_set(self):
+        self.clock_set_count += 1
 
     def on_message(self, topic, payload, is_retained):
         raise self.failure
@@ -165,3 +173,40 @@ def test_drops_the_connection_when_the_broker_stops_answering_pings(runtime):
     runtime.publisher.client = client
     runtime.connection.serve_pending_messages()
     assert runtime.publisher.client is None
+
+
+def test_holds_alarms_and_results_while_offline_but_not_samples_or_retained_state(runtime):
+    publisher = runtime.publisher
+    publisher.publish("alarm", "{}", False, 1)
+    publisher.publish("gpio/result", "{}", False, 1)
+    publisher.publish("sensor/air/sample", "{}", False, 0)
+    publisher.publish("gpio/state/20", "{}", True, 1)
+    client = FakeClient()
+    publisher.client = client
+    publisher.send_held_messages()
+    assert client.published_topics == ["alarm", "gpio/result"]
+    assert publisher.held_messages == []
+
+
+def test_keeps_only_the_newest_messages_when_offline_for_long(runtime):
+    for number in range(runtime.module.MAX_MESSAGES_HELD_OFFLINE + 5):
+        runtime.publisher.publish("alarm/%d" % number, "{}", False, 1)
+    held_topics = [message[0] for message in runtime.publisher.held_messages]
+    assert len(held_topics) == runtime.module.MAX_MESSAGES_HELD_OFFLINE
+    assert held_topics[-1] == "alarm/%d" % (runtime.module.MAX_MESSAGES_HELD_OFFLINE + 4)
+
+
+def test_tells_the_agent_when_ntp_has_set_the_clock(runtime):
+    runtime.connection.resync_clock_while_online()
+    assert runtime.connection.agent.clock_set_count == 1
+
+
+def test_a_client_dropped_by_its_own_handler_is_not_dropped_twice(runtime):
+    class ClientDroppedMidMessage(FakeClient):
+        def check_msg(self):
+            runtime.publisher.drop("publish failed")
+            raise AttributeError("'NoneType' object has no attribute 'write'")
+
+    runtime.publisher.client = ClientDroppedMidMessage()
+    runtime.connection.serve_pending_messages()
+    assert sum("dropping" in line for line in runtime.module.log.lines) == 1
