@@ -19,8 +19,7 @@ sample_interval_s = 10.0
 # No temperature offset, because the real canopy sensor has none yet either.
 
 [gpio]
-# 21 HPS via contactor, 20 exhaust fans, 26 MH via its own module,
-# 16 dark (CO2 moved to elantris), 12 spare with no load.
+# 21 HPS, 20 exhaust fans, 26 MH on its own module, 16 dark (CO2 moved to elantris), 12 spare.
 lines = [21, 20, 26, 16, 12]
 chip_label = "pinctrl-rp1"     # Pi 5
 

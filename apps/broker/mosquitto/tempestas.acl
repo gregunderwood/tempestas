@@ -14,8 +14,7 @@ topic read tempestas/v1/node/+/gpio/result
 topic read tempestas/v1/node/+/gpio/state/+
 topic read tempestas/v1/node/+/alarm
 
-# Each node writes only its own subtree and never gpio/set, so it cannot command itself.
-# It reads the server's status so it can fail safe the moment the server's last will fires.
+# Nodes write only their own subtree, never gpio/set; server/status lets them fail safe on its will.
 user elantris
 topic write tempestas/v1/node/elantris/hello
 topic write tempestas/v1/node/elantris/status
