@@ -37,7 +37,6 @@ export class RealtimeService implements OnDestroy {
   // Every push in arrival order, so two switches of one relay between reads are both seen.
   readonly recentDevicePushes = signal<readonly NumberedPush[]>([]);
   readonly latestRulesCycle = signal<RulesCycle | null>(null);
-  // Server timestamps are aged against the server's clock; a browser minutes off would fake or hide a stall.
   readonly serverClockOffsetMilliseconds = signal(0);
 
   private socket?: Socket;
