@@ -10,7 +10,7 @@ the app and the standalone DataSource — schema changes are reviewed SQL, never
 - [../../apps/server/src/typeorm.config.ts](../../apps/server/src/typeorm.config.ts) — the DataSource the CLI uses (globs for entity discovery, unlike the app's explicit list)
 - [../../apps/server/src/migrations/](../../apps/server/src/migrations/) — the migrations, in timestamp order
 - `scripts` in [../../package.json](../../package.json) — the four `migration:*` commands
-- [../../apps/server/src/migrate.ts](../../apps/server/src/migrate.ts) — the same migrations inside the shipped bundle, as `main.js migrate:show|run|revert`
+- [../../apps/server/src/migrate.ts](../../apps/server/src/migrate.ts) — the same migrations inside the shipped bundle, as `main.js migrate:show|run|revert|revert-applied`
 
 ## How it works
 
@@ -30,23 +30,22 @@ migration cannot see the database, check that file first.
 ### On elantris
 
 elantris has the build, not a checkout: no `package.json`, no `ts-node`, no source. The server
-bundle carries the same migrations, and `tempestas-migrate@.service` runs them from it with the
-server's own root-only env file. `tools/deploy.sh` checks for pending migrations **before** it
-restarts the server, and stops if there are any: the new code on an unmigrated schema crash-loops.
-It decides from `migrate:show`'s exit status, 3 when something is pending, and stops on any status
-it does not recognise, so a check that cannot run never reads as "nothing pending". Run by hand,
-`systemctl start tempestas-migrate@show.service` therefore reports the job **failed** when
-something is pending: that is the answer, not an error. A stopped deploy has not shipped the web
-bundle either, so the browser keeps matching the running server.
+bundle carries the same migrations, and `tempestas-migrate@.service` runs them from the release
+the `migrator` link points at, with the server's own root-only env file. `tools/deploy.sh` runs
+them itself, before it switches: see [Deploys](Deploys.md). `migrate:show` exits 3 when something
+is pending and 4 when something pending cannot be reverted, so run by hand,
+`systemctl start tempestas-migrate@show.service` reports the job **failed** when something is
+pending: that is the answer, not an error.
 
-Running them stays a separate step, then the deploy runs again:
+`run` applies everything pending in one transaction, and records what it applied in the release's
+`applied-migrations.json`; `revert-applied` reverts exactly that, in one transaction, which is how
+a rollback undoes a deploy.
 
 ```bash
-ssh elantris sudo -n systemctl start tempestas-migrate@run.service && tools/deploy.sh
 ssh elantris journalctl -u tempestas-migrate@run.service -n 20 -o cat   # what it applied
 ```
 
-**`run` and `revert` take a backup first**, through a drop-in that makes them require
+**`run`, `revert` and `revert-applied` take a backup first**, through a drop-in that makes them require
 `tempestas-backup.service`, and do nothing if it fails. The backup keeps the last 10 dumps in
 `/var/backups/tempestas`, and its journal names the file it wrote. After
 `tools/install-deploy-privileges.sh`, none of this asks for a password.

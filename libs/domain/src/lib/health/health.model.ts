@@ -4,6 +4,8 @@ import type { DeviceRole } from '../devices/device.model';
 export interface HealthReport {
   status: 'ok' | 'degraded';
   db: boolean;
+  /** The deployed release this server runs; null when run from a checkout. */
+  releaseId: string | null;
   uptimeSeconds: number;
   nodes: { total: number; online: number; pending: number };
   readings: { latestAt: string | null; ageSeconds: number | null };

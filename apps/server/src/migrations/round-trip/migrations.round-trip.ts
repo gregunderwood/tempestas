@@ -1,7 +1,19 @@
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { inject } from 'vitest';
 import { DataSource, type QueryRunner } from 'typeorm';
 import { postgresConnectionOptions } from '../../app/common/postgres-connection';
 import * as migrations from '..';
+import {
+  AddNodeAgentName1795330000000,
+  AddPicoNodeKind1795220722652,
+} from '..';
+import {
+  EXIT_MIGRATIONS_PENDING,
+  revertMigrations,
+  runMigrationCommand,
+} from '../../migrate';
 import {
   IrreversibleMigration,
   isIrreversible,
@@ -22,6 +34,7 @@ const VOLATILE_DUMP_LINE = /^(--|\\restrict |\\unrestrict )/;
 const MIGRATIONS_TABLE_COUNTER =
   /^SELECT pg_catalog\.setval\('public\.migrations_id_seq'/;
 const ROLLBACK_COPY = 'rollback_copy';
+const COMMAND_DATABASE = 'command_cycle';
 
 class MarkedIrreversibleFixture9999999999999 extends IrreversibleMigration {
   name = 'MarkedIrreversibleFixture9999999999999';
@@ -44,15 +57,8 @@ function connectWith(
   migrationsSoFar: MigrationClass[],
   database: string,
 ): DataSource {
-  const settings: Record<string, string> = {
-    DATABASE_HOST: '127.0.0.1',
-    DATABASE_PORT: String(throwawayPostgres.port),
-    DATABASE_USER: throwawayPostgres.username,
-    DATABASE_PASSWORD: throwawayPostgres.password,
-    DATABASE_NAME: database,
-  };
   return new DataSource({
-    ...postgresConnectionOptions((name) => settings[name]),
+    ...postgresConnectionOptions(readSettingFor(database)),
     migrations: migrationsSoFar,
   });
 }
@@ -70,18 +76,40 @@ async function withConnection(
   }
 }
 
-// The same transaction mode tempestas-migrate@run and @revert use.
+// The transaction mode tempestas-migrate@run uses, and the revert tempestas-migrate@revert-applied uses.
 const applyPending = (migrationsSoFar: MigrationClass[]) =>
   withConnection(migrationsSoFar, (source) =>
-    source.runMigrations({ transaction: 'each' }),
+    source.runMigrations({ transaction: 'all' }),
+  );
+
+const revertNewest = (
+  migrationsSoFar: MigrationClass[],
+  newestFirst: MigrationClass[],
+  database?: string,
+) =>
+  withConnection(
+    migrationsSoFar,
+    (source) =>
+      revertMigrations(
+        source,
+        newestFirst.map((migrationClass) => migrationClass.name),
+      ),
+    database,
   );
 
 const revertLast = (migrationsSoFar: MigrationClass[], database?: string) =>
-  withConnection(
-    migrationsSoFar,
-    (source) => source.undoLastMigration({ transaction: 'each' }),
-    database,
-  );
+  revertNewest(migrationsSoFar, migrationsSoFar.slice(-1), database);
+
+function readSettingFor(database: string) {
+  const settings: Record<string, string> = {
+    DATABASE_HOST: '127.0.0.1',
+    DATABASE_PORT: String(throwawayPostgres.port),
+    DATABASE_USER: throwawayPostgres.username,
+    DATABASE_PASSWORD: throwawayPostgres.password,
+    DATABASE_NAME: database,
+  };
+  return (name: string) => settings[name];
+}
 
 function readDump(database: string, ...dumpOptions: string[]): string {
   const dump = runDocker(
@@ -203,6 +231,66 @@ describe('every migration, in order, on a database with a row in each table', ()
       }
       await expectRevertOverNewRows(migrationsSoFar, newRows, schemaBefore);
     });
+  });
+
+  // A rollback over a deploy that applied several must never stop between them.
+  it('reverts several migrations all together or not at all', async () => {
+    await withCopyOfMainDatabase(async (copy) => {
+      await withConnection(
+        migrationsInOrder,
+        (source) =>
+          source.query(
+            `INSERT INTO nodes (slug, display_name, kind, capabilities) VALUES ('braize', 'Braize', 'pico', '{}')`,
+          ),
+        copy,
+      );
+      const copyBeforeRevert = readDatabase(copy);
+
+      await expect(
+        revertNewest(
+          migrationsInOrder,
+          [AddNodeAgentName1795330000000, AddPicoNodeKind1795220722652],
+          copy,
+        ),
+      ).rejects.toThrow(/braize/);
+      expect(readDatabase(copy)).toBe(copyBeforeRevert);
+    });
+  });
+
+  it('shows, runs and reverts what it applied through the commands the units call', async () => {
+    runAsSuperuser(
+      throwawayPostgres.containerId,
+      `CREATE DATABASE ${COMMAND_DATABASE} OWNER ${throwawayPostgres.username}`,
+    );
+    const options = {
+      readSetting: readSettingFor(COMMAND_DATABASE),
+      appliedMigrationsFile: join(
+        mkdtempSync(join(tmpdir(), 'release-')),
+        'applied-migrations.json',
+      ),
+    };
+    expect(await runMigrationCommand('show', options)).toBe(
+      EXIT_MIGRATIONS_PENDING,
+    );
+    // After show, whose connection installs pgcrypto as the server's does, and with TypeORM's own table.
+    await withConnection(
+      [],
+      (source) => source.runMigrations(),
+      COMMAND_DATABASE,
+    );
+    const schemaBeforeAnyMigration = readSchema(COMMAND_DATABASE);
+
+    await runMigrationCommand('run', options);
+    expect(await runMigrationCommand('show', options)).toBe(0);
+    expect(
+      JSON.parse(readFileSync(options.appliedMigrationsFile, 'utf8')),
+    ).toEqual(migrationsInOrder.map((migrationClass) => migrationClass.name));
+
+    await runMigrationCommand('revert-applied', options);
+    expect(await runMigrationCommand('show', options)).toBe(
+      EXIT_MIGRATIONS_PENDING,
+    );
+    expect(readSchema(COMMAND_DATABASE)).toBe(schemaBeforeAnyMigration);
   });
 
   it('refuses to revert a migration marked irreversible, and changes nothing', async () => {
