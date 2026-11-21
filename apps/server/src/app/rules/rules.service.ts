@@ -258,8 +258,8 @@ export class RulesService implements OnApplicationBootstrap {
   }
 
   findLastEvaluations(): RulesEvaluation[] {
-    return [...this.lastEvaluations.values()].sort((newer, older) =>
-      older.evaluatedAt.localeCompare(newer.evaluatedAt),
+    return [...this.lastEvaluations.values()].sort((first, second) =>
+      second.evaluatedAt.localeCompare(first.evaluatedAt),
     );
   }
 
