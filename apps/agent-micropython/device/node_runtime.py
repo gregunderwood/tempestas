@@ -16,7 +16,7 @@ import contract
 import credentials
 import settings
 from ds18b20_probes import Ds18b20Probes
-from node_agent import NodeAgent
+from node_agent import OFFLINE_STATE, NodeAgent
 from relay_lines import ReleasedWhenHighLines
 from tempestas_mqtt import MqttSession
 
@@ -35,7 +35,6 @@ BOOT_ID_BYTES = 6
 MAX_MESSAGES_HELD_OFFLINE = 20
 PINGS_PER_KEEPALIVE = 2
 CLIENT_ID_PREFIX = "tempestas-"
-OFFLINE_STATE = "offline"
 
 
 def log(message):
