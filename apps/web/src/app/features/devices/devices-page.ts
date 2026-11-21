@@ -3,9 +3,9 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { ApiService } from '../../core/api.service';
+import { refreshAfterSuccess } from '../../core/refresh-after-success';
 import { injectLiveDevices } from '../../core/live-devices';
 import type { Device } from '@tempestas/domain';
-import type { Observable } from 'rxjs';
 import { isHeldOffByInterlock } from './device-hold';
 
 // No force-on here: it bypasses the burner's anti-short-cycle interlock.
@@ -94,21 +94,17 @@ export class DevicesPage {
   protected readonly isHeldOffByInterlock = isHeldOffByInterlock;
 
   turnOn(device: Device): void {
-    this.refreshAfterSuccess(this.api.turnOn(device.id));
+    refreshAfterSuccess(this.api.turnOn(device.id), () => this.refresh());
   }
 
   turnOff(device: Device): void {
-    this.refreshAfterSuccess(this.api.turnOff(device.id));
+    refreshAfterSuccess(this.api.turnOff(device.id), () => this.refresh());
   }
 
   setRulesEnabled(device: Device, rulesEnabled: boolean): void {
     this.api
       .setRulesEnabled(device.id, rulesEnabled)
       .subscribe({ next: () => this.refresh(), error: () => this.refresh() });
-  }
-
-  private refreshAfterSuccess(request: Observable<unknown>): void {
-    request.subscribe({ next: () => this.refresh(), error: () => undefined });
   }
 
   private refresh(): void {
