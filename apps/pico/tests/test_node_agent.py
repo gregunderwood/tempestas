@@ -182,3 +182,13 @@ def test_publishes_each_reading_with_a_rising_sequence():
     assert [sample["seq"] for sample in samples] == [1, 2]
     assert samples[0]["measurements"]["tempC"] == {"value": 3.5, "valid": True, "unit": "C"}
     assert samples[0]["measurements"]["co2Ppm"]["valid"] is False
+
+
+def test_reports_an_unmanaged_pin_as_failed_and_publishes_no_state_for_it():
+    node = AgentUnderTest()
+    node.heartbeat()
+    node.command(DRIVEN_LOW_LEVEL, pin=99)
+    result = node.publisher.on_topic("/gpio/result")[0].payload
+    assert result["ok"] is False
+    assert result["lines"][0]["readback"] is None
+    assert node.publisher.on_topic("/gpio/state/99") == []

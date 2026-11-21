@@ -66,9 +66,19 @@ def test_refuses_malformed_commands_quietly():
         command(schema="gpioSet/2"),
         command(expiresAt="soon"),
         command(lines=[]),
+        command(lines=[{"pin": 20, "level": 0}, {"pin": "x", "level": 0}]),
+        command(lines=[{"pin": 20}]),
+        command(lines=[{"pin": 20, "level": True}]),
+        command(lines=[{"pin": 20.5, "level": 0}]),
+        command(lines=["20"]),
         command(id=7),
     ]
     for payload in malformed:
         verdict = judge(payload)
         assert not verdict.is_accepted
         assert verdict.alarm_code is None
+
+
+def test_accepts_a_command_with_the_server_fifteen_second_lifetime_and_milliseconds():
+    expires_at = format_iso(SET_CLOCK_EPOCH_SECONDS + 15).replace("Z", ".417Z")
+    assert judge(command(expiresAt=expires_at)).is_accepted

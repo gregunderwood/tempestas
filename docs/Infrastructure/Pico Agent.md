@@ -19,6 +19,8 @@ node leaves them **on**, the same as patji in the [Pumphouse](../Pumphouse.md).
 - [../../apps/pico/device/node_agent.py](../../apps/pico/device/node_agent.py) — announce, judge commands, dead-man, readings; no hardware imports
 - [../../apps/pico/device/node_runtime.py](../../apps/pico/device/node_runtime.py) — boot, Wi-Fi, NTP, the broker connection, the main loop, the watchdog
 - [../../apps/pico/device/command_guard.py](../../apps/pico/device/command_guard.py) — every reason a `gpio/set` is refused
+- [../../apps/pico/device/mqtt_session.py](../../apps/pico/device/mqtt_session.py) — holds messages that arrive while a publish waits for its acknowledgement
+- [../../apps/pico/device/lib/tempestas_mqtt.py](../../apps/pico/device/lib/tempestas_mqtt.py) — `umqtt.simple` 1.8.1, renamed and with its changes marked
 - [../../apps/pico/device/relay_lines.py](../../apps/pico/device/relay_lines.py) — driving and releasing the relay pins, with register readback
 - [../../apps/pico/device/ds18b20_probes.py](../../apps/pico/device/ds18b20_probes.py) — the probes, pinned by ROM, refusing the chip's fake readings
 - [../../apps/pico/device/contract.py](../../apps/pico/device/contract.py) — the MicroPython mirror of the contract
@@ -105,6 +107,13 @@ interrupting the agent.
 
 ## Pitfalls
 
+- **Floats are 32-bit.** Near 2026 an epoch second as a float steps by 128 s, so
+  `1795215600.0 + 15 == 1795215600.0 + 60` on the board. Keep time in integers; CPython tests
+  will not catch a float creeping back in.
+- **`ticks_diff` wraps after about 6.2 days.** Only compare stamps that are refreshed more often
+  than that. `FakeClock` wraps the same way, so the tests can show it.
+- **Firmware modules shadow `/lib`.** `sys.path` is `['', '.frozen', '/lib']`, which is why the
+  MQTT client is `tempestas_mqtt`, a name no firmware freezes in.
 - **The watchdog survives Ctrl-C.** Interrupt a running agent and the board resets itself 8 s later.
   To work in the REPL, reset the board and press Ctrl-C during the boot grace.
 - **`credentials.py` sits in plain text on the Pico's flash.** Anyone with a USB cable can read it.

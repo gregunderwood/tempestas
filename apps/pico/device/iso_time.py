@@ -1,4 +1,5 @@
-"""ISO-8601 in UTC, by arithmetic: MicroPython has no datetime, and mktime is local time."""
+"""ISO-8601 in UTC, by integer arithmetic: MicroPython has no datetime, mktime is local time, and the
+Pico's 32-bit floats cannot hold an epoch second (near 2026 they step by 128 s)."""
 
 import time
 
@@ -19,7 +20,7 @@ def is_clock_set(epoch_seconds):
 
 
 def parse_iso(text):
-    """Epoch seconds for a UTC ISO-8601 string such as the server's toISOString(), else None."""
+    """Whole epoch seconds, fraction dropped, for a UTC ISO-8601 string such as toISOString(), else None."""
     if not isinstance(text, str):
         return None
     without_zone = strip_utc_suffix(text)
@@ -31,10 +32,10 @@ def parse_iso(text):
         day = int(without_zone[8:10])
         hour = int(without_zone[11:13])
         minute = int(without_zone[14:16])
-        second = float(without_zone[17:])
+        second = int(without_zone[17:19])
     except ValueError:
         return None
-    if not has_iso_separators(without_zone):
+    if not has_iso_separators(without_zone) or not is_fraction_of_a_second(without_zone[19:]):
         return None
     days = count_days_since_epoch(year, month, day)
     return days * SECONDS_PER_DAY + hour * SECONDS_PER_HOUR + minute * SECONDS_PER_MINUTE + second
@@ -45,6 +46,10 @@ def strip_utc_suffix(text):
         if text.endswith(suffix):
             return text[: len(text) - len(suffix)]
     return None
+
+
+def is_fraction_of_a_second(text):
+    return text == "" or (text[0] == "." and len(text) > 1 and text[1:].isdigit())
 
 
 def has_iso_separators(text):

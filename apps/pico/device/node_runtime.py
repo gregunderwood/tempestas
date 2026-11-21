@@ -9,17 +9,17 @@ import json
 import os
 import time
 
-import credentials
 import ds18x20
 import machine
 import network
 import ntptime
 import onewire
-from umqtt.simple import MQTTClient
 
 import contract
+import credentials
 import settings
 from ds18b20_probes import Ds18b20Probes
+from mqtt_session import DeferringMqttClient
 from node_agent import NodeAgent
 from relay_lines import ReleasedWhenHighLines
 
@@ -29,6 +29,7 @@ WIFI_JOIN_LIMIT_MILLISECONDS = 20000
 WIFI_POLL_MILLISECONDS = 250
 RECONNECT_AFTER_MILLISECONDS = 15000
 CLOCK_RESYNC_AFTER_MILLISECONDS = 3600000
+CLOCK_RETRY_AFTER_MILLISECONDS = 60000
 SOCKET_TIMEOUT_SECONDS = 5
 WIFI_POWER_SAVE_OFF = 0xA11140
 MILLISECONDS_PER_SECOND = 1000
@@ -61,9 +62,14 @@ class BrokerPublisher:
             return
         try:
             self.client.publish(topic, text, is_retained, quality_of_service)
-        except OSError as error:
-            log("publish failed, dropping the connection: %s" % error)
-            self.client = None
+        except Exception as error:
+            self.drop("publish failed: %r" % error)
+
+    def drop(self, reason):
+        log("dropping the broker connection: %s" % reason)
+        if self.client is not None:
+            self.client.close()
+        self.client = None
 
 
 class Connection:
@@ -74,11 +80,14 @@ class Connection:
         self.publisher = publisher
         self.wifi = network.WLAN(network.STA_IF)
         self.last_attempt_ticks = None
-        self.last_clock_sync_ticks = None
+        self.last_clock_attempt_ticks = None
+        self.is_clock_synced = False
         self.last_ping_ticks = None
 
     def keep_up(self):
         if self.publisher.client is not None:
+            # Spacing applies to failed attempts only, and a stale stamp would wrap after 6 days.
+            self.last_attempt_ticks = None
             return
         if (
             self.last_attempt_ticks is not None
@@ -107,23 +116,35 @@ class Connection:
         log("wifi did not join; will retry")
         return False
 
-    def sync_clock_when_due(self):
-        is_due = (
-            self.last_clock_sync_ticks is None
-            or self.clock.elapsed_since(self.last_clock_sync_ticks) > CLOCK_RESYNC_AFTER_MILLISECONDS
-        )
-        if not is_due:
+    def resync_clock_while_online(self):
+        if not self.wifi.isconnected():
+            # Offline for days would wrap the stamp, so sync afresh as soon as Wi-Fi returns.
+            self.last_clock_attempt_ticks = None
             return
+        self.sync_clock_when_due()
+
+    def sync_clock_when_due(self):
+        if not self.is_clock_sync_due():
+            return
+        self.last_clock_attempt_ticks = self.clock.ticks()
         try:
             ntptime.settime()
-            self.last_clock_sync_ticks = self.clock.ticks()
+            self.is_clock_synced = True
             log("clock set from NTP")
         except Exception as error:
-            log("NTP failed, commands stay refused until it works: %s" % error)
+            log("NTP failed: %r" % error)
+
+    def is_clock_sync_due(self):
+        if self.last_clock_attempt_ticks is None:
+            return True
+        wait_milliseconds = (
+            CLOCK_RESYNC_AFTER_MILLISECONDS if self.is_clock_synced else CLOCK_RETRY_AFTER_MILLISECONDS
+        )
+        return self.clock.elapsed_since(self.last_clock_attempt_ticks) >= wait_milliseconds
 
     def connect_to_broker(self):
         node_id = settings.NODE_ID
-        client = MQTTClient(
+        client = DeferringMqttClient(
             "tempestas-" + node_id,
             settings.BROKER_HOST,
             port=settings.BROKER_PORT,
@@ -134,14 +155,15 @@ class Connection:
         quality_of_service, is_retained = contract.QOS["status"]
         offline = json.dumps(self.agent.status_payload("offline"))
         client.set_last_will(contract.topic_status(node_id), offline, is_retained, quality_of_service)
-        client.set_callback(self.deliver)
+        client.set_message_handler(self.deliver)
         try:
             # A persistent session is a queue of commands waiting to replay, so always start clean.
             client.connect(clean_session=True, timeout=SOCKET_TIMEOUT_SECONDS)
             for topic, subscription_qos in self.agent.subscriptions():
                 client.subscribe(topic, subscription_qos)
         except Exception as error:
-            log("broker connect failed: %s" % error)
+            log("broker connect failed: %r" % error)
+            client.close()
             return
         log("connected to %s as %s" % (settings.BROKER_HOST, node_id))
         self.publisher.client = client
@@ -149,7 +171,10 @@ class Connection:
         self.agent.announce()
 
     def deliver(self, topic, payload, is_retained):
-        self.agent.on_message(topic.decode(), payload, is_retained)
+        try:
+            self.agent.on_message(topic.decode(), payload, is_retained)
+        except Exception as error:
+            log("a message on %s could not be handled: %r" % (topic, error))
 
     def serve_pending_messages(self):
         client = self.publisher.client
@@ -159,9 +184,8 @@ class Connection:
             while client.check_msg() is not None:
                 self.watchdog.feed()
             self.ping_when_due(client)
-        except OSError as error:
-            log("broker connection lost: %s" % error)
-            self.publisher.client = None
+        except Exception as error:
+            self.publisher.drop("connection lost: %r" % error)
 
     def ping_when_due(self, client):
         ping_interval_milliseconds = settings.KEEPALIVE_SECONDS * MILLISECONDS_PER_SECOND // 2
@@ -196,6 +220,7 @@ def run():
     while True:
         watchdog.feed()
         connection.keep_up()
+        connection.resync_clock_while_online()
         connection.serve_pending_messages()
         is_sample_due = (
             last_sample_ticks is None

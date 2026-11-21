@@ -23,12 +23,17 @@ select = ["E", "F", "I", "B", "SIM"]
 known-first-party = [
   "command_guard",
   "contract",
+  "credentials",
   "ds18b20_probes",
   "iso_time",
+  "mqtt_session",
+  "node_runtime",
+  "tempestas_mqtt",
   "node_agent",
   "relay_lines",
+  "settings",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["device", "tests"]
+pythonpath = ["device", "device/lib", "tests"]

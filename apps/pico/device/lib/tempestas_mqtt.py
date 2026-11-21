@@ -1,6 +1,7 @@
-# umqtt.simple 1.8.1 from micropython-lib (MIT, see LICENSE in this directory).
-# One change, marked "tempestas": the callback also gets the retain flag, which the
-# MQTT contract needs to drop retained commands.
+# umqtt.simple 1.8.1 from micropython-lib (MIT, see tempestas_mqtt.LICENSE), renamed so a firmware
+# with umqtt frozen in cannot shadow it. Changes are marked "tempestas": the callback also gets
+# the retain flag, which the contract needs to drop retained commands, and the connect timeout
+# survives check_msg instead of being cleared to fully blocking.
 
 import socket
 import struct
@@ -37,6 +38,7 @@ class MQTTClient:
             port = 8883 if ssl else 1883
         self.client_id = client_id
         self.sock = None
+        self.socket_timeout = None  # tempestas
         self.server = server
         self.port = port
         self.ssl = ssl
@@ -80,6 +82,7 @@ class MQTTClient:
         if self.sock:
             self.sock.close()
         self.sock = socket.socket()
+        self.socket_timeout = timeout  # tempestas
         self.sock.settimeout(timeout)
         addr = socket.getaddrinfo(self.server, self.port)[0][-1]
         self.sock.connect(addr)
@@ -198,7 +201,7 @@ class MQTTClient:
     # messages processed internally.
     def wait_msg(self):
         res = self.sock.read(1)
-        self.sock.setblocking(True)
+        self.sock.settimeout(self.socket_timeout)  # tempestas: was setblocking(True)
         if res is None:
             return None
         if res == b"":
