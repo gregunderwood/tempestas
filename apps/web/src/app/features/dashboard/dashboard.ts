@@ -1,7 +1,6 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  DestroyRef,
   computed,
   inject,
   signal,
@@ -13,6 +12,7 @@ import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
 import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
 import { RealtimeService } from '../../core/realtime.service';
+import { injectServerNow } from '../../core/server-now';
 import { secondsSince } from '../../shared/time';
 import { formatDuration } from '../zones/zone-words';
 import { ActivityLog } from './activity-log';
@@ -125,7 +125,7 @@ export class Dashboard {
   private readonly activityLog = inject(ActivityLog);
 
   private readonly nodes = signal<Node[]>([]);
-  private readonly now = signal(Date.now());
+  private readonly now = injectServerNow(AGE_TICK_MILLISECONDS);
 
   private readonly readings = injectLiveReadings().readings;
   private readonly devices = injectLiveDevices().devices;
@@ -174,11 +174,6 @@ export class Dashboard {
 
   constructor() {
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
-    const timer = setInterval(
-      () => this.now.set(Date.now()),
-      AGE_TICK_MILLISECONDS,
-    );
-    inject(DestroyRef).onDestroy(() => clearInterval(timer));
   }
 
   private describeRulesAge(): string {
