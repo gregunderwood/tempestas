@@ -2,20 +2,21 @@
 
 ## What it is
 
-`apps/agent-micropython` — a MicroPython agent for a Raspberry Pi Pico W. It speaks the same MQTT contract as
-the Python [Linux Agent](Linux%20Agent.md), so the server cannot tell the two apart beyond `kind` and
-`capabilities`. It is for a box that only needs a probe and a couple of relays, where a Pi would
-need an SD card, an OS and updates.
+`apps/agent-micropython` — the MicroPython agent, for a microcontroller with Wi-Fi. It runs on a
+Raspberry Pi Pico W today, and another board is a file in `device/boards/`, not a fork. It speaks
+the same MQTT contract as the [Linux Agent](Linux%20Agent.md), so the server cannot tell the two
+apart beyond `kind` and `capabilities`. It is for a box that only needs a probe and a couple of
+relays, where a Pi would need an SD card, an OS and updates.
 
-The first one is `braize`, the crawlspace node: one DS18B20, a heater and a heat tape, both wired so a dead
-node leaves them **on**, the same as patji in the [Pumphouse](../Pumphouse.md).
+The first one is `braize`, the crawlspace node: one DS18B20, a heater and a heat tape, both wired
+so a dead node leaves them **on**, the same as patji in the [Pumphouse](../Pumphouse.md).
 
 > [!note] Status
 > Bench-tested on braize (2026-11-20) against a throwaway broker, relays unloaded, MicroPython
 > 1.21.0: announce, samples, both relays with readback, every refusal, a retained replay after
 > reconnect, server-offline failsafe, the dead-man tripping at 600 s and clearing, a watchdog
-> reboot, a broker restart, and a Wi-Fi drop with a new DHCP lease. Not yet on elantris: the
-> firmware update, the broker account, admission and the lamp tests are still to do.
+> reboot, a broker restart, and a Wi-Fi drop with a new DHCP lease. Running on elantris since
+> 2026-11-20, admitted and under rule control; the lamp tests wait for the wiring.
 
 ## Key files
 
@@ -23,10 +24,11 @@ node leaves them **on**, the same as patji in the [Pumphouse](../Pumphouse.md).
 - [../../apps/agent-micropython/device/node_runtime.py](../../apps/agent-micropython/device/node_runtime.py) — boot, Wi-Fi, NTP, the broker connection, the main loop, the watchdog
 - [../../apps/agent-micropython/device/command_guard.py](../../apps/agent-micropython/device/command_guard.py) — every reason a `gpio/set` is refused
 - [../../apps/agent-micropython/device/tempestas_mqtt.py](../../apps/agent-micropython/device/tempestas_mqtt.py) — MQTT 3.1.1 at QoS 0 and 1, rewritten from `umqtt.simple` 1.8.1 (MIT); holds messages that arrive while a publish waits for its acknowledgement
-- [../../apps/agent-micropython/device/relay_lines.py](../../apps/agent-micropython/device/relay_lines.py) — driving and releasing the relay pins, with register readback
+- [../../apps/agent-micropython/device/relay_lines.py](../../apps/agent-micropython/device/relay_lines.py) — driving and releasing the relay pins, read back through the board
+- [../../apps/agent-micropython/device/boards/](../../apps/agent-micropython/device/boards/) — one file per board, for everything the chip decides: pin readback, Wi-Fi power saving, whether the watchdog is armed
 - [../../apps/agent-micropython/device/ds18b20_probes.py](../../apps/agent-micropython/device/ds18b20_probes.py) — the probes, pinned by ROM, refusing the chip's fake readings
 - [../../apps/agent-micropython/device/contract.py](../../apps/agent-micropython/device/contract.py) — the MicroPython mirror of the contract
-- [../../apps/agent-micropython/device/settings.py](../../apps/agent-micropython/device/settings.py) — node id, broker, pins, probes, failsafe levels
+- [../../apps/agent-micropython/device/settings.py](../../apps/agent-micropython/device/settings.py) — node id, board, broker, pins, probes, failsafe levels
 - [../../tools/deploy-agent-micropython.sh](../../tools/deploy-agent-micropython.sh) — copy it onto the board over USB
 
 ## The board
@@ -45,14 +47,15 @@ off, and released is.
 Level 1 is released, which is also what a reset, a crash or an unpowered Pico does. Both loads hang
 off the NC contacts, so level 1 is **load on** and is the failsafe for both lines.
 
-## How it differs from the Python agent
+## How it differs from the Linux agent
 
 - **No real-time clock.** The Pico's clock starts at 1970 on every boot. Until NTP has set it, every
   command is refused quietly (no alarm), because `expiresAt` cannot be judged. `hasRtc` is `false`.
 - **A hardware watchdog.** The loop feeds it; a hang anywhere resets the board within 8 s, and a
   reset releases every pin.
-- **Readback from the registers.** `read_level()` reads the SIO output-enable and output registers, not
-  a cached value, so a `gpioResult` reports what the pin is doing.
+- **Readback from the registers.** `read_level()` asks the board, which on the Pico W reads the
+  SIO output-enable and output registers, not a cached value, so a `gpioResult` reports what the
+  pin is doing.
 - **No rate guard on the probes yet.** The Python DS18B20 driver refuses a jump of more than
   10 °C/min. This one refuses the power-on 85 °C, all-zero and out-of-range readings, but not a
   plausible-looking spike.
@@ -64,7 +67,7 @@ off the NC contacts, so level 1 is **load on** and is the failsafe for both line
   offline (up to 20) are sent after the next announce; nothing else is, because retained state,
   samples and the hello are repeated anyway.
 
-Everything else on the command path matches the Python agent: a retained command is dropped with
+Everything else on the command path matches the Linux agent: a retained command is dropped with
 `RETAINED_COMMAND_DROPPED`, a foreign `issuedBy` raises `CONTROLLER_CONFLICT`, an expired command
 raises `COMMAND_EXPIRED`, an empty payload is ignored. The dead-man (600 s) and a server `offline`
 status both drive the failsafe, then publish the line states, then the alarm.
@@ -79,9 +82,9 @@ cd apps/agent-micropython
 uv run pytest -q && uv run ruff check .
 ```
 
-Nx wires `lint`, `test` and `format`, with `implicitDependencies: ["domain", "hardware"]`.
-`tests/test_contract_matches_hardware_agent.py` compares this contract with the Python agent's,
-which is itself checked against the TypeScript, so a contract change that misses the Pico fails.
+Nx wires `lint`, `test` and `format`, with `implicitDependencies: ["domain", "agent-linux"]`.
+`tests/test_contract_matches_linux_agent.py` compares this contract with the Linux agent's,
+which is itself checked against the TypeScript, so a contract change that misses this agent fails.
 
 CPython is more forgiving than MicroPython. Before deploying, check that every file compiles:
 
@@ -107,10 +110,19 @@ for file in *.py; do uv tool run --from mpy-cross mpy-cross -o /tmp/check.mpy "$
 tools/deploy-agent-micropython.sh [/dev/ttyACM0]
 ```
 
-It runs the Pico's tests, hard-resets the board, catches it inside `main.py`'s 5 s boot grace,
-copies the agent and resets again. Watch it with
+It runs the agent's tests, hard-resets the board, catches it inside `main.py`'s 5 s boot grace,
+copies the agent and `boards/<settings.BOARD>.py` as `board.py`, and resets again. The board
+file's `refuse_if_watchdog_armed()` runs first, so a deploy that missed the grace stops before it
+copies anything. Watch it with
 `uv tool run mpremote connect /dev/ttyACM0 resume repl` — `resume` stops mpremote from
 interrupting the agent.
+
+### Adding a board
+
+Write `device/boards/<board>.py` with the same four functions as `pico_w.py`, and set
+`BOARD = "<board>"` in `settings.py`. `test_boards.py` checks every board offers all four. The
+board's own limits still need reading: an ESP32's GPIO registers are elsewhere, its watchdog
+timeout range differs, and its Wi-Fi takes no `pm` setting.
 
 ## Pitfalls
 
@@ -133,7 +145,7 @@ interrupting the agent.
   flag only when it replays a stored message to a new subscriber, so the guard catches the replay
   after a reconnect, not a live one. The broker ACL is what stops a live command from anyone but
   the server.
-- **`hello` is not retained**, as with the Python agent. A controller started after the node
+- **`hello` is not retained**, as with the Linux agent. A controller started after the node
   connected never sees its capabilities until the node reconnects; reset the Pico.
 - **Migrate the server before the first Pico connects.** Its kind, `pico`, is a Postgres enum value
   added by `AddPicoNodeKind`; an unmigrated server fails to store the hello.
@@ -141,6 +153,6 @@ interrupting the agent.
 ## When to update this file
 
 - A guard, the dead-man or the failsafe behaviour changes
-- A pin, a probe or the relay board changes
+- A pin, a probe, the relay board or a board file changes
 - The deploy script or the install steps change
 - The rate guard is ported, or the node kind gets its own value

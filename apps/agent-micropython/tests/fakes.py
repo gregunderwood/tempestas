@@ -1,12 +1,30 @@
 """Stand-ins for the Pico's hardware, clock and broker, so the device code runs under CPython."""
 
-from relay_lines import GPIO_OUT_REGISTER, GPIO_OUTPUT_ENABLE_REGISTER
+import importlib.util
+import sys
+import types
+from pathlib import Path
+
+BOARDS = Path(__file__).resolve().parents[1] / "device" / "boards"
 
 SET_CLOCK_EPOCH_SECONDS = 1795215600
 
 
 TICKS_PERIOD = 2**30
 HALF_TICKS_PERIOD = TICKS_PERIOD // 2
+
+
+def load_board(board_name, machine):
+    """A fresh copy of a board module, reading this machine rather than a real one."""
+    sys.modules.setdefault("machine", types.SimpleNamespace())
+    spec = importlib.util.spec_from_file_location("board_" + board_name, BOARDS / (board_name + ".py"))
+    board = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(board)
+    board.machine = machine
+    return board
+
+
+PICO_W = load_board("pico_w", None)
 
 
 class FakeClock:
@@ -72,10 +90,12 @@ class FakeRegisters:
         self.chip = chip
 
     def __getitem__(self, address):
-        if address == GPIO_OUTPUT_ENABLE_REGISTER:
+        if address == PICO_W.GPIO_OUTPUT_ENABLE_REGISTER:
             return self.chip.mask_of(lambda number: self.chip.modes[number] == FakePin.OUT)
-        if address == GPIO_OUT_REGISTER:
+        if address == PICO_W.GPIO_OUT_REGISTER:
             return self.chip.mask_of(lambda number: self.chip.output_levels[number] == 1)
+        if address == PICO_W.WATCHDOG_CONTROL_REGISTER:
+            return PICO_W.WATCHDOG_ENABLE_BIT if self.chip.is_watchdog_armed else 0
         raise KeyError(hex(address))
 
 
@@ -85,6 +105,7 @@ class FakeMachine:
     def __init__(self):
         self.modes = {}
         self.output_levels = {}
+        self.is_watchdog_armed = False
         self.mem32 = FakeRegisters(self)
         chip = self
 

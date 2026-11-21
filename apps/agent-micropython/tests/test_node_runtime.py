@@ -30,6 +30,7 @@ class FakeNtp:
 def install_device_modules(ntp):
     stubs = {
         "machine": types.SimpleNamespace(),
+        "board": types.SimpleNamespace(keep_wifi_awake=lambda wifi: None),
         "network": types.SimpleNamespace(STA_IF=0, WLAN=FakeWlan),
         "ntptime": ntp,
         "onewire": types.SimpleNamespace(),

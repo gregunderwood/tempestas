@@ -56,6 +56,6 @@ def test_every_alarm_code_matches():
     assert public_codes(micropython_contract.AlarmCode) == public_codes(linux_contract.AlarmCode)
 
 
-def test_schema_major_reads_like_the_hardware_agent():
+def test_schema_major_reads_like_the_linux_agent():
     for schema in ["sample/1", "sample/2", "sample", "sample/x", None, 3]:
         assert micropython_contract.read_schema_major(schema) == linux_contract.read_schema_major(schema)

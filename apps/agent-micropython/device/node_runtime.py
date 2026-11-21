@@ -11,6 +11,7 @@ import network
 import ntptime
 import onewire
 
+import board
 import contract
 import credentials
 import settings
@@ -29,7 +30,6 @@ CLOCK_RETRY_AFTER_MILLISECONDS = 60000
 # Connect and CONNACK each wait this long, back to back, inside the 8 s watchdog.
 SOCKET_TIMEOUT_SECONDS = 3
 UNANSWERED_PINGS_BEFORE_DROPPING = 2
-WIFI_POWER_SAVE_OFF = 0xA11140
 MILLISECONDS_PER_SECOND = 1000
 BOOT_ID_BYTES = 6
 MAX_MESSAGES_HELD_OFFLINE = 20
@@ -132,7 +132,7 @@ class Connection:
         if self.wifi.isconnected():
             return True
         self.wifi.active(True)
-        self.wifi.config(pm=WIFI_POWER_SAVE_OFF)
+        board.keep_wifi_awake(self.wifi)
         self.wifi.connect(credentials.WIFI_SSID, credentials.WIFI_PASSWORD)
         started_ticks = self.clock.ticks()
         while self.clock.elapsed_since(started_ticks) < WIFI_JOIN_LIMIT_MILLISECONDS:
@@ -251,7 +251,7 @@ def build_boot_id():
 
 def run():
     watchdog = machine.WDT(timeout=WATCHDOG_TIMEOUT_MILLISECONDS)
-    relay_lines = ReleasedWhenHighLines(machine, settings.RELAY_LINES, settings.FAILSAFE_LEVELS)
+    relay_lines = ReleasedWhenHighLines(machine, board, settings.RELAY_LINES, settings.FAILSAFE_LEVELS)
     relay_lines.claim_at_failsafe()
 
     probes = build_probes()
