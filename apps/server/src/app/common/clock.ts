@@ -1,3 +1,5 @@
+const MILLISECONDS_PER_SECOND = 1000;
+
 export abstract class Clock {
   abstract now(): Date;
 }
@@ -8,7 +10,6 @@ export class SystemClock extends Clock {
   }
 }
 
-/** Test double. Lets every time-dependent behaviour be asserted exactly. */
 export class FixedClock extends Clock {
   constructor(private current: Date) {
     super();
@@ -16,10 +17,12 @@ export class FixedClock extends Clock {
   now(): Date {
     return this.current;
   }
-  set(d: Date): void {
-    this.current = d;
+  set(instant: Date): void {
+    this.current = instant;
   }
-  advanceSeconds(s: number): void {
-    this.current = new Date(this.current.getTime() + s * 1000);
+  advanceSeconds(seconds: number): void {
+    this.current = new Date(
+      this.current.getTime() + seconds * MILLISECONDS_PER_SECOND,
+    );
   }
 }
