@@ -25,8 +25,9 @@ HEATER_PIN = 20
 HEAT_TAPE_PIN = 18
 RELAY_LINES = (HEATER_PIN, HEAT_TAPE_PIN)
 
-# 1 = pin released = relay de-energised = NC closed = load ON.
+# Released means relay de-energised, so the NC contact closes and the load is ON.
+RELEASED_LEVEL = 1
 FAILSAFE_LEVELS = {
-    HEATER_PIN: 1,
-    HEAT_TAPE_PIN: 1,
+    HEATER_PIN: RELEASED_LEVEL,
+    HEAT_TAPE_PIN: RELEASED_LEVEL,
 }

@@ -38,6 +38,9 @@ LENGTH_DIGIT_BITS = 7
 LENGTH_DIGIT_MASK = 0x7F
 LENGTH_CONTINUES = 0x80
 
+UNSIGNED_SHORT_BIG_ENDIAN = "!H"
+SINGLE_BYTE = 1
+
 
 class MqttError(Exception):
     pass
@@ -55,13 +58,21 @@ def encode_remaining_length(length):
             return bytes(encoded)
 
 
+def encode_unsigned_short(value):
+    return struct.pack(UNSIGNED_SHORT_BIG_ENDIAN, value)
+
+
+def decode_unsigned_short(two_bytes):
+    return struct.unpack(UNSIGNED_SHORT_BIG_ENDIAN, two_bytes)[0]
+
+
 def encode_bytes(text):
     return text.encode() if isinstance(text, str) else bytes(text)
 
 
 def encode_string(text):
     encoded = encode_bytes(text)
-    return struct.pack("!H", len(encoded)) + encoded
+    return encode_unsigned_short(len(encoded)) + encoded
 
 
 def build_packet(first_byte, body):
@@ -72,7 +83,7 @@ def is_acknowledgement_of(received, packet_type, packet_id):
     received_type, body = received
     if received_type != packet_type or len(body) < PACKET_ID_LENGTH:
         return False
-    return struct.unpack("!H", body[:PACKET_ID_LENGTH])[0] == packet_id
+    return decode_unsigned_short(body[:PACKET_ID_LENGTH]) == packet_id
 
 
 class MqttSession:
@@ -125,7 +136,7 @@ class MqttSession:
             flags |= USERNAME_FLAG | PASSWORD_FLAG
             payload += encode_string(self.username) + encode_string(self.password)
         variable_header = (
-            PROTOCOL_NAME_AND_LEVEL + bytes((flags,)) + struct.pack("!H", self.keepalive_seconds)
+            PROTOCOL_NAME_AND_LEVEL + bytes((flags,)) + encode_unsigned_short(self.keepalive_seconds)
         )
         return build_packet(CONNECT, variable_header + payload)
 
@@ -140,7 +151,7 @@ class MqttSession:
 
     def subscribe(self, topic, quality_of_service):
         packet_id = self.next_packet_id()
-        body = struct.pack("!H", packet_id) + encode_string(topic) + bytes((quality_of_service,))
+        body = encode_unsigned_short(packet_id) + encode_string(topic) + bytes((quality_of_service,))
         self.write(build_packet(SUBSCRIBE, body))
         acknowledgement = self.wait_for_acknowledgement(SUBACK, packet_id)
         if acknowledgement[PACKET_ID_LENGTH] == SUBSCRIPTION_REFUSED:
@@ -154,7 +165,7 @@ class MqttSession:
         packet_id = None
         if quality_of_service > 0:
             packet_id = self.next_packet_id()
-            body += struct.pack("!H", packet_id)
+            body += encode_unsigned_short(packet_id)
         self.write(build_packet(first_byte, body + encode_bytes(payload)))
         if packet_id is not None:
             self.wait_for_acknowledgement(PUBACK, packet_id)
@@ -164,7 +175,6 @@ class MqttSession:
         self.write(build_packet(PINGREQ, b""))
 
     def serve_one_message(self):
-        """True when a packet was read, False when nothing was waiting."""
         if self.deferred_messages:
             self.message_handler(*self.deferred_messages.pop(0))
             return True
@@ -190,21 +200,20 @@ class MqttSession:
         return self.last_packet_id
 
     def wait_for_acknowledgement(self, packet_type, packet_id):
-        """The acknowledgement's body; anything else that arrives meanwhile is handled or held."""
         was_awaiting = self.is_awaiting_acknowledgement
         self.is_awaiting_acknowledgement = True
         try:
             while True:
                 received = self.receive_packet()
                 if received is not None and is_acknowledgement_of(received, packet_type, packet_id):
-                    return received[1]
+                    _received_type, body = received
+                    return body
         finally:
             self.is_awaiting_acknowledgement = was_awaiting
 
     def receive_packet(self):
-        """(type, body) of the packet read, or None when nothing was waiting."""
         self.feed_watchdog()
-        first_byte = self.socket_connection.read(1)
+        first_byte = self.socket_connection.read(SINGLE_BYTE)
         # A non-blocking check would otherwise leave the rest of the packet with no time limit.
         self.socket_connection.settimeout(self.timeout_seconds)
         if first_byte is None:
@@ -222,7 +231,7 @@ class MqttSession:
         return (packet_type, body)
 
     def receive_publish(self, first_byte, remaining_length):
-        topic_length = struct.unpack("!H", self.read(STRING_LENGTH_PREFIX))[0]
+        topic_length = decode_unsigned_short(self.read(STRING_LENGTH_PREFIX))
         topic = self.read(topic_length)
         remaining_length -= STRING_LENGTH_PREFIX + topic_length
         quality_of_service = (first_byte & QOS_MASK) >> QOS_SHIFT
@@ -245,7 +254,7 @@ class MqttSession:
         length = 0
         shift = 0
         while True:
-            digit = self.read(1)[0]
+            digit = self.read(SINGLE_BYTE)[0]
             length |= (digit & LENGTH_DIGIT_MASK) << shift
             if not digit & LENGTH_CONTINUES:
                 return length

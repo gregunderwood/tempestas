@@ -2,6 +2,7 @@
 
 RELEASED_LEVEL = 1
 DRIVEN_LOW_LEVEL = 0
+DRIVEN_HIGH_LEVEL = 1
 VALID_LEVELS = (RELEASED_LEVEL, DRIVEN_LOW_LEVEL)
 
 
@@ -25,15 +26,14 @@ class ReleasedWhenHighLines:
         if level not in VALID_LEVELS:
             raise ValueError("level must be 0 or 1, not %r" % (level,))
         if level == DRIVEN_LOW_LEVEL:
-            self.machine.Pin(pin, self.machine.Pin.OUT, value=0)
+            self.machine.Pin(pin, self.machine.Pin.OUT, value=DRIVEN_LOW_LEVEL)
         else:
             self.machine.Pin(pin, self.machine.Pin.IN, None)
 
     def read_level(self, pin):
-        """Read from the chip's registers, not from what was last asked for."""
         if not self.board.is_pin_driven(pin):
             return RELEASED_LEVEL
-        return 1 if self.board.is_pin_driven_high(pin) else DRIVEN_LOW_LEVEL
+        return DRIVEN_HIGH_LEVEL if self.board.is_pin_driven_high(pin) else DRIVEN_LOW_LEVEL
 
     def failsafe(self):
         for pin in self.lines:
