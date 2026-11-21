@@ -5,6 +5,5 @@
   "sourceRoot": "apps/web-e2e/src",
   "tags": [],
   "implicitDependencies": ["web"],
-  "// targets": "to see all targets run: nx show project web-e2e --web",
   "targets": {}
 }

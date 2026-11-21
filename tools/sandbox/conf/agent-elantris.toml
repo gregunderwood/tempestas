@@ -1,5 +1,4 @@
-# Sandbox elantris. Mirrors /etc/tempestas/agent.toml on the real box, with
-# only the backends swapped for the shared world.
+# Mirrors elantris's /etc/tempestas/agent.toml, with only the backends swapped for the shared world.
 node_id = "elantris"
 kind = "rpi"
 agent_version = "0.1.0"

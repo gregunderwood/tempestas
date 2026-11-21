@@ -5,8 +5,7 @@ agent_version = "0.1.0"
 deadman_s = 30.0
 
 [mqtt]
-# Points at elantris's broker, which is what we plan to run first. A local
-# broker bridged to elantris is a later step with its own risks.
+# elantris's broker, as planned for production; a bridged local broker comes later.
 url = "mqtt://127.0.0.1:1883"
 
 [world]
@@ -17,19 +16,15 @@ position = "canopy"        # under the plants, sheltered, NOT yet calibrated
 kind = "world"
 sensor_id = "scd4x-0"
 sample_interval_s = 10.0
-# The real canopy sensor has never had an offset set. Leaving this unset in the
-# sandbox too, so the sandbox is wrong in the same way production is.
+# No temperature offset, because the real canopy sensor has none yet either.
 
 [gpio]
-# 21 HPS via contactor, 20 exhaust fans, 26 MH via its own module,
-# 16 dark (CO2 moved to elantris), 12 spare with no load.
+# 21 HPS, 20 exhaust fans, 26 MH on its own module, 16 dark (CO2 moved to elantris), 12 spare.
 lines = [21, 20, 26, 16, 12]
 chip_label = "pinctrl-rp1"     # Pi 5
 
 [gpio.failsafe]
-# OFF is not one level. Four channels are active-LOW so 1 is off; BCM 26 is
-# active-HIGH through its own module, so its OFF is 0. Getting this backwards
-# lights the MH lamp the instant the agent claims the line.
+# BCM 26 is active-HIGH, so its off is 0; getting it backwards lights the MH lamp on claim.
 21 = 1
 20 = 1
 26 = 0

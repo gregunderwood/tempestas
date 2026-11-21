@@ -1,32 +1,7 @@
 #!/usr/bin/env python3
-"""Fit the greenhouse ENVELOPE from the 2025 season, not the burner.
+"""Fit the greenhouse envelope (leak and outdoor baseline) from the 2025 season; see README.md.
 
-    uv run python fit/fit_envelope.py <greenhouse-readings.csv.gz>
-
-What this can and cannot answer
--------------------------------
-The export is the far-end sensor watching the far-end generator: a different
-appliance from elantris's, measured at a different point in the greenhouse. So
-its burner output does NOT transfer.
-
-What does transfer is the envelope. Leakage is a property of the structure -
-the same glass, the same gaps - and it is the constant the duty-cycle gap most
-likely turns on: 5 min on / 12 min off simulated against 7 on / 9 off measured.
-A leak that is too weak makes the burner look too strong.
-
-There is no relay history in the legacy database, so burner state is inferred
-from the trace itself. That is fine for decay: a long, smooth, monotonic fall
-can only be leakage, whatever caused the peak before it.
-
-Method
-------
-Decay segments only, and only after the transport lag has drained, then a
-least-squares fit of
-
-    dC/dt = -k * (C - C_out)
-
-over all of them. Both k and C_out fall out of one linear regression, which
-means the outdoor baseline is measured here rather than assumed.
+uv run python fit/fit_envelope.py <greenhouse-readings.csv.gz>
 """
 
 from __future__ import annotations
@@ -34,54 +9,168 @@ from __future__ import annotations
 import gzip
 import sys
 from datetime import datetime
+from typing import NamedTuple
 
-# The season the burner ran the same scenario as now. After 2025-11-01
-# enrichment stops dead and the trace is flat at the winter baseline.
+from least_squares import Line, fit_least_squares_line
+
+# After 2025-11-01 enrichment stops and the trace is flat at the winter baseline.
 WINDOW_START = datetime(2025, 8, 23)
 WINDOW_END = datetime(2025, 11, 2)
 
-SAMPLE_S = 10.0
-SMOOTH_SAMPLES = 6           # 1 minute; the SCD41 quantises to 1 ppm
-DERIV_SAMPLES = 6            # slope over 1 minute
-LAG_DRAIN_MIN = 5.0          # skip the transport lag draining after burner-off
-MIN_SEGMENT_MIN = 4.0        # a decay worth fitting
-FALLING_PPM_PER_MIN = -1.0   # what counts as falling
-# Only the ENRICHED regime. Below this the fall is dominated by photosynthetic
-# draw-down toward ambient, which is a different process with a different
-# shape; pooling the two produced R^2 = 0.015 and a negative outdoor baseline.
+SMOOTH_SAMPLES = 6
+DERIVATIVE_SAMPLES = 6
+LAG_DRAIN_MINUTES = 5.0
+FALLING_PPM_PER_MINUTE = -1.0
+MIN_CONTIGUOUS_SPAN_MINUTES = 0.5
+MAX_CONTIGUOUS_SPAN_MINUTES = 2.0
+# Below this the fall is photosynthetic draw-down, a different process that wrecks the pooled fit.
 MIN_ENRICHED_PPM = 900.0
+
+IMPLAUSIBLY_HIGH_PPM = 5000
+IMPLAUSIBLY_LOW_PPM = 300
+MIN_DECAY_POINTS = 100
+MIN_POINTS_PER_MONTH = 50
+SETPOINTS_PPM = (1200.0, 1500.0, 1600.0)
+
+
+class DecayPoint(NamedTuple):
+    co2_ppm: float
+    slope_ppm_per_minute: float
+    observed_at: datetime
+
+
+def is_plausible_co2(co2_ppm: float) -> bool:
+    return IMPLAUSIBLY_LOW_PPM <= co2_ppm <= IMPLAUSIBLY_HIGH_PPM
+
+
+def is_in_window(observed_at: datetime) -> bool:
+    return WINDOW_START <= observed_at.replace(tzinfo=None) < WINDOW_END
 
 
 def load(path: str) -> list[tuple[datetime, float]]:
     rows: list[tuple[datetime, float]] = []
-    with gzip.open(path, "rt") as fh:
-        next(fh)
-        for line in fh:
-            ts_s, _temp, _rh, co2_s = line.rstrip("\n").split(",")
-            if not co2_s:
+    with gzip.open(path, "rt") as csv_file:
+        next(csv_file)
+        for line in csv_file:
+            timestamp_text, _temp, _humidity, co2_text = line.rstrip("\n").split(",")
+            if not co2_text:
                 continue
-            co2 = float(co2_s)
-            # The known-bad rows: 20 impossible highs on 2025-08-26, plus a
-            # few implausible lows. 0.21% of the window.
-            if co2 > 5000 or co2 < 300:
+            co2_ppm = float(co2_text)
+            if not is_plausible_co2(co2_ppm):
                 continue
-            ts = datetime.fromisoformat(ts_s)
-            naive = ts.replace(tzinfo=None)
-            if not (WINDOW_START <= naive < WINDOW_END):
+            observed_at = datetime.fromisoformat(timestamp_text)
+            if not is_in_window(observed_at):
                 continue
-            rows.append((ts, co2))
-    rows.sort(key=lambda r: r[0])
+            rows.append((observed_at, co2_ppm))
+    rows.sort(key=lambda row: row[0])
     return rows
 
 
 def smooth(values: list[float], width: int) -> list[float]:
-    out, acc = [], 0.0
-    for i, v in enumerate(values):
-        acc += v
-        if i >= width:
-            acc -= values[i - width]
-        out.append(acc / min(i + 1, width))
-    return out
+    smoothed, running_total = [], 0.0
+    for index, value in enumerate(values):
+        running_total += value
+        if index >= width:
+            running_total -= values[index - width]
+        smoothed.append(running_total / min(index + 1, width))
+    return smoothed
+
+
+def is_contiguous(span_minutes: float) -> bool:
+    return MIN_CONTIGUOUS_SPAN_MINUTES <= span_minutes <= MAX_CONTIGUOUS_SPAN_MINUTES
+
+
+def collect_decay_points(rows: list[tuple[datetime, float]]) -> list[DecayPoint]:
+    """Falling, enriched samples once the transport lag has drained."""
+    times = [row[0] for row in rows]
+    co2 = smooth([row[1] for row in rows], SMOOTH_SAMPLES)
+    points: list[DecayPoint] = []
+    falling_for_minutes = 0.0
+    for index in range(DERIVATIVE_SAMPLES, len(rows)):
+        earlier = index - DERIVATIVE_SAMPLES
+        span_minutes = (times[index] - times[earlier]).total_seconds() / 60.0
+        if not is_contiguous(span_minutes):
+            falling_for_minutes = 0.0
+            continue
+        slope = (co2[index] - co2[earlier]) / span_minutes
+
+        if slope > FALLING_PPM_PER_MINUTE:
+            falling_for_minutes = 0.0
+            continue
+        falling_for_minutes += span_minutes / DERIVATIVE_SAMPLES
+
+        if falling_for_minutes < LAG_DRAIN_MINUTES:
+            continue
+        if co2[index] < MIN_ENRICHED_PPM:
+            continue
+        points.append(DecayPoint(co2[index], slope, times[index]))
+    return points
+
+
+def to_xy(points: list[DecayPoint]) -> list[tuple[float, float]]:
+    return [(point.co2_ppm, point.slope_ppm_per_minute) for point in points]
+
+
+def residual_sum_of_squares(points: list[DecayPoint], line: Line) -> float:
+    return sum((point.slope_ppm_per_minute - line.predict(point.co2_ppm)) ** 2 for point in points)
+
+
+def print_pooled_fit(points: list[DecayPoint], line: Line) -> None:
+    """dC/dt = a + b*C, so k = -b and C_out = -a/b."""
+    count = len(points)
+    leak = -line.slope
+    outdoor_ppm = -line.intercept / line.slope
+    mean_slope = sum(point.slope_ppm_per_minute for point in points) / count
+    total_sum_of_squares = sum((point.slope_ppm_per_minute - mean_slope) ** 2 for point in points)
+    r_squared = 1 - residual_sum_of_squares(points, line) / total_sum_of_squares
+
+    print()
+    print("pooled fit  dC/dt = -k (C - C_out)")
+    print(f"  k      = {leak:.5f} per minute   (model today: 0.027)")
+    print(f"  C_out  = {outdoor_ppm:.0f} ppm       (model today: 420)")
+    print(f"  R^2    = {r_squared:.3f} over {count:,} points")
+    for setpoint_ppm in SETPOINTS_PPM:
+        print(
+            f"  decay at {setpoint_ppm:.0f} ppm = {leak * (setpoint_ppm - outdoor_ppm):.1f} ppm/min"
+        )
+
+
+def print_sink_shape(points: list[DecayPoint], line: Line) -> None:
+    """Proportional sink against constant sink, judged on residuals."""
+    rates = sorted(-point.slope_ppm_per_minute for point in points)
+    mean_rate = sum(rates) / len(rates)
+    constant_sum_of_squares = sum((rate - mean_rate) ** 2 for rate in rates)
+    print()
+    print("which shape does the data support?")
+    print(
+        f"  proportional  -k(C-C_out)   residual SS = {residual_sum_of_squares(points, line):,.0f}"
+    )
+    print(f"  constant      -R           residual SS = {constant_sum_of_squares:,.0f}")
+    print(
+        f"  constant R = {mean_rate:.1f} ppm/min"
+        f"   median {rates[len(rates) // 2]:.1f}"
+        f"   p10 {rates[len(rates) // 10]:.1f}"
+        f"   p90 {rates[9 * len(rates) // 10]:.1f}"
+    )
+
+
+def print_monthly_fits(points: list[DecayPoint]) -> None:
+    print()
+    print("by month (decay is not one number - wind and dT drive it):")
+    by_month: dict[str, list[DecayPoint]] = {}
+    for point in points:
+        by_month.setdefault(point.observed_at.strftime("%Y-%m"), []).append(point)
+    for month in sorted(by_month):
+        month_points = by_month[month]
+        if len(month_points) < MIN_POINTS_PER_MONTH:
+            continue
+        line = fit_least_squares_line(to_xy(month_points))
+        if line is None:
+            continue
+        print(
+            f"  {month}  k={-line.slope:.5f}  C_out={-line.intercept / line.slope:>5.0f}"
+            f"  n={len(month_points):,}"
+        )
 
 
 def main(path: str) -> int:
@@ -90,101 +179,19 @@ def main(path: str) -> int:
     if not rows:
         return 1
 
-    times = [r[0] for r in rows]
-    co2 = smooth([r[1] for r in rows], SMOOTH_SAMPLES)
-
-    # Slope in ppm/min over a 1-minute window, only where samples are contiguous.
-    pts: list[tuple[float, float, datetime]] = []   # (C, dC/dt, when)
-    falling_for = 0.0
-    for i in range(DERIV_SAMPLES, len(rows)):
-        dt_min = (times[i] - times[i - DERIV_SAMPLES]).total_seconds() / 60.0
-        if not (0.5 <= dt_min <= 2.0):        # a gap; restart the run
-            falling_for = 0.0
-            continue
-        slope = (co2[i] - co2[i - DERIV_SAMPLES]) / dt_min
-
-        if slope > FALLING_PPM_PER_MIN:
-            falling_for = 0.0
-            continue
-        falling_for += dt_min / DERIV_SAMPLES
-
-        # Wait out the transport lag, and stay in the enriched regime.
-        if falling_for < LAG_DRAIN_MIN:
-            continue
-        if co2[i] < MIN_ENRICHED_PPM:
-            continue
-        pts.append((co2[i], slope, times[i]))
-
-    print(f"decay points after the lag drains: {len(pts):,}")
-    if len(pts) < 100:
+    points = collect_decay_points(rows)
+    print(f"decay points after the lag drains: {len(points):,}")
+    if len(points) < MIN_DECAY_POINTS:
         print("not enough decay to fit")
         return 1
 
-    # dC/dt = a + b*C   ->   k = -b,  C_out = -a/b
-    n = len(pts)
-    sx = sum(p[0] for p in pts)
-    sy = sum(p[1] for p in pts)
-    sxx = sum(p[0] * p[0] for p in pts)
-    sxy = sum(p[0] * p[1] for p in pts)
-    denom = n * sxx - sx * sx
-    b = (n * sxy - sx * sy) / denom
-    a = (sy - b * sx) / n
-    k = -b
-    c_out = -a / b
-
-    mean_y = sy / n
-    ss_tot = sum((p[1] - mean_y) ** 2 for p in pts)
-    ss_res = sum((p[1] - (a + b * p[0])) ** 2 for p in pts)
-    r2 = 1 - ss_res / ss_tot
-
-    print()
-    print("pooled fit  dC/dt = -k (C - C_out)")
-    print(f"  k      = {k:.5f} per minute   (model today: 0.027)")
-    print(f"  C_out  = {c_out:.0f} ppm       (model today: 420)")
-    print(f"  R^2    = {r2:.3f} over {n:,} points")
-
-    # Monthly, because leakage is not one number - wind and the indoor/outdoor
-    # temperature difference drive it, and both change across a season.
-    # What the fit says the greenhouse does at the setpoint, which is the
-    # number to compare against elantris's own measurement.
-    for level in (1200.0, 1500.0, 1600.0):
-        print(f"  decay at {level:.0f} ppm = {k * (level - c_out):.1f} ppm/min")
-
-    # Which SHAPE the data actually supports. A proportional sink and a constant
-    # one are very different models; pick between them on residuals, not taste.
-    rates = [-sl for _c, sl, _t in pts]
-    rates.sort()
-    mean_r = sum(rates) / len(rates)
-    ss_const = sum((r - mean_r) ** 2 for r in rates)
-    print()
-    print("which shape does the data support?")
-    print(f"  proportional  -k(C-C_out)   residual SS = {ss_res:,.0f}")
-    print(f"  constant      -R           residual SS = {ss_const:,.0f}")
-    print(f"  constant R = {mean_r:.1f} ppm/min"
-          f"   median {rates[len(rates)//2]:.1f}"
-          f"   p10 {rates[len(rates)//10]:.1f}"
-          f"   p90 {rates[9*len(rates)//10]:.1f}")
-
-    print()
-    print("by month (decay is not one number - wind and dT drive it):")
-    by_month: dict[str, list[tuple[float, float]]] = {}
-    for c, slope_, t in pts:
-        by_month.setdefault(t.strftime("%Y-%m"), []).append((c, slope_))
-    for month in sorted(by_month):
-        g = by_month[month]
-        if len(g) < 50:
-            continue
-        m = len(g)
-        gsx = sum(p[0] for p in g)
-        gsy = sum(p[1] for p in g)
-        gsxx = sum(p[0] * p[0] for p in g)
-        gsxy = sum(p[0] * p[1] for p in g)
-        gd = m * gsxx - gsx * gsx
-        if gd == 0:
-            continue
-        gb = (m * gsxy - gsx * gsy) / gd
-        ga = (gsy - gb * gsx) / m
-        print(f"  {month}  k={-gb:.5f}  C_out={-ga/gb:>5.0f}  n={m:,}")
+    line = fit_least_squares_line(to_xy(points))
+    if line is None:
+        print("not enough decay to fit")
+        return 1
+    print_pooled_fit(points, line)
+    print_sink_shape(points, line)
+    print_monthly_fits(points)
     return 0
 
 
