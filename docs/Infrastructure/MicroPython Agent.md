@@ -69,8 +69,9 @@ off the NC contacts, so level 1 is **load on** and is the failsafe for both line
 
 Everything else on the command path matches the Linux agent: a retained command is dropped with
 `RETAINED_COMMAND_DROPPED`, a foreign `issuedBy` raises `CONTROLLER_CONFLICT`, an expired command
-raises `COMMAND_EXPIRED`, an empty payload is ignored. The dead-man (600 s) and a server `offline`
-status both drive the failsafe, then publish the line states, then the alarm.
+raises `COMMAND_EXPIRED`, an empty payload is ignored. The dead-man (600 s) drives the failsafe,
+then publishes the line states, then the alarm. A server `offline` status is logged and the lines
+are held, as on the Linux agent.
 
 ## Running the tests
 
