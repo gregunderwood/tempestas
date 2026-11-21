@@ -21,7 +21,9 @@ export function measureServerClockOffset(
   status: SystemStatus,
   receivedAt: number,
 ): number {
-  return Date.parse(status.sentAt) - receivedAt;
+  const offset = Date.parse(status.sentAt) - receivedAt;
+  // A status without a readable sentAt would make every age NaN and silence the stall alert.
+  return Number.isFinite(offset) ? offset : 0;
 }
 
 // Device state arrives as a patch on what the API said, since a socket message can always be missed.
