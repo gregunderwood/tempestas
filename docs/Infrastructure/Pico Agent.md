@@ -7,7 +7,7 @@ the Python [Node Agent](Node%20Agent.md), so the server cannot tell the two apar
 `capabilities`. It is for a box that only needs a probe and a couple of relays, where a Pi would
 need an SD card, an OS and updates.
 
-The first one is the crawlspace node: one DS18B20, a heater and a heat tape, both wired so a dead
+The first one is `braize`, the crawlspace node: one DS18B20, a heater and a heat tape, both wired so a dead
 node leaves them **on**, the same as patji in the [Pumphouse](../Pumphouse.md).
 
 > [!note] Status
@@ -115,7 +115,8 @@ interrupting the agent.
   pinout, not memory.
 - **`hello` is not retained**, as with the Python agent. A controller started after the node
   connected never sees its capabilities until the node reconnects; reset the Pico.
-- **The node kind is `esp32` for now.** `NodeKind` has no `pico`, and adding one needs a migration.
+- **Migrate the server before the first Pico connects.** Its kind, `pico`, is a Postgres enum value
+  added by `AddPicoNodeKind`; an unmigrated server fails to store the hello.
 
 ## When to update this file
 
