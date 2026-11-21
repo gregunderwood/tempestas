@@ -53,6 +53,12 @@ npx prettier --write .                # format
   They went unrun for four phases and were failing when phase 5 first looked.
 - `npm run migration:generate -- apps/server/src/migrations/<Name>` needs the database up.
 - There is no `serve` on `libs/domain`; it is consumed through the `@tempestas/domain` alias.
+- **In a second worktree, check `NX_WORKSPACE_ROOT_PATH` first.** If the environment exports it
+  pointing at the main checkout, Nx run from the worktree lints, tests and builds the main
+  checkout instead, and still reports success. Override it on every call:
+  `NX_WORKSPACE_ROOT_PATH=$PWD NX_DAEMON=false npx nx run-many ...`. Give the worktree its own
+  `node_modules` too (`cp -al` from the main checkout is quick); a symlink leads Nx back to the
+  main checkout the same way.
 
 ## Workflow: issue, branch, PR
 
