@@ -39,6 +39,7 @@ LENGTH_DIGIT_MASK = 0x7F
 LENGTH_CONTINUES = 0x80
 
 UNSIGNED_SHORT_BIG_ENDIAN = "!H"
+FOUR_UNSIGNED_BYTES = "!BBBB"
 SINGLE_BYTE = 1
 
 
@@ -142,7 +143,7 @@ class MqttSession:
 
     def read_connack(self):
         packet_type, length, _session_present, return_code = struct.unpack(
-            "!BBBB", self.read(CONNACK_PACKET_LENGTH)
+            FOUR_UNSIGNED_BYTES, self.read(CONNACK_PACKET_LENGTH)
         )
         if packet_type != CONNACK or length != CONNACK_LENGTH:
             raise MqttError("expected CONNACK, got packet type 0x%02x" % packet_type)
