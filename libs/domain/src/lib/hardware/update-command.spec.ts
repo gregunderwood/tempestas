@@ -90,13 +90,15 @@ describe('judgeUpdateCommand', () => {
     ).toMatchObject({ answer: 'alarm', alarm: AlarmCode.ControllerConflict });
   });
 
-  it('takes any issuer before a controller is bound, exactly as gpio/set does', () => {
-    const verdict = judgeUpdateCommand(
-      buildUpdate({ issuedBy: 'laptop' }),
-      buildContext({ boundController: null }),
-    );
-
-    expect(verdict.isAccepted).toBe(true);
+  it('only logs any update before a controller is bound, unlike gpio/set', () => {
+    for (const issuedBy of [SERVER, 'laptop']) {
+      expect(
+        judgeUpdateCommand(
+          buildUpdate({ issuedBy }),
+          buildContext({ boundController: null }),
+        ),
+      ).toMatchObject({ isAccepted: false, answer: 'log' });
+    }
   });
 
   it('refuses an expired update and alarms', () => {
@@ -128,6 +130,13 @@ describe('judgeUpdateCommand', () => {
     ['another schema major', buildUpdate({ schema: 'update/2' })],
     ['no expiresAt', buildUpdate({ expiresAt: undefined })],
     ['an unparseable expiresAt', buildUpdate({ expiresAt: 'soon' })],
+    ['a bare year as expiresAt', buildUpdate({ expiresAt: '2027' })],
+    ['a date with no time', buildUpdate({ expiresAt: '2027-01-01' })],
+    ['an English date', buildUpdate({ expiresAt: 'Nov 21 2027' })],
+    [
+      'an instant with no offset',
+      buildUpdate({ expiresAt: '2027-01-01T00:00:00' }),
+    ],
     ['no id', buildUpdate({ id: '' })],
   ])('only logs an update with %s', (_description, payload) => {
     expect(judgeUpdateCommand(payload, buildContext())).toMatchObject({
@@ -177,6 +186,16 @@ describe('judgeUpdateCommand', () => {
       expect(!verdict.isAccepted && verdict.reason).toContain(reasonFragment);
     },
   );
+
+  it.each([
+    '2026-11-21T12:05:00Z',
+    '2026-11-21T12:05:00.250Z',
+    '2026-11-21T07:05:00-05:00',
+  ])('accepts an ISO-8601 expiresAt of %s', (expiresAt) => {
+    expect(
+      judgeUpdateCommand(buildUpdate({ expiresAt }), buildContext()).isAccepted,
+    ).toBe(true);
+  });
 
   it('accepts a development build of the same contract major', () => {
     const verdict = judgeUpdateCommand(

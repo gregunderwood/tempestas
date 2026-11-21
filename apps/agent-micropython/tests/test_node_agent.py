@@ -125,7 +125,7 @@ def test_announces_online_hello_and_the_lines_on_connect():
     assert hello.payload["capabilities"]["hasRtc"] is False
     assert hello.payload["kind"] == "pico"
     assert hello.payload["agentName"] == "agent-micropython"
-    assert hello.payload["capabilities"]["contractMinor"] == 1
+    assert hello.payload["capabilities"]["contractMinor"] == 0
     assert [(state.payload["pin"], state.payload["level"], state.is_retained) for state in states] == [
         (HEATER_PIN, RELEASED_LEVEL, True),
         (HEAT_TAPE_PIN, RELEASED_LEVEL, True),

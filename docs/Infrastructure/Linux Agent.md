@@ -190,9 +190,9 @@ could never be commanded at all.
 ## The update command
 
 Contract 1.1 adds `update` and `update/status`, and `contract.py` carries their topics, schemas,
-QoS and the `UpdateState` values. The agent reports contract 1.1 but does not subscribe to
-`update` yet, so it never answers one. When it does, the refusals above apply to it unchanged, and
-it also refuses an update for another app or another contract major with an `update/status` of
+QoS and the `UpdateState` values. The agent still reports contract minor 0, because it does not
+subscribe to `update` yet; it raises the minor when it does. Then the refusals above apply to it,
+except that it refuses every update until a controller is bound, and it also refuses an update for another app or another contract major with an `update/status` of
 `failed`. The full rules are in [MQTT Contract](MQTT%20Contract.md#the-update-command).
 
 ## Announcing line state

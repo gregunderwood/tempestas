@@ -31,6 +31,9 @@ export type UpdateCommandVerdict =
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const AGENT_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.+-]+)?$/;
+// Stricter than `new Date`, so an agent's ISO parser and this judge refuse the same strings.
+const ISO_8601_INSTANT =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const MANIFEST_URL_SCHEMES = new Set(['http:', 'https:']);
 const AGENT_APPS = new Set<unknown>(Object.values(AgentApp));
 const UPDATE_STATES = new Set<unknown>(Object.values(UpdateState));
@@ -105,8 +108,11 @@ function judgeOwnership(
   issuedBy: unknown,
   boundController: string | null,
 ): UpdateCommandVerdict | null {
-  // Unbound takes any issuer, exactly as gpio/set does; until then only the broker ACL limits it.
-  if (boundController !== null && issuedBy !== boundController) {
+  // Stricter than gpio/set: replacing code can wait the few seconds until the first heartbeat binds.
+  if (boundController === null) {
+    return logOnly('no controller is bound yet');
+  }
+  if (issuedBy !== boundController) {
     return alarm(
       `issuedBy ${JSON.stringify(issuedBy)} is not the bound controller "${boundController}"`,
       AlarmCode.ControllerConflict,
@@ -123,7 +129,7 @@ function judgeExpiry(
     return logOnly('update has no expiresAt');
   }
   const deadline = new Date(expiresAt);
-  if (Number.isNaN(deadline.getTime())) {
+  if (!ISO_8601_INSTANT.test(expiresAt) || Number.isNaN(deadline.getTime())) {
     return logOnly(`unparseable expiresAt "${expiresAt}"`);
   }
   if (deadline < now) {
@@ -143,11 +149,13 @@ function describeTargetProblem(
   if (app !== runningApp) {
     return `update is for ${String(app)}, this node runs ${runningApp}`;
   }
-  if (typeof version !== 'string' || readVersionMajor(version) === null) {
+  const versionMajor =
+    typeof version === 'string' ? readVersionMajor(version) : null;
+  if (versionMajor === null) {
     return `unparseable version ${JSON.stringify(version)}`;
   }
-  if (readVersionMajor(version) !== MQTT_CONTRACT_MAJOR) {
-    return `version ${version} is for contract major ${readVersionMajor(version)}, this node speaks ${MQTT_CONTRACT_MAJOR}`;
+  if (versionMajor !== MQTT_CONTRACT_MAJOR) {
+    return `version ${String(version)} is for contract major ${versionMajor}, this node speaks ${MQTT_CONTRACT_MAJOR}`;
   }
   if (!isFetchableUrl(manifestUrl)) {
     return `manifestUrl ${JSON.stringify(manifestUrl)} is not an http(s) URL`;

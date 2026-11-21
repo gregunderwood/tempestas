@@ -80,9 +80,10 @@ rather than vanishing.
 ## The update command
 
 Contract 1.1 adds `update` and `update/status`, and `contract.py` carries their topics, schemas,
-QoS and the `UpdateState` values, matched against the Linux agent's. The agent reports contract 1.1
-but does not subscribe to `update` yet, so it never answers one. When it does, it judges it exactly
-as it judges `gpio/set`, including refusing quietly until NTP has set the clock, and refuses an
+QoS and the `UpdateState` values, matched against the Linux agent's. The agent still reports
+contract minor 0, because it does not subscribe to `update` yet; it raises the minor when it does.
+Then it judges an update as it judges `gpio/set`, including refusing quietly until NTP has set the
+clock, except that it refuses every update until a controller is bound, and refuses an
 update for another app or another contract major with an `update/status` of `failed`. The full
 rules are in [MQTT Contract](MQTT%20Contract.md#the-update-command).
 

@@ -30,7 +30,9 @@ def test_contract_version_matches(source: str):
     major = re.search(r"MQTT_CONTRACT_MAJOR = (\d+);", source)
     minor = re.search(r"MQTT_CONTRACT_MINOR = (\d+);", source)
     assert major and int(major.group(1)) == contract.SUPPORTED_MAJOR
-    assert minor and int(minor.group(1)) == contract.MQTT_CONTRACT_MINOR
+    assert minor, "MQTT_CONTRACT_MINOR not found in the TypeScript contract"
+    typescript_minor = int(minor.group(1))
+    assert typescript_minor >= contract.MQTT_CONTRACT_MINOR, "agent is ahead of the contract"
 
 
 def test_every_schema_matches(source: str):

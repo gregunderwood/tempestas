@@ -78,6 +78,10 @@ Each agent reports `agentName` (`agent-linux`, `agent-micropython`) and an `agen
 `<major>.<minor>.<patch>`, and declares `contractMinor` in its capabilities. The Nodes page shows a
 node whose minor differs from the server's as behind or ahead; it does not degrade health.
 
+An agent's minor says what it accepts, not what its mirror knows. It raises its minor only once it
+handles that minor's commands, so it may sit behind `MQTT_CONTRACT_MINOR` but never ahead, and the
+contract-match tests allow exactly that. A node on minor 1 or later takes `update`.
+
 The patch counts that agent's commits since the contract version last changed, so every change to
 an agent raises it, in order, without bumping it by hand. That only holds for released code, so
 anything else is marked: [tools/describe-agent-version.sh](../../tools/describe-agent-version.sh)
@@ -155,6 +159,7 @@ each agent's own judge must agree with its spec.
 | empty payload (a retained clear)               | logged only                             |
 | retain flag set                                | alarm `RETAINED_COMMAND_DROPPED`        |
 | not JSON, or an unknown schema major           | logged only                             |
+| no controller bound yet                        | logged only                             |
 | `issuedBy` ≠ bound controller                  | alarm `CONTROLLER_CONFLICT`             |
 | past `expiresAt`                               | alarm `COMMAND_EXPIRED`                 |
 | missing or unparseable `expiresAt`, or no `id` | logged only                             |
@@ -162,8 +167,10 @@ each agent's own judge must agree with its spec.
 | `version` is for another contract major        | `update/status` `failed`, with a reason |
 | a non-http(s) `manifestUrl`, a malformed hash  | `update/status` `failed`, with a reason |
 
-The first five are the `gpio/set` rules unchanged, including that a node with no bound controller
-yet takes any issuer. The last three come from the server, which needs to hear why its update went
+These are the `gpio/set` rules with one difference: a node with no bound controller yet takes
+`gpio/set` from any issuer, but refuses every `update`. Replacing code can wait the few seconds until
+the first heartbeat binds the node, and in that window the broker ACL would otherwise be the only
+guard. The last three come from the server, which needs to hear why its update went
 nowhere. A node never crosses a contract major on its own: that needs the server to move first.
 
 Integrity rests on two hashes: `manifestSha256` arrives in a command only the server can publish,
@@ -215,8 +222,9 @@ in `tools/` implements all of them as a reference:
   `CONTROLLER_CONFLICT`. This is the layer that stops a foreign command being obeyed.
 - **Drop any inbound command carrying the retain flag** and alarm `RETAINED_COMMAND_DROPPED`.
 - **Refuse a command past its `expiresAt`** and alarm `COMMAND_EXPIRED`.
-- **Apply all three to `update` as well** (1.1), and refuse an update for another `app` or another
-  contract major with an `update/status` of `failed`.
+- **Apply all three to `update` as well** (1.1), refuse every update until a controller is bound,
+  and refuse an update for another `app` or another contract major with an `update/status` of
+  `failed`.
 - **Ignore an empty command payload.** A zero-length payload is how a retained command is cleared;
   parsing it throws, and reacting to it creates a publish loop.
 - **Publish `status: offline` (retained) before a clean shutdown.** MQTT **suppresses the will on a

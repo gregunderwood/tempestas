@@ -140,7 +140,7 @@ export interface GpioResultPayload extends MqttEnvelope {
   lines: GpioResultLine[];
 }
 
-/** The programs a node can run, as each names itself in `hello` and an update names its target. */
+/** The programs a node can run; an update names its target with one. */
 export enum AgentApp {
   Linux = 'agent-linux',
   MicroPython = 'agent-micropython',
