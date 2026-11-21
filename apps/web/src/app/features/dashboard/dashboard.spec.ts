@@ -304,6 +304,7 @@ describe('Dashboard hero', () => {
       sourceNodeIds: ['elantris'],
       sourceSensorIds: ['elantris/scd4x-0'],
       decidingSensorIds: ['elantris/scd4x-0'],
+      co2DecidingSensorIds: ['elantris/scd4x-0'],
     };
     const { page } = renderDashboard({ cycle: cycleOf([evaluation]) });
     expect(textsOf(page, '.tile__reading')).toEqual(['—']);

@@ -272,6 +272,94 @@ describe('invalid CO2', () => {
   });
 });
 
+describe('deciding sensors per measurement', () => {
+  // The coldest end is not the end with the least CO2.
+  function crossedEnds(): NodeSample[] {
+    return [
+      {
+        nodeId: 'elantris',
+        sensorId: 's',
+        temperatureC: 20,
+        co2Ppm: 900,
+        observedAt: FRESH,
+      },
+      {
+        nodeId: 'north-end',
+        sensorId: 's',
+        temperatureC: 24,
+        co2Ppm: 600,
+        observedAt: FRESH,
+      },
+    ];
+  }
+
+  it('names the probe that decided CO2 apart from the one that decided temperature', () => {
+    const { climateByRole } = resolveClimate(
+      crossedEnds(),
+      config({ source: 'min' }),
+      NOW,
+    );
+    expect(climateByRole[DeviceRole.Co2Generator]).toMatchObject({
+      temperatureC: 20,
+      co2Ppm: 600,
+      decidingSensorIds: ['elantris/s'],
+      co2DecidingSensorIds: ['north-end/s'],
+    });
+  });
+
+  it('takes the max of each measurement from its own probe', () => {
+    const { climateByRole } = resolveClimate(
+      crossedEnds(),
+      config({ source: 'max' }),
+      NOW,
+    );
+    expect(climateByRole[DeviceRole.Co2Generator]).toMatchObject({
+      temperatureC: 24,
+      co2Ppm: 900,
+      decidingSensorIds: ['north-end/s'],
+      co2DecidingSensorIds: ['elantris/s'],
+    });
+  });
+
+  it('never names a probe with no valid CO2 as deciding CO2', () => {
+    const [elantris, northEnd] = crossedEnds();
+    const { climateByRole } = resolveClimate(
+      [{ ...elantris, co2Ppm: null }, northEnd],
+      config({ source: 'mean' }),
+      NOW,
+    );
+    expect(climateByRole[DeviceRole.Co2Generator]).toMatchObject({
+      decidingSensorIds: ['elantris/s', 'north-end/s'],
+      co2DecidingSensorIds: ['north-end/s'],
+    });
+  });
+
+  it('names no CO2 probe when none has a valid reading', () => {
+    const noCo2 = crossedEnds().map((sample) => ({ ...sample, co2Ppm: null }));
+    const { climateByRole } = resolveClimate(
+      noCo2,
+      config({ source: 'min' }),
+      NOW,
+    );
+    expect(climateByRole[DeviceRole.Co2Generator]).toMatchObject({
+      co2Ppm: null,
+      co2DecidingSensorIds: [],
+    });
+  });
+
+  it('names both probes when they tie for the lowest CO2', () => {
+    const tied = crossedEnds().map((sample) => ({ ...sample, co2Ppm: 600 }));
+    const { climateByRole } = resolveClimate(
+      tied,
+      config({ source: 'min' }),
+      NOW,
+    );
+    expect(
+      climateByRole[DeviceRole.Co2Generator]?.co2DecidingSensorIds,
+    ).toEqual(['elantris/s', 'north-end/s']);
+  });
+});
+
 describe('staleness', () => {
   it('marks a role stale when every sample is older than maxAgeMs', () => {
     const { staleRoles } = resolveClimate(

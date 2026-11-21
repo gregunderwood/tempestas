@@ -95,16 +95,21 @@ function aggregate(samples: NodeSample[], source: SensorSource): ClimateSample {
     source,
   );
   // Nulls are dropped, not propagated: one broken sensor must not blind the zone.
-  const validCo2Readings = samples
-    .map((sample) => sample.co2Ppm)
-    .filter((co2Ppm): co2Ppm is number => co2Ppm !== null);
+  const samplesWithValidCo2 = samples.filter(
+    (sample): sample is NodeSample & { co2Ppm: number } =>
+      sample.co2Ppm !== null,
+  );
+  const pickedCo2 =
+    samplesWithValidCo2.length === 0
+      ? null
+      : pickBySource(
+          samplesWithValidCo2.map((sample) => sample.co2Ppm),
+          source,
+        );
 
   return {
     temperatureC: roundToHundredths(pickedTemperature),
-    co2Ppm:
-      validCo2Readings.length === 0
-        ? null
-        : Math.round(pickBySource(validCo2Readings, source)),
+    co2Ppm: pickedCo2 === null ? null : Math.round(pickedCo2),
     // The oldest input, so provenance cannot look fresher than what it was computed from.
     observedAt: new Date(
       Math.min(...samples.map((sample) => sample.observedAt.getTime())),
@@ -114,7 +119,12 @@ function aggregate(samples: NodeSample[], source: SensorSource): ClimateSample {
     decidingSensorIds: findDecidingSensorIds(
       samples,
       source,
-      pickedTemperature,
+      (sample) => sample.temperatureC === pickedTemperature,
+    ),
+    co2DecidingSensorIds: findDecidingSensorIds(
+      samplesWithValidCo2,
+      source,
+      (sample) => sample.co2Ppm === pickedCo2,
     ),
   };
 }
@@ -122,12 +132,10 @@ function aggregate(samples: NodeSample[], source: SensorSource): ClimateSample {
 function findDecidingSensorIds(
   samples: NodeSample[],
   source: SensorSource,
-  pickedTemperature: number,
+  holdsPickedValue: (sample: NodeSample) => boolean,
 ): string[] {
   const picksOneSample = source === 'min' || source === 'max';
-  const deciding = picksOneSample
-    ? samples.filter((sample) => sample.temperatureC === pickedTemperature)
-    : samples;
+  const deciding = picksOneSample ? samples.filter(holdsPickedValue) : samples;
   return deciding.map(sensorKey);
 }
 

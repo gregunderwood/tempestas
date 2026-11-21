@@ -65,6 +65,7 @@ function climate(
     sourceNodeIds: ['elantris'],
     sourceSensorIds: ['elantris/scd4x-0'],
     decidingSensorIds: ['elantris/scd4x-0'],
+    co2DecidingSensorIds: ['elantris/scd4x-0'],
   };
 }
 
