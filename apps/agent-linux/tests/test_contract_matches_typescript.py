@@ -47,15 +47,15 @@ def test_every_topic_builder_matches(source: str):
     # Render each TypeScript template literal with the same arguments the Python
     # builder gets, and compare the strings.
     cases = {
-        "hello": (contract.topic_hello("n"), {"n": "n"}),
-        "status": (contract.topic_status("n"), {"n": "n"}),
-        "gpioSet": (contract.topic_gpio_set("n"), {"n": "n"}),
-        "gpioSync": (contract.topic_gpio_sync("n"), {"n": "n"}),
-        "gpioResult": (contract.topic_gpio_result("n"), {"n": "n"}),
-        "heartbeat": (contract.topic_heartbeat("n"), {"n": "n"}),
-        "alarm": (contract.topic_alarm("n"), {"n": "n"}),
-        "sample": (contract.topic_sample("n", "s"), {"n": "n", "s": "s"}),
-        "gpioState": (contract.topic_gpio_state("n", 16), {"n": "n", "pin": "16"}),
+        "hello": (contract.build_hello_topic("n"), {"n": "n"}),
+        "status": (contract.build_status_topic("n"), {"n": "n"}),
+        "gpioSet": (contract.build_gpio_set_topic("n"), {"n": "n"}),
+        "gpioSync": (contract.build_gpio_sync_topic("n"), {"n": "n"}),
+        "gpioResult": (contract.build_gpio_result_topic("n"), {"n": "n"}),
+        "heartbeat": (contract.build_heartbeat_topic("n"), {"n": "n"}),
+        "alarm": (contract.build_alarm_topic("n"), {"n": "n"}),
+        "sample": (contract.build_sample_topic("n", "s"), {"n": "n", "s": "s"}),
+        "gpioState": (contract.build_gpio_state_topic("n", 16), {"n": "n", "pin": "16"}),
     }
 
     for name, (python_topic, args) in cases.items():
