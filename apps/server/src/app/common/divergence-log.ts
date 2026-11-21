@@ -6,6 +6,8 @@ export interface Divergence {
   pin: number;
   hardwareOn: boolean;
   reason: string;
+  // The first report after a provable node reboot: the agent claimed its fail-safe level on start.
+  isExplainedByReboot: boolean;
   at: Date;
 }
 

@@ -162,9 +162,12 @@ def handle_server_status(agent: Agent, message) -> None:
         body = json.loads(message.payload)
     except (ValueError, UnicodeDecodeError):
         return
+    # A deploy restarts the server too; the dead-man decides whether it is really gone.
     if body.get("state") == "offline":
-        log.error("the server reported itself OFFLINE - entering failsafe now")
-        agent.enter_failsafe(contract.AlarmCode.SAFE_STATE_ENTERED, "server published offline")
+        log.warning(
+            "the server reported itself offline - holding the lines for the dead-man (%.0fs)",
+            agent.config.deadman_s,
+        )
 
 
 def start(agent: Agent, config: AgentConfig) -> None:

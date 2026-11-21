@@ -160,7 +160,9 @@ def test_fails_safe_when_the_controller_goes_quiet_for_the_deadman():
 
 def test_tells_the_bus_the_lines_before_it_raises_the_alarm():
     node = AgentUnderTest()
-    node.deliver("server", {"state": "offline"})
+    node.heartbeat()
+    node.clock.advance_seconds(DEADMAN_SECONDS)
+    node.agent.check_deadman()
     topics = node.publisher.topics()
     assert topics[-1].endswith("/alarm")
     assert topics[:-1] == [NODE_ROOT + "/gpio/state/20", NODE_ROOT + "/gpio/state/18"]
@@ -183,13 +185,23 @@ def test_has_no_deadman_before_the_first_heartbeat():
     assert node.agent.check_deadman() is False
 
 
-def test_fails_safe_at_once_when_the_server_goes_offline():
+def test_holds_the_lines_when_the_server_goes_offline():
     node = AgentUnderTest()
     node.heartbeat()
     node.command(DRIVEN_LOW_LEVEL)
     node.deliver("server", {"state": "offline"})
+    assert node.levels() == [DRIVEN_LOW_LEVEL, RELEASED_LEVEL]
+    assert node.alarm_codes() == []
+
+
+def test_still_fails_safe_on_the_deadman_after_the_server_goes_offline():
+    node = AgentUnderTest()
+    node.heartbeat()
+    node.command(DRIVEN_LOW_LEVEL)
+    node.deliver("server", {"state": "offline"})
+    node.clock.advance_seconds(DEADMAN_SECONDS)
+    assert node.agent.check_deadman() is True
     assert node.levels() == [RELEASED_LEVEL, RELEASED_LEVEL]
-    assert node.alarm_codes() == [AlarmCode.SAFE_STATE_ENTERED]
 
 
 def test_publishes_each_reading_with_a_rising_sequence():
@@ -224,8 +236,10 @@ def test_holds_back_line_state_until_ntp_has_set_the_clock():
 
 def test_still_raises_the_alarm_when_failing_safe_before_the_clock_is_set():
     node = AgentUnderTest(FakeClock(epoch_seconds=0))
-    node.deliver("server", {"state": "offline"})
-    assert node.alarm_codes() == [AlarmCode.SAFE_STATE_ENTERED]
+    node.heartbeat()
+    node.clock.advance_seconds(DEADMAN_SECONDS)
+    node.agent.check_deadman()
+    assert node.alarm_codes() == [AlarmCode.DEADMAN_TRIPPED]
     assert node.levels() == [RELEASED_LEVEL, RELEASED_LEVEL]
 
 

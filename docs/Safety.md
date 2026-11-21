@@ -109,6 +109,11 @@ The decided policy for a divergence, and the other half of 3b. `DevicesService` 
   right, and an entry in `GET /api/health`'s `problems` for 24 h — long enough that an overnight
   failsafe is still reported in the morning. A divergence means something upstream already failed,
   so it is never corrected quietly.
+- **Except the one the server can explain.** An agent claims every line at its failsafe level as it
+  starts, so the first report for each pin after a hello with a **new** `bootId` may disagree on
+  purpose. That one is a WARN and stays out of `problems`; the row is still corrected. Everything
+  else stays an ERROR, including a dead-man trip during a server outage. A reboot is only provable
+  against a stored `bootId`, so a node that reboots while the server is down still alarms.
 
 Verified against the real panel: relay energised, controller `kill -9`ed, node failed safe, and on
 restart the server logged the divergence, wrote `offAt` at the node's observed time nine seconds
@@ -232,6 +237,11 @@ The burner wears two hats. By day it is enrichment and failing it off costs noth
 the heat source and failing it off on a cold night is how plants die. The dead-man cannot tell which
 mode it is in without the brain that just died — but it _can_ read a clock, so it applies the same
 night window locally and holds longer at night before dropping the line.
+
+The server's own `offline` status does **not** trip it early. Every deploy restarts the server, and
+failing safe on each one cycled the heaters and left a divergence in the morning report. A node
+logs the server going offline and holds its lines; if the server does not come back, the dead-man
+fails them safe on its own schedule.
 
 **Open question:** how long is that night hold? Long enough to ride out a restart or a WiFi blip,
 short enough that a dead controller doesn't leave it burning until morning. It gets much easier to

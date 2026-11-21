@@ -301,12 +301,6 @@ class TestFailsafePublishesState:
         assert next(state for state in states if state["pin"] == 5)["level"] == 1
         assert all(state["known"] for state in states)
 
-    def test_the_server_lwt_path_republishes_too(self):
-        agent, gpio, client = self._agent()
-        gpio.write(5, 0)
-        agent.enter_failsafe(contract.AlarmCode.SAFE_STATE_ENTERED, "server published offline")
-        assert next(state for state in client.states() if state["pin"] == 5)["level"] == 1
-
     # Hardware, then state, then alarm: anything reacting to the alarm can already read the truth.
     def test_state_is_published_before_the_alarm(self):
         agent, _gpio, client = self._agent()

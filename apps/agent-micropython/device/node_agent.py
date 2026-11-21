@@ -113,8 +113,11 @@ class NodeAgent:
 
     def on_server_status(self, payload):
         if is_server_offline(parse_json_object(payload)):
-            self.log("the server reported itself OFFLINE - entering failsafe now")
-            self.enter_failsafe(contract.AlarmCode.SAFE_STATE_ENTERED, "server published offline")
+            # A deploy restarts the server too; the dead-man decides whether it is really gone.
+            self.log(
+                "the server reported itself offline - holding the lines for the dead-man (%ds)"
+                % self.settings.DEADMAN_SECONDS
+            )
 
     def check_deadman(self):
         if self.last_heartbeat_ticks is None or self.is_deadman_tripped:

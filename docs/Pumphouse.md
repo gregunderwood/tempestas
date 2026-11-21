@@ -86,16 +86,15 @@ Consequences worth knowing:
 | Pi unpowered, or booting           | ON                       | NC wiring, BCM 5/6 reset pull-ups, `gpio=` line |
 | Agent crashed, restarting          | ON within ~5 s           | Claim at failsafe on restart                    |
 | WiFi drop, or elantris unreachable | hold for 10 min, then ON | Node dead-man, `deadman_s = 600`                |
-| tempestas-server stops or crashes  | ON **at once**           | The agent fails safe on the server's LWT        |
+| tempestas-server stops or crashes  | hold for 10 min, then ON | Node dead-man, `deadman_s = 600`                |
 | Probes dead, node and server fine  | ON after `maxAgeMs`      | **New:** per-role `onStale: 'on'` (section A)   |
 | Everything fine                    | rule                     | Thermostat rules                                |
 
 Two rows deserve a note:
 
-- **The server row skips the hold.** The agent treats the server's last-will as "fail safe now"
-  rather than waiting out the dead-man. For a burner that is right; here it means a server
-  restart (every deploy) turns the heater on until the server re-asserts a few seconds later. One
-  extra heater cycle per deploy is accepted rather than adding a per-node switch for it.
+- **The server row holds.** The agent logs the server's last-will and waits out the dead-man, so a
+  deploy restarts the server without touching the heater. A server that stays down is a dead
+  controller like any other, and ten minutes later the heater is on.
 - **The probes row is the one wiring cannot cover, and today's engine gets it wrong.** A stale
   sensor holds last state for every role, so a heater that was off when the probes died would stay
   off however cold it got.
@@ -170,11 +169,11 @@ inserted. `AddHeatingRoles` fixes that. What follows is the plan as written.
 
 Three things in the server assume one sensor per node:
 
-| Where                                                                                       | Today                                                           | Change                                                                  |
-| ------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Where                                                                                           | Today                                                           | Change                                                                  |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `findLatestSamplesForZone` in [rules.service.ts](../apps/server/src/app/rules/rules.service.ts) | `DISTINCT ON (node_id)`, so a second probe overwrites the first | `DISTINCT ON (node_id, sensor_id)`, and `NodeSample` carries `sensorId` |
-| `sensor_readings.humidity`                                                                  | `NOT NULL`                                                      | Nullable, by migration                                                  |
-| `decodeSample` in [mqtt-codec.ts](../apps/server/src/app/hardware/mqtt-codec.ts)            | Rejects a sample without valid humidity                         | Requires humidity only if that sensor's capability lists `humidity`     |
+| `sensor_readings.humidity`                                                                      | `NOT NULL`                                                      | Nullable, by migration                                                  |
+| `decodeSample` in [mqtt-codec.ts](../apps/server/src/app/hardware/mqtt-codec.ts)                | Rejects a sample without valid humidity                         | Requires humidity only if that sensor's capability lists `humidity`     |
 
 Plus:
 
