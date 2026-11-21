@@ -16,10 +16,10 @@ import {
   type SegmentStats,
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
+import { IN_BACKGROUND } from '../../core/background-request';
 
 const LONGEST_TIMEOUT_MILLISECONDS = 2_147_483_647;
 export const PERIOD_START_RETRY_MILLISECONDS = 60_000;
-const IN_BACKGROUND = { isBackground: true };
 
 export interface PeriodStart {
   kind: SegmentStats['kind'];
@@ -44,7 +44,6 @@ export interface SensorBaseline {
   failedAt: number | null;
 }
 
-/** Each sensor's first reading of the day or night now running, the baseline for its trends. */
 export function injectPeriodStarts(
   liveReadings: Signal<readonly Reading[]>,
 ): Signal<ReadonlyMap<string, PeriodStart>> {
@@ -142,7 +141,7 @@ export function injectPeriodStarts(
   return computed(() => buildPeriodStarts(periods(), baselines()));
 }
 
-/** Only once the sensor has spoken this period, so a dead probe is never asked about. */
+// Only once the sensor has spoken this period, so a dead probe is never asked about.
 export function isBaselineDue(
   liveReading: Reading,
   period: CurrentPeriod | undefined,
@@ -182,7 +181,7 @@ export function buildPeriodStarts(
   return starts;
 }
 
-/** A failed lookup keeps the period it had, but never past that period's end. */
+// A failed lookup keeps the period it had, but never past that period's end.
 export function replaceCurrentPeriod(
   periods: ReadonlyMap<string, CurrentPeriod>,
   nodeId: string,
@@ -211,7 +210,7 @@ function chooseReplacement(
   return hasPeriodEnded ? null : current;
 }
 
-/** Retry soon after a failure, otherwise wait for the period to end; never faster than a retry. */
+// Retry soon after a failure, otherwise wait for the period to end; never faster than a retry.
 export function chooseNextPeriodLoadDelay(
   lookup: PeriodLookup | null,
   now: number,

@@ -1,7 +1,13 @@
 import { Injectable, effect, inject, signal, untracked } from '@angular/core';
 import { EMPTY, catchError } from 'rxjs';
-import type { Device, RulesCycle } from '@tempestas/domain';
+import type {
+  DecisionOutcome,
+  Device,
+  RulesCycle,
+  RulesEvaluation,
+} from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
+import { IN_BACKGROUND } from '../../core/background-request';
 import type { NumberedPush, PushedDevice } from '../../core/device-pushes';
 import { RealtimeService } from '../../core/realtime.service';
 import { MILLISECONDS_PER_SECOND } from '../../shared/time';
@@ -46,7 +52,7 @@ export class ActivityLog {
 
   constructor() {
     inject(ApiService)
-      .devices({ isBackground: true })
+      .devices(IN_BACKGROUND)
       .pipe(catchError(() => EMPTY))
       .subscribe((devices) => this.learnDeviceStates(devices));
     effect(() => {
@@ -72,7 +78,7 @@ export class ActivityLog {
     }
   }
 
-  /** A push that beat the list here is newer than the list, so it stands. */
+  // A push that beat the list here is newer than the list, so it stands.
   private learnDeviceStates(devices: readonly Device[]): void {
     for (const device of devices) {
       if (!this.knownDeviceStates.has(device.id)) {
@@ -143,21 +149,26 @@ function describeChangedDecisions(
     );
     return evaluation.decisions
       .filter(isOwnedDecision)
-      .filter((decision) => {
-        const previousDecision = before?.decisions.find(
-          (candidate) => candidate.role === decision.role,
-        );
-        return (
-          previousDecision?.desired !== decision.desired ||
-          previousDecision?.reason !== decision.reason
-        );
-      })
+      .filter((decision) => hasDecisionChanged(before, decision))
       .map((decision) => ({
         at: evaluation.evaluatedAt,
         kind: 'decision' as const,
         text: `${evaluation.zoneSlug} ${labelRole(decision.role)}: ${describeDecision(decision)}`,
       }));
   });
+}
+
+function hasDecisionChanged(
+  previousEvaluation: RulesEvaluation | undefined,
+  decision: DecisionOutcome,
+): boolean {
+  const previousDecision = previousEvaluation?.decisions.find(
+    (candidate) => candidate.role === decision.role,
+  );
+  return (
+    previousDecision?.desired !== decision.desired ||
+    previousDecision?.reason !== decision.reason
+  );
 }
 
 function describeNewFailures(

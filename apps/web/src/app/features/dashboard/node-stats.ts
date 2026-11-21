@@ -66,32 +66,38 @@ export function buildNodeStatCards(facts: NodeStatFacts): NodeStatCard[] {
     .sort(([firstNodeId], [secondNodeId]) =>
       firstNodeId.localeCompare(secondNodeId),
     )
-    .map(([nodeId, readings]) => {
-      const node = facts.nodes.find((candidate) => candidate.slug === nodeId);
-      const hasSeveralSensors = readings.length > 1;
-      const quietSensors = readings.filter((reading) =>
-        isQuiet(reading, facts.now),
-      );
-      return {
-        nodeId,
-        title: node?.displayName ?? nodeId,
-        metrics: readings.flatMap((reading) =>
-          metricsFor(reading, node).map((metric) =>
-            buildMetricStat(
-              reading,
-              metric,
-              hasSeveralSensors,
-              facts.periodStarts.get(nodeId),
-            ),
-          ),
+    .map(([nodeId, readings]) => buildNodeStatCard(nodeId, readings, facts));
+}
+
+function buildNodeStatCard(
+  nodeId: string,
+  readings: readonly Reading[],
+  facts: NodeStatFacts,
+): NodeStatCard {
+  const node = facts.nodes.find((candidate) => candidate.slug === nodeId);
+  const hasSeveralSensors = readings.length > 1;
+  const quietSensors = readings.filter((reading) =>
+    isQuiet(reading, facts.now),
+  );
+  return {
+    nodeId,
+    title: node?.displayName ?? nodeId,
+    metrics: readings.flatMap((reading) =>
+      metricsFor(reading, node).map((metric) =>
+        buildMetricStat(
+          reading,
+          metric,
+          hasSeveralSensors,
+          facts.periodStarts.get(nodeId),
         ),
-        age: describeAge(readings, quietSensors, hasSeveralSensors, facts.now),
-        isQuiet: quietSensors.length > 0,
-        relays: facts.devices
-          .filter((device) => device.nodeId === nodeId)
-          .map((device) => describeRelay(device, facts.now)),
-      };
-    });
+      ),
+    ),
+    age: describeAge(readings, quietSensors, hasSeveralSensors, facts.now),
+    isQuiet: quietSensors.length > 0,
+    relays: facts.devices
+      .filter((device) => device.nodeId === nodeId)
+      .map((device) => describeRelay(device, facts.now)),
+  };
 }
 
 function buildMetricStat(
@@ -180,7 +186,7 @@ function groupByNode(readings: readonly Reading[]): Map<string, Reading[]> {
   return readingsByNode;
 }
 
-/** A relay on since yesterday says so, rather than reading as on since earlier today. */
+// A relay on since yesterday says so, rather than reading as on since earlier today.
 function describeRelay(device: Device, now: number): RelayLine {
   const onAt = device.onAt;
   const isToday =
