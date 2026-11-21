@@ -22,7 +22,6 @@ import { NodeStatus, type Node } from '@tempestas/domain';
   imports: [MatCardModule, MatButtonModule, MatChipsModule, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <h1>Nodes</h1>
     <div class="temp-cards">
       @for (node of nodes(); track node.id) {
         <mat-card appearance="outlined">

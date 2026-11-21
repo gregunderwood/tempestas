@@ -15,10 +15,13 @@ import { injectLiveSource, type SourceState } from '../../core/live-source';
 import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
 import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
-import { buildZoneCards } from './zone-view';
+import { Pinboard } from '../../shared/pinboard/pinboard';
+import { buildZoneCards, type ZoneCard } from './zone-view';
 import { formatDuration } from './zone-words';
 
 const CLOCK_TICK_MILLISECONDS = 1_000;
+const ZONE_COLUMN_MINIMUM_REM = 24;
+const ZONE_COLUMN_MAXIMUM_REM = 36;
 
 interface NamedSource {
   name: string;
@@ -27,11 +30,9 @@ interface NamedSource {
 
 @Component({
   selector: 'temp-zones-page',
-  imports: [MatCardModule, RouterLink, DatePipe, DecimalPipe],
+  imports: [MatCardModule, RouterLink, DatePipe, DecimalPipe, Pinboard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <h1>Zones</h1>
-
     <div class="page-status" aria-live="polite">
       @if (failedSources().length > 0) {
         <p class="alert">
@@ -49,8 +50,13 @@ interface NamedSource {
       }
     </div>
 
-    <div class="zones">
-      @for (zone of cards(); track zone.id) {
+    <temp-pinboard
+      [items]="cards()"
+      [identify]="identifyZoneCard"
+      [columnMinimumRem]="zoneColumnMinimumRem"
+      [columnMaximumRem]="zoneColumnMaximumRem"
+    >
+      <ng-template let-zone>
         <mat-card
           appearance="outlined"
           class="zone"
@@ -267,16 +273,10 @@ interface NamedSource {
             </p>
           </mat-card-content>
         </mat-card>
-      }
-    </div>
+      </ng-template>
+    </temp-pinboard>
   `,
   styles: `
-    .zones {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 36rem));
-      gap: 1rem;
-      align-items: start;
-    }
     .zone__name {
       margin: 0;
     }
@@ -575,6 +575,10 @@ export class ZonesPage {
   protected readonly isLoading = computed(
     () => this.nameSourcesIn('loading').length > 0,
   );
+
+  protected readonly zoneColumnMinimumRem = ZONE_COLUMN_MINIMUM_REM;
+  protected readonly zoneColumnMaximumRem = ZONE_COLUMN_MAXIMUM_REM;
+  protected readonly identifyZoneCard = (zone: ZoneCard) => zone.id;
 
   readonly cards = computed(() => {
     const hasEverySource =

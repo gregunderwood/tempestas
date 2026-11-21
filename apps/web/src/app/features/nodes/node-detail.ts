@@ -3,6 +3,7 @@ import {
   Component,
   DestroyRef,
   computed,
+  effect,
   inject,
   input,
   signal,
@@ -22,6 +23,7 @@ import {
   type SegmentStats,
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
+import { PageHeading } from '../../core/page-heading';
 import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
 import { Gauge } from '../../shared/gauge/gauge';
@@ -56,6 +58,17 @@ interface MetricBlock {
   periods: PeriodRow[];
 }
 
+function describeNodeHeading(slug: string, node: Node | null) {
+  if (!node) {
+    return { heading: slug, subtitle: '' };
+  }
+  const reachability = node.online ? 'online' : 'offline';
+  return {
+    heading: node.displayName,
+    subtitle: `${slug} · ${node.kind} · ${reachability}`,
+  };
+}
+
 /**
  * One node in detail: what it reads now, and what it has done over the last
  * 24 hours.
@@ -74,14 +87,6 @@ interface MetricBlock {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <nav class="crumb"><a routerLink="/nodes">← All nodes</a></nav>
-
-    <h1>{{ node()?.displayName ?? slug() }}</h1>
-    <p class="sub">
-      {{ slug() }}
-      @if (node(); as n) {
-        · {{ n.kind }} · {{ n.online ? 'online' : 'offline' }}
-      }
-    </p>
 
     <mat-card appearance="outlined">
       <mat-card-header><mat-card-title>Now</mat-card-title></mat-card-header>
@@ -395,6 +400,7 @@ interface MetricBlock {
 })
 export class NodeDetail {
   private readonly api = inject(ApiService);
+  private readonly pageHeading = inject(PageHeading);
 
   /** Bound from the route, so the component works from a deep link. */
   readonly slug = input.required<string>();
@@ -409,7 +415,7 @@ export class NodeDetail {
   protected readonly stats = signal<DayNightStats | null>(null);
 
   protected readonly node = computed(
-    () => this.nodes().find((n) => n.slug === this.slug()) ?? null,
+    () => this.nodes().find((node) => node.slug === this.slug()) ?? null,
   );
 
   /**
@@ -472,6 +478,9 @@ export class NodeDetail {
 
   constructor() {
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
+    effect(() =>
+      this.pageHeading.showPage(describeNodeHeading(this.slug(), this.node())),
+    );
 
     // Driven off the route parameter rather than read once: a required input
     // has no value during construction, and moving between two nodes reuses

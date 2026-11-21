@@ -6,20 +6,49 @@
 sometimes with wet hands. Angular 20 standalone components, Angular Material M3, no SSR.
 
 > [!note] Status
-> Phase 10: the shell, the gauge component and the dashboard. The devices and nodes screens are
-> still thin — phase 11.
+> A side-rail shell with a top bar on every screen, and a dashboard of four live panels. The
+> devices and nodes screens are still thin.
 
 ## Key files
 
-- [../apps/web/src/app/app.ts](../apps/web/src/app/app.ts) / [app.html](../apps/web/src/app/app.html) — the shell, and the banner
+- [../apps/web/src/app/app.ts](../apps/web/src/app/app.ts) / [app.html](../apps/web/src/app/app.html) — the shell: rail, top bar and banner
+- [../apps/web/src/app/core/page-heading.ts](../apps/web/src/app/core/page-heading.ts) — the top bar's title and subtitle
 - [../apps/web/src/app/core/api-error.interceptor.ts](../apps/web/src/app/core/api-error.interceptor.ts) — the only error handling in the app
 - [../apps/web/src/app/core/api.service.ts](../apps/web/src/app/core/api.service.ts) — every call, typed from `@tempestas/domain`
 - [../apps/web/src/app/core/realtime.service.ts](../apps/web/src/app/core/realtime.service.ts) — the socket feed, as signals
 - [../apps/web/src/app/shared/gauge/gauge.ts](../apps/web/src/app/shared/gauge/gauge.ts) — one reading, as an arc
-- [../apps/web/src/app/features/dashboard/dashboard.ts](../apps/web/src/app/features/dashboard/dashboard.ts) — the dashboard
+- [../apps/web/src/app/features/dashboard/dashboard.ts](../apps/web/src/app/features/dashboard/dashboard.ts) — the dashboard, composing its four panels
+- [../apps/web/src/app/features/dashboard/activity-log.ts](../apps/web/src/app/features/dashboard/activity-log.ts) — rules decisions and relay switches, newest first
 - [../apps/web/src/app/features/nodes/node-detail.ts](../apps/web/src/app/features/nodes/node-detail.ts) — one node, with its 24-hour statistics
-- [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme and the gauge band colours
+- [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme, the rail and hero tokens, and the gauge band colours
 - [../apps/web/proxy.conf.json](../apps/web/proxy.conf.json) — `/api` and `/socket.io` to `:7000` in dev
+
+## The shell
+
+At **64rem and wider** the nav is a rail down the left that is always shown, and the hamburger is
+not displayed. Below that the rail becomes a drawer behind a hamburger in the top bar. The switch
+is **CSS media queries only**: no `BreakpointObserver`, no `mat-sidenav`. The open state is a
+signal rather than a CSS trick for one reason: a closed drawer is `display: none`, so its links
+leave the tab order and the accessibility tree. It closes on navigation, on Escape and on the
+scrim.
+
+Nav glyphs are inline SVG paths in a lookup table in `app.ts`, stroked in `currentColor`. The
+active link is bold and carries a leading bar as well as a different fill, and it sets
+`aria-current="page"`.
+
+The **top bar** is sticky and names the screen. Its title and subtitle come from the route's
+`data: { heading, subtitle }`, read from the deepest route on every `NavigationEnd`. A page that
+knows more can override it with `PageHeading.showPage()`: node detail shows the node's display
+name, with its slug, kind and whether it is online. The next navigation resets it. Pages no longer
+render their own `<h1>`.
+
+The live/offline indicator shows in the rail's foot on a wide screen and in the top bar on a
+narrow one. Offline is a hollow dot and the word "offline", never colour alone.
+
+Colours come from the M3 tokens. The rail uses the **fixed** tokens
+(`--mat-sys-on-primary-fixed-variant` and `--mat-sys-primary-fixed`), which keep one tone in light
+and dark mode, so the rail looks the same in both. Cards are restyled once with
+`mat.card-overrides` in `styles.scss`, not per screen.
 
 ## Errors happen in exactly one place
 
@@ -48,7 +77,9 @@ Layer 1 of the safety design holds last state when readings stop — it does not
 is explicit that this is _"only sound if the alarm is actually visible"_.
 
 **This banner is that alarm.** It lives in the shell rather than on a screen, it is not dismissible,
-and it names the affected roles. It is driven by `sensorStale` on the `system:status` socket event,
+and it names the affected roles. It sits in the content column, full width, under the top bar and
+above the page, so it is never inside the drawer that a narrow screen hides. `app.spec.ts` checks
+that placement with the menu open and closed. It is driven by `sensorStale` on the `system:status` socket event,
 which the server caches and replays on connect so a browser opening mid-cycle sees it immediately.
 
 Treat it as a required part of the feature. A change that makes it easier to miss is a safety
@@ -126,7 +157,94 @@ Two mechanics worth knowing:
 Every figure on it can legitimately be absent and renders as an em-dash. A window with no valid CO2
 has no CO2 average.
 
-## The dashboard shows a reading's age
+## The dashboard
+
+Four panels, every one of them fed by the socket. None of them polls, and none of them switches
+anything: there are no relay buttons here, and never `force-on`.
+
+- **Hero.** One line of system state, with the worst problem first: offline, then following,
+  failing rules, quiet sensors, warnings, and finally "All zones running normally". Under it are
+  when the rules last ran and how many nodes are online. Below that is a tile for each zone and
+  role that tempestas drives, with the reading that role is controlled on, the decision in words
+  ("ON · below setpoint") and how long ago it was made.
+- **Stat cards**, one per node:
+  - each metric as a large figure, with a trend chip and a bar showing where the figure sits in
+    the gauge's range, in the band colour;
+  - an age line;
+  - each relay's state in words, "ON since 14:02" or "off", with the date when it switched on
+    before today.
+- **Needs attention**, read-only:
+  - the socket being down;
+  - a follower that is not leading;
+  - nodes waiting to be admitted;
+  - probes quiet for over two minutes;
+  - zones whose rules failed;
+  - decisions that warn.
+
+  Each one links to the screen that deals with it. When the list is empty it says "Nothing needs
+  you."
+
+- **Activity**: relay switches, rules decisions that changed since the previous cycle, newly
+  failing zones and failed dispatches, newest first, each with its clock time. The panel shows
+  when the rules last ran.
+
+A server that stops leading forgets its rules cycle without saying so on the socket, so the
+client drops its cycle as soon as a status says `isLeading: false`. The tiles, the warnings and
+"Rules ran" then show nothing rather than a follower's stale decisions, and the activity log treats
+the next cycle as its first.
+
+Every figure that can be unknown renders an **em-dash**: a tile's reading, a stat's value, its
+trend and its range bar, and the count of nodes online before the first status arrives.
+
+### The trend is since the period began, not since some minutes ago
+
+The trend chip shows the change since the **start of the day or night now running**, because the
+burner does enrichment by day and heat by night, and a change that straddles dusk describes
+neither. The baseline is each sensor's first reading in that period. The client asks each node's
+`day-night` stats for the period's `from`. Once a sensor's live reading falls inside that period,
+it asks for that one sensor's first reading since `from` (`nodeId` with `sensorId`, `order=oldest-first`,
+`limit=1`). A probe that was quiet at the boundary gets its baseline as soon as it speaks again,
+and a probe that has been quiet all period is never asked about. Per sensor matters: a node's
+readings are interleaved, so one chatty probe would otherwise push a quieter one off the end of
+any row limit.
+
+The period is fetched again at the server's `nextBoundary`, never at a boundary the client works
+out for itself. A failed request, or a sensor whose first reading has not landed yet, is tried
+again after a minute, and nothing is asked faster than that, even when a phone's clock runs ahead
+of the server's and the boundary looks already past. A period that has ended is dropped rather
+than shown under the wrong label. Both requests are background requests,
+so a failure leaves an em-dash and raises no snackbar.
+
+### The activity log outlives the page
+
+`ActivityLog` is a root service, so leaving the dashboard and coming back keeps its history. The
+shell starts it when the app opens, and it keeps the newest 30 entries. It reads
+`recentDevicePushes`, every push in arrival order and numbered, rather than the latest push per
+device, so a relay switched on and off between two reads logs both. A failed dispatch is logged when it first fails, not again on every cycle while it
+keeps failing. When it starts it loads the device list once, so each relay's first push is
+compared with a known state rather than with the clock. The controller stamps `onAt` and the phone
+stamps the push, and the two can be minutes apart. Only a device missing from that list falls
+back to counting as a switch when its `onAt` or `offAt` is within a minute of the push, so opening
+the page does not replay every relay as news. Rules decisions are compared with the
+previous cycle, so the first cycle after the app opens is the baseline for decisions and records
+none. Failures are different: a zone already failing, or a dispatch already failing, is logged
+from that first cycle, because it is happening now.
+
+### Cards are pinned, not gridded
+
+The dashboard's node cards and the zones page's zone cards sit on a shared pinboard
+(`shared/pinboard/`). Each card goes into whichever column is shortest, so a short card leaves no
+gap the way a grid row would. The pinboard measures each card's real height. Every column has
+the same width, so a card's height holds wherever it moves. Empty columns are kept, so a lone card
+is one column wide rather than stretched across the page. Once cards are placed and measured,
+they stay in their columns as their contents change. A new card goes under the shortest column and
+a removed card leaves its gap, so neither moves the others. The whole board repacks only while it
+is first being measured and when the column count changes. After a column change it measures
+every card once the new columns are drawn and packs again from those heights, because a card that
+did not change size reports nothing on its own. Moving a card rebuilds it, which would drop
+keyboard focus inside it.
+
+### Each card still shows a reading's age
 
 The shell banner fires only when an **owned role** goes stale. A node can go quiet without that, so
 each card carries its own age and marks itself after two minutes. A confident number with nothing
@@ -182,12 +300,17 @@ That is how the old client ended up with four of them and no coverage.
   and the sidecar in reach of the OOM killer. See [Development setup](Getting%20Started/Development%20setup.md).
 - **Angular Material 20 is M3** and dropped `deeppurple-amber`, which the old app used. The theme is
   declared with `mat.theme()` in `styles.scss` rather than taking a prebuilt.
-- **The budget is 500 kB initial / 1 MB error.** Angular Material adds up; check the build output
-  before adding a component library.
+- **The budget is 1 MB initial / 2 MB error, and it is a tripwire, not a target.** The app is
+  served over the LAN, so a few hundred kB more costs nothing anybody would notice, even on one
+  bar of Wi-Fi in the pumphouse. The budget is there to flag a library pulled in by mistake, such
+  as an icon font or a charting package; a warning means look at what was added, not squeeze the
+  code to fit.
 
 ## When to update this file
 
-- A screen moves out of placeholder status (phases 10 and 11)
+- A screen moves out of placeholder status
+- The shell's breakpoint, or how a page sets its heading, changes
+- A dashboard panel gains or loses a source
 - The error-handling contract changes
 - The banner's trigger or wording changes
 - A second realtime consumer appears

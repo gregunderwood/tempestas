@@ -115,13 +115,22 @@ export interface DayNightStats {
   };
 }
 
+export enum ReadingOrder {
+  NewestFirst = 'newest-first',
+  OldestFirst = 'oldest-first',
+}
+
 export interface ReadingsQuery {
   days?: number;
   from?: string;
   to?: string;
   nodeId?: NodeId;
+  /** Only with `nodeId`: a sensor id is unique on its node, not across nodes. */
+  sensorId?: string;
+  /** Newest first unless asked; oldest first is how a client finds where a window began. */
+  order?: ReadingOrder;
   /**
-   * Rows to return, newest first. Bounded on purpose: 90 days of retention at
+   * Rows to return. Bounded on purpose: 90 days of retention at
    * one sample per node per 10 s is over three quarters of a million rows, and
    * the dashboard asks for stats over a window rather than the window itself.
    */

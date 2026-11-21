@@ -1,9 +1,12 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router, type Route } from '@angular/router';
-import { provideZonelessChangeDetection } from '@angular/core';
-import { signal } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
+import { of } from 'rxjs';
 import { App } from './app';
+import { ApiService } from './core/api.service';
 import { RealtimeService } from './core/realtime.service';
+import { PageHeading } from './core/page-heading';
+import { fakeRealtime } from './testing/fake-realtime';
 import type { SystemStatus } from '@tempestas/domain';
 
 function statusOf(overrides: Partial<SystemStatus> = {}): SystemStatus {
@@ -13,137 +16,229 @@ function statusOf(overrides: Partial<SystemStatus> = {}): SystemStatus {
     staleRoles: [],
     nodesOnline: 2,
     nodesTotal: 2,
+    nodesPending: 0,
+    isLeading: true,
     lastEvaluationAt: '2026-01-10T12:00:00.000Z',
     ...overrides,
   };
 }
 
-function setup(
-  status: SystemStatus | null,
-  connected = true,
-  routes: Route[] = [],
-) {
-  const fake = {
-    connected: signal(connected),
-    status: signal(status),
-    readings: signal({}),
-    devicePushes: signal(new Map()),
+const ROUTES: Route[] = [
+  {
+    path: 'readings',
+    data: { heading: 'Readings', subtitle: 'Every sensor' },
+    children: [],
+  },
+  { path: 'zones', children: [] },
+];
+
+function setup(status: SystemStatus | null, isConnected = true) {
+  const realtime = {
+    ...fakeRealtime({
+      connected: signal(isConnected),
+      status: signal(status),
+    }),
     connect: () => undefined,
   };
   TestBed.configureTestingModule({
     imports: [App],
     providers: [
       provideZonelessChangeDetection(),
-      provideRouter(routes),
-      { provide: RealtimeService, useValue: fake },
+      provideRouter(ROUTES),
+      { provide: RealtimeService, useValue: realtime },
+      { provide: ApiService, useValue: { devices: () => of([]) } },
     ],
   });
   const fixture = TestBed.createComponent(App);
   fixture.detectChanges();
-  return fixture;
+  const element = fixture.nativeElement as HTMLElement;
+  return {
+    fixture,
+    element,
+    menuButton: element.querySelector<HTMLButtonElement>('.temp-menu-button'),
+    nav: element.querySelector<HTMLElement>('#temp-nav'),
+    banner: () => element.querySelector<HTMLElement>('[role="alert"]'),
+  };
+}
+
+async function navigateTo(fixture: { detectChanges(): void }, url: string) {
+  await TestBed.inject(Router).navigateByUrl(url);
+  fixture.detectChanges();
 }
 
 describe('App shell', () => {
-  it('shows the nav', () => {
-    const text =
-      (setup(statusOf()).nativeElement as HTMLElement).textContent ?? '';
-    for (const link of ['Dashboard', 'Readings', 'Devices', 'Nodes']) {
-      expect(text).toContain(link);
-    }
-  });
-
-  // Layer 1 of the safety design holds last state when readings stop, and is
-  // explicit that this is "only sound if the alarm is actually visible". The
-  // banner IS that alarm, so its absence is a safety defect, not a cosmetic one.
-  it('raises the stale-sensor banner when the server says sensors are stale', () => {
-    const fixture = setup(
-      statusOf({ sensorStale: true, staleRoles: ['co2_generator'] as never }),
+  it('links every screen from the nav', () => {
+    const { nav } = setup(statusOf());
+    const labels = Array.from(nav?.querySelectorAll('a') ?? []).map((link) =>
+      link.textContent?.trim(),
     );
-    const banner = (fixture.nativeElement as HTMLElement).querySelector(
-      '[role="alert"]',
+    expect(labels).toEqual([
+      'Dashboard',
+      'Readings',
+      'Zones',
+      'Devices',
+      'Nodes',
+    ]);
+  });
+
+  it('marks the current screen for a screen reader', async () => {
+    const { fixture, nav } = setup(statusOf());
+    await navigateTo(fixture, '/readings');
+    const current = nav?.querySelector('[aria-current="page"]');
+    expect(current?.textContent).toContain('Readings');
+  });
+
+  it('titles the top bar from the route', async () => {
+    const { fixture, element } = setup(statusOf());
+    await navigateTo(fixture, '/readings');
+    expect(element.querySelector('.temp-heading')?.textContent).toBe(
+      'Readings',
+    );
+    expect(element.querySelector('.temp-subtitle')?.textContent).toBe(
+      'Every sensor',
+    );
+  });
+
+  it('lets a page name itself, until the next navigation', async () => {
+    const { fixture, element } = setup(statusOf());
+    await navigateTo(fixture, '/readings');
+    TestBed.inject(PageHeading).showPage({
+      heading: 'greenhouse',
+      subtitle: 'linux node',
+    });
+    fixture.detectChanges();
+    expect(element.querySelector('.temp-heading')?.textContent).toBe(
+      'greenhouse',
     );
 
-    expect(banner).toBeTruthy();
-    expect(banner?.textContent).toContain('holding its last state');
-    expect(banner?.textContent).toContain('co2_generator');
+    await navigateTo(fixture, '/zones');
+    expect(element.querySelector('.temp-heading')?.textContent).toBe(
+      'tempestas',
+    );
   });
 
-  it('shows no banner when nothing is stale', () => {
-    const fixture = setup(statusOf({ sensorStale: false }));
-    expect(
-      (fixture.nativeElement as HTMLElement).querySelector('[role="alert"]'),
-    ).toBeNull();
+  it('keeps a page name through a navigation that stays on the page', async () => {
+    const { fixture, element } = setup(statusOf());
+    await navigateTo(fixture, '/readings');
+    TestBed.inject(PageHeading).showPage({
+      heading: 'greenhouse',
+      subtitle: 'linux node',
+    });
+    await navigateTo(fixture, '/readings?days=7');
+    expect(element.querySelector('.temp-heading')?.textContent).toBe(
+      'greenhouse',
+    );
   });
 
-  it('shows no banner before the first status has arrived', () => {
-    const fixture = setup(null);
-    expect(
-      (fixture.nativeElement as HTMLElement).querySelector('[role="alert"]'),
-    ).toBeNull();
-  });
-
-  // A dashboard that has quietly stopped updating looks exactly like one where
-  // nothing is happening.
   it('says so when the socket is down', () => {
-    const text =
-      (setup(statusOf(), false).nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('offline');
+    const { element } = setup(statusOf(), false);
+    expect(element.textContent).toContain('offline');
   });
 });
 
-// The nav collapses behind a button on narrow screens. These assert the parts
-// that are not styling: a link that is hidden must also leave the tab order and
-// the accessibility tree, and the menu must not survive a navigation and cover
-// the screen somebody just asked to see.
-describe('App shell menu', () => {
-  function shell() {
-    // A real route, so a navigation actually completes and emits NavigationEnd.
-    const fixture = setup(statusOf(), true, [
-      { path: 'readings', children: [] },
-    ]);
-    const el = fixture.nativeElement as HTMLElement;
-    return {
-      fixture,
-      el,
-      button: el.querySelector<HTMLButtonElement>('.temp-menu-button'),
-      nav: el.querySelector<HTMLElement>('.temp-nav'),
-    };
-  }
+// Holding last state is only sound if this alarm is visible, so its absence is a safety defect.
+describe('App shell stale-sensor banner', () => {
+  const staleStatus = statusOf({
+    sensorStale: true,
+    staleRoles: ['co2_generator'] as never,
+  });
 
+  it('is raised when the server says sensors are stale', () => {
+    const { banner } = setup(staleStatus);
+    expect(banner()?.textContent).toContain('holding its last state');
+    expect(banner()?.textContent).toContain('co2_generator');
+  });
+
+  it('is absent when nothing is stale', () => {
+    expect(setup(statusOf()).banner()).toBeNull();
+  });
+
+  it('is absent before the first status has arrived', () => {
+    expect(setup(null).banner()).toBeNull();
+  });
+
+  it('sits full width above the page, never inside the nav the narrow layout hides', () => {
+    const { element, nav, banner } = setup(staleStatus);
+    const content = element.querySelector('.temp-content');
+    expect(banner()?.parentElement).toBe(content);
+    expect(nav?.contains(banner())).toBe(false);
+    expect(banner()?.nextElementSibling?.tagName).toBe('MAIN');
+  });
+
+  it('stays in place while the narrow layout has its menu open', () => {
+    const { fixture, menuButton, nav, banner } = setup(staleStatus);
+    menuButton?.click();
+    fixture.detectChanges();
+    expect(nav?.classList.contains('temp-rail-open')).toBe(true);
+    expect(banner()?.parentElement?.classList).toContain('temp-content');
+    expect(banner()?.nextElementSibling?.tagName).toBe('MAIN');
+  });
+
+  it('offers no way to dismiss it', () => {
+    expect(setup(staleStatus).banner()?.querySelector('button')).toBeNull();
+  });
+});
+
+// Below 64rem the nav is a drawer; a closed one must leave the tab order and not survive a navigation.
+describe('App shell menu', () => {
   it('starts closed and says so to a screen reader', () => {
-    const { button, nav } = shell();
-    expect(button?.getAttribute('aria-expanded')).toBe('false');
-    expect(nav?.classList.contains('temp-nav-open')).toBe(false);
+    const { menuButton, nav } = setup(statusOf());
+    expect(menuButton?.getAttribute('aria-expanded')).toBe('false');
+    expect(nav?.classList.contains('temp-rail-open')).toBe(false);
   });
 
   it('opens and closes on the button', () => {
-    const { fixture, button, nav } = shell();
-    button?.click();
+    const { fixture, menuButton, nav } = setup(statusOf());
+    menuButton?.click();
     fixture.detectChanges();
-    expect(button?.getAttribute('aria-expanded')).toBe('true');
-    expect(nav?.classList.contains('temp-nav-open')).toBe(true);
+    expect(menuButton?.getAttribute('aria-expanded')).toBe('true');
+    expect(nav?.classList.contains('temp-rail-open')).toBe(true);
 
-    button?.click();
+    menuButton?.click();
     fixture.detectChanges();
-    expect(button?.getAttribute('aria-expanded')).toBe('false');
-    expect(nav?.classList.contains('temp-nav-open')).toBe(false);
+    expect(menuButton?.getAttribute('aria-expanded')).toBe('false');
+    expect(nav?.classList.contains('temp-rail-open')).toBe(false);
   });
 
   it('points the button at the nav it controls', () => {
-    const { button, nav } = shell();
-    expect(button?.getAttribute('aria-controls')).toBe('temp-nav');
-    expect(nav?.id).toBe('temp-nav');
+    const { menuButton, nav } = setup(statusOf());
+    expect(menuButton?.getAttribute('aria-controls')).toBe(nav?.id);
+  });
+
+  it('closes on Escape', () => {
+    const { fixture, menuButton, nav } = setup(statusOf());
+    menuButton?.click();
+    fixture.detectChanges();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+    expect(nav?.classList.contains('temp-rail-open')).toBe(false);
+  });
+
+  it('hands focus back to the menu button on Escape', () => {
+    const { fixture, menuButton, nav } = setup(statusOf());
+    menuButton?.click();
+    fixture.detectChanges();
+    nav?.querySelector<HTMLElement>('a')?.focus();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(menuButton);
+  });
+
+  it('closes on the scrim', () => {
+    const { fixture, element, menuButton, nav } = setup(statusOf());
+    menuButton?.click();
+    fixture.detectChanges();
+    element.querySelector<HTMLElement>('.temp-scrim')?.click();
+    fixture.detectChanges();
+    expect(nav?.classList.contains('temp-rail-open')).toBe(false);
   });
 
   it('closes when a navigation completes', async () => {
-    const { fixture, button, nav } = shell();
-    button?.click();
+    const { fixture, menuButton, nav } = setup(statusOf());
+    menuButton?.click();
     fixture.detectChanges();
-    expect(nav?.classList.contains('temp-nav-open')).toBe(true);
-
-    await TestBed.inject(Router).navigateByUrl('/readings');
-    fixture.detectChanges();
-    expect(nav?.classList.contains('temp-nav-open')).toBe(false);
-    expect(button?.getAttribute('aria-expanded')).toBe('false');
+    await navigateTo(fixture, '/readings');
+    expect(nav?.classList.contains('temp-rail-open')).toBe(false);
+    expect(menuButton?.getAttribute('aria-expanded')).toBe('false');
   });
 });
