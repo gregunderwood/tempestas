@@ -3,9 +3,6 @@
 
 set -euo pipefail
 
-DEFAULT_HOSTS=(elantris patji)
-HOSTS=("$@")
-[ "$#" -gt 0 ] || HOSTS=("${DEFAULT_HOSTS[@]}")
 REMOTE_AGENT="/home/gunderwood/tempestas/apps/agent-linux"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENT="$HERE/apps/agent-linux"
@@ -13,13 +10,23 @@ UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 SETTLE_SECONDS=5
 SHIPPED=(src tools nodes systemd pyproject.toml uv.lock agent.example.toml)
 
-say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+source "$HERE/tools/lib/console.sh"
+
+source "$HERE/tools/lib/remote-host.sh"
+
+HOSTS=("$@")
+[ "$#" -gt 0 ] || HOSTS=("${LINUX_HOSTS[@]}")
 
 say "Gate"
 (cd "$AGENT" && "$UV" run ruff check . && "$UV" run pytest -q)
 
 AGENT_VERSION="$("$HERE/tools/describe-agent-version.sh" "$AGENT")"
 say "Deploying $AGENT_VERSION to ${HOSTS[*]}"
+
+# Every host first: stopping halfway would leave the fleet on two versions.
+for HOST in "${HOSTS[@]}"; do
+  require_passwordless_systemctl "$HOST" "restart tempestas-agent.service"
+done
 
 for HOST in "${HOSTS[@]}"; do
   say "$HOST: copying"
@@ -35,7 +42,7 @@ for HOST in "${HOSTS[@]}"; do
     ssh "$HOST" "cat > $REMOTE_AGENT/src/tempestas_agent/deployed_version.py"
 
   say "$HOST: restarting (relays fail safe until the server drives them again)"
-  ssh -t "$HOST" "sudo systemctl restart tempestas-agent"
+  ssh "$HOST" "sudo -n systemctl restart tempestas-agent.service"
   sleep "$SETTLE_SECONDS"
   ssh "$HOST" "systemctl is-active tempestas-agent && journalctl -u tempestas-agent -n 5 --no-pager"
 done

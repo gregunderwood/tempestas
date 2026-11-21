@@ -30,20 +30,33 @@ migration cannot see the database, check that file first.
 ### On elantris
 
 elantris has the build, not a checkout: no `package.json`, no `ts-node`, no source. The server
-bundle carries the same migrations, so run them from it, with the service's own env file. That
-file is root-only, so `systemd-run` reads it as the service does and runs node as `gunderwood`.
-`tools/deploy.sh` shows what is pending after every deploy; running them stays a separate step.
+bundle carries the same migrations, and `tempestas-migrate@.service` runs them from it with the
+server's own root-only env file. `tools/deploy.sh` checks for pending migrations **before** it
+restarts the server, and stops if there are any: the new code on an unmigrated schema crash-loops.
+It decides from `migrate:show`'s exit status, 3 when something is pending, and stops on any status
+it does not recognise, so a check that cannot run never reads as "nothing pending". Run by hand,
+`systemctl start tempestas-migrate@show.service` therefore reports the job **failed** when
+something is pending: that is the answer, not an error. A stopped deploy has not shipped the web
+bundle either, so the browser keeps matching the running server.
+
+Running them stays a separate step, then the deploy runs again:
 
 ```bash
-ssh elantris
-sudo -u postgres pg_dump -Fc tempestas > ~/backups/tempestas-$(date +%F)-before-<change>.dump
-migrate() {
-  sudo systemd-run --quiet --pipe --wait --uid=gunderwood \
-    -p EnvironmentFile=/etc/tempestas/server.env -E NODE_ENV=production \
-    /usr/local/bin/node ~/tempestas/dist/apps/server/main.js "migrate:$1"
-}
-migrate show                                                    # read it first
-migrate run
+ssh elantris sudo -n systemctl start tempestas-migrate@run.service && tools/deploy.sh
+ssh elantris journalctl -u tempestas-migrate@run.service -n 20 -o cat   # what it applied
+```
+
+**`run` and `revert` take a backup first**, through a drop-in that makes them require
+`tempestas-backup.service`, and do nothing if it fails. The backup keeps the last 10 dumps in
+`/var/backups/tempestas`, and its journal names the file it wrote. After
+`tools/install-deploy-privileges.sh`, none of this asks for a password.
+
+A host whose Postgres runs in Docker (greenhouse) has no `postgresql.service` to hang the backup on,
+so there `run` and `revert` keep asking for a password, and the backup is by hand first:
+
+```bash
+sudo docker exec tempestas-db pg_dump -U tempestas -Fc tempestas > ~/backups/tempestas-$(date +%F)-before-<change>.dump
+sudo systemctl start tempestas-migrate@run.service
 ```
 
 ### Naming
@@ -113,7 +126,7 @@ synchronize: true,   // ❌ never, in any config, for any reason
 - **Expand-contract, once anything is deployed.** Without it, "roll back the image" is a lie —
   the previous image still has to run against the migrated schema. Add the column, deploy, backfill,
   then remove the old one in a later migration.
-- **`pg_dump` before migrations on the Pi.** The deploy script does it; a manual run should too.
+- **`pg_dump` before migrations on the Pi.** `tempestas-backup.service` does it; never skip it.
 - **Enum changes are not free.** TypeORM rewrites the type, which on a large table is a table
   rewrite. `sensor_readings` will be the one that hurts.
 - **Destructive operations on populated tables** get a second pair of eyes and a dump first.
