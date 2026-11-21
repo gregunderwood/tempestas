@@ -68,6 +68,8 @@ export const CO2_SCALE: BarScale = {
   decimals: 0,
 };
 
+export const FULL_SCALE_PERCENT = 100;
+
 const PADDING_PER_BAND_WIDTH = 1.5;
 const MERGE_LABELS_CLOSER_THAN_PERCENT = 20;
 
@@ -200,7 +202,7 @@ function buildWindow(definition: BarDefinition): BarWindow {
   const minimum = low - padding;
   const maximum = high + padding;
   const toPercent = (value: number): number =>
-    ((value - minimum) / (maximum - minimum)) * 100;
+    ((value - minimum) / (maximum - minimum)) * FULL_SCALE_PERCENT;
   return {
     low,
     high,
@@ -225,7 +227,7 @@ function buildSegments(barWindow: BarWindow, onSide: BarSide): BarSegment[] {
     {
       kind: aboveBand,
       fromPercent: highPercent,
-      widthPercent: 100 - highPercent,
+      widthPercent: FULL_SCALE_PERCENT - highPercent,
     },
   ];
 }
@@ -261,7 +263,7 @@ function placeMarker(
     return { atPercent: 0, offScale: 'low', isStale };
   }
   if (reading > barWindow.maximum) {
-    return { atPercent: 100, offScale: 'high', isStale };
+    return { atPercent: FULL_SCALE_PERCENT, offScale: 'high', isStale };
   }
   return { atPercent: barWindow.toPercent(reading), offScale: null, isStale };
 }

@@ -17,7 +17,13 @@ import { fakeRealtime } from '../../testing/fake-realtime';
 import { NodeDetail } from './node-detail';
 import { PageHeading } from '../../core/page-heading';
 
-function reading(over: Partial<Reading> = {}): Reading {
+const STATS_REFRESH_MILLISECONDS = 60_000;
+const PAST_BOUNDARY_AND_SLACK_MILLISECONDS = 61_500;
+const REFRESH_INTERVAL_AND_BOUNDARY_TIMEOUT = 2;
+
+let statsRequestCount = 0;
+
+function reading(overrides: Partial<Reading> = {}): Reading {
   return {
     id: 'r1',
     nodeId: 'elantris',
@@ -26,11 +32,11 @@ function reading(over: Partial<Reading> = {}): Reading {
     humidity: 63,
     co2: 481,
     createdAt: '2026-09-10T22:39:46.000Z',
-    ...over,
+    ...overrides,
   };
 }
 
-function statsOf(): ReadingStats {
+function populatedStats(): ReadingStats {
   return {
     min: {
       temperature: reading({ temperature: 17.5 }),
@@ -48,7 +54,6 @@ function statsOf(): ReadingStats {
   };
 }
 
-/** A period with nothing in it - the normal case for a node that started today. */
 function emptyStats(): ReadingStats {
   return {
     min: { temperature: null, humidity: null, co2: null },
@@ -73,13 +78,13 @@ function segment(
   };
 }
 
-function dayNight(over: Partial<DayNightStats> = {}): DayNightStats {
+function dayNight(overrides: Partial<DayNightStats> = {}): DayNightStats {
   return {
     // Oldest first, ending with the period still running.
     periods: [
-      segment('day', false, statsOf()),
+      segment('day', false, populatedStats()),
       segment('night', false, emptyStats()),
-      segment('day', true, statsOf()),
+      segment('day', true, populatedStats()),
     ],
     nextBoundary: '2026-09-11T01:30:00.000Z',
     daylight: {
@@ -87,11 +92,11 @@ function dayNight(over: Partial<DayNightStats> = {}): DayNightStats {
       endTime: '18:30',
       timezone: 'America/Vancouver',
     },
-    ...over,
+    ...overrides,
   };
 }
 
-function node(over: Partial<Node> = {}): Node {
+function node(overrides: Partial<Node> = {}): Node {
   return {
     id: 'n1',
     slug: 'elantris',
@@ -99,13 +104,11 @@ function node(over: Partial<Node> = {}): Node {
     kind: 'rpi',
     status: NodeStatus.Admitted,
     online: true,
-    ...over,
+    ...overrides,
   } as unknown as Node;
 }
 
-let statsCalls = 0;
-
-function device(over: Partial<Device> = {}): Device {
+function device(overrides: Partial<Device> = {}): Device {
   return {
     id: 'dev-1',
     nodeId: 'elantris',
@@ -122,12 +125,12 @@ function device(over: Partial<Device> = {}): Device {
     isOn: false,
     canTurnOn: true,
     canTurnOnAt: null,
-    ...over,
+    ...overrides,
   } as Device;
 }
 
-function setup(
-  opts: {
+function renderNodeDetail(
+  options: {
     stats?: DayNightStats;
     latest?: Reading[];
     live?: Record<string, Reading>;
@@ -136,9 +139,8 @@ function setup(
     slug?: string;
   } = {},
 ): HTMLElement {
-  statsCalls = 0;
-  // Some tests render twice to compare two inputs, and TestBed refuses to be
-  // reconfigured once it has been instantiated.
+  statsRequestCount = 0;
+  // Some tests render twice, and TestBed refuses to be reconfigured once instantiated.
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     imports: [NodeDetail],
@@ -148,36 +150,37 @@ function setup(
       {
         provide: ApiService,
         useValue: {
-          nodes: () => of([opts.node ?? node()]),
-          latestReadings: () => of(opts.latest ?? [reading()]),
+          nodes: () => of([options.node ?? node()]),
+          latestReadings: () => of(options.latest ?? [reading()]),
           dayNightStats: () => {
-            statsCalls++;
-            return of(opts.stats ?? dayNight());
+            statsRequestCount++;
+            return of(options.stats ?? dayNight());
           },
-          devices: () => of(opts.devices ?? []),
+          devices: () => of(options.devices ?? []),
         },
       },
       {
         provide: RealtimeService,
-        useValue: fakeRealtime({ readings: signal(opts.live ?? {}) }),
+        useValue: fakeRealtime({ readings: signal(options.live ?? {}) }),
       },
     ],
   });
   const fixture = TestBed.createComponent(NodeDetail);
-  fixture.componentRef.setInput('slug', opts.slug ?? 'elantris');
+  fixture.componentRef.setInput('slug', options.slug ?? 'elantris');
   fixture.detectChanges();
   return fixture.nativeElement as HTMLElement;
 }
 
-/** The period rows of the first metric block, in the order they render. */
-function firstBlockRows(el: HTMLElement): HTMLElement[] {
-  const block = el.querySelectorAll('tbody')[0];
+function firstBlockRows(page: HTMLElement): HTMLElement[] {
+  const block = page.querySelectorAll('tbody')[0];
   return [...block.querySelectorAll<HTMLElement>('tr:not(.metric)')];
 }
 
 describe('NodeDetail', () => {
   it('names itself in the top bar, with its kind and whether it is online', () => {
-    setup({ node: node({ displayName: 'Greenhouse Pi', online: false }) });
+    renderNodeDetail({
+      node: node({ displayName: 'Greenhouse Pi', online: false }),
+    });
     expect(TestBed.inject(PageHeading).text()).toEqual({
       heading: 'Greenhouse Pi',
       subtitle: 'elantris · rpi · offline',
@@ -185,7 +188,7 @@ describe('NodeDetail', () => {
   });
 
   it('falls back to its slug in the top bar while the node is unknown', () => {
-    setup({ slug: 'braize' });
+    renderNodeDetail({ slug: 'braize' });
     expect(TestBed.inject(PageHeading).text()).toEqual({
       heading: 'braize',
       subtitle: '',
@@ -193,12 +196,11 @@ describe('NodeDetail', () => {
   });
 
   it('shows the current reading as gauges', () => {
-    const el = setup();
-    expect(el.querySelectorAll('temp-gauge')).toHaveLength(3);
-    expect(el.textContent).toContain('23.8');
+    const page = renderNodeDetail();
+    expect(page.querySelectorAll('temp-gauge')).toHaveLength(3);
+    expect(page.textContent).toContain('23.8');
   });
 
-  // The pumphouse: three pipe probes on one node, temperature only.
   it('shows a gauge row per sensor, and only the metrics it has', () => {
     const probe = (sensorId: string, temperature: number) =>
       reading({
@@ -215,7 +217,7 @@ describe('NodeDetail', () => {
       metrics: ['temperature' as const],
       sampleIntervalMs: 30_000,
     });
-    const el = setup({
+    const page = renderNodeDetail({
       slug: 'pumphouse',
       latest: [probe('28-b', 4.2), probe('28-a', 3.1), reading()],
       node: node({
@@ -227,136 +229,116 @@ describe('NodeDetail', () => {
         },
       }),
     });
-    const names = [...el.querySelectorAll('.sensor__name')].map((n) =>
-      n.textContent?.trim(),
+    const names = [...page.querySelectorAll('.sensor__name')].map((name) =>
+      name.textContent?.trim(),
     );
     expect(names).toEqual(['28-a', '28-b']);
-    expect(el.querySelectorAll('temp-gauge')).toHaveLength(2);
-    // No humidity or CO2 block of dashes under a node that has neither.
-    expect(el.querySelectorAll('tbody')).toHaveLength(1);
+    expect(page.querySelectorAll('temp-gauge')).toHaveLength(2);
+    expect(page.querySelectorAll('tbody')).toHaveLength(1);
   });
 
   it('shows min, max and average for each metric', () => {
-    const text = setup().textContent ?? '';
+    const text = renderNodeDetail().textContent ?? '';
     for (const value of ['17.5', '23.8', '21.8', '54.9', '77.5', '584']) {
       expect(text).toContain(value);
     }
   });
 
-  // The whole point of the split: a period spanning both averages CO2
-  // enrichment together with night heating and describes neither.
   it('shows three alternating periods and no combined figure', () => {
-    const el = setup();
-    expect(firstBlockRows(el)).toHaveLength(3);
-    expect(el.textContent).not.toContain('24 hours');
+    const page = renderNodeDetail();
+    expect(firstBlockRows(page)).toHaveLength(3);
+    expect(page.textContent).not.toContain('24 hours');
   });
 
-  // The period running now is what somebody opens this screen to see.
   it('puts the running period at the top and marks it', () => {
-    const rows = firstBlockRows(setup());
+    const rows = firstBlockRows(renderNodeDetail());
     expect(rows[0].classList.contains('running')).toBe(true);
     expect(rows[0].textContent).toContain('Day so far');
     expect(rows[2].classList.contains('running')).toBe(false);
   });
 
   it('says night so far when the running period is night', () => {
-    const el = setup({
+    const page = renderNodeDetail({
       stats: dayNight({
         periods: [
-          segment('night', false, statsOf()),
-          segment('day', false, statsOf()),
-          segment('night', true, statsOf()),
+          segment('night', false, populatedStats()),
+          segment('day', false, populatedStats()),
+          segment('night', true, populatedStats()),
         ],
       }),
     });
-    expect(el.querySelector('tr.running')?.textContent).toContain(
+    expect(page.querySelector('tr.running')?.textContent).toContain(
       'Night so far',
     );
   });
 
-  // Which night is "last" depends on whether it is currently night, so a label
-  // that is right half the time is worse than one that never claims it. The
-  // dated span carries the identity instead.
   it('does not claim a completed period is "last night"', () => {
-    expect(setup().textContent).not.toContain('Last night');
+    expect(renderNodeDetail().textContent).not.toContain('Last night');
   });
 
-  // The clock time of an extreme matters as much as its value: a peak at 14:00
-  // is the greenhouse working, the same peak at 03:00 is a fault.
   it('shows when an extreme happened, not just what it was', () => {
-    expect(setup().querySelectorAll('.at').length).toBeGreaterThan(0);
+    expect(renderNodeDetail().querySelectorAll('.at').length).toBeGreaterThan(
+      0,
+    );
   });
 
-  // Every figure here can legitimately be absent. Zero would read as extremely
-  // low CO2, which is the one direction that runs the burner.
   it('renders an empty period as em-dashes, never zeros', () => {
-    // The night between the two days, which the fixture leaves empty.
-    const empty = firstBlockRows(setup())[1];
-    expect(empty.textContent).toContain('—');
-    expect(empty.textContent).not.toMatch(/\b0\b/);
+    const emptyNightBetweenTheDays = firstBlockRows(renderNodeDetail())[1];
+    expect(emptyNightBetweenTheDays.textContent).toContain('—');
+    expect(emptyNightBetweenTheDays.textContent).not.toMatch(/\b0\b/);
   });
 
   it('says which daylight boundary it split at', () => {
-    const text = setup().textContent ?? '';
+    const text = renderNodeDetail().textContent ?? '';
     expect(text).toContain('06:30');
     expect(text).toContain('America/Vancouver');
   });
 
-  // Same rule as everywhere else: the socket patches what the API established.
   it('prefers a live reading over the fetched one', () => {
-    const el = setup({
+    const page = renderNodeDetail({
       live: { 'elantris/scd4x-0': reading({ temperature: 31.4 }) },
     });
-    expect(el.textContent).toContain('31.4');
+    expect(page.textContent).toContain('31.4');
   });
 
   it('says so plainly when the node has never reported', () => {
-    expect(setup({ latest: [] }).textContent).toContain(
+    expect(renderNodeDetail({ latest: [] }).textContent).toContain(
       'No readings from this node',
     );
   });
 
   it('says so plainly when there are no periods to show', () => {
-    const el = setup({ stats: dayNight({ periods: [] }) });
-    expect(el.textContent).toContain('No day or night period to show');
+    const page = renderNodeDetail({ stats: dayNight({ periods: [] }) });
+    expect(page.textContent).toContain('No day or night period to show');
   });
 
-  // The gauges are pushed over the socket; these figures are a query. Left
-  // alone the table freezes while the gauges keep moving, and the running
-  // period is still accumulating so it drifts further the longer you watch.
   describe('keeping the figures current', () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
 
     it('re-queries on a slow timer', () => {
-      setup();
-      expect(statsCalls).toBe(1);
-      vi.advanceTimersByTime(60_000);
-      expect(statsCalls).toBe(2);
-      vi.advanceTimersByTime(60_000);
-      expect(statsCalls).toBe(3);
+      renderNodeDetail();
+      expect(statsRequestCount).toBe(1);
+      vi.advanceTimersByTime(STATS_REFRESH_MILLISECONDS);
+      expect(statsRequestCount).toBe(2);
+      vi.advanceTimersByTime(STATS_REFRESH_MILLISECONDS);
+      expect(statsRequestCount).toBe(3);
     });
 
-    // Every row shifts the moment the running period ends.
     it('re-queries when the period boundary passes', () => {
       vi.setSystemTime(new Date('2026-09-11T01:29:00.000Z'));
-      setup();
-      expect(statsCalls).toBe(1);
-      // One minute to the boundary, plus the second of slack.
-      vi.advanceTimersByTime(61_500);
-      expect(statsCalls).toBeGreaterThanOrEqual(2);
+      renderNodeDetail();
+      expect(statsRequestCount).toBe(1);
+      vi.advanceTimersByTime(PAST_BOUNDARY_AND_SLACK_MILLISECONDS);
+      expect(statsRequestCount).toBeGreaterThanOrEqual(2);
     });
 
-    // Asserted on the timers themselves, not on the request count: the
-    // subscription is torn down separately, so counting requests passes even
-    // when the interval is left running for the life of the page.
+    // Counts timers, not requests: the subscription is torn down separately, so requests miss a leaked interval.
     it('clears its timers once the screen is gone', () => {
-      // Pinned before the fixture's boundary. On the real clock the boundary
-      // is in the past, no timeout is armed, and the count of two is wrong.
+      // Before the fixture's boundary; on the real clock it is past and no timeout is armed.
       vi.setSystemTime(new Date('2026-09-10T23:00:00.000Z'));
-      setup();
-      // Two: the slow refresh interval and the boundary timeout.
-      expect(vi.getTimerCount()).toBe(2);
+      renderNodeDetail();
+      expect(vi.getTimerCount()).toBe(REFRESH_INTERVAL_AND_BOUNDARY_TIMEOUT);
       TestBed.resetTestingModule();
       expect(vi.getTimerCount()).toBe(0);
     });
@@ -365,33 +347,30 @@ describe('NodeDetail', () => {
 
 describe('NodeDetail relays', () => {
   it('lists the relays on this node with their pin and role', () => {
-    const text = setup({ devices: [device()] }).textContent ?? '';
+    const text = renderNodeDetail({ devices: [device()] }).textContent ?? '';
     expect(text).toContain('CO2 Generator');
     expect(text).toContain('BCM 5');
     expect(text).toContain('co2_generator');
   });
 
-  // Colour is not readable on a phone in sunlight, and this one means a
-  // propane burner is alight.
   it('states an energised relay in words', () => {
-    const el = setup({ devices: [device({ isOn: true })] });
-    expect(el.querySelector('.relay__state')?.textContent?.trim()).toBe('ON');
-    expect(el.querySelector('.relay--on')).not.toBeNull();
+    const page = renderNodeDetail({ devices: [device({ isOn: true })] });
+    expect(page.querySelector('.relay__state')?.textContent?.trim()).toBe('ON');
+    expect(page.querySelector('.relay--on')).not.toBeNull();
   });
 
-  // An idle relay under manual control and one the rules engine is deciding
-  // about look identical otherwise.
   it('says whether anything is driving it', () => {
-    expect(setup({ devices: [device()] }).textContent).toContain('automatic');
+    expect(renderNodeDetail({ devices: [device()] }).textContent).toContain(
+      'automatic',
+    );
     expect(
-      setup({ devices: [device({ rulesEnabled: false })] }).textContent,
+      renderNodeDetail({ devices: [device({ rulesEnabled: false })] })
+        .textContent,
     ).toContain('manual');
   });
 
-  // The interlock is invisible otherwise, and "why is it not coming on?" is
-  // exactly the question it produces.
   it('shows the minimum-off hold when one is in force', () => {
-    const el = setup({
+    const page = renderNodeDetail({
       devices: [
         device({
           isOn: false,
@@ -400,26 +379,26 @@ describe('NodeDetail relays', () => {
         }),
       ],
     });
-    expect(el.textContent).toContain('held off until');
-    expect(el.textContent).toContain('300s minimum off');
+    expect(page.textContent).toContain('held off until');
+    expect(page.textContent).toContain('300s minimum off');
   });
 
   it('does not claim a hold when the device is free to turn on', () => {
-    expect(setup({ devices: [device()] }).textContent).not.toContain(
+    expect(renderNodeDetail({ devices: [device()] }).textContent).not.toContain(
       'held off until',
     );
   });
 
   it('only lists relays belonging to this node', () => {
-    const el = setup({
+    const page = renderNodeDetail({
       devices: [
         device({ id: 'other', nodeId: 'elsewhere', name: 'Other Relay' }),
       ],
     });
-    expect(el.textContent).not.toContain('Other Relay');
+    expect(page.textContent).not.toContain('Other Relay');
   });
 
   it('shows no relay card at all when the node has none', () => {
-    expect(setup().querySelector('.relays')).toBeNull();
+    expect(renderNodeDetail().querySelector('.relays')).toBeNull();
   });
 });

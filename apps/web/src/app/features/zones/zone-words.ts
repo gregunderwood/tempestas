@@ -17,6 +17,7 @@ export type DecisionTone = 'on' | 'off' | 'hold' | 'warn' | 'idle';
 const NODE_SOURCE_PREFIX = 'node:';
 const SENSOR_SOURCE_PREFIX = 'sensor:';
 const HOUR_MINUTE_PATTERN = /^(\d{1,2}):(\d{2})$/;
+const HOURS_PER_DAY = 24;
 
 const ROLE_LABELS: Record<DeviceRole, string> = {
   heater: 'Heater',
@@ -143,7 +144,7 @@ export function parseHourMinute(value: unknown): number | null {
   if (!match) return null;
   const hours = Number(match[1]);
   const minutes = Number(match[2]);
-  const isValidTime = hours < 24 && minutes < MINUTES_PER_HOUR;
+  const isValidTime = hours < HOURS_PER_DAY && minutes < MINUTES_PER_HOUR;
   return isValidTime ? hours * MINUTES_PER_HOUR + minutes : null;
 }
 
