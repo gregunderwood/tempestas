@@ -2,5 +2,5 @@
 
 WIFI_SSID = "your-network"
 WIFI_PASSWORD = "your-wifi-password"
-MQTT_USERNAME = "crawlspace-pico"
+MQTT_USERNAME = "braize"
 MQTT_PASSWORD = "generated-on-elantris"

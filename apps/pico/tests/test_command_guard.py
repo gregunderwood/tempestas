@@ -11,7 +11,7 @@ CONTROLLER = "nestjs-1"
 def command(**overrides):
     body = {
         "schema": "gpioSet/1",
-        "node": "crawlspace-pico",
+        "node": "braize",
         "ts": format_iso(SET_CLOCK_EPOCH_SECONDS),
         "id": "cmd-1",
         "issuedBy": CONTROLLER,
