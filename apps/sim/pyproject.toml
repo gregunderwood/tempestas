@@ -3,9 +3,7 @@ name = "tempestas-sim"
 version = "0.1.0"
 description = "One greenhouse, shared by every agent in the sandbox."
 requires-python = ">=3.11"
-# Deliberately dependency-free. The world is pure arithmetic and the server is
-# http.server from the standard library: the sandbox must run anywhere the
-# agent runs, including a 32-bit Pi, without a wheel to build.
+# Dependency-free so the sandbox runs anywhere the agent does, without a wheel to build.
 dependencies = []
 
 [dependency-groups]

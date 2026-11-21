@@ -1,35 +1,33 @@
 #!/usr/bin/env bash
-# Does shading the SCD41 stop the faults?
-#
-# Before the cover: 0 bad below 25C, 22% at 25-30, 26% at 30-35, 40% above 35.
-# Two outcomes mean different things, so this reports the band as well as the
-# rate:
-#   die never gets hot now   -> symptom avoided, part NOT exonerated
-#   gets hot and stays clean -> it was the sun, the part is fine
+# Does shading the SCD41 stop the faults? Why it reports the band as well as the rate: README.md.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API="http://192.168.2.70:7000/api"
-prev=""
+FAULTING_ABOVE_PCT=5
+POLL_SECONDS=300
+UNREACHABLE_RETRY_SECONDS=60
+SUMMARY_EVERY_TICKS=6
+previous_state=""
 ticks=0
 
 while :; do
-  out=$(curl -sf --max-time 20 "$API/readings?nodeId=elantris&limit=120" 2>/dev/null \
+  stats=$(curl -sf --max-time 20 "$API/readings?nodeId=elantris&limit=120" 2>/dev/null \
         | python3 "$HERE/sensor-stats.py" 2>/dev/null)
   now=$(TZ=America/Vancouver date +%H:%M)
-  if [[ -z "$out" ]]; then
-    echo "[$now] controller unreachable"; sleep 60; continue
+  if [[ -z "$stats" ]]; then
+    echo "[$now] controller unreachable"; sleep "$UNREACHABLE_RETRY_SECONDS"; continue
   fi
-  set -- $out
-  tmax=$1; pct=$2; bad=$3; n=$4; band=$5
-  verdict=clean; [[ "$pct" -gt 5 ]] && verdict=FAULTING
+  set -- $stats
+  peak_temp=$1; bad_pct=$2; bad_count=$3; total=$4; band=$5
+  verdict=clean; [[ "$bad_pct" -gt "$FAULTING_ABOVE_PCT" ]] && verdict=FAULTING
   state="$band:$verdict"
 
-  if [[ "$state" != "$prev" ]]; then
-    echo "[$now] $(echo "$band" | tr a-z A-Z) peak ${tmax}C - ${bad}/${n} bad (${pct}%) $verdict"
-    prev="$state"
-  elif (( ticks % 6 == 0 )); then
-    echo "[$now] $band peak ${tmax}C - ${bad}/${n} bad (${pct}%)"
+  if [[ "$state" != "$previous_state" ]]; then
+    echo "[$now] $(echo "$band" | tr a-z A-Z) peak ${peak_temp}C - ${bad_count}/${total} bad (${bad_pct}%) $verdict"
+    previous_state="$state"
+  elif (( ticks % SUMMARY_EVERY_TICKS == 0 )); then
+    echo "[$now] $band peak ${peak_temp}C - ${bad_count}/${total} bad (${bad_pct}%)"
   fi
   ticks=$((ticks+1))
-  sleep 300
+  sleep "$POLL_SECONDS"
 done

@@ -25,9 +25,7 @@ export default [
               onlyDependOnLibsWithTags: ['type:domain'],
             },
             {
-              // The invariant that keeps @tempestas/domain consumable by the
-              // Angular app, the NestJS API and (via generated schemas) the
-              // Python agents: interfaces and consts only, no framework.
+              // Interfaces and consts only, so the web app, API and Python agents can all consume it.
               sourceTag: 'type:domain',
               onlyDependOnLibsWithTags: ['type:domain'],
               bannedExternalImports: [
@@ -46,18 +44,5 @@ export default [
         },
       ],
     },
-  },
-  {
-    files: [
-      '**/*.ts',
-      '**/*.tsx',
-      '**/*.cts',
-      '**/*.mts',
-      '**/*.js',
-      '**/*.jsx',
-      '**/*.cjs',
-      '**/*.mjs',
-    ],
-    rules: {},
   },
 ];

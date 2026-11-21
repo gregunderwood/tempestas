@@ -262,7 +262,13 @@ refuses to start with until they are read off the bus. The plan as written follo
 - The agent unit: the repo's own, unchanged. Its `SupplementaryGroups=i2c gpio` works here
   because Raspberry Pi OS creates both groups; 1-wire sysfs needs neither.
 - Pumphouse zone, via SQL in a script under `tools/`. There is no zones API, and data for one
-  installation does not belong in a migration every dev database runs.
+  installation does not belong in a migration every dev database runs. It is idempotent:
+  re-running it on elantris resets the rules, which is how a setpoint is changed, by review
+  rather than through a form.
+
+  ```bash
+  sudo -u postgres psql -d tempestas -v ON_ERROR_STOP=1 -f tools/pumphouse-zone.sql
+  ```
 
   ```
   enabledRoles: ['heater', 'heat_tape'], sensorPolicy.default: { source: 'min', maxAgeMs: 120000 }

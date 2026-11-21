@@ -11,8 +11,7 @@ while read -r name pid; do
 done < "$RUN/pids"
 : > "$RUN/pids"
 
-# Sweep anything the pid file missed. An agent or sim orphaned by a crash
-# outlives down.sh otherwise, and the next up.sh silently runs against it.
+# A process orphaned by a crash is missing from the pid file, and the next up.sh would run against it.
 for PAT in "tempestas-sim" "tempestas-agent" "sandbox/run/app/server/main.js"; do
   pkill -f "$PAT" 2>/dev/null && echo "swept stray $PAT"
 done

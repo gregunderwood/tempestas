@@ -11,7 +11,8 @@ tools/watch/watch-sensor.sh      # CO2 fault rate, bucketed by temperature
 
 Reports the share of readings a node's sensor **refuses** - nulls, below-range,
 above-range - and buckets it by temperature, because that is how the 2026-09-12
-failure presented: flawless below 25 °C, 40% bad above 35 °C.
+failure presented: flawless below 25 °C, 22% bad at 25-30, 26% at 30-35 and
+40% above 35 °C.
 
 It reports the band alongside the rate on purpose. Two outcomes look identical
 in a single number and mean opposite things:

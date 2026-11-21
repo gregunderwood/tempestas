@@ -89,6 +89,10 @@ out. This has to be measured, not borrowed — see below.
 daytime respiration is not the night figure, so doing so would trade a measured
 quantity for a guessed one.
 
+VPD is taken at the **leaf**: the inside of a leaf is saturated at leaf
+temperature, which under lamps runs ~2 °C above the air in still conditions and
+~1 °C with strong canopy airflow (`--leaf-offset`).
+
 ```sh
 python fit/export_legacy.py --from 2026-09-23 --to 2026-09-25 -o canopy.json
 python fit/fit_vpd_response.py canopy.json --transitions trans.json \
@@ -126,7 +130,8 @@ between the two regimes.
 reports every 10 s as an integer; overnight drift of 0.5 ppm/min is 0.08 ppm per
 sample, so nearly every adjacent pair differs by 0 and the median is 0 no matter
 how long the window. Fixed by collapsing to minute-medians and running Theil–Sen
-over pairs spanning at least a quarter of the window. At 15 and 30 min the old
+over pairs spanning at least a quarter of the window. Medians rather than means,
+because a single 489 ppm spike (2026-09-13) drags a minute's mean by 80 ppm. At 15 and 30 min the old
 version returned small-count noise that merely _looked_ like a fit — worse than
 failing.
 
@@ -143,11 +148,18 @@ sealed house usually means something happened in the greenhouse.
 Neither 2026-09-23 nor 09-24 could be fitted. Through both photoperiods CO2 sat
 at 450–500 ppm — outdoor air — because the house was open. The mass balance only
 closes when it is shut, so the tool refuses rather than reporting the noise
-around zero as a VPD curve.
+around zero as a VPD curve. Neither the vents nor the legacy exhaust fan are
+logged, so it infers an open house: lit, planted and pinned **near** outdoor air.
+A sealed house is drawn below ambient, which incoming air cannot do, so only the
+band around outdoor is ambiguous — and assimilation there is CO2-limited anyway.
 
 Nor can it be fitted while the burner is cycling to hold a setpoint: at ~7.8 min
 on / 7.3 min off, no gap clears the 8-minute transport-lag settle, and the
 07:00–09:00 enriched window yielded **zero** usable windows.
+
+Light and temperature move with VPD across a day and drive uptake on their own,
+so a single day's curve mostly measures the sun. Windows are printed with their
+hour and temperature so like can be compared with like across several days.
 
 **So the protocol is: seal the house, charge it to ~1400 ppm, then leave the
 burner off and let it draw down under light.** A couple of hours is enough. That
