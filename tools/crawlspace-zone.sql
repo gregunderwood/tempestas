@@ -1,22 +1,4 @@
--- The crawlspace zone. Run on elantris:
---
---   sudo -u postgres psql -d tempestas -v ON_ERROR_STOP=1 -f tools/crawlspace-zone.sql
---
--- Data for one installation, so a script rather than a migration: every dev
--- database runs migrations, and none of them has a crawlspace.
---
--- The setpoints are the pumphouse's: the same pipes, the same freeze, the same
--- posture. One probe for now; `min` still holds when more are added.
---
--- Idempotent: re-running it resets the rules to what is written here, which is
--- how a setpoint is changed. There is no zones API on purpose - this is policy
--- that drives a heater, and it is changed by review, not by a form.
---
--- The server validates it on its next evaluation. A typo here does not become a
--- heater rule: the zone is refused, logged at ERROR, and named in
--- GET /api/health `problems`. Check that after running this.
---
--- Why each number is what it is: docs/Pumphouse.md.
+-- The crawlspace zone. Re-run to change a setpoint; how and why are in docs/Crawlspace.md.
 
 INSERT INTO zones (slug, display_name, rules_config)
 VALUES (

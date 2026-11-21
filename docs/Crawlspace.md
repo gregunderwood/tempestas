@@ -9,8 +9,8 @@ posture: a dead node, a lost link or a dead probe all end in heat.
 ⚠ Read [Safety](Safety.md) before wiring or energising anything.
 
 > [!note] Status
-> Planned. The agent, the zone script and the broker ACL are written; nothing is installed. The
-> heater waits for its contactor.
+> Planned. The zone script, the broker ACL and the [Pico Agent](Infrastructure/Pico%20Agent.md) are
+> written; nothing is installed. The heater waits for its contactor.
 
 ## Decisions already made
 
@@ -92,6 +92,11 @@ old tutorial scripts, write `credentials.py` with the password from step 2, then
 `GET /api/nodes` as `pending`.
 
 ### 4. Zone, admission, devices
+
+The zone script is data for one installation, so it is not a migration. It is idempotent:
+re-running it resets the rules, which is how a setpoint is changed, by review rather than through
+a form. The server checks it on its next evaluation and names a refused zone in `/api/health`
+`problems`; the gate also runs every `tools/*-zone.sql` through the same parser.
 
 ```bash
 sudo -u postgres psql -d tempestas -v ON_ERROR_STOP=1 -f tools/crawlspace-zone.sql
