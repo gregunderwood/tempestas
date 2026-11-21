@@ -36,6 +36,7 @@ the greenhouse for eight years.
 - [[MQTT Contract]]
 - [[Node Agent]] — the Python agent on each box: guards, dead-man, the sensor driver
 - [[Nodes]]
+- [[Pico Agent]] — the MicroPython agent on a Pico W: the crawlspace node
 - [[Off-the-shelf devices]] — smart plugs and vendor sensors: the bridge, and what `off` decides
 - [[Readings]] — the query surface, window semantics, retention
 - [[Realtime]] — the socket.io contract to the browser

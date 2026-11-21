@@ -14,3 +14,4 @@ export { AddPinTransitions1789170000000 } from './1789170000000-AddPinTransition
 export { RuleKindsPerRole1794975900000 } from './1794975900000-RuleKindsPerRole';
 export { AddHeatingRoles1794976900000 } from './1794976900000-AddHeatingRoles';
 export { HumidityIsOptional1794977000000 } from './1794977000000-HumidityIsOptional';
+export { AddPicoNodeKind1795220722652 } from './1795220722652-AddPicoNodeKind';
