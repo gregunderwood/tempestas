@@ -49,7 +49,7 @@ export interface NodeCapabilities {
 /** How a node's contract minor compares with the server's. Any of them works; see the MQTT contract. */
 export type ContractStanding = 'current' | 'behind' | 'ahead';
 
-/** `agent-linux 1.0.3+abc1234`, or just the version from an agent that predates naming itself. */
+/** `agent-linux 1.0.3`, or just the version from an agent that predates naming itself. */
 export function describeAgent(agent: {
   agentName: string | null;
   agentVersion: string | null;
