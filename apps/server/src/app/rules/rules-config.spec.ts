@@ -329,3 +329,22 @@ describe('the CO2 burner', () => {
     ]);
   });
 });
+
+describe('a kind that is not one of the rule kinds', () => {
+  it.each(['toString', 'constructor', 'hasOwnProperty', '__proto__'])(
+    'refuses %s as a kind instead of throwing',
+    (kind) => {
+      expect(
+        errorsOf((config) => (config['rules'].heater.kind = kind)),
+      ).toEqual([
+        `rules.heater.kind "${kind}" is not one of thermostat, daylight-thermostat, co2-burner`,
+      ]);
+    },
+  );
+
+  it('refuses a kind that is not a string', () => {
+    expect(errorsOf((config) => (config['rules'].heater.kind = 3))).toEqual([
+      'rules.heater.kind "3" is not one of thermostat, daylight-thermostat, co2-burner',
+    ]);
+  });
+});

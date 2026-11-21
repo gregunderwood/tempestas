@@ -11,6 +11,7 @@ export type ParsedRulesConfig =
 
 type JsonObject = Record<string, unknown>;
 type RuleCheck = (rule: JsonObject, path: string, errors: string[]) => void;
+type RuleKindSpec = { keys: string[]; check: RuleCheck };
 
 const KNOWN_ROLES: ReadonlySet<string> = new Set(Object.values(DeviceRole));
 const STALE_POLICIES: ReadonlySet<StalePolicy> = new Set(['hold', 'on', 'off']);
@@ -32,7 +33,7 @@ const TOP_LEVEL_KEYS = [
 const SENSOR_POLICY_KEYS = ['source', 'maxAgeMs'];
 const DAYLIGHT_KEYS = ['start', 'end'];
 const BASE_RULE_KEYS = ['kind', 'onStale', 'sensor'];
-const RULE_KINDS: Record<RoleRuleKind, { keys: string[]; check: RuleCheck }> = {
+const RULE_KIND_SPECS: Record<RoleRuleKind, RuleKindSpec> = {
   thermostat: {
     keys: ['mode', 'onAtC', 'offAtC'],
     check: checkThermostat,
@@ -46,6 +47,10 @@ const RULE_KINDS: Record<RoleRuleKind, { keys: string[]; check: RuleCheck }> = {
     check: checkCo2Burner,
   },
 };
+// A Map, not `in`: a kind such as "toString" must not find an inherited Object method.
+const RULE_KINDS: ReadonlyMap<string, RuleKindSpec> = new Map(
+  Object.entries(RULE_KIND_SPECS),
+);
 
 // Strict on purpose: a typo read as undefined leaves a heater calmly in its dead band. See docs/Rules and Climate.md.
 export function parseZoneRulesConfig(raw: unknown): ParsedRulesConfig {
@@ -142,13 +147,13 @@ function checkRule(
     return;
   }
   const kind = rule['kind'];
-  if (typeof kind !== 'string' || !(kind in RULE_KINDS)) {
+  const ruleKind = findRuleKind(kind);
+  if (ruleKind === undefined) {
     errors.push(
-      `${path}.kind "${String(kind)}" is not one of ${Object.keys(RULE_KINDS).join(', ')}`,
+      `${path}.kind "${String(kind)}" is not one of ${[...RULE_KINDS.keys()].join(', ')}`,
     );
     return;
   }
-  const ruleKind = RULE_KINDS[kind as RoleRuleKind];
   reportUnknownKeys(
     rule,
     [...BASE_RULE_KEYS, ...ruleKind.keys],
@@ -168,6 +173,10 @@ function checkRule(
   }
 
   ruleKind.check(rule, path, errors);
+}
+
+function findRuleKind(kind: unknown): RuleKindSpec | undefined {
+  return typeof kind === 'string' ? RULE_KINDS.get(kind) : undefined;
 }
 
 // A band with no width flips a 120 V heater relay on every reading that crosses one number.
