@@ -16,7 +16,7 @@ import contract
 import credentials
 import settings
 from ds18b20_probes import Ds18b20Probes
-from node_agent import NodeAgent
+from node_agent import OFFLINE_STATE, NodeAgent
 from relay_lines import ReleasedWhenHighLines
 from tempestas_mqtt import MqttSession
 
@@ -34,10 +34,15 @@ MILLISECONDS_PER_SECOND = 1000
 BOOT_ID_BYTES = 6
 MAX_MESSAGES_HELD_OFFLINE = 20
 PINGS_PER_KEEPALIVE = 2
+CLIENT_ID_PREFIX = "tempestas-"
 
 
 def log(message):
     print(message)
+
+
+def is_due(clock, last_ticks, interval_milliseconds):
+    return last_ticks is None or clock.elapsed_since(last_ticks) >= interval_milliseconds
 
 
 class TicksClock:
@@ -117,10 +122,7 @@ class Connection:
             # Spacing applies to failed attempts only, and a stale stamp would wrap after 6 days.
             self.last_attempt_ticks = None
             return
-        if (
-            self.last_attempt_ticks is not None
-            and self.clock.elapsed_since(self.last_attempt_ticks) < RECONNECT_AFTER_MILLISECONDS
-        ):
+        if not is_due(self.clock, self.last_attempt_ticks, RECONNECT_AFTER_MILLISECONDS):
             return
         self.last_attempt_ticks = self.clock.ticks()
         if not self.join_wifi():
@@ -165,18 +167,30 @@ class Connection:
             log("NTP failed: %r" % error)
 
     def is_clock_sync_due(self):
-        if self.last_clock_attempt_ticks is None:
-            return True
         wait_milliseconds = (
             CLOCK_RESYNC_AFTER_MILLISECONDS if self.is_clock_synced else CLOCK_RETRY_AFTER_MILLISECONDS
         )
-        return self.clock.elapsed_since(self.last_clock_attempt_ticks) >= wait_milliseconds
+        return is_due(self.clock, self.last_clock_attempt_ticks, wait_milliseconds)
 
     def connect_to_broker(self):
-        node_id = settings.NODE_ID
+        client = self.build_session()
+        try:
+            client.connect(SOCKET_TIMEOUT_SECONDS)
+            self.subscribe_to_agent_topics(client)
+        except Exception as error:
+            log("broker connect failed: %r" % error)
+            client.close()
+            return
+        log("connected to %s as %s" % (settings.BROKER_HOST, settings.NODE_ID))
+        self.publisher.client = client
+        self.last_ping_ticks = self.clock.ticks()
+        self.agent.announce()
+        self.publisher.send_held_messages()
+
+    def build_session(self):
         client = MqttSession(
             self.watchdog.feed,
-            "tempestas-" + node_id,
+            CLIENT_ID_PREFIX + settings.NODE_ID,
             settings.BROKER_HOST,
             settings.BROKER_PORT,
             credentials.MQTT_USERNAME,
@@ -184,22 +198,19 @@ class Connection:
             settings.KEEPALIVE_SECONDS,
         )
         quality_of_service, is_retained = contract.QOS["status"]
-        offline = json.dumps(self.agent.build_status_payload("offline"))
-        client.set_last_will(contract.build_status_topic(node_id), offline, is_retained, quality_of_service)
+        offline_status_text = json.dumps(self.agent.build_status_payload(OFFLINE_STATE))
+        client.set_last_will(
+            contract.build_status_topic(settings.NODE_ID),
+            offline_status_text,
+            is_retained,
+            quality_of_service,
+        )
         client.set_message_handler(self.deliver)
-        try:
-            client.connect(SOCKET_TIMEOUT_SECONDS)
-            for topic, subscription_quality_of_service in self.agent.list_subscriptions():
-                client.subscribe(topic, subscription_quality_of_service)
-        except Exception as error:
-            log("broker connect failed: %r" % error)
-            client.close()
-            return
-        log("connected to %s as %s" % (settings.BROKER_HOST, node_id))
-        self.publisher.client = client
-        self.last_ping_ticks = self.clock.ticks()
-        self.agent.announce()
-        self.publisher.send_held_messages()
+        return client
+
+    def subscribe_to_agent_topics(self, client):
+        for topic, quality_of_service in self.agent.list_subscriptions():
+            client.subscribe(topic, quality_of_service)
 
     def deliver(self, topic, payload, is_retained):
         try:
@@ -249,18 +260,25 @@ def build_boot_id():
     return "boot-" + binascii.hexlify(os.urandom(BOOT_ID_BYTES)).decode()
 
 
-def run():
-    watchdog = machine.WDT(timeout=WATCHDOG_TIMEOUT_MILLISECONDS)
+def build_relay_lines():
     relay_lines = ReleasedWhenHighLines(machine, board, settings.RELAY_LINES, settings.FAILSAFE_LEVELS)
     relay_lines.claim_at_failsafe()
+    return relay_lines
 
+
+def run():
+    watchdog = machine.WDT(timeout=WATCHDOG_TIMEOUT_MILLISECONDS)
+    relay_lines = build_relay_lines()
     probes = build_probes()
     probes.start()
     clock = TicksClock()
     publisher = BrokerPublisher()
     agent = NodeAgent(settings, publisher, relay_lines, probes, clock, log, build_boot_id())
     connection = Connection(watchdog, clock, agent, publisher)
+    run_forever(watchdog, clock, agent, connection)
 
+
+def run_forever(watchdog, clock, agent, connection):
     sample_interval_milliseconds = settings.SAMPLE_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND
     last_sample_ticks = None
     while True:
@@ -268,11 +286,7 @@ def run():
         connection.keep_up()
         connection.resync_clock_while_online()
         connection.serve_pending_messages()
-        is_sample_due = (
-            last_sample_ticks is None
-            or clock.elapsed_since(last_sample_ticks) >= sample_interval_milliseconds
-        )
-        if is_sample_due:
+        if is_due(clock, last_sample_ticks, sample_interval_milliseconds):
             last_sample_ticks = clock.ticks()
             agent.publish_readings()
         agent.check_deadman()

@@ -86,6 +86,16 @@ class AgentUnderTest:
         return [message.payload["code"] for message in self.publisher.on_topic("/alarm")]
 
 
+def test_subscribes_with_the_contract_quality_of_service():
+    node = AgentUnderTest()
+    assert node.agent.list_subscriptions() == [
+        (NODE_ROOT + "/gpio/set", 1),
+        (NODE_ROOT + "/gpio/sync", 1),
+        (NODE_ROOT + "/control/heartbeat", 0),
+        (SERVER_STATUS_TOPIC, 1),
+    ]
+
+
 def test_announces_online_hello_and_the_lines_on_connect():
     node = AgentUnderTest()
     node.agent.announce()
@@ -207,7 +217,7 @@ def test_holds_back_line_state_until_ntp_has_set_the_clock():
     node = AgentUnderTest(FakeClock(epoch_seconds=0))
     node.agent.announce()
     assert node.publisher.on_topic("/gpio/state/20") == []
-    node.clock.epoch = SET_CLOCK_EPOCH_SECONDS
+    node.clock.start_epoch_seconds = SET_CLOCK_EPOCH_SECONDS
     node.agent.on_clock_set()
     states = node.publisher.on_topic("/gpio/state/20") + node.publisher.on_topic("/gpio/state/18")
     assert [state.payload["ts"][:4] for state in states] == ["2026", "2026"]

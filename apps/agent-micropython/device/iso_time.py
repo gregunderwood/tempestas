@@ -98,10 +98,10 @@ def is_leap_year(year):
 
 def count_days_since_epoch(year, month, day):
     # Howard Hinnant's days_from_civil: exact for every Gregorian date, with no calendar library.
-    shifted_year = year - 1 if month <= 2 else year
+    shifted_year = year - 1 if month <= FEBRUARY else year
     era = shifted_year // YEARS_PER_ERA
     year_of_era = shifted_year - era * YEARS_PER_ERA
-    shifted_month = month - 3 if month > 2 else month + 9
+    shifted_month = month - 3 if month > FEBRUARY else month + 9
     day_of_year = (153 * shifted_month + 2) // 5 + day - 1
     day_of_era = year_of_era * 365 + year_of_era // 4 - year_of_era // 100 + day_of_year
     return era * DAYS_PER_ERA + day_of_era - DAYS_FROM_YEAR_ZERO_MARCH_TO_EPOCH
