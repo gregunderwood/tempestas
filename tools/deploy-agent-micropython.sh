@@ -19,7 +19,7 @@ say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 mpremote() { "$UV" tool run mpremote connect "$PORT" "$@"; }
 
 wait_for_port() {
-  for attempt in $(seq "$PORT_WAIT_SECONDS"); do
+  for _ in $(seq "$PORT_WAIT_SECONDS"); do
     [ -e "$PORT" ] && return 0
     sleep 1
   done
