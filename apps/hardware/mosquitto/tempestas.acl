@@ -101,6 +101,24 @@ topic read tempestas/v1/node/patji/gpio/sync
 topic read tempestas/v1/node/patji/control/heartbeat
 topic read tempestas/v1/server/status
 
+# ------------------------------------------------------------ braize
+#
+# The Pico W heating the crawlspace zone: one DS18B20, a heater (through a
+# contactor) and heat tape. Same shape as patji. Its password sits in plain text
+# on the Pico's flash, readable by anyone with a USB cable, which is one more
+# reason this credential can reach nothing but its own subtree.
+user braize
+topic write tempestas/v1/node/braize/hello
+topic write tempestas/v1/node/braize/status
+topic write tempestas/v1/node/braize/sensor/+/sample
+topic write tempestas/v1/node/braize/gpio/result
+topic write tempestas/v1/node/braize/gpio/state/+
+topic write tempestas/v1/node/braize/alarm
+topic read tempestas/v1/node/braize/gpio/set
+topic read tempestas/v1/node/braize/gpio/sync
+topic read tempestas/v1/node/braize/control/heartbeat
+topic read tempestas/v1/server/status
+
 # ------------------------------------------------------------ observers
 #
 # Read-only across the whole tree, for the soak logger and anything else that
