@@ -101,6 +101,21 @@ topic read tempestas/v1/node/patji/gpio/sync
 topic read tempestas/v1/node/patji/control/heartbeat
 topic read tempestas/v1/server/status
 
+# ------------------------------------------------------------ braize
+#
+# The crawlspace Pico W. Its password is in plain text on the board, so its own subtree only.
+user braize
+topic write tempestas/v1/node/braize/hello
+topic write tempestas/v1/node/braize/status
+topic write tempestas/v1/node/braize/sensor/+/sample
+topic write tempestas/v1/node/braize/gpio/result
+topic write tempestas/v1/node/braize/gpio/state/+
+topic write tempestas/v1/node/braize/alarm
+topic read tempestas/v1/node/braize/gpio/set
+topic read tempestas/v1/node/braize/gpio/sync
+topic read tempestas/v1/node/braize/control/heartbeat
+topic read tempestas/v1/server/status
+
 # ------------------------------------------------------------ observers
 #
 # Read-only across the whole tree, for the soak logger and anything else that
