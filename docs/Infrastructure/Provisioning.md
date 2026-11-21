@@ -106,8 +106,8 @@ Raspbian ships.
    never an argument:
 
    ```bash
-   sudo systemctl start tempestas-migrate@show   # read it first
-   sudo systemctl start tempestas-migrate@run
+   sudo systemctl start tempestas-migrate@show.service   # read it first
+   sudo systemctl start tempestas-migrate@run.service
    ```
 
 8. **Deploy privileges**, once the units are in, from the workstation:
@@ -116,7 +116,8 @@ Raspbian ships.
    tools/install-deploy-privileges.sh elantris patji
    ```
 
-   It installs `tempestas-backup.service` where the server runs, then writes
+   It installs `tempestas-backup.service` where the server runs, and makes
+   every migrate `run` and `revert` require it, then writes
    `/etc/sudoers.d/tempestas-deploy`: the deploy user may run exactly the
    `systemctl` lines a deploy uses (start the backup, the three migrate
    instances, restart or reset the server, restart the agent) without a

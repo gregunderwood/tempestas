@@ -1,8 +1,8 @@
 # Install to /etc/systemd/system/tempestas-migrate@.service
 #
-#   sudo systemctl start tempestas-migrate@show   # read this first
-#   sudo systemctl start tempestas-migrate@run
-#   journalctl -u tempestas-migrate@run -n 50
+#   sudo systemctl start tempestas-migrate@show.service   # read this first
+#   sudo systemctl start tempestas-migrate@run.service    # backs up first
+#   journalctl -u tempestas-migrate@run.service -n 50
 #
 # A unit rather than a shell command so it reuses the SAME environment file the
 # server does. That file is 0600 root because it holds the database and broker
@@ -10,8 +10,7 @@
 # hand-typed command cannot do without putting a password in the shell history
 # or in `ps`.
 #
-# tools/deploy.sh runs `show` before every restart and stops if anything is
-# pending (exit status 3). `run` stays a deliberate step, after a backup.
+# `show` exits 3 when anything is pending, so tools/deploy.sh can refuse to restart into it.
 
 [Unit]
 Description=tempestas migrations (%i)

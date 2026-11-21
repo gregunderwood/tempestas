@@ -10,7 +10,7 @@ UNIT_DIR=/etc/systemd/system
 SUDOERS_FILE=/etc/sudoers.d/tempestas-deploy
 LIBRARY_DIR=/usr/local/lib/tempestas
 
-say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+source "$PAYLOAD/console.sh"
 has_installed_unit() { [ -f "$UNIT_DIR/$1" ]; }
 has_postgres_service() { systemctl cat postgresql.service >/dev/null 2>&1; }
 
@@ -27,6 +27,11 @@ install_backup_unit() {
   install -d -o root -g root -m 0755 "$LIBRARY_DIR"
   install -o root -g root -m 0755 "$PAYLOAD/backup-database.sh" "$LIBRARY_DIR/backup-database.sh"
   install -o root -g root -m 0644 "$PAYLOAD/tempestas-backup.service" "$UNIT_DIR/tempestas-backup.service"
+  for instance in run revert; do
+    install -d -o root -g root -m 0755 "$UNIT_DIR/tempestas-migrate@$instance.service.d"
+    install -o root -g root -m 0644 "$PAYLOAD/tempestas-migrate-requires-backup.conf" \
+      "$UNIT_DIR/tempestas-migrate@$instance.service.d/requires-backup.conf"
+  done
   systemctl daemon-reload
   systemd-analyze verify "$UNIT_DIR/tempestas-backup.service"
 }
@@ -36,7 +41,7 @@ allowed_commands=()
 if has_installed_unit tempestas-server.service; then
   # A host whose Postgres runs in Docker has no postgresql.service for the backup unit to require.
   if has_postgres_service; then
-    say "Installing the backup unit"
+    say "Installing the backup unit, required by every migrate run and revert"
     install_backup_unit
     allowed_commands+=("$SYSTEMCTL start tempestas-backup.service")
   else

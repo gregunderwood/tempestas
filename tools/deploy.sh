@@ -17,7 +17,7 @@ REQUIRED_SYSTEMCTL_LINES=(
 
 source "$HERE/tools/lib/remote-host.sh"
 
-say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+source "$HERE/tools/lib/console.sh"
 
 # A stale status from an earlier run, or a signal number, must never read as "pending" or "nothing pending".
 show_migrations_and_exit_with_their_status() {
@@ -25,6 +25,7 @@ show_migrations_and_exit_with_their_status() {
 unit=tempestas-migrate@show.service
 read_property() { systemctl show -p "$1" --value "$unit"; }
 EXITED_NORMALLY=1
+COULD_NOT_CHECK=1
 started_before="$(read_property ExecMainStartTimestampMonotonic)"
 checked_since="$(date +%s)"
 if sudo -n systemctl start "$unit"; then
@@ -32,9 +33,9 @@ if sudo -n systemctl start "$unit"; then
 elif [ "$(read_property ExecMainStartTimestampMonotonic)" != "$started_before" ] &&
   [ "$(read_property ExecMainCode)" = "$EXITED_NORMALLY" ]; then
   status="$(read_property ExecMainStatus)"
-  [ "$status" != 0 ] || status=1
+  [ "$status" != 0 ] || status="$COULD_NOT_CHECK"
 else
-  status=1
+  status="$COULD_NOT_CHECK"
 fi
 journalctl -u "$unit" --since "@$checked_since" -o cat
 exit "$status"
@@ -64,7 +65,6 @@ require_passwordless_systemctl "$HOST" "${REQUIRED_SYSTEMCTL_LINES[@]}"
 
 say "Shipping to $HOST"
 rsync -a --delete "$HERE/dist/apps/server/" "$HOST:$REMOTE/dist/apps/server/"
-rsync -a --delete "$HERE/dist/apps/web/browser/" "$HOST:$REMOTE/dist/apps/web/"
 rsync -a "$HERE/apps/server/systemd/" "$HOST:$REMOTE/apps/server/systemd/"
 rsync -a "$HERE/apps/agent-linux/systemd/" "$HOST:$REMOTE/apps/agent-linux/systemd/"
 
@@ -80,10 +80,9 @@ else
 fi
 
 if [ "$migration_status" -eq "$EXIT_MIGRATIONS_PENDING" ]; then
-  echo "Migrations are pending, so the server was NOT restarted. Back up, run them, then restart:" >&2
-  echo "  ssh -t $HOST sudo systemctl start tempestas-backup.service" >&2
-  echo "  ssh -t $HOST sudo systemctl start tempestas-migrate@run.service" >&2
-  echo "  ssh -t $HOST sudo systemctl restart tempestas-server.service" >&2
+  echo "Migrations are pending, so the server was NOT restarted and the web bundle was not shipped." >&2
+  echo "Run them (migrate@run takes a backup first, and stops if it fails), then deploy again:" >&2
+  echo "  ssh $HOST sudo -n systemctl start tempestas-migrate@run.service && tools/deploy.sh $HOST" >&2
   warn_new_build_not_running
   exit 1
 fi
@@ -93,6 +92,9 @@ if [ "$migration_status" -ne 0 ]; then
   warn_new_build_not_running
   exit 1
 fi
+
+say "Shipping the web bundle"
+rsync -a --delete "$HERE/dist/apps/web/browser/" "$HOST:$REMOTE/dist/apps/web/"
 
 say "Restarting"
 # A server that crash-looped into its start limit refuses a plain restart.
