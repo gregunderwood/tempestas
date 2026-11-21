@@ -1,29 +1,165 @@
-.temp-toolbar {
-  gap: 0.5rem;
-  position: sticky;
-  top: 0;
-  z-index: 10;
+$rail-width: 16rem;
+$tap-target: 3rem;
+
+.temp-shell {
+  min-height: 100vh;
+}
+
+.temp-rail {
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.25rem 0.75rem;
+  background: var(--temp-rail-background);
+  color: var(--temp-rail-foreground);
+  --temp-offline: var(--temp-rail-offline);
 }
 
 .temp-brand {
+  padding: 0 0.75rem;
+  font-size: 1.35rem;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
 
-.temp-nav {
+.temp-rail-links {
   display: flex;
+  flex-direction: column;
   gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.temp-rail-link {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-height: $tap-target;
+  padding: 0 0.75rem;
+  border-radius: 0.75rem;
+  color: inherit;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.temp-rail-link:hover {
+  background: var(--temp-rail-hover);
+}
+
+.temp-rail-link:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+// Not colour alone: the active link is also bold and carries a leading bar.
+.temp-rail-link-active {
+  background: var(--temp-rail-active-background);
+  color: var(--temp-rail-active-foreground);
+  font-weight: 700;
+  box-shadow: inset 4px 0 0 currentColor;
+}
+
+.temp-glyph {
+  width: 1.4rem;
+  height: 1.4rem;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.temp-rail-foot {
+  margin-top: auto;
+  padding: 0 0.75rem;
+}
+
+.temp-content {
   min-width: 0;
 }
 
-.temp-nav a {
-  flex: 0 0 auto;
+.temp-top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 4.5rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--mat-sys-surface);
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
 }
 
-/* The menu button only exists below the breakpoint; above it the links are
-   always shown and the button is not rendered to a screen reader either. */
+.temp-top-bar-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.temp-heading {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.temp-subtitle {
+  margin: 0.15rem 0 0;
+  color: var(--mat-sys-on-surface-variant);
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .temp-menu-button {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: $tap-target;
+  height: $tap-target;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.temp-menu-button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.temp-menu-bars,
+.temp-menu-bars::before,
+.temp-menu-bars::after {
+  display: block;
+  width: 1.25rem;
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+.temp-menu-bars {
+  position: relative;
+}
+
+.temp-menu-bars::before,
+.temp-menu-bars::after {
+  content: '';
+  position: absolute;
+  left: 0;
+}
+
+.temp-menu-bars::before {
+  top: -6px;
+}
+
+.temp-menu-bars::after {
+  top: 6px;
 }
 
 .temp-visually-hidden {
@@ -35,137 +171,69 @@
   white-space: nowrap;
 }
 
-/* 42rem is where four links plus the brand and the live indicator stop fitting
-   on one line, not a device size. */
-@media (max-width: 42rem) {
-  .temp-menu-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2.75rem;
-    height: 2.75rem;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    background: none;
-    color: inherit;
-    cursor: pointer;
-  }
+.temp-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgb(0 0 0 / 40%);
+}
 
-  .temp-menu-button:focus-visible {
-    outline: 2px solid currentColor;
-    outline-offset: 2px;
-  }
-
-  /* Three bars drawn in CSS. An icon font would be a network fetch this
-     LAN-only app cannot rely on. */
-  .temp-menu-bars,
-  .temp-menu-bars::before,
-  .temp-menu-bars::after {
-    display: block;
-    width: 1.25rem;
-    height: 2px;
-    background: currentColor;
-    border-radius: 2px;
-  }
-
-  .temp-menu-bars {
-    position: relative;
-  }
-
-  .temp-menu-bars::before,
-  .temp-menu-bars::after {
-    content: '';
-    position: absolute;
-    left: 0;
-  }
-
-  .temp-menu-bars::before {
-    top: -6px;
-  }
-
-  .temp-menu-bars::after {
-    top: 6px;
-  }
-
-  /* `display: none` rather than opacity or height: a hidden link must leave
-     the tab order and the accessibility tree, not just the screen. */
-  .temp-nav {
+// Below the rail width a closed drawer is display: none, so its links leave the tab order.
+@media (width < 64rem) {
+  .temp-rail {
     display: none;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
-    padding: 0.5rem;
-    background: var(--mat-sys-surface-container);
-    color: var(--mat-sys-on-surface);
-    border-bottom: 1px solid var(--mat-sys-outline-variant);
-    box-shadow: var(--mat-sys-level2);
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    width: min($rail-width, 85vw);
+    overflow-y: auto;
+    box-shadow: var(--mat-sys-level3);
   }
 
-  .temp-nav-open {
+  .temp-rail-open {
     display: flex;
   }
 
-  .temp-nav a {
-    width: 100%;
-    justify-content: flex-start;
-    /* Comfortably tappable with wet hands. */
-    min-height: 3rem;
+  .temp-rail-foot {
+    display: none;
+  }
+
+  .temp-top-bar {
+    padding: 0.5rem 1rem 0.5rem 0.5rem;
   }
 }
 
-.temp-active {
-  text-decoration: underline;
-  text-underline-offset: 6px;
-}
+@media (min-width: 64rem) {
+  .temp-shell {
+    display: grid;
+    grid-template-columns: $rail-width minmax(0, 1fr);
+  }
 
-.temp-spacer {
-  flex: 1 1 auto;
+  .temp-rail {
+    display: flex;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  .temp-menu-button,
+  .temp-top-bar-live,
+  .temp-scrim {
+    display: none;
+  }
 }
 
 .temp-link {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  opacity: 0.85;
+  gap: 0.4rem;
+  font-size: 0.9rem;
 }
 
 .temp-link-down {
-  color: var(--mat-sys-error);
-  opacity: 1;
-}
-
-.temp-link-label {
-  font-size: 0.85rem;
-}
-
-/* Deliberately loud and deliberately not dismissible: this is the alarm that
-   makes "hold last state" a sound policy rather than a silent stall. */
-.temp-banner {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 1rem 1.25rem;
-  background: var(--mat-sys-error-container);
-  color: var(--mat-sys-on-error-container);
-  border-bottom: 4px solid var(--mat-sys-error);
-  font-size: 1rem;
-  line-height: 1.4;
-}
-
-/* Drawn as text and a shape rather than an icon font. Angular Material's
-   `mat-icon` renders its ligature name as literal text when the Material
-   Symbols font is missing, so the banner's warning showed the word "warning"
-   clipped to "wa" - the one element the safety design calls required. Nothing
-   here needs a network fetch to be legible. */
-.temp-banner-mark {
-  font-size: 1.6rem;
-  line-height: 1;
-  flex: 0 0 auto;
+  color: var(--temp-offline);
+  font-weight: 600;
 }
 
 .temp-link-dot {
@@ -176,8 +244,26 @@
   flex: 0 0 auto;
 }
 
-/* Not colour alone: the label beside it already says live or offline. */
 .temp-link-down .temp-link-dot {
   background: none;
   border: 2px solid currentColor;
+}
+
+// Deliberately loud and not dismissible: this alarm is what makes holding last state safe.
+.temp-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  background: var(--mat-sys-error-container);
+  color: var(--mat-sys-on-error-container);
+  border-bottom: 4px solid var(--mat-sys-error);
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.temp-banner-mark {
+  font-size: 1.6rem;
+  line-height: 1;
+  flex: 0 0 auto;
 }

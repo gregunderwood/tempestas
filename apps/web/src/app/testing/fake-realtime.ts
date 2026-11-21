@@ -5,7 +5,12 @@ import type {
   RulesCycle,
   SystemStatus,
 } from '@tempestas/domain';
-import { recordDevicePush, type PushedDevice } from '../core/device-pushes';
+import {
+  appendDevicePush,
+  recordDevicePush,
+  type NumberedPush,
+  type PushedDevice,
+} from '../core/device-pushes';
 import type { RealtimeService } from '../core/realtime.service';
 
 export type FakeRealtime = Pick<
@@ -15,6 +20,7 @@ export type FakeRealtime = Pick<
   | 'connected'
   | 'reconnectCount'
   | 'devicePushes'
+  | 'recentDevicePushes'
   | 'latestRulesCycle'
 >;
 
@@ -27,13 +33,18 @@ export function fakeRealtime(
     connected: signal(true),
     reconnectCount: signal(0),
     devicePushes: signal<ReadonlyMap<string, PushedDevice>>(new Map()),
+    recentDevicePushes: signal<readonly NumberedPush[]>([]),
     latestRulesCycle: signal<RulesCycle | null>(null),
     ...overrides,
   };
 }
 
 export function pushDevice(realtime: FakeRealtime, device: Device): void {
+  const receivedAt = Date.now();
   realtime.devicePushes.update((pushes) =>
-    recordDevicePush(pushes, device, Date.now()),
+    recordDevicePush(pushes, device, receivedAt),
+  );
+  realtime.recentDevicePushes.update((recentPushes) =>
+    appendDevicePush(recentPushes, { device, receivedAt }),
   );
 }

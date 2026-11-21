@@ -32,6 +32,10 @@ export interface SystemStatus {
   staleRoles: DeviceRole[];
   nodesOnline: number;
   nodesTotal: number;
+  /** Nodes that have announced themselves and wait for a human to admit them. */
+  nodesPending: number;
+  /** False on a follower, which runs no rules and switches nothing. */
+  isLeading: boolean;
   /** ISO-8601, or null before the first evaluation. */
   lastEvaluationAt: string | null;
 }

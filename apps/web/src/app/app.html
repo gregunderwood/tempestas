@@ -1,54 +1,92 @@
-<mat-toolbar color="primary" class="temp-toolbar">
-  <span class="temp-brand">tempestas</span>
-
-  <button
-    type="button"
-    class="temp-menu-button"
-    aria-controls="temp-nav"
-    [attr.aria-expanded]="menuOpen()"
-    (click)="toggleMenu()"
+<div class="temp-shell">
+  <nav
+    id="temp-nav"
+    class="temp-rail"
+    [class.temp-rail-open]="menuOpen()"
+    aria-label="Main"
   >
-    <span class="temp-menu-bars" aria-hidden="true"></span>
-    <span class="temp-visually-hidden"
-      >{{ menuOpen() ? 'Close menu' : 'Open menu' }}</span
-    >
-  </button>
+    <span class="temp-brand">tempestas</span>
 
-  <nav id="temp-nav" class="temp-nav" [class.temp-nav-open]="menuOpen()">
-    <a mat-button routerLink="/dashboard" routerLinkActive="temp-active"
-      >Dashboard</a
-    >
-    <a mat-button routerLink="/readings" routerLinkActive="temp-active"
-      >Readings</a
-    >
-    <a mat-button routerLink="/zones" routerLinkActive="temp-active">Zones</a>
-    <a mat-button routerLink="/devices" routerLinkActive="temp-active"
-      >Devices</a
-    >
-    <a mat-button routerLink="/nodes" routerLinkActive="temp-active">Nodes</a>
+    <ul class="temp-rail-links">
+      @for (link of navLinks; track link.path) {
+      <li>
+        <a
+          class="temp-rail-link"
+          [routerLink]="link.path"
+          routerLinkActive="temp-rail-link-active"
+          ariaCurrentWhenActive="page"
+        >
+          <svg
+            class="temp-glyph"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path [attr.d]="link.glyph" />
+          </svg>
+          <span>{{ link.label }}</span>
+        </a>
+      </li>
+      }
+    </ul>
+
+    <span class="temp-rail-foot">
+      <ng-container *ngTemplateOutlet="liveIndicator" />
+    </span>
   </nav>
 
-  <span class="temp-spacer"></span>
+  @if (menuOpen()) {
+  <div class="temp-scrim" aria-hidden="true" (click)="closeMenu()"></div>
+  }
 
-  <!-- Live vs not is worth showing always: a dashboard that has quietly stopped
-       updating looks exactly like one where nothing is happening. -->
+  <div class="temp-content">
+    <header class="temp-top-bar">
+      <button
+        #menuButton
+        type="button"
+        class="temp-menu-button"
+        aria-controls="temp-nav"
+        [attr.aria-expanded]="menuOpen()"
+        (click)="toggleMenu()"
+      >
+        <span class="temp-menu-bars" aria-hidden="true"></span>
+        <span class="temp-visually-hidden"
+          >{{ menuOpen() ? 'Close menu' : 'Open menu' }}</span
+        >
+      </button>
+
+      <div class="temp-top-bar-text">
+        <h1 class="temp-heading">{{ heading().heading }}</h1>
+        @if (heading().subtitle) {
+        <p class="temp-subtitle">{{ heading().subtitle }}</p>
+        }
+      </div>
+
+      <span class="temp-top-bar-live">
+        <ng-container *ngTemplateOutlet="liveIndicator" />
+      </span>
+    </header>
+
+    @if (sensorStale()) {
+    <div class="temp-banner" role="alert">
+      <span class="temp-banner-mark" aria-hidden="true">&#9888;</span>
+      <div>
+        <strong>Sensors have gone quiet.</strong>
+        Automation is holding its last state rather than guessing — nothing is
+        being switched on or off. Affected: {{ staleRoles() }}.
+      </div>
+    </div>
+    }
+
+    <main class="tempestas-page">
+      <router-outlet />
+    </main>
+  </div>
+</div>
+
+<ng-template #liveIndicator>
   <span class="temp-link" [class.temp-link-down]="!connected()">
     <span class="temp-link-dot" aria-hidden="true"></span>
     <span class="temp-link-label">{{ connected() ? 'live' : 'offline' }}</span>
   </span>
-</mat-toolbar>
-
-@if (sensorStale()) {
-<div class="temp-banner" role="alert">
-  <span class="temp-banner-mark" aria-hidden="true">&#9888;</span>
-  <div>
-    <strong>Sensors have gone quiet.</strong>
-    Automation is holding its last state rather than guessing — nothing is being
-    switched on or off. Affected: {{ staleRoles() }}.
-  </div>
-</div>
-}
-
-<main class="tempestas-page">
-  <router-outlet />
-</main>
+</ng-template>

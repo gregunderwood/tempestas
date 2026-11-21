@@ -15,6 +15,7 @@ import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import { fakeRealtime } from '../../testing/fake-realtime';
 import { NodeDetail } from './node-detail';
+import { PageHeading } from '../../core/page-heading';
 
 function reading(over: Partial<Reading> = {}): Reading {
   return {
@@ -175,6 +176,22 @@ function firstBlockRows(el: HTMLElement): HTMLElement[] {
 }
 
 describe('NodeDetail', () => {
+  it('names itself in the top bar, with its kind and whether it is online', () => {
+    setup({ node: node({ displayName: 'Greenhouse Pi', online: false }) });
+    expect(TestBed.inject(PageHeading).text()).toEqual({
+      heading: 'Greenhouse Pi',
+      subtitle: 'elantris · rpi · offline',
+    });
+  });
+
+  it('falls back to its slug in the top bar while the node is unknown', () => {
+    setup({ slug: 'braize' });
+    expect(TestBed.inject(PageHeading).text()).toEqual({
+      heading: 'braize',
+      subtitle: '',
+    });
+  });
+
   it('shows the current reading as gauges', () => {
     const el = setup();
     expect(el.querySelectorAll('temp-gauge')).toHaveLength(3);

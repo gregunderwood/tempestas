@@ -8,7 +8,7 @@ export class ReadingsController {
   constructor(private readonly readings: ReadingsService) {}
 
   /**
-   * Newest first, inside a resolved window and a row limit. Both windows and
+   * Newest first unless `order` says otherwise, inside a resolved window and a row limit. Both windows and
    * limits are always applied - see `reading-window.ts` for what the defaults
    * resolve to and why they are not the old system's.
    */

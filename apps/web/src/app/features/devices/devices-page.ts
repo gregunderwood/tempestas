@@ -18,7 +18,6 @@ import type { Device } from '@tempestas/domain';
   imports: [MatCardModule, MatButtonModule, MatSlideToggleModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <h1>Devices</h1>
     <div aria-live="polite">
       @switch (sourceState()) {
         @case ('failed') {

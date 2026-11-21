@@ -162,6 +162,7 @@ function makeService(setup: Setup = {}) {
   );
   return {
     service,
+    nodes,
     turnOn,
     turnOff,
     findByRole,
@@ -531,6 +532,8 @@ describe('system status fan-out', () => {
       staleRoles: [],
       nodesOnline: 2,
       nodesTotal: 2,
+      nodesPending: 0,
+      isLeading: true,
       lastEvaluationAt: NOW.toISOString(),
     });
   });
@@ -676,10 +679,45 @@ describe('publishing each rules cycle', () => {
     expect(forgetRulesCycle).toHaveBeenCalledTimes(1);
   });
 
+  // A follower's own dashboard has to say it is not in charge; silence would read as a healthy leader.
+  it('still publishes a status, saying it is not leading', async () => {
+    const { service, publishSystemStatus } = makeService({ isLeader: false });
+    await service.tick();
+    expect(publishSystemStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isLeading: false,
+        sensorStale: false,
+        lastEvaluationAt: null,
+      }),
+    );
+  });
+
+  it('survives a database error on the timer, as follower or leader', async () => {
+    for (const isLeader of [false, true]) {
+      const { service, nodes } = makeService({ isLeader });
+      vi.mocked(nodes.counts).mockRejectedValueOnce(new Error('db gone'));
+      await expect(service.tick()).resolves.toBeUndefined();
+    }
+  });
+
   it('publishes no cycle when a follower is asked to evaluate', async () => {
     const { service, publishRulesCycle } = makeService({ isLeader: false });
     await service.evaluateAll();
     expect(publishRulesCycle).not.toHaveBeenCalled();
     expect(service.findLatestRulesCycle()).toBeNull();
+  });
+
+  // A follower's tick always says nothing is stale; an evaluation by hand must not say otherwise and flash the banner.
+  it('publishes the same not-leading status when a follower is asked to evaluate', async () => {
+    const { service, publishSystemStatus } = makeService({ isLeader: false });
+    await service.evaluateAll();
+    expect(publishSystemStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        isLeading: false,
+        sensorStale: false,
+        staleRoles: [],
+        lastEvaluationAt: null,
+      }),
+    );
   });
 });
