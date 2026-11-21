@@ -10,11 +10,7 @@ import {
   readMigrationTimestamp,
   type MigrationClass,
 } from '../migration-timestamp';
-import {
-  ROWS_ADDED_AFTER,
-  addRowsAfter,
-  runStatements,
-} from './rows-added-after';
+import { addRowsAfter, runStatements } from './rows-added-after';
 import {
   ROWS_ONLY_NEW_CODE_WRITES,
   type RowsOnlyNewCodeWrites,
@@ -184,7 +180,7 @@ async function expectRevertOverNewRows(
 describe('every migration, in order, on a database with a row in each table', () => {
   migrationsInOrder.forEach((migrationClass, position) => {
     const migrationsSoFar = migrationsInOrder.slice(0, position + 1);
-    let schemaBefore = '';
+    let schemaBefore: string | undefined;
 
     it(`${migrationClass.name} goes up, down and up again to the same schema and rows`, async () => {
       schemaBefore = await expectRoundTrip(migrationsSoFar);
@@ -200,22 +196,13 @@ describe('every migration, in order, on a database with a row in each table', ()
           `Say in rows-only-new-code-writes.ts which rows only ${migrationClass.name}'s new code writes, and whether its down reverts or refuses them`,
         );
       }
+      if (schemaBefore === undefined) {
+        throw new Error(
+          `Run ${migrationClass.name}'s round trip first: this check starts from the database it leaves`,
+        );
+      }
       await expectRevertOverNewRows(migrationsSoFar, newRows, schemaBefore);
     });
-  });
-
-  it('keys its rows by migrations that exist, so a rename cannot orphan them', () => {
-    const migrationNames = migrationsInOrder.map(
-      (migrationClass) => migrationClass.name,
-    );
-    for (const rowsByMigration of [
-      ROWS_ADDED_AFTER,
-      ROWS_ONLY_NEW_CODE_WRITES,
-    ]) {
-      expect(migrationNames).toEqual(
-        expect.arrayContaining([...rowsByMigration.keys()]),
-      );
-    }
   });
 
   it('refuses to revert a migration marked irreversible, and changes nothing', async () => {

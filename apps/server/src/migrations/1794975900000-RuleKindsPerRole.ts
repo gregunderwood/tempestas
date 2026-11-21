@@ -54,8 +54,10 @@ export class RuleKindsPerRole1794975900000 implements MigrationInterface {
       const legacy = toLegacy(zone.rules_config);
       if (!legacy) {
         throw new Error(
-          `Zone "${zone.slug}" has rules the old shape cannot express; ` +
-            `remove or convert it by hand before reverting this migration`,
+          `Zone "${zone.slug}" has rules the old shape cannot express. ` +
+            `Reverting would mean deleting the zone. ` +
+            `If the deploy being rolled back applied this migration, restore that deploy's backup; ` +
+            `otherwise fix forward with a new migration`,
         );
       }
       await queryRunner.query(

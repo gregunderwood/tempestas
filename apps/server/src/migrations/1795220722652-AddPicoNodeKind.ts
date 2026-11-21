@@ -16,8 +16,10 @@ export class AddPicoNodeKind1795220722652 implements MigrationInterface {
     );
     if (picoNodes.length > 0) {
       throw new Error(
-        `Nodes are still Picos (${picoNodes.map((node) => node.slug).join(', ')}); ` +
-          `change or remove them before reverting this migration`,
+        `Nodes are still Picos (${picoNodes.map((node) => node.slug).join(', ')}). ` +
+          `Reverting would mean deleting them and their readings. ` +
+          `If the deploy being rolled back applied this migration, restore that deploy's backup; ` +
+          `otherwise fix forward with a new migration`,
       );
     }
     await queryRunner.query(

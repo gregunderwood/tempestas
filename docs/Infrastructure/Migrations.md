@@ -161,7 +161,7 @@ migration did, only whether reverting it refuses with a message instead of a Pos
 
 ```ts
 if (picoNodes.length > 0) {
-  throw new Error(`Nodes are still Picos (${slugs}); change or remove them before reverting this migration`);
+  throw new Error(`Nodes are still Picos (${slugs}). Reverting would mean deleting them and their readings. ` + `If the deploy being rolled back applied this migration, restore that deploy's backup; ` + `otherwise fix forward with a new migration`);
 }
 ```
 
@@ -170,8 +170,8 @@ names the rows, or counts them, and says what to do. Never delete them to make t
 
 Restore a backup only if the deploy being rolled back applied the migration: its backup is minutes
 old. A migration applied long ago is older than any backup worth restoring, and restoring one
-would lose everything recorded since. Fix those forward with a new migration. The refusal messages
-say exactly this.
+would lose everything recorded since. Fix those forward with a new migration. All five refusal
+messages say exactly this.
 
 Four `down`s refuse today on rows elantris has: the Pico, the heating roles, the pumphouse rules
 and the readings without humidity. A fifth, repeated sequence numbers, almost certainly does too:
