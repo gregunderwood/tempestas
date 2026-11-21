@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Subscription } from 'rxjs';
 import { Clock } from '../common/clock';
+import { describeError } from '../common/describe-error';
 import {
   HardwareService,
   type SensorSample,
@@ -86,9 +87,7 @@ export class ReadingsIngestService implements OnModuleInit, OnModuleDestroy {
       .then(() => this.ingest(sample))
       .catch((error: unknown) => {
         this.logger.error(
-          `Failed to ingest a sample from "${sample.nodeId}": ${
-            error instanceof Error ? error.message : error
-          }`,
+          `Failed to ingest a sample from "${sample.nodeId}": ${describeError(error)}`,
         );
       });
   }

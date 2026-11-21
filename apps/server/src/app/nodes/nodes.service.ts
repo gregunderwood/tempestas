@@ -22,6 +22,7 @@ import {
   type NodeHello,
 } from '../hardware/hardware.service';
 import { Clock } from '../common/clock';
+import { describeError } from '../common/describe-error';
 import { DeviceEntity } from '../devices/models';
 import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';
@@ -263,9 +264,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
 
   private enqueue(task: () => Promise<void>): void {
     this.queue = this.queue.then(task).catch((error: unknown) => {
-      this.logger.error(
-        `Registry task failed: ${error instanceof Error ? error.message : error}`,
-      );
+      this.logger.error(`Registry task failed: ${describeError(error)}`);
     });
   }
 
