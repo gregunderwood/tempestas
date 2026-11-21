@@ -29,7 +29,7 @@ burner changing what greenhouse's canopy sensor reads. The world is therefore a
 separate service both agents talk to.
 
 **The production ACL file, not a copy.** `up.sh` points mosquitto at
-`apps/hardware/mosquitto/tempestas.acl`. A sandbox with looser rules would not
+`apps/broker/mosquitto/tempestas.acl`. A sandbox with looser rules would not
 have caught the silent QoS-0 denial that bit us on the real broker.
 
 **Two Postgres instances, not two schemas.** Per-box databases are the design.

@@ -307,7 +307,7 @@ locks you out of your own greenhouse at 2 a.m. In priority order:
    write goes straight to a GPIO pin and a propane burner, bypassing any HTTP control. Everything
    below matters less than this line.
 
-   The posture, in [../apps/hardware/mosquitto/](../apps/hardware/mosquitto/): `allow_anonymous false`,
+   The posture, in [../apps/broker/mosquitto/](../apps/broker/mosquitto/): `allow_anonymous false`,
    a listener bound by **interface** (`bind_interface wlan0`, not a hardcoded address — this box is
    on DHCP and a lease change would otherwise stop the broker), an explicit loopback listener
    alongside it, and three identities scoped by ACL.

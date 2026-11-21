@@ -78,7 +78,7 @@ never touched.
 - ~~**The Mosquitto listener is loopback-only.**~~ **Done (2026-09-09).** Opened to the LAN with
   `allow_anonymous false`, three ACL-scoped identities, and the listener bound by interface rather
   than address. Samples now reach the Mac. Config in
-  [../apps/hardware/mosquitto/](../apps/hardware/mosquitto/), posture and the verification method in
+  [../apps/broker/mosquitto/](../apps/broker/mosquitto/), posture and the verification method in
   [Safety](Safety.md#authentication-is-an-interlock-not-security).
 
   Two things worth carrying forward. **A denied QoS-0 publish is silent** — the first round of
@@ -339,7 +339,7 @@ recovered in ~5 s, and a cold reboot brings it up in 21.6 s with the lines claim
 `systemd-analyze verify` found two directives in the shipped unit that systemd had been silently
 ignoring, including the start limit that the no-crash-loop rule depends on. GPIO has **not** yet
 been driven from an MQTT command end to end. See
-[Node Agent](Infrastructure/Node%20Agent.md#the-gpio-backend). Deployment (a systemd unit, the
+[Linux Agent](Infrastructure/Linux%20Agent.md#the-gpio-backend). Deployment (a systemd unit, the
 `flock`, `Type=notify`, `OOMScoreAdjust`) is still to do; the agent has only been run in the
 foreground.
 
