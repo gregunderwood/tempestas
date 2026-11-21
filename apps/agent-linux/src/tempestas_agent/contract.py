@@ -37,44 +37,44 @@ SCHEMAS = {
 SUPPORTED_MAJOR = 1
 
 
-def node_root(node_id: str) -> str:
+def build_node_root(node_id: str) -> str:
     return f"{MQTT_ROOT}/node/{node_id}"
 
 
-def topic_hello(node_id: str) -> str:
-    return f"{node_root(node_id)}/hello"
+def build_hello_topic(node_id: str) -> str:
+    return f"{build_node_root(node_id)}/hello"
 
 
-def topic_status(node_id: str) -> str:
-    return f"{node_root(node_id)}/status"
+def build_status_topic(node_id: str) -> str:
+    return f"{build_node_root(node_id)}/status"
 
 
-def topic_sample(node_id: str, sensor_id: str) -> str:
-    return f"{node_root(node_id)}/sensor/{sensor_id}/sample"
+def build_sample_topic(node_id: str, sensor_id: str) -> str:
+    return f"{build_node_root(node_id)}/sensor/{sensor_id}/sample"
 
 
-def topic_gpio_set(node_id: str) -> str:
-    return f"{node_root(node_id)}/gpio/set"
+def build_gpio_set_topic(node_id: str) -> str:
+    return f"{build_node_root(node_id)}/gpio/set"
 
 
-def topic_gpio_sync(node_id: str) -> str:
-    return f"{node_root(node_id)}/gpio/sync"
+def build_gpio_sync_topic(node_id: str) -> str:
+    return f"{build_node_root(node_id)}/gpio/sync"
 
 
-def topic_gpio_state(node_id: str, pin: int) -> str:
-    return f"{node_root(node_id)}/gpio/state/{pin}"
+def build_gpio_state_topic(node_id: str, pin: int) -> str:
+    return f"{build_node_root(node_id)}/gpio/state/{pin}"
 
 
-def topic_gpio_result(node_id: str) -> str:
-    return f"{node_root(node_id)}/gpio/result"
+def build_gpio_result_topic(node_id: str) -> str:
+    return f"{build_node_root(node_id)}/gpio/result"
 
 
-def topic_heartbeat(node_id: str) -> str:
-    return f"{node_root(node_id)}/control/heartbeat"
+def build_heartbeat_topic(node_id: str) -> str:
+    return f"{build_node_root(node_id)}/control/heartbeat"
 
 
-def topic_alarm(node_id: str) -> str:
-    return f"{node_root(node_id)}/alarm"
+def build_alarm_topic(node_id: str) -> str:
+    return f"{build_node_root(node_id)}/alarm"
 
 
 SERVER_STATUS_TOPIC = f"{MQTT_ROOT}/server/status"
@@ -112,7 +112,7 @@ class AlarmCode:
     SAFE_STATE_ENTERED = "SAFE_STATE_ENTERED"
 
 
-def schema_major(schema: object) -> int | None:
+def read_schema_major(schema: object) -> int | None:
     """`"sample/2"` -> 2. None when it is not a schema string at all."""
     if not isinstance(schema, str):
         return None

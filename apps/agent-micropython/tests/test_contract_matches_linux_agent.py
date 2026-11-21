@@ -30,18 +30,22 @@ def test_qos_and_retain_match():
 
 def test_every_topic_matches():
     single_node_topics = [
-        "topic_hello",
-        "topic_status",
-        "topic_gpio_set",
-        "topic_gpio_sync",
-        "topic_gpio_result",
-        "topic_heartbeat",
-        "topic_alarm",
+        "build_hello_topic",
+        "build_status_topic",
+        "build_gpio_set_topic",
+        "build_gpio_sync_topic",
+        "build_gpio_result_topic",
+        "build_heartbeat_topic",
+        "build_alarm_topic",
     ]
     for builder in single_node_topics:
         assert getattr(micropython_contract, builder)("node") == getattr(linux_contract, builder)("node")
-    assert micropython_contract.topic_sample("node", "air") == linux_contract.topic_sample("node", "air")
-    assert micropython_contract.topic_gpio_state("node", 20) == linux_contract.topic_gpio_state("node", 20)
+    assert micropython_contract.build_sample_topic("node", "air") == linux_contract.build_sample_topic(
+        "node", "air"
+    )
+    assert micropython_contract.build_gpio_state_topic("node", 20) == linux_contract.build_gpio_state_topic(
+        "node", 20
+    )
     assert micropython_contract.SERVER_STATUS_TOPIC == linux_contract.SERVER_STATUS_TOPIC
 
 
@@ -54,4 +58,4 @@ def test_every_alarm_code_matches():
 
 def test_schema_major_reads_like_the_hardware_agent():
     for schema in ["sample/1", "sample/2", "sample", "sample/x", None, 3]:
-        assert micropython_contract.read_schema_major(schema) == linux_contract.schema_major(schema)
+        assert micropython_contract.read_schema_major(schema) == linux_contract.read_schema_major(schema)

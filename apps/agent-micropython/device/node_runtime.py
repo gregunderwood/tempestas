@@ -185,7 +185,7 @@ class Connection:
         )
         quality_of_service, is_retained = contract.QOS["status"]
         offline = json.dumps(self.agent.build_status_payload("offline"))
-        client.set_last_will(contract.topic_status(node_id), offline, is_retained, quality_of_service)
+        client.set_last_will(contract.build_status_topic(node_id), offline, is_retained, quality_of_service)
         client.set_message_handler(self.deliver)
         try:
             client.connect(SOCKET_TIMEOUT_SECONDS)

@@ -67,7 +67,7 @@ def judge_command(
     if not isinstance(body, dict):
         return CommandVerdict(False, "payload is not a JSON object")
 
-    major = contract.schema_major(body.get("schema"))
+    major = contract.read_schema_major(body.get("schema"))
     if major != contract.SUPPORTED_MAJOR:
         return CommandVerdict(False, f"unsupported schema {body.get('schema')!r}")
 
@@ -317,7 +317,7 @@ class Agent:
         qos, retain = contract.QOS["gpioState"]
         for pin in pins:
             self.client.publish(
-                contract.topic_gpio_state(self.config.node_id, pin),
+                contract.build_gpio_state_topic(self.config.node_id, pin),
                 json.dumps(self.gpio_state_payload(pin)),
                 qos=qos,
                 retain=retain,
@@ -326,7 +326,7 @@ class Agent:
     def publish_alarm(self, code: str, severity: str, message: str) -> None:
         qos, retain = contract.QOS["alarm"]
         self.client.publish(
-            contract.topic_alarm(self.config.node_id),
+            contract.build_alarm_topic(self.config.node_id),
             json.dumps(self.alarm_payload(code, severity, message)),
             qos=qos,
             retain=retain,

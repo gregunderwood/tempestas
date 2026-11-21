@@ -29,26 +29,26 @@ class NodeAgent:
 
     def announce(self):
         """On every connect: online, hello, then the lines as they are."""
-        self.send("status", contract.topic_status(self.node_id), self.build_status_payload("online"))
-        self.send("hello", contract.topic_hello(self.node_id), self.build_hello_payload())
+        self.send("status", contract.build_status_topic(self.node_id), self.build_status_payload("online"))
+        self.send("hello", contract.build_hello_topic(self.node_id), self.build_hello_payload())
         self.publish_gpio_states(self.relay_lines.lines)
 
     def list_subscriptions(self):
         node_id = self.node_id
         return [
-            (contract.topic_gpio_set(node_id), 1),
-            (contract.topic_gpio_sync(node_id), 1),
-            (contract.topic_heartbeat(node_id), 0),
+            (contract.build_gpio_set_topic(node_id), 1),
+            (contract.build_gpio_sync_topic(node_id), 1),
+            (contract.build_heartbeat_topic(node_id), 0),
             (contract.SERVER_STATUS_TOPIC, 1),
         ]
 
     def on_message(self, topic, payload, is_retained):
         node_id = self.node_id
-        if topic == contract.topic_heartbeat(node_id):
+        if topic == contract.build_heartbeat_topic(node_id):
             self.on_heartbeat(payload)
         elif topic == contract.SERVER_STATUS_TOPIC:
             self.on_server_status(payload)
-        elif topic == contract.topic_gpio_set(node_id):
+        elif topic == contract.build_gpio_set_topic(node_id):
             self.on_command(payload, is_retained)
 
     def on_command(self, payload, is_retained):
@@ -60,7 +60,7 @@ class NodeAgent:
         line_results = [self.apply_line(line) for line in command["lines"]]
         self.send(
             "gpioResult",
-            contract.topic_gpio_result(self.node_id),
+            contract.build_gpio_result_topic(self.node_id),
             self.build_result_payload(command["id"], line_results),
         )
         self.publish_gpio_states(self.select_managed_pins(line_results))
@@ -129,7 +129,7 @@ class NodeAgent:
 
     def publish_readings(self):
         for reading in self.probes.read_all():
-            topic = contract.topic_sample(self.node_id, reading.sensor_id)
+            topic = contract.build_sample_topic(self.node_id, reading.sensor_id)
             self.send("sample", topic, self.build_sample_payload(reading))
 
     def publish_gpio_states(self, pins):
@@ -139,7 +139,9 @@ class NodeAgent:
             return
         for pin in pins:
             self.send(
-                "gpioState", contract.topic_gpio_state(self.node_id, pin), self.build_gpio_state_payload(pin)
+                "gpioState",
+                contract.build_gpio_state_topic(self.node_id, pin),
+                self.build_gpio_state_payload(pin),
             )
 
     def on_clock_set(self):
@@ -150,7 +152,7 @@ class NodeAgent:
     def publish_alarm(self, alarm_code, severity, message):
         self.send(
             "alarm",
-            contract.topic_alarm(self.node_id),
+            contract.build_alarm_topic(self.node_id),
             self.build_alarm_payload(alarm_code, severity, message),
         )
 
