@@ -10,6 +10,7 @@ interface Pin {
 }
 
 const measureHeight = (pin: Pin) => pin.height;
+const identifyPin = (pin: Pin) => pin.name;
 
 function namesOf(columns: Pin[][]): string[][] {
   return columns.map((column) => column.map((pin) => pin.name));
@@ -73,7 +74,7 @@ describe('keepColumnAssignment', () => {
         { name: 'greenhouse', height: 100 },
         { name: 'pumphouse', height: 900 },
       ],
-      (pin) => pin.name,
+      identifyPin,
       measureHeight,
     );
     expect(namesOf(columns)).toEqual([
@@ -92,7 +93,7 @@ describe('keepColumnAssignment', () => {
         { name: 'pumphouse', height: 100 },
         { name: 'workshop', height: 300 },
       ],
-      (pin) => pin.name,
+      identifyPin,
       measureHeight,
     );
     expect(namesOf(columns)).toEqual([
@@ -108,7 +109,7 @@ describe('keepColumnAssignment', () => {
         { name: 'greenhouse', height: 100 },
         { name: 'pumphouse', height: 900 },
       ],
-      (pin) => pin.name,
+      identifyPin,
       measureHeight,
     );
     expect(namesOf(columns)).toEqual([['greenhouse'], ['pumphouse']]);

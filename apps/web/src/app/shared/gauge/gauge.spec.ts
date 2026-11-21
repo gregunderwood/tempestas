@@ -26,14 +26,12 @@ function colorOf(key: GaugeMetricKey, value: number | null): string {
 }
 
 describe('Gauge', () => {
-  // A null CO2 means the sensor had no answer. Rendering 0 reads as
-  // "extremely low", which is the one direction that runs the burner - so this
-  // is a safety assertion, not a formatting one.
+  // A safety assertion: "0 ppm" reads as extremely low, the one direction that runs the burner.
   it('renders a null value as an em-dash, never a zero', () => {
-    const el = render('co2', null);
-    const number = el.querySelector('.gauge__number');
+    const gauge = render('co2', null);
+    const number = gauge.querySelector('.gauge__number');
     expect(number?.textContent?.trim()).toBe('—');
-    expect(el.textContent).not.toContain('0');
+    expect(gauge.textContent).not.toContain('0');
   });
 
   it('says "unknown" in words, so the state does not rely on colour', () => {
@@ -55,9 +53,7 @@ describe('Gauge', () => {
     ).toContain('861');
   });
 
-  // The bands are carried over from the old app and have to match AT THE
-  // BOUNDARY, which is where an off-by-one shows up. Each `from` is inclusive,
-  // so a value exactly on it takes the new colour.
+  // Each band's `from` is inclusive, so a value exactly on it takes the new colour.
   describe('band colours at boundary values', () => {
     const cases: [GaugeMetricKey, number, string][] = [
       ['co2', 299, 'blue'],
@@ -85,8 +81,6 @@ describe('Gauge', () => {
     });
   });
 
-  // A sensor reporting outside the configured range must not draw an arc past
-  // the end of the track, and must not invert it below the start.
   it('clamps the arc rather than overflowing the track', () => {
     const over = render('co2', 99_999).querySelector('.gauge__value');
     expect(Number(over?.getAttribute('stroke-dashoffset'))).toBe(0);
@@ -107,11 +101,10 @@ describe('Gauge', () => {
     ).toBe('CO2 unknown');
   });
 
-  // The gauge must not carry its own copy of the ranges: the rules engine and
-  // this component have to agree about what a band means.
+  // The rules engine and the gauge have to agree about what a band means.
   it('takes its range and unit from the shared contract', () => {
-    const el = render('humidity', 50);
-    expect(el.textContent).toContain(GAUGE_METRICS.humidity.unit);
-    expect(el.textContent).toContain(GAUGE_METRICS.humidity.label);
+    const gauge = render('humidity', 50);
+    expect(gauge.textContent).toContain(GAUGE_METRICS.humidity.unit);
+    expect(gauge.textContent).toContain(GAUGE_METRICS.humidity.label);
   });
 });
