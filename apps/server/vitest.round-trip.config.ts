@@ -13,6 +13,8 @@ export default defineConfig({
     environment: 'node',
     include: ['src/migrations/round-trip/**/*.round-trip.ts'],
     globalSetup: ['src/migrations/round-trip/throwaway-postgres.ts'],
+    // Each migration builds on the one before, so later failures would only repeat the first.
+    bail: 1,
     testTimeout: 60_000,
     hookTimeout: 90_000,
     reporters: ['default'],
