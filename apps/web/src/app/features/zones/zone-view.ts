@@ -67,6 +67,16 @@ export interface ProbeLine {
   ageSeconds: number;
   isQuiet: boolean;
   tag: string | null;
+  isTemperatureDeciding: boolean;
+  isCo2Deciding: boolean;
+}
+
+type DecidingMeasurement = 'temperature' | 'co2';
+
+interface DecidingProbes {
+  role: DeviceRole;
+  measurement: DecidingMeasurement;
+  probeKeys: string[];
 }
 
 export interface RuleDecision {
@@ -118,7 +128,10 @@ export interface ZonesInput {
   now: number;
 }
 
-type ProbeReading = Omit<ProbeLine, 'tag'>;
+type ProbeReading = Omit<
+  ProbeLine,
+  'tag' | 'isTemperatureDeciding' | 'isCo2Deciding'
+>;
 
 export function buildZoneCards(input: ZonesInput): ZoneCard[] {
   return input.zones.map((zone) => {
@@ -423,16 +436,33 @@ function buildProbeLines(
     .sort((first, second) => first.label.localeCompare(second.label));
 
   const enabledRoles = zone.rulesConfig.enabledRoles ?? [];
-  const controlledRolesByProbe = mapControlledRolesToProbes(
-    findDecidingProbesByRole(zone.rulesConfig, evaluation),
-  );
+  const decidingProbes = findDecidingProbesByRole(zone.rulesConfig, evaluation);
+  const controlledRolesByProbe = mapControlledRolesToProbes(decidingProbes);
   return probes.map((probe) => ({
     ...probe,
     tag: describeControlTag(
       controlledRolesByProbe.get(probe.key) ?? [],
       enabledRoles.length,
     ),
+    isTemperatureDeciding: isDecidingOn(
+      decidingProbes,
+      probe.key,
+      'temperature',
+    ),
+    isCo2Deciding: isDecidingOn(decidingProbes, probe.key, 'co2'),
   }));
+}
+
+function isDecidingOn(
+  decidingProbes: readonly DecidingProbes[],
+  probeKey: string,
+  measurement: DecidingMeasurement,
+): boolean {
+  return decidingProbes.some(
+    (deciding) =>
+      deciding.measurement === measurement &&
+      deciding.probeKeys.includes(probeKey),
+  );
 }
 
 function findZoneNodeSlugs(zone: Zone, nodes: readonly Node[]): Set<string> {
@@ -460,10 +490,10 @@ function toProbeReading(
 function findDecidingProbesByRole(
   config: ZoneRulesConfig,
   evaluation: RulesEvaluation | null,
-): [DeviceRole, string[]][] {
+): DecidingProbes[] {
   if (!evaluation) return [];
   const enabledRoles = config.enabledRoles ?? [];
-  return enabledRoles.flatMap((role): [DeviceRole, string[]][] => {
+  return enabledRoles.flatMap((role): DecidingProbes[] => {
     const climate = evaluation.climateByRole[role];
     const isDecidedByProbes =
       climate !== undefined && !evaluation.staleRoles.includes(role);
@@ -471,20 +501,23 @@ function findDecidingProbesByRole(
     const decision = evaluation.decisions.find(
       (candidate) => candidate.role === role,
     );
-    return [
-      [role, selectDecidingProbes(config.rules[role], decision, climate)],
-    ];
+    return [selectDecidingProbes(role, config.rules[role], decision, climate)];
   });
 }
 
 function selectDecidingProbes(
+  role: DeviceRole,
   rule: RoleRule | undefined,
   decision: DecisionOutcome | undefined,
   climate: ClimateSample,
-): string[] {
+): DecidingProbes {
   return wasDecidedOnCo2(rule, decision)
-    ? climate.co2DecidingSensorIds
-    : climate.decidingSensorIds;
+    ? { role, measurement: 'co2', probeKeys: climate.co2DecidingSensorIds }
+    : {
+        role,
+        measurement: 'temperature',
+        probeKeys: climate.decidingSensorIds,
+      };
 }
 
 function wasDecidedOnCo2(
@@ -499,11 +532,11 @@ function wasDecidedOnCo2(
 }
 
 function mapControlledRolesToProbes(
-  decidingProbesByRole: [DeviceRole, string[]][],
+  decidingProbesByRole: readonly DecidingProbes[],
 ): Map<string, string[]> {
   const controlledRolesByProbe = new Map<string, string[]>();
-  for (const [role, decidingProbeKeys] of decidingProbesByRole) {
-    for (const probeKey of decidingProbeKeys) {
+  for (const { role, probeKeys } of decidingProbesByRole) {
+    for (const probeKey of probeKeys) {
       const controlledRoles = controlledRolesByProbe.get(probeKey) ?? [];
       controlledRolesByProbe.set(probeKey, [
         ...controlledRoles,

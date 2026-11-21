@@ -100,11 +100,17 @@ interface NamedSource {
                     [class.probe--quiet]="probe.isQuiet"
                   >
                     <span class="probe__name">{{ probe.label }}</span>
-                    <span class="probe__value"
+                    <span
+                      class="probe__value"
+                      [class.probe__value--deciding]="
+                        probe.isTemperatureDeciding
+                      "
                       >{{ probe.temperatureC | number: '1.1-1' }} °C</span
                     >
                     @if (probe.co2Ppm !== null) {
-                      <span class="probe__value"
+                      <span
+                        class="probe__value"
+                        [class.probe__value--deciding]="probe.isCo2Deciding"
                         >{{ probe.co2Ppm | number: '1.0-0' }} ppm CO₂</span
                       >
                     }
@@ -327,7 +333,7 @@ interface NamedSource {
       font-size: 0.85rem;
       opacity: 0.7;
     }
-    .probe--controlling .probe__value {
+    .probe__value--deciding {
       color: var(--temp-gauge-blue);
     }
     .probe__tag {

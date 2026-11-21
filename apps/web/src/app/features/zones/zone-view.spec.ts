@@ -289,7 +289,7 @@ describe('buildZoneCards tags the probe that decided the measurement the rule us
   const COLD_HIGH_CO2 = 'patji/north';
   const WARM_LOW_CO2 = 'patji/south';
 
-  function greenhouseCard(reason: RuleReason): ZoneCard {
+  function greenhouseCard(reason: RuleReason, hasCo2 = true): ZoneCard {
     const evaluation = pumphouseEvaluation({
       zoneId: GREENHOUSE.id,
       zoneSlug: GREENHOUSE.slug,
@@ -297,12 +297,12 @@ describe('buildZoneCards tags the probe that decided the measurement the rule us
       climateByRole: {
         co2_generator: {
           temperatureC: 18,
-          co2Ppm: 600,
+          co2Ppm: hasCo2 ? 600 : null,
           observedAt: NOW.toISOString(),
           sourceNodeIds: ['patji'],
           sourceSensorIds: [COLD_HIGH_CO2, WARM_LOW_CO2],
           decidingSensorIds: [COLD_HIGH_CO2],
-          co2DecidingSensorIds: [WARM_LOW_CO2],
+          co2DecidingSensorIds: hasCo2 ? [WARM_LOW_CO2] : [],
         },
       },
       decisions: [
@@ -318,10 +318,23 @@ describe('buildZoneCards tags the probe that decided the measurement the rule us
     return onlyCard({
       zones: [GREENHOUSE],
       nodes: [node('patji', GREENHOUSE.id)],
-      readings: [probe('north', 18, 4, 900), probe('south', 22, 4, 600)],
+      readings: [
+        probe('north', 18, 4, hasCo2 ? 900 : null),
+        probe('south', 22, 4, hasCo2 ? 600 : null),
+      ],
       devices: [],
       cycle: cycleOf([evaluation]),
     });
+  }
+
+  function decidingMeasurementsOf(
+    card: ZoneCard,
+  ): [string, boolean, boolean][] {
+    return card.probes.map((probeLine) => [
+      probeLine.label,
+      probeLine.isTemperatureDeciding,
+      probeLine.isCo2Deciding,
+    ]);
   }
 
   it.each<RuleReason>(['co2-below-threshold', 'co2-at-threshold', 'dead-band'])(
@@ -333,6 +346,27 @@ describe('buildZoneCards tags the probe that decided the measurement the rule us
       ]);
     },
   );
+
+  it('tags no probe when the burner decided on CO2 but no probe has any', () => {
+    expect(probeTagsOf(greenhouseCard('co2-at-threshold', false))).toEqual([
+      ['north', null],
+      ['south', null],
+    ]);
+  });
+
+  it('marks only the CO2 value as deciding when the burner decided on CO2', () => {
+    expect(decidingMeasurementsOf(greenhouseCard('dead-band'))).toEqual([
+      ['north', false, false],
+      ['south', false, true],
+    ]);
+  });
+
+  it('marks only the temperature as deciding when the burner decided on temperature', () => {
+    expect(decidingMeasurementsOf(greenhouseCard('frost-protection'))).toEqual([
+      ['north', true, false],
+      ['south', false, false],
+    ]);
+  });
 
   it.each<RuleReason>(['frost-protection', 'temp-above-setpoint'])(
     'tags the coldest probe when the burner decided on temperature (%s)',
