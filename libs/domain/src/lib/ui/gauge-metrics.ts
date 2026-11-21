@@ -1,12 +1,8 @@
-/**
- * Gauge ranges and colour bands, carried over verbatim from the old Angular
- * app - where they lived untyped on a service as `readonly threshholds: any`
- * (sic) and the gauge config was copy-pasted nine times across two templates.
- */
-export type GaugeMetricKey = 'co2' | 'temperature' | 'humidity';
+import type { MetricKey } from '../nodes/node.model';
+
+export type GaugeMetricKey = MetricKey;
 
 export interface GaugeThreshold {
-  /** Applies from this value upward. */
   from: number;
   color: string;
 }
@@ -18,7 +14,7 @@ export interface GaugeMetric {
   min: number;
   max: number;
   decimals: number;
-  /** Ascending. Pick the last threshold whose `from` <= value. */
+  /** Ascending. */
   thresholds: GaugeThreshold[];
 }
 
@@ -77,9 +73,9 @@ export function gaugeColorFor(
     return null;
   }
   let color: string | null = null;
-  for (const t of metric.thresholds) {
-    if (value >= t.from) {
-      color = t.color;
+  for (const threshold of metric.thresholds) {
+    if (value >= threshold.from) {
+      color = threshold.color;
     }
   }
   return color;
