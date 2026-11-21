@@ -36,7 +36,7 @@ def test_reads_each_named_probe_after_one_conversion():
 
 
 def test_leaves_out_a_reading_nobody_measured():
-    for untrue_reading in [85.0, -127.0, 99.0, None, OSError("CRC error")]:
+    for untrue_reading in [85.0, -127.0, 99.0, bytes(9), OSError("CRC error")]:
         probes, _, _ = build_probes({AIR_ROM: untrue_reading})
         assert temperatures_of(probes) == []
 
@@ -75,3 +75,14 @@ def test_a_failed_scan_at_boot_is_logged_not_raised():
     probes = Ds18b20Probes(bus_sensors, {AIR_LINUX_ID: "air"}, lambda milliseconds: None, log)
     probes.start()
     assert any("scan failed" in line for line in log.lines)
+
+
+def test_reads_below_freezing_from_the_twos_complement_scratchpad():
+    probes, _, _ = build_probes({AIR_ROM: -10.125})
+    assert temperatures_of(probes) == [("air", -10.125)]
+
+
+def test_names_the_all_zero_scratchpad_of_a_shorted_line():
+    probes, log, _ = build_probes({AIR_ROM: bytes(9)})
+    assert temperatures_of(probes) == []
+    assert "all-zero" in log.lines[-1]

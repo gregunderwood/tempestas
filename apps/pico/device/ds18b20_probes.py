@@ -7,6 +7,9 @@ POWER_ON_RESET_CELSIUS = 85.0
 LOWEST_PLAUSIBLE_CELSIUS = -40.0
 HIGHEST_PLAUSIBLE_CELSIUS = 60.0
 DS18B20_FAMILY_CODE = 0x28
+SIGN_BIT = 0x8000
+TWO_BYTE_RANGE = 0x10000
+SIXTEENTHS_PER_DEGREE = 16
 
 
 def format_rom_as_linux_id(rom):
@@ -75,14 +78,30 @@ class Ds18b20Probes:
         if rom is None:
             return None
         try:
-            temperature = self.bus_sensors.read_temp(rom)
+            scratchpad = self.bus_sensors.read_scratch(rom)
         except Exception as error:
             self.log("probe %s read failed: %s" % (linux_id, error))
             return None
+        if is_all_zero(scratchpad):
+            # Zeros pass the CRC (the CRC of zeros is zero) and decode as exactly 0 °C: a shorted line.
+            self.log("probe %s returned an all-zero scratchpad" % linux_id)
+            return None
+        temperature = decode_celsius(scratchpad)
         return temperature if is_plausible(temperature) else None
 
 
+def is_all_zero(scratchpad):
+    return all(byte == 0 for byte in scratchpad)
+
+
+def decode_celsius(scratchpad):
+    sixteenths = scratchpad[1] << 8 | scratchpad[0]
+    if sixteenths & SIGN_BIT:
+        sixteenths -= TWO_BYTE_RANGE
+    return sixteenths / SIXTEENTHS_PER_DEGREE
+
+
 def is_plausible(temperature):
-    if temperature is None or temperature == POWER_ON_RESET_CELSIUS:
+    if temperature == POWER_ON_RESET_CELSIUS:
         return False
     return LOWEST_PLAUSIBLE_CELSIUS <= temperature <= HIGHEST_PLAUSIBLE_CELSIUS
