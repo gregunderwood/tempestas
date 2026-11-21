@@ -104,29 +104,29 @@ class AgentConfig:
         return len(self.gpio.lines) > 0
 
 
-def load(path: str | Path | None = None, env: dict[str, str] | None = None) -> AgentConfig:
+def load(path: str | Path | None = None, environment: dict[str, str] | None = None) -> AgentConfig:
     """Load from TOML then apply environment overrides."""
-    env = os.environ if env is None else env
-    raw = tomllib.loads(Path(path).read_text()) if path is not None else {}
+    environment = os.environ if environment is None else environment
+    document = tomllib.loads(Path(path).read_text()) if path is not None else {}
 
-    node_id = _read_node_id(raw, env)
-    mqtt = _read_mqtt(raw.get("mqtt", {}), env)
-    sensor = _read_sensor(raw.get("sensor", {}), env)
+    node_id = _read_node_id(document, environment)
+    mqtt = _read_mqtt(document.get("mqtt", {}), environment)
+    sensor = _read_sensor(document.get("sensor", {}), environment)
     _validate_sensor(sensor)
-    world = _read_world(raw.get("world", {}), env)
+    world = _read_world(document.get("world", {}), environment)
     if sensor.kind == "world" and not world.url:
         raise ConfigError('sensor.kind = "world" needs world.url (or TEMPESTAS_WORLD_URL)')
-    gpio = _read_gpio(raw.get("gpio", {}))
+    gpio = _read_gpio(document.get("gpio", {}))
 
     return AgentConfig(
         node_id=node_id,
-        kind=raw.get("kind", AgentConfig.kind),
-        agent_version=raw.get("agent_version", AgentConfig.agent_version),
+        kind=document.get("kind", AgentConfig.kind),
+        agent_version=document.get("agent_version", AgentConfig.agent_version),
         mqtt=mqtt,
         sensor=sensor,
         gpio=gpio,
         world=world,
-        deadman_s=float(raw.get("deadman_s", AgentConfig.deadman_s)),
+        deadman_s=float(document.get("deadman_s", AgentConfig.deadman_s)),
     )
 
 
@@ -134,29 +134,29 @@ def _read_setting(section: dict, defaults: type, key: str, convert: Callable = l
     return convert(section.get(key, getattr(defaults, key)))
 
 
-def _read_node_id(raw: dict, env) -> str:
-    node_id = env.get("TEMPESTAS_NODE_ID") or raw.get("node_id")
+def _read_node_id(document: dict, environment) -> str:
+    node_id = environment.get("TEMPESTAS_NODE_ID") or document.get("node_id")
     if not node_id:
         # A slug is a topic segment and an ACL subject; guessing one lands on another node's topics.
         raise ConfigError("node_id is required (TEMPESTAS_NODE_ID or node_id in the config file)")
     return node_id
 
 
-def _read_mqtt(section: dict, env) -> MqttConfig:
+def _read_mqtt(section: dict, environment) -> MqttConfig:
     return MqttConfig(
-        url=env.get("MQTT_URL") or _read_setting(section, MqttConfig, "url"),
-        username=env.get("MQTT_USERNAME") or section.get("username"),
-        password=env.get("MQTT_PASSWORD") or section.get("password"),
+        url=environment.get("MQTT_URL") or _read_setting(section, MqttConfig, "url"),
+        username=environment.get("MQTT_USERNAME") or section.get("username"),
+        password=environment.get("MQTT_PASSWORD") or section.get("password"),
         keepalive_s=_read_setting(section, MqttConfig, "keepalive_s", int),
     )
 
 
-def _read_sensor(section: dict, env) -> SensorConfig:
+def _read_sensor(section: dict, environment) -> SensorConfig:
     def read(key: str, convert: Callable = lambda value: value):
         return _read_setting(section, SensorConfig, key, convert)
 
     return SensorConfig(
-        kind=env.get("TEMPESTAS_SENSOR_KIND") or read("kind"),
+        kind=environment.get("TEMPESTAS_SENSOR_KIND") or read("kind"),
         sensor_id=read("sensor_id"),
         bus=read("bus", int),
         address=read("address", int),
@@ -194,10 +194,10 @@ def _validate_sensor(sensor: SensorConfig) -> None:
         raise ConfigError("sensor.sample_interval_s below 5s is pointless for these sensors")
 
 
-def _read_world(section: dict, env) -> WorldConfig:
+def _read_world(section: dict, environment) -> WorldConfig:
     return WorldConfig(
-        url=env.get("TEMPESTAS_WORLD_URL") or section.get("url"),
-        position=env.get("TEMPESTAS_WORLD_POSITION")
+        url=environment.get("TEMPESTAS_WORLD_URL") or section.get("url"),
+        position=environment.get("TEMPESTAS_WORLD_POSITION")
         or _read_setting(section, WorldConfig, "position"),
     )
 
