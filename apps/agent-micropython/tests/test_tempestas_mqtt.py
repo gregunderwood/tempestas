@@ -15,6 +15,8 @@ FIRST_PACKET_ID = 1
 SOCKET_TIMEOUT_SECONDS = 3
 PINGRESP_PACKET = bytes((0xD0, 0))
 CONNACK_ACCEPTED = bytes((0x20, 2, 0, 0))
+PUBLISH_QOS_BIT_OFFSET = 1
+PUBLISH_RETAIN_BIT = 0x01
 
 
 def publish_packet(topic, payload, quality_of_service=0, is_retained=False, packet_id=None):
@@ -22,7 +24,9 @@ def publish_packet(topic, payload, quality_of_service=0, is_retained=False, pack
     if quality_of_service:
         body += struct.pack("!H", packet_id)
     body += payload
-    first_byte = PUBLISH | quality_of_service << 1 | (1 if is_retained else 0)
+    first_byte = (
+        PUBLISH | quality_of_service << PUBLISH_QOS_BIT_OFFSET | (PUBLISH_RETAIN_BIT if is_retained else 0)
+    )
     return bytes((first_byte,)) + encode_remaining_length(len(body)) + body
 
 
@@ -72,10 +76,9 @@ def build_session(handled=None, feed_watchdog=None):
     session = MqttSession(
         feed_watchdog or WatchdogFeeds(), "tempestas-braize", "broker", 1883, "braize", "secret", 60
     )
+    handled_messages = handled if handled is not None else []
     session.set_message_handler(
-        lambda topic, payload, is_retained: (handled if handled is not None else []).append(
-            (topic, payload, is_retained)
-        )
+        lambda topic, payload, is_retained: handled_messages.append((topic, payload, is_retained))
     )
     return session
 
