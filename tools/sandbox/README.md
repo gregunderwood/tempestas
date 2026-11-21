@@ -42,6 +42,31 @@ subscribed before any agent announces. `up.sh` waits for both APIs first.
 Production self-heals because nodes persist in its database; a sandbox with a
 fresh one would simply never discover them.
 
+## How the world models the air
+
+`apps/sim` is pure arithmetic behind a standard-library HTTP server, with no
+dependencies, so it runs anywhere an agent does.
+
+- **A line nobody has written is unknown, not off**, the same rule the real
+  backends follow. Assuming off would let the sandbox pass a test that real
+  hardware fails.
+- **Polarity is per fixture.** Four channels are active-LOW and BCM 26 is
+  active-HIGH; getting that backwards is the migration bug that lights a lamp.
+  Two lines drive nothing, so a command routed to a dead channel is reproduced too.
+- **Burner CO2 passes through an in-flight reservoir** that drains to the
+  measured air with a time constant. A threshold-style warm-up would model only
+  the rising edge and stop the burner dead on command; the greenhouse overshot
+  the 1500 ppm cut-off by 46-103 ppm on every one of the four cycles measured.
+- **The CO2 gradient between sites scales with enrichment.** A flat ±72 ppm
+  offset is only valid near the ~1110 ppm it was measured at; applied at rest it
+  put the canopy at 348 ppm, below outdoor air.
+- **Humidity is carried as vapour pressure, not RH.** Two sensors in one air at
+  different indicated temperatures must report different RH; the paired sample
+  read 64.9% and 52.4% RH at 16.08 and 16.48 hPa.
+- **Sim time runs faster than real time** so day/night segments and DST
+  boundaries are reachable in a test. A single advance is capped at four hours,
+  so a laptop waking from sleep does not integrate the night in one step.
+
 ## What it proves today
 
 - Both agents claim at failsafe, with **BCM 26 at 0** and the other four at 1,
