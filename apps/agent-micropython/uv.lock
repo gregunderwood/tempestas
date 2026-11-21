@@ -89,7 +89,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tempestas-pico"
+name = "tempestas-agent-micropython"
 version = "0.1.0"
 source = { virtual = "." }
 

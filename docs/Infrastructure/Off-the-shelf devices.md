@@ -18,7 +18,7 @@ one of the guarantees cannot be recovered by any amount of software on our side.
 
 ## Key files
 
-- [Node Agent](Node%20Agent.md) — the conforming agent a bridge would be a variant of
+- [Linux Agent](Linux%20Agent.md) — the conforming agent a bridge would be a variant of
 - [../../libs/domain/src/lib/nodes/node.model.ts](../../libs/domain/src/lib/nodes/node.model.ts) — `NodeCapabilities`, and the rule that nothing branches on `NodeKind`
 - [../../libs/domain/src/lib/devices/device.model.ts](../../libs/domain/src/lib/devices/device.model.ts) — `DeviceRole`, `onDelayDuration`
 - [Home Assistant](Home%20Assistant.md) — the other route to the same devices, and the ownership hazard shared with this one

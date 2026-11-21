@@ -33,7 +33,7 @@ chmod 600 "$PW"
 
 # The PRODUCTION acl file, not a copy. A sandbox running looser rules than the
 # greenhouse would not have caught the silent QoS-0 denial that bit us once.
-ACL="$ROOT/apps/hardware/mosquitto/tempestas.acl"
+ACL="$ROOT/apps/broker/mosquitto/tempestas.acl"
 sed -e "s|PWFILE|$PW|" -e "s|ACLFILE|$ACL|" \
   "$HERE/conf/mosquitto.conf" > "$RUN/mosquitto.conf"
 
@@ -161,7 +161,7 @@ fi
 
 for NODE in elantris greenhouse; do
   echo "==> agent $NODE"
-  ( cd "$ROOT/apps/hardware" && \
+  ( cd "$ROOT/apps/agent-linux" && \
     MQTT_USERNAME="$NODE" MQTT_PASSWORD=sandbox \
     uv run tempestas-agent --config "$HERE/conf/agent-$NODE.toml" \
       --lock-file "$RUN/agent-$NODE.lock" \

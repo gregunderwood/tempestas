@@ -16,7 +16,7 @@ Group=gunderwood
 # leading `-` means a missing file is not a start failure, so a box without the
 # secret still boots.
 EnvironmentFile=-/etc/tempestas/soak.env
-ExecStart=/home/gunderwood/tempestas/apps/hardware/.venv/bin/python \
+ExecStart=/home/gunderwood/tempestas/apps/agent-linux/.venv/bin/python \
     /home/gunderwood/tempestas/tools/stage-b-soak.py \
     --out /home/gunderwood/tempestas/soak/stage-b-soak.csv
 Restart=on-failure
