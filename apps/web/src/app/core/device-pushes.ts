@@ -1,3 +1,4 @@
+import type { WritableSignal } from '@angular/core';
 import type { Device } from '@tempestas/domain';
 
 export interface PushedDevice {
@@ -26,4 +27,22 @@ export function appendDevicePush(
   const newest = recentPushes[recentPushes.length - 1];
   const sequence = (newest?.sequence ?? 0) + 1;
   return [...recentPushes, { ...push, sequence }].slice(-RECENT_PUSH_COUNT);
+}
+
+export interface DevicePushSignals {
+  devicePushes: WritableSignal<ReadonlyMap<string, PushedDevice>>;
+  recentDevicePushes: WritableSignal<readonly NumberedPush[]>;
+}
+
+export function storeDevicePush(
+  signals: DevicePushSignals,
+  device: Device,
+  receivedAt: number,
+): void {
+  signals.devicePushes.update((pushes) =>
+    recordDevicePush(pushes, device, receivedAt),
+  );
+  signals.recentDevicePushes.update((recentPushes) =>
+    appendDevicePush(recentPushes, { device, receivedAt }),
+  );
 }

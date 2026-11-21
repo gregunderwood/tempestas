@@ -18,7 +18,7 @@ export function pickNewerCycle(
   return socketCycle.at >= fetchedCycle.at ? socketCycle : fetchedCycle;
 }
 
-/** A follower runs no rules, so whatever cycle it last saw is history, not the current state. */
+// A follower runs no rules, so whatever cycle it last saw is history, not the current state.
 export function chooseCurrentCycle(
   status: SystemStatus | null,
   socketCycle: RulesCycle | null,

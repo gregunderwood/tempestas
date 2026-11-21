@@ -7,7 +7,6 @@ export interface PageHeadingText {
 
 const UNTITLED_PAGE: PageHeadingText = { heading: 'tempestas', subtitle: '' };
 
-/** The top bar's title: the route's, unless the page names itself once it knows more. */
 @Injectable({ providedIn: 'root' })
 export class PageHeading {
   private readonly routeText = signal<PageHeadingText>(UNTITLED_PAGE);
@@ -16,7 +15,7 @@ export class PageHeading {
 
   readonly text = computed(() => this.pageText() ?? this.routeText());
 
-  /** A navigation that stays on the same route keeps the page's own name, since the page is still there. */
+  // A navigation that stays on the same route keeps the page's own name, since the page is still there.
   showRoute(
     routeText: Partial<PageHeadingText> | undefined,
     route: object | null,
