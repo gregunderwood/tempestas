@@ -7,7 +7,8 @@ POWER_ON_RESET_CELSIUS = 85.0
 LOWEST_PLAUSIBLE_CELSIUS = -40.0
 HIGHEST_PLAUSIBLE_CELSIUS = 60.0
 ROM_FAMILY_CODE_INDEX = 0
-ROM_SERIAL_BYTES = slice(1, 7)
+ROM_SERIAL_START = 1
+ROM_SERIAL_END = 7
 SCRATCHPAD_LOW_BYTE_INDEX = 0
 SCRATCHPAD_HIGH_BYTE_INDEX = 1
 BITS_PER_BYTE = 8
@@ -17,7 +18,7 @@ SIXTEENTHS_PER_DEGREE = 16
 
 
 def format_rom_as_linux_id(rom):
-    serial_most_significant_first = bytes(reversed(rom[ROM_SERIAL_BYTES]))
+    serial_most_significant_first = bytes(reversed(rom[ROM_SERIAL_START:ROM_SERIAL_END]))
     return "%02x-%s" % (rom[ROM_FAMILY_CODE_INDEX], binascii.hexlify(serial_most_significant_first).decode())
 
 
