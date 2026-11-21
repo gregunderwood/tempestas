@@ -85,7 +85,7 @@ def is_reference_stable(readings: list[float], settle_s: int) -> bool:
     recent = readings[-STABILITY_WINDOW:]
     spread = max(recent) - min(recent)
     mean = sum(recent) / len(recent)
-    print(f"  last 6: mean {mean:.0f} ppm, spread {spread:.0f} ppm")
+    print(f"  last {STABILITY_WINDOW}: mean {mean:.0f} ppm, spread {spread:.0f} ppm")
     if spread > MAX_SPREAD_PPM:
         print(f"  spread {spread:.0f} ppm is too wide - the air has not settled. Wait longer.")
         return False

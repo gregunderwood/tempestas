@@ -417,7 +417,7 @@ SIMULATED_BURNER_PIN = 16
 SIMULATED_FAN_PIN = 20
 SIMULATED_START_MINUTES = 360
 MINUTES_PER_DAY = 24 * 60
-# The relays are active-LOW, so 0 means energised.
+# Four of the five relays are active-LOW, so 0 means energised.
 ENERGISED_LEVEL = 0
 
 
