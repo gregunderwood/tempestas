@@ -45,11 +45,11 @@ moves status**.
 This split is the whole point of `node-registry.ts`, and `patchFromHello`'s return type enforces it
 by simply not having the other fields:
 
-| Owner                 | Fields                                           |
-| --------------------- | ------------------------------------------------ |
-| The node, via `hello` | `kind`, `capabilities`, `agentVersion`, `bootId` |
-| The node, via its LWT | `online`, `lastSeenAt`                           |
-| A human, via the API  | `status`, `displayName`, `location`, `zoneId`    |
+| Owner                 | Fields                                                        |
+| --------------------- | ------------------------------------------------------------- |
+| The node, via `hello` | `kind`, `capabilities`, `agentName`, `agentVersion`, `bootId` |
+| The node, via its LWT | `online`, `lastSeenAt`                                        |
+| A human, via the API  | `status`, `displayName`, `location`, `zoneId`                 |
 
 A node that re-announces itself therefore cannot admit itself, un-admit itself, undo a rejection, or
 rename what an operator called it.

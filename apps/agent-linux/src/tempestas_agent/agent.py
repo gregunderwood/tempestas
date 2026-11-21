@@ -14,7 +14,7 @@ from . import gpio as gpio_backends
 from . import sensor as sensor_backends
 from .config import AgentConfig
 from .ds18b20 import Ds18b20Sensors, Probe
-from .version import read_agent_version
+from .version import AGENT_NAME, read_agent_version
 from .world_client import WorldClient
 
 log = logging.getLogger("tempestas.agent")
@@ -120,6 +120,7 @@ class Agent:
     def capabilities(self) -> dict:
         capabilities: dict = {
             "contractVersion": contract.SUPPORTED_MAJOR,
+            "contractMinor": contract.MQTT_CONTRACT_MINOR,
             # Only the metrics each sensor has: the dashboard draws a dial per declared metric.
             "sensors": [
                 self._describe_sensor(sensor_info) for sensor_info in self.sensor.sensors()
@@ -135,6 +136,7 @@ class Agent:
         return {
             **self._envelope("hello"),
             "kind": self.config.kind,
+            "agentName": AGENT_NAME,
             "agentVersion": self.agent_version,
             "bootId": self.boot_id,
             "capabilities": self.capabilities(),

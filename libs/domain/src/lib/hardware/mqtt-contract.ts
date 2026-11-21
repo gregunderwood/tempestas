@@ -2,6 +2,10 @@ import type { GpioLevel } from '../devices/device.model';
 import type { NodeCapabilities, NodeId, NodeKind } from '../nodes/node.model';
 
 export const MQTT_CONTRACT_VERSION = 'v1' as const;
+
+/** Semver for the contract: a major changes it, a minor only adds to it. Agents version as major.minor.patch. */
+export const MQTT_CONTRACT_MAJOR = 1;
+export const MQTT_CONTRACT_MINOR = 0;
 export const MQTT_ROOT = `tempestas/${MQTT_CONTRACT_VERSION}` as const;
 
 export const mqttTopics = {
@@ -52,6 +56,8 @@ export interface MqttEnvelope {
 
 export interface HelloPayload extends MqttEnvelope {
   kind: NodeKind;
+  /** Which program, such as `agent-linux`; absent from agents older than contract 1.0. */
+  agentName?: string;
   agentVersion: string;
   capabilities: NodeCapabilities;
   /** Changes on every restart, so the server can detect a bounce. */

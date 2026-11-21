@@ -3,6 +3,7 @@ import {
   NODE_OFFLINE_AFTER_MS,
   acceptsCommands,
   acceptsSamples,
+  findContractStanding,
   isNodeOnline,
   newNodeFromHello,
   patchFromHello,
@@ -36,6 +37,7 @@ function hello(overrides: Partial<HelloFacts> = {}): HelloFacts {
   return {
     nodeId: 'elantris',
     kind: NodeKind.RaspberryPi,
+    agentName: 'agent-linux',
     agentVersion: '1.0.0',
     capabilities: capabilities(),
     bootId: 'boot-1',
@@ -49,6 +51,7 @@ function registered(overrides: Partial<RegisteredNode> = {}): RegisteredNode {
     slug: 'elantris',
     status: NodeStatus.Admitted,
     kind: NodeKind.RaspberryPi,
+    agentName: 'agent-linux',
     agentVersion: '1.0.0',
     capabilities: capabilities(),
     bootId: 'boot-1',
@@ -150,6 +153,14 @@ describe('patchFromHello', () => {
     const { outcomes } = patchFromHello(
       registered(),
       hello({ agentVersion: '1.1.0' }),
+    );
+    expect(outcomes).toContain('agent-upgraded');
+  });
+
+  it('reports an agent upgrade when an old agent first names itself', () => {
+    const { outcomes } = patchFromHello(
+      registered({ agentName: null }),
+      hello(),
     );
     expect(outcomes).toContain('agent-upgraded');
   });
@@ -327,5 +338,24 @@ describe('isNodeOnline', () => {
   it('allows far more than a sample interval or a broker will', () => {
     expect(NODE_OFFLINE_AFTER_MS).toBeGreaterThan(60_000);
     expect(NODE_OFFLINE_AFTER_MS).toBeLessThanOrEqual(10 * MINUTE);
+  });
+});
+
+describe('findContractStanding', () => {
+  it('calls a node on the same minor current', () => {
+    expect(findContractStanding(capabilities({ contractMinor: 0 }))).toBe(
+      'current',
+    );
+  });
+
+  // Agents older than the minor field are on minor 0.
+  it('reads an absent minor as 0', () => {
+    expect(findContractStanding(capabilities())).toBe('current');
+  });
+
+  it('calls a node on a newer minor ahead', () => {
+    expect(findContractStanding(capabilities({ contractMinor: 1 }))).toBe(
+      'ahead',
+    );
   });
 });

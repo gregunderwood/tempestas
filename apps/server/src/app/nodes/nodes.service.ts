@@ -11,6 +11,7 @@ import { Repository } from 'typeorm';
 import { Subscription } from 'rxjs';
 import {
   ApiErrorCode,
+  describeAgent,
   NodeStatus,
   type Node,
   type NodeCapabilities,
@@ -32,6 +33,7 @@ import type { AdmitNodeDto } from './dto/admit-node.dto';
 import type { UpdateNodeDto } from './dto/update-node.dto';
 import {
   acceptsSamples,
+  findContractStanding,
   newNodeFromHello,
   patchFromHello,
   pinsWithdrawn,
@@ -89,7 +91,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     'capabilities-changed': (context) => this.reportWithdrawnPins(context),
     'agent-upgraded': ({ facts }) =>
       this.logger.log(
-        `Node "${facts.nodeId}" agent is now ${facts.agentVersion}`,
+        `Node "${facts.nodeId}" agent is now ${describeAgent(facts)}`,
       ),
     seen: ({ facts }) =>
       this.logger.debug(`Node "${facts.nodeId}" re-announced, unchanged`),
@@ -386,7 +388,9 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
           now,
         ),
         lastSeenAt: node.lastSeenAt?.toISOString() ?? null,
+        agentName: node.agentName,
         agentVersion: node.agentVersion,
+        contractStanding: findContractStanding(node.capabilities),
         capabilities: node.capabilities,
         zoneId: node.zoneId,
         deviceCount: deviceCounts.get(node.id) ?? 0,
@@ -430,6 +434,7 @@ function toHelloFacts(hello: NodeHello): HelloFacts {
   return {
     nodeId: hello.nodeId,
     kind: hello.kind,
+    agentName: hello.agentName,
     agentVersion: hello.agentVersion,
     capabilities: hello.capabilities,
     bootId: hello.bootId,
