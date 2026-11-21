@@ -58,7 +58,7 @@ const offline = (): Observable<string> =>
 
 function answerInTurn(
   ...answers: Observable<string>[]
-): () => Observable<string> {
+): (options: RequestOptions) => Observable<string> {
   return () => answers.shift() ?? NEVER;
 }
 

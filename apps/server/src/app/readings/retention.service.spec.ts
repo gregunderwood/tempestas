@@ -6,9 +6,14 @@ import { RETENTION_BATCH_SIZE, RetentionService } from './retention.service';
 
 const NOW = new Date('2026-01-10T11:00:00Z');
 
+type RawQuery = (
+  sql: string,
+  parameters: [Date, number],
+) => Promise<[unknown[], number]>;
+
 function makeService(deletedPerCall: number[], retentionDays: unknown = 90) {
   let callIndex = 0;
-  const query = vi.fn(async () => {
+  const query = vi.fn<RawQuery>(async () => {
     const deleted = deletedPerCall[callIndex] ?? 0;
     callIndex += 1;
     return [[], deleted];

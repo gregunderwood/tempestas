@@ -3,7 +3,12 @@ import { Subject } from 'rxjs';
 import { DivergenceLog } from '../common/divergence-log';
 import type { NodeHello, PinStateReport } from '../hardware/hardware.service';
 import type { Repository } from 'typeorm';
-import { ApiErrorCode, DeviceRole, NodeStatus } from '@tempestas/domain';
+import {
+  ApiErrorCode,
+  DeviceRole,
+  NodeStatus,
+  type NodeCapabilities,
+} from '@tempestas/domain';
 import { FixedClock } from '../common/clock';
 import {
   HardwareError,
@@ -36,18 +41,20 @@ function burner(overrides: Partial<DeviceEntity> = {}): DeviceEntity {
   } as DeviceEntity;
 }
 
+const ELANTRIS_CAPABILITIES: NodeCapabilities = {
+  contractVersion: 1,
+  gpio: { pins: [12, 16, 20, 21, 26], supportsReadback: true },
+  sensors: [],
+  hasRtc: true,
+};
+
 /** elantris as it is actually wired: five exposed pins, admitted. */
 const NODE = {
   id: 'node-uuid',
   slug: 'elantris',
   status: NodeStatus.Admitted,
   zoneId: 'zone-1',
-  capabilities: {
-    contractVersion: 1,
-    gpio: { pins: [12, 16, 20, 21, 26], supportsReadback: true },
-    sensors: [],
-    hasRtc: true,
-  },
+  capabilities: ELANTRIS_CAPABILITIES,
 } as NodeEntity;
 
 function makeService(
