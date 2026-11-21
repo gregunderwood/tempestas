@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs as postgres from tempestas-backup.service; installed to /usr/local/lib/tempestas/backup-database.sh.
+# Run as postgres by tempestas-backup.service.
 
 set -euo pipefail
 
@@ -10,6 +10,7 @@ BACKUPS_KEPT=10
 umask 077
 BACKUP_FILE="$BACKUP_DIR/$DATABASE-$(date -u +%Y%m%dT%H%M%SZ).dump"
 PARTIAL_FILE="$BACKUP_FILE.partial"
+trap 'rm -f "$PARTIAL_FILE"' EXIT
 
 # Written aside and renamed, so a dump cut short never looks like a backup.
 pg_dump --format=custom --file="$PARTIAL_FILE" "$DATABASE"

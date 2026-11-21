@@ -33,13 +33,17 @@ elantris has the build, not a checkout: no `package.json`, no `ts-node`, no sour
 bundle carries the same migrations, and `tempestas-migrate@.service` runs them from it with the
 server's own root-only env file. `tools/deploy.sh` checks for pending migrations **before** it
 restarts the server, and stops if there are any: the new code on an unmigrated schema crash-loops.
+It decides from `migrate:show`'s exit status, 3 when something is pending, and stops on any status
+it does not recognise, so a check that cannot run never reads as "nothing pending". Run by hand,
+`systemctl start tempestas-migrate@show` therefore reports the job **failed** when something is
+pending: that is the answer, not an error.
 Running them stays a separate step:
 
 ```bash
 ssh -t elantris sudo systemctl start tempestas-backup.service        # pg_dump to /var/backups/tempestas
 ssh -t elantris sudo systemctl start tempestas-migrate@run.service
 ssh -t elantris sudo systemctl restart tempestas-server.service
-journalctl -u tempestas-migrate@run.service -n 20 -o cat              # what it applied
+ssh elantris journalctl -u tempestas-migrate@run.service -n 20 -o cat   # what it applied
 ```
 
 The backup unit keeps the last 10 dumps, and its journal names the file it wrote. After
