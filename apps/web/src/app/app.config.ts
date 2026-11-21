@@ -14,8 +14,7 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(appRoutes, withComponentInputBinding()),
-    // Registered once, globally. An error path that a component can forget to
-    // wire up is an error path that will be forgotten.
+    // Registered globally, because an error path a component must wire up is one it will forget.
     provideHttpClient(withInterceptors([apiErrorInterceptor])),
     provideAnimationsAsync(),
   ],
