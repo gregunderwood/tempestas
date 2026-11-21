@@ -17,8 +17,8 @@ import {
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { IN_BACKGROUND } from '../../core/background-request';
+import { LONGEST_TIMEOUT_MILLISECONDS } from '../../shared/time';
 
-const LONGEST_TIMEOUT_MILLISECONDS = 2_147_483_647;
 export const PERIOD_START_RETRY_MILLISECONDS = 60_000;
 
 export interface PeriodStart {
