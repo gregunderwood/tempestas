@@ -1,12 +1,7 @@
 import type { GpioLevel } from '@tempestas/domain';
 import type { PinStateReport } from '../hardware/hardware.service';
 
-/**
- * What the log already believes about one pin.
- *
- * `null` means nothing has ever been recorded for it, which is different from
- * "recorded as unknown" - the first is no history, the second is history.
- */
+/** What the log last wrote for one pin; `null` in its place means no history at all. */
 export interface LastKnown {
   level: GpioLevel | null;
   known: boolean;
@@ -20,89 +15,66 @@ export type TransitionVerdict =
     }
   | { action: 'skip'; reason: 'unchanged' | 'stale' };
 
-/**
- * Should this report become a row?
- *
- * Pure, because the interesting cases are all about ordering and repetition
- * rather than about a database.
- *
- * Two things make this more than `level !== last.level`:
- *
- * - **Retained state republishes on every connect.** A node reconnecting
- *   re-announces the level it already had. Logging that would put a transition
- *   in the record where no relay moved, which is exactly the kind of false
- *   entry that makes a log untrustworthy for fitting.
- * - **Reports can arrive out of order.** QoS 1 permits redelivery, and a
- *   reconnect replays retained state that may be older than something already
- *   seen. An older observation must never overwrite a newer one.
- * - **...but a live report is never old.** Only a retained replay can be. A
- *   live report dated before the last one means the node's clock is behind (a
- *   Pi rebooting without an RTC), and skipping it hid patji failing safe to ON
- *   after a reboot on 2026-11-18. See `recordedAt` for its timestamp.
- */
 export function judgeTransition(
   last: LastKnown | null,
   report: PinStateReport,
 ): TransitionVerdict {
   if (last === null) {
-    // Worth a row even though no relay moved: it anchors the series, so a
-    // later change has something to be a change FROM.
+    // Anchors the series, so a later change has something to be a change from.
     return { action: 'record', reason: 'first-sight' };
   }
-
-  if (!report.live && report.observedAt.getTime() < last.observedAt.getTime()) {
+  if (isOlderRetainedReplay(last, report)) {
     return { action: 'skip', reason: 'stale' };
   }
-
   if (!report.known) {
-    // Unknown is not off, and losing track of a burner relay is an event.
     return last.known
       ? { action: 'record', reason: 'became-unknown' }
       : { action: 'skip', reason: 'unchanged' };
   }
-
   if (!last.known || last.level !== report.level) {
     return { action: 'record', reason: 'level-changed' };
   }
   return { action: 'skip', reason: 'unchanged' };
 }
 
-/**
- * Did this level mean the device was ON, at the time it was observed?
- *
- * Resolved at write time and stored, rather than derived later from the device
- * row. `onLevel` is editable - the MH light is active-HIGH on the same board
- * where four channels are active-LOW - so a row edited next month would
- * silently rewrite what last month's history meant.
- */
-export function energisedBy(
+/** Resolved at write time, because `onLevel` is editable and must not rewrite history. */
+export function resolveEnergised(
   level: GpioLevel | null,
   known: boolean,
   onLevel: GpioLevel | null | undefined,
 ): boolean | null {
-  if (!known || level === null || onLevel === null || onLevel === undefined)
+  if (!known || level === null || onLevel === null || onLevel === undefined) {
     return null;
+  }
   return level === onLevel;
 }
 
-/**
- * The instant to file a report under.
- *
- * The node's own timestamp, normally - it is when the relay moved. A live
- * report dated before the last one carries a clock that is behind, and filing
- * it there would put history out of order, so it is filed at receipt instead.
- */
-export function recordedAt(
+export function resolveRecordedAt(
   last: LastKnown | null,
   report: PinStateReport,
   receivedAt: Date,
 ): Date {
-  if (
-    report.live &&
-    last !== null &&
-    report.observedAt.getTime() < last.observedAt.getTime()
-  ) {
+  if (last !== null && isLiveFromClockBehind(last, report)) {
     return receivedAt;
   }
   return report.observedAt;
+}
+
+function isDatedBefore(report: PinStateReport, last: LastKnown): boolean {
+  return report.observedAt.getTime() < last.observedAt.getTime();
+}
+
+function isOlderRetainedReplay(
+  last: LastKnown,
+  report: PinStateReport,
+): boolean {
+  return !report.live && isDatedBefore(report, last);
+}
+
+// A live report is never old; dated in the past, it is the node's clock that is behind.
+function isLiveFromClockBehind(
+  last: LastKnown,
+  report: PinStateReport,
+): boolean {
+  return report.live && isDatedBefore(report, last);
 }
