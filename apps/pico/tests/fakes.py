@@ -30,21 +30,26 @@ class FakeClock:
 
 
 class PublishedMessage:
-    def __init__(self, topic, payload, is_retained, quality_of_service):
+    def __init__(self, topic, payload, is_retained, quality_of_service, should_hold_while_offline):
         self.topic = topic
         self.payload = payload
         self.is_retained = is_retained
         self.quality_of_service = quality_of_service
+        self.should_hold_while_offline = should_hold_while_offline
 
 
 class FakePublisher:
     def __init__(self):
         self.messages = []
 
-    def publish(self, topic, text, is_retained, quality_of_service):
+    def publish(self, topic, text, is_retained, quality_of_service, should_hold_while_offline):
         import json
 
-        self.messages.append(PublishedMessage(topic, json.loads(text), is_retained, quality_of_service))
+        self.messages.append(
+            PublishedMessage(
+                topic, json.loads(text), is_retained, quality_of_service, should_hold_while_offline
+            )
+        )
 
     def on_topic(self, suffix):
         return [message for message in self.messages if message.topic.endswith(suffix)]

@@ -26,7 +26,10 @@ QOS_SHIFT = 1
 QOS_MASK = 0x06
 HIGHEST_SUPPORTED_QOS = 1
 
+CONNACK_PACKET_LENGTH = 4
 CONNACK_LENGTH = 2
+PACKET_ID_LENGTH = 2
+STRING_LENGTH_PREFIX = 2
 CONNECTION_ACCEPTED = 0
 SUBSCRIPTION_REFUSED = 0x80
 HIGHEST_PACKET_ID = 0xFFFF
@@ -67,7 +70,9 @@ def build_packet(first_byte, body):
 
 def is_acknowledgement_of(received, packet_type, packet_id):
     received_type, body = received
-    return received_type == packet_type and len(body) >= 2 and struct.unpack("!H", body[:2])[0] == packet_id
+    if received_type != packet_type or len(body) < PACKET_ID_LENGTH:
+        return False
+    return struct.unpack("!H", body[:PACKET_ID_LENGTH])[0] == packet_id
 
 
 class MqttSession:
@@ -125,7 +130,9 @@ class MqttSession:
         return build_packet(CONNECT, variable_header + payload)
 
     def read_connack(self):
-        packet_type, length, _session_present, return_code = struct.unpack("!BBBB", self.read(4))
+        packet_type, length, _session_present, return_code = struct.unpack(
+            "!BBBB", self.read(CONNACK_PACKET_LENGTH)
+        )
         if packet_type != CONNACK or length != CONNACK_LENGTH:
             raise MqttError("expected CONNACK, got packet type 0x%02x" % packet_type)
         if return_code != CONNECTION_ACCEPTED:
@@ -136,7 +143,7 @@ class MqttSession:
         body = struct.pack("!H", packet_id) + encode_string(topic) + bytes((quality_of_service,))
         self.write(build_packet(SUBSCRIBE, body))
         acknowledgement = self.wait_for_acknowledgement(SUBACK, packet_id)
-        if acknowledgement[2] == SUBSCRIPTION_REFUSED:
+        if acknowledgement[PACKET_ID_LENGTH] == SUBSCRIPTION_REFUSED:
             raise MqttError("subscription to %s refused" % topic)
 
     def publish(self, topic, payload, is_retained, quality_of_service):
@@ -154,7 +161,7 @@ class MqttSession:
 
     def ping(self):
         self.unanswered_pings += 1
-        self.write(bytes((PINGREQ, 0)))
+        self.write(build_packet(PINGREQ, b""))
 
     def serve_one_message(self):
         """True when a packet was read, False when nothing was waiting."""
@@ -163,6 +170,11 @@ class MqttSession:
             return True
         self.socket_connection.setblocking(False)
         return self.receive_packet() is not None
+
+    def take_deferred_messages(self):
+        deferred_messages = self.deferred_messages
+        self.deferred_messages = []
+        return deferred_messages
 
     def close(self):
         if self.socket_connection is None:
@@ -210,13 +222,13 @@ class MqttSession:
         return (packet_type, body)
 
     def receive_publish(self, first_byte, remaining_length):
-        topic_length = struct.unpack("!H", self.read(2))[0]
+        topic_length = struct.unpack("!H", self.read(STRING_LENGTH_PREFIX))[0]
         topic = self.read(topic_length)
-        remaining_length -= 2 + topic_length
+        remaining_length -= STRING_LENGTH_PREFIX + topic_length
         quality_of_service = (first_byte & QOS_MASK) >> QOS_SHIFT
         if quality_of_service > 0:
-            packet_id_bytes = self.read(2)
-            remaining_length -= 2
+            packet_id_bytes = self.read(PACKET_ID_LENGTH)
+            remaining_length -= PACKET_ID_LENGTH
         payload = self.read(remaining_length) if remaining_length else b""
         if quality_of_service > 0:
             # Acknowledged before handling, because a handler may close this connection.

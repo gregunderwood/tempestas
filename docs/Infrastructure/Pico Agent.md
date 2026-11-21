@@ -51,13 +51,18 @@ off the NC contacts, so level 1 is **load on** and is the failsafe for both line
   command is refused quietly (no alarm), because `expiresAt` cannot be judged. `hasRtc` is `false`.
 - **A hardware watchdog.** The loop feeds it; a hang anywhere resets the board within 8 s, and a
   reset releases every pin.
-- **Readback from the registers.** `level()` reads the SIO output-enable and output registers, not
+- **Readback from the registers.** `read_level()` reads the SIO output-enable and output registers, not
   a cached value, so a `gpioResult` reports what the pin is doing.
 - **No rate guard on the probes yet.** The Python DS18B20 driver refuses a jump of more than
   10 °C/min. This one refuses the power-on 85 °C, all-zero and out-of-range readings, but not a
   plausible-looking spike.
 - **One thread.** Messages, sampling and the dead-man share one loop. A probe conversion (750 ms) is
   the longest stall.
+- **Nothing acknowledged is lost to a drop.** A command that arrives while a publish waits for its
+  PUBACK is acknowledged at once and held. If that wait then fails, the command is still handled
+  after the drop, because the broker will not send it again. Alarms and results raised while
+  offline (up to 20) are sent after the next announce; nothing else is, because retained state,
+  samples and the hello are repeated anyway.
 
 Everything else on the command path matches the Python agent: a retained command is dropped with
 `RETAINED_COMMAND_DROPPED`, a foreign `issuedBy` raises `CONTROLLER_CONFLICT`, an expired command

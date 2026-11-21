@@ -52,11 +52,17 @@ class FakeWatchdog:
 
 
 class FakeClient:
-    def __init__(self, failure=None):
+    def __init__(self, failure=None, deferred_messages=()):
         self.failure = failure
         self.is_closed = False
         self.unanswered_pings = 0
         self.published_topics = []
+        self.deferred_messages = list(deferred_messages)
+
+    def take_deferred_messages(self):
+        deferred_messages = self.deferred_messages
+        self.deferred_messages = []
+        return deferred_messages
 
     def publish(self, topic, text, is_retained, quality_of_service):
         self.published_topics.append(topic)
@@ -73,12 +79,15 @@ class QuietAgent:
     def __init__(self, failure=None):
         self.failure = failure
         self.clock_set_count = 0
+        self.received_messages = []
 
     def on_clock_set(self):
         self.clock_set_count += 1
 
     def on_message(self, topic, payload, is_retained):
-        raise self.failure
+        if self.failure is not None:
+            raise self.failure
+        self.received_messages.append((topic, payload, is_retained))
 
 
 @pytest.fixture
@@ -175,12 +184,12 @@ def test_drops_the_connection_when_the_broker_stops_answering_pings(runtime):
     assert runtime.publisher.client is None
 
 
-def test_holds_alarms_and_results_while_offline_but_not_samples_or_retained_state(runtime):
+def test_holds_only_what_it_is_told_to_while_offline(runtime):
     publisher = runtime.publisher
-    publisher.publish("alarm", "{}", False, 1)
-    publisher.publish("gpio/result", "{}", False, 1)
-    publisher.publish("sensor/air/sample", "{}", False, 0)
-    publisher.publish("gpio/state/20", "{}", True, 1)
+    publisher.publish("alarm", "{}", False, 1, True)
+    publisher.publish("gpio/result", "{}", False, 1, True)
+    publisher.publish("hello", "{}", False, 1, False)
+    publisher.publish("sensor/air/sample", "{}", False, 0, False)
     client = FakeClient()
     publisher.client = client
     publisher.send_held_messages()
@@ -188,9 +197,20 @@ def test_holds_alarms_and_results_while_offline_but_not_samples_or_retained_stat
     assert publisher.held_messages == []
 
 
+def test_a_command_acknowledged_before_the_connection_dropped_is_still_handled(runtime):
+    runtime.publisher.client = FakeClient(
+        deferred_messages=[(b"tempestas/v1/node/braize/gpio/set", b"{}", False)]
+    )
+    runtime.publisher.drop("publish failed")
+    runtime.connection.serve_pending_messages()
+    assert runtime.connection.agent.received_messages == [("tempestas/v1/node/braize/gpio/set", b"{}", False)]
+    runtime.connection.serve_pending_messages()
+    assert len(runtime.connection.agent.received_messages) == 1
+
+
 def test_keeps_only_the_newest_messages_when_offline_for_long(runtime):
     for number in range(runtime.module.MAX_MESSAGES_HELD_OFFLINE + 5):
-        runtime.publisher.publish("alarm/%d" % number, "{}", False, 1)
+        runtime.publisher.publish("alarm/%d" % number, "{}", False, 1, True)
     held_topics = [message[0] for message in runtime.publisher.held_messages]
     assert len(held_topics) == runtime.module.MAX_MESSAGES_HELD_OFFLINE
     assert held_topics[-1] == "alarm/%d" % (runtime.module.MAX_MESSAGES_HELD_OFFLINE + 4)
