@@ -60,7 +60,7 @@ describe('RetentionService', () => {
     const { service, query } = makeService([0]);
     await service.prune();
     const [, params] = query.mock.calls[0];
-    expect((params[0] as Date).toISOString()).toBe('2025-10-12T11:00:00.000Z');
+    expect(params[0].toISOString()).toBe('2025-10-12T11:00:00.000Z');
   });
 
   it.each([0, -1, 'ninety', ''])(
