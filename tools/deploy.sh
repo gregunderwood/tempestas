@@ -28,10 +28,13 @@ EXITED_NORMALLY=1
 COULD_NOT_CHECK=1
 started_before="$(read_property ExecMainStartTimestampMonotonic)"
 checked_since="$(date +%s)"
+ran_this_time_and_exited_normally() {
+  [ "$(read_property ExecMainStartTimestampMonotonic)" != "$started_before" ] &&
+    [ "$(read_property ExecMainCode)" = "$EXITED_NORMALLY" ]
+}
 if sudo -n systemctl start "$unit"; then
   status=0
-elif [ "$(read_property ExecMainStartTimestampMonotonic)" != "$started_before" ] &&
-  [ "$(read_property ExecMainCode)" = "$EXITED_NORMALLY" ]; then
+elif ran_this_time_and_exited_normally; then
   status="$(read_property ExecMainStatus)"
   [ "$status" != 0 ] || status="$COULD_NOT_CHECK"
 else
@@ -81,7 +84,8 @@ fi
 
 if [ "$migration_status" -eq "$EXIT_MIGRATIONS_PENDING" ]; then
   echo "Migrations are pending, so the server was NOT restarted and the web bundle was not shipped." >&2
-  echo "Run them (migrate@run takes a backup first, and stops if it fails), then deploy again:" >&2
+  echo "Run them, then deploy again. migrate@run backs up first where tempestas-backup.service exists;" >&2
+  echo "anywhere else it asks for a password: back up by hand first (docs/Infrastructure/Migrations.md)." >&2
   echo "  ssh $HOST sudo -n systemctl start tempestas-migrate@run.service && tools/deploy.sh $HOST" >&2
   warn_new_build_not_running
   exit 1

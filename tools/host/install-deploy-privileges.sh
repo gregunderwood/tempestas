@@ -26,6 +26,8 @@ join_with_commas() {
 install_backup_unit() {
   install -d -o root -g root -m 0755 "$LIBRARY_DIR"
   install -o root -g root -m 0755 "$PAYLOAD/backup-database.sh" "$LIBRARY_DIR/backup-database.sh"
+  # Verified before anything depends on it: a broken backup unit would block every migration.
+  systemd-analyze verify "$PAYLOAD/tempestas-backup.service"
   install -o root -g root -m 0644 "$PAYLOAD/tempestas-backup.service" "$UNIT_DIR/tempestas-backup.service"
   for instance in run revert; do
     install -d -o root -g root -m 0755 "$UNIT_DIR/tempestas-migrate@$instance.service.d"
@@ -33,27 +35,28 @@ install_backup_unit() {
       "$UNIT_DIR/tempestas-migrate@$instance.service.d/requires-backup.conf"
   done
   systemctl daemon-reload
-  systemd-analyze verify "$UNIT_DIR/tempestas-backup.service"
 }
 
 allowed_commands=()
 
 if has_installed_unit tempestas-server.service; then
-  # A host whose Postgres runs in Docker has no postgresql.service for the backup unit to require.
-  if has_postgres_service; then
-    say "Installing the backup unit, required by every migrate run and revert"
-    install_backup_unit
-    allowed_commands+=("$SYSTEMCTL start tempestas-backup.service")
-  else
-    echo "No postgresql.service here, so no backup unit: back up by hand before migrating." >&2
-  fi
   allowed_commands+=(
     "$SYSTEMCTL start tempestas-migrate@show.service"
-    "$SYSTEMCTL start tempestas-migrate@run.service"
-    "$SYSTEMCTL start tempestas-migrate@revert.service"
     "$SYSTEMCTL restart tempestas-server.service"
     "$SYSTEMCTL reset-failed tempestas-server.service"
   )
+  # Docker's Postgres has no postgresql.service to back up through, so changing the schema keeps its password there.
+  if has_postgres_service; then
+    say "Installing the backup unit, required by every migrate run and revert"
+    install_backup_unit
+    allowed_commands+=(
+      "$SYSTEMCTL start tempestas-backup.service"
+      "$SYSTEMCTL start tempestas-migrate@run.service"
+      "$SYSTEMCTL start tempestas-migrate@revert.service"
+    )
+  else
+    echo "No postgresql.service here: migrate run and revert still ask for a password, after a hand backup." >&2
+  fi
 fi
 
 if has_installed_unit tempestas-agent.service; then

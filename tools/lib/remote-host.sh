@@ -20,9 +20,9 @@ read_password_tag() {
       is_root_runas = ($0 ~ /^\((root|ALL)[ :)]/)
       tag = "PASSWD"
       commands = substr($0, index($0, ")") + 1)
-      count = split(commands, items, ",")
-      for (i = 1; i <= count; i++) {
-        item = items[i]
+      item_count = split(commands, items, ",")
+      for (item_index = 1; item_index <= item_count; item_index++) {
+        item = items[item_index]
         while (match(item, /^ *[A-Z_]+: */)) {
           name = substr(item, RSTART, RLENGTH)
           gsub(/[ :]/, "", name)
@@ -37,14 +37,14 @@ read_password_tag() {
   ' <<<"$rules"
 }
 
-missing=0
+is_any_line_missing=false
 for command in "$@"; do
   if [ "$(read_password_tag "$systemctl_path $command")" != NOPASSWD ]; then
     echo "  sudo $systemctl_path $command" >&2
-    missing=1
+    is_any_line_missing=true
   fi
 done
-exit "$missing"
+! "$is_any_line_missing"
 REMOTE
   if [ "$status" -eq "$EXIT_HOST_UNREACHABLE" ]; then
     echo "Could not reach $host over ssh." >&2

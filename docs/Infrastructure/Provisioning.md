@@ -116,14 +116,18 @@ Raspbian ships.
    tools/install-deploy-privileges.sh elantris patji
    ```
 
-   It installs `tempestas-backup.service` where the server runs, and makes
-   every migrate `run` and `revert` require it, then writes
-   `/etc/sudoers.d/tempestas-deploy`: the deploy user may run exactly the
-   `systemctl` lines a deploy uses (start the backup, the three migrate
-   instances, restart or reset the server, restart the agent) without a
-   password, and nothing else. Exact lines only, because a wildcard in sudoers
-   is a root shell. The file is checked with `visudo -c` before it lands. Rerun
-   it when a unit is added to a host, or the allowed lines change.
+   It installs `tempestas-backup.service` where the server runs on
+   `postgresql.service`, and makes every migrate `run` and `revert` require
+   it, then writes `/etc/sudoers.d/tempestas-deploy`: the deploy user may run
+   exactly the `systemctl` lines a deploy uses (show migrations, restart or
+   reset the server, restart the agent, and where there is a backup unit,
+   back up and run or revert migrations) without a password, and nothing
+   else. Exact lines only, because a wildcard in sudoers is a root shell. The
+   file is checked with `visudo -c` before it lands. Rerun it when a unit is
+   added to a host, or the allowed lines change.
+
+   The deploy reads the migrate unit's journal, so the deploy user must be in
+   `adm` or `systemd-journal`. On Raspberry Pi OS the first user already is.
 
 ## ⚠ `Requires=postgresql.service` has to be edited, not dropped in
 

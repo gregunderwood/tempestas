@@ -21,7 +21,8 @@ HOSTS=("$@")
 
 for HOST in "${HOSTS[@]}"; do
   say "$HOST"
-  ssh "$HOST" "mkdir -p $REMOTE_PAYLOAD"
-  rsync -a --delete "${PAYLOAD_FILES[@]}" "$HOST:$REMOTE_PAYLOAD/"
+  # Emptied first, so a file dropped from the payload never lingers where root runs from.
+  ssh "$HOST" "rm -rf $REMOTE_PAYLOAD && mkdir -p $REMOTE_PAYLOAD"
+  rsync -a "${PAYLOAD_FILES[@]}" "$HOST:$REMOTE_PAYLOAD/"
   ssh -t "$HOST" "sudo bash $REMOTE_PAYLOAD/install-deploy-privileges.sh $REMOTE_PAYLOAD"
 done
