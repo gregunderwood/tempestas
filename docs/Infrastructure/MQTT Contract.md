@@ -212,8 +212,9 @@ mosquitto_pub -r -t 'tempestas/v1/node/elantris/gpio/set' -m '{...}'   # MUST be
 ## Pitfalls
 
 - **`hello` is not retained.** A late subscriber never sees it, so the server cannot assume it has
-  met every node — nodes re-announce, and the fake driver deliberately reproduces this by announcing
-  from `onApplicationBootstrap` rather than at construction.
+  met every node — nodes re-announce on their own connect and whenever `server/status` turns
+  `online` (a live publish, not the retained replay), and the fake driver deliberately reproduces
+  this by announcing from `onApplicationBootstrap` rather than at construction.
 - **A retained `status` for an unknown slug arrives before that node's `hello`.** Ignore it; do not
   half-create a node from it.
 - **Per-node credentials and ACLs are not optional.** Any MQTT client can otherwise publish as any
