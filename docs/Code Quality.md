@@ -186,55 +186,67 @@ a rate-limited summary carrying a count — see `ReadingsIngestService.noteDisca
 
 ### Comments
 
-Comments here carry **safety and hardware rationale**, and that is a deliberate departure from the
-house style in other Sign In Solutions repos, where the default is no comment at all. One
-maintainer, combustion hardware, and long gaps between sessions change the calculus: a future
-session re-deriving "why is this command not retained?" from scratch is the failure being prevented.
+The shared rules apply: names do the explaining, and a comment is the last resort. Write one only
+when the code cannot make itself clear — an outside constraint, or a deliberate choice that looks
+like a bug — and make it **one line saying why**. In this repo that is usually a physical or
+protocol fact. Anything longer belongs in `docs/`, with the line pointing there.
 
-#### ✅ Comment the invariant and what breaks without it
-
-```ts
-// Publish FIRST and await the acknowledgement, persist only on success. The old
-// system did the reverse: a failed GPIO write was logged and the row updated
-// anyway, so the UI confidently showed a heater as running when it was not.
-```
-
-#### ✅ Comment the physical or protocol fact behind a constant
+#### ✅ One line on the protocol or physical fact the code depends on
 
 ```ts
-/** Four of the five relays are active-LOW, so 0 means energised. */
-const ON_LEVEL_ACTIVE_LOW = 0;
+// Never retained: a retained command replays on every reconnect.
+await this.client.publishAsync(topic, payload, { qos: 1, retain: false });
 ```
-
-#### ❌ Don't restate the code
 
 ```ts
-// find the node by its slug
-const node = await this.nodes.findOne({ where: { slug } }); // ❌
+const ON_LEVEL_ACTIVE_LOW = 0; // four of the five relays energise on LOW
 ```
 
-#### ❌ Don't reference tickets, phases-in-flight, or "as discussed"
+#### ✅ Rename or extract instead of explaining
+
+```ts
+if (isCommandExpired(command, now)) { ... }
+```
+
+#### ❌ Don't explain a block that a name could carry
+
+```ts
+// check the command has not expired                          // ❌
+if (new Date(command.expiresAt).getTime() < now.getTime()) { ... }
+```
+
+#### ❌ Don't restate the code, or repeat the signature in a docblock
+
+```ts
+// find the node by its slug                                  // ❌
+const node = await this.nodes.findOne({ where: { slug } });
+```
+
+#### ❌ Don't write the rationale as a paragraph
+
+```ts
+// Publish FIRST and await the acknowledgement, persist only    // ❌
+// on success. The old system did the reverse: a failed GPIO
+// write was logged and the row updated anyway, so the UI ...
+```
+
+Put the paragraph in the matching `docs/` page ([Safety](Safety.md) here) and keep, at most, one
+line in the code: `// Publish before persist; see docs/Safety.md.`
+
+#### ❌ Don't reference tickets, phases, PRs or "as discussed"
 
 ```ts
 // [phase 4.5] added the admission gate here                  // ❌
 ```
 
-The docs and the commit history are the time capsule; a comment reads as current understanding.
-Naming a _future_ phase for work this file will need is fine (`MqttHardwareService lands in phase 7`)
-— naming the phase that produced the current line is not.
+The docs and the commit history are the time capsule.
 
-#### ❌ Don't speculate about future problems
+#### ❌ No section banners, no speculation
 
 ```ts
-// if this becomes slow we may need to cache the node lookup                // ❌
+// ---------------------------------------------------- inputs // ❌
+// if this becomes slow we may need to cache the lookup        // ❌
 ```
-
-If it becomes real, fix it then, in its own commit with its own context.
-
-#### ❌ Don't let a comment explain a block that should be simplified
-
-If it takes a paragraph to say _what_ the code does, extract a named function. A paragraph on _why
-it must be this way_ is fine and often required.
 
 ## Pitfalls
 
