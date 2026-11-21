@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # tools/install-deploy-privileges.sh [host ...]
-# Run once per host, and again after the allowed commands change. Asks for that host's sudo password.
 
 set -euo pipefail
 

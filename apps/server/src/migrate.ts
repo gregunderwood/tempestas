@@ -11,8 +11,10 @@ import * as migrations from './migrations';
 
 const EXIT_SUCCESS = 0;
 const EXIT_UNKNOWN_COMMAND = 2;
+// tools/deploy.sh refuses to restart the server on this status from `show`.
+export const EXIT_MIGRATIONS_PENDING = 3;
 
-type MigrationCommand = (source: DataSource) => Promise<void>;
+type MigrationCommand = (source: DataSource) => Promise<number>;
 
 const MIGRATION_COMMANDS = new Map<string, MigrationCommand>([
   ['show', showMigrations],
@@ -40,18 +42,18 @@ export async function runMigrationCommand(command: string): Promise<number> {
       );
       return EXIT_UNKNOWN_COMMAND;
     }
-    await migrationCommand(source);
-    return EXIT_SUCCESS;
+    return await migrationCommand(source);
   } finally {
     await source.destroy();
   }
 }
 
-async function showMigrations(source: DataSource): Promise<void> {
-  await source.showMigrations();
+async function showMigrations(source: DataSource): Promise<number> {
+  const hasPendingMigrations = await source.showMigrations();
+  return hasPendingMigrations ? EXIT_MIGRATIONS_PENDING : EXIT_SUCCESS;
 }
 
-async function runPendingMigrations(source: DataSource): Promise<void> {
+async function runPendingMigrations(source: DataSource): Promise<number> {
   const applied = await source.runMigrations({ transaction: 'each' });
   if (applied.length === 0) {
     console.log('No migrations were pending.');
@@ -59,8 +61,10 @@ async function runPendingMigrations(source: DataSource): Promise<void> {
   for (const migration of applied) {
     console.log(`Applied ${migration.name}`);
   }
+  return EXIT_SUCCESS;
 }
 
-async function revertLastMigration(source: DataSource): Promise<void> {
+async function revertLastMigration(source: DataSource): Promise<number> {
   await source.undoLastMigration({ transaction: 'each' });
+  return EXIT_SUCCESS;
 }

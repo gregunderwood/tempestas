@@ -10,8 +10,8 @@
 # hand-typed command cannot do without putting a password in the shell history
 # or in `ps`.
 #
-# Never wired into the deploy. Applying a schema change to the only copy of the
-# greenhouse's history is a deliberate act with a human reading `show` first.
+# tools/deploy.sh runs `show` before every restart and stops if anything is
+# pending (exit status 3). `run` stays a deliberate step, after a backup.
 
 [Unit]
 Description=tempestas migrations (%i)
