@@ -217,9 +217,9 @@ read-back of it** has to happen inside the idle window at startup, which is why
 `applied_offset_c` is an attribute captured during `start()` rather than a method you can call
 later. `tests/test_sensor.py` pins that ordering with a fake bus that records command words.
 
-The temperature offset, altitude and ASC are applied at **every** startup and read back, never
-trusted to persist: the Adafruit setter the old system used never called `persist_settings`, so
-anything set through it was lost to every power cycle.
+The temperature offset, altitude and ASC are applied at **every** startup, never trusted to
+persist: the Adafruit setter the old system used never called `persist_settings`, so anything set
+through it was lost to every power cycle. The offset and ASC are then read back; altitude is not.
 
 ### The CO2 range guard
 
