@@ -169,7 +169,7 @@ class World:
             raise ValueError(f"level must be 0 or 1, not {level!r}")
         self.levels[key] = level
 
-    def energised(self, role: str) -> bool:
+    def is_energised(self, role: str) -> bool:
         return any(
             self._is_fixture_energised(key, fixture)
             for key, fixture in self.fixtures.items()
@@ -194,8 +194,8 @@ class World:
 
     def _step_once(self, step_minutes: float, minute_of_day: float) -> None:
         outdoor_c = self.outdoor_temp_c(minute_of_day)
-        is_burner_on = self.energised(ROLE_CO2)
-        is_fan_on = self.energised(ROLE_FAN)
+        is_burner_on = self.is_energised(ROLE_CO2)
+        is_fan_on = self.is_energised(ROLE_FAN)
 
         self._step_co2(step_minutes, is_burner_on, is_fan_on)
         self._step_temperature(step_minutes, outdoor_c, is_burner_on, is_fan_on)
@@ -230,9 +230,9 @@ class World:
         )
         if is_burner_on:
             self.air.temp_c += model.burner_deg_c_per_minute * step_minutes
-        if self.energised(ROLE_HPS):
+        if self.is_energised(ROLE_HPS):
             self.air.temp_c += model.hps_deg_c_per_minute * step_minutes
-        if self.energised(ROLE_MH):
+        if self.is_energised(ROLE_MH):
             self.air.temp_c += model.mh_deg_c_per_minute * step_minutes
         if is_fan_on:
             self.air.temp_c += (

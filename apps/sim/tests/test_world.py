@@ -52,17 +52,17 @@ def test_polarity_is_per_fixture_not_per_board(world: World) -> None:
     for node, pin in [("greenhouse", 21), ("greenhouse", 20), ("greenhouse", 26)]:
         world.set_level(node, pin, 0)
 
-    assert world.energised(ROLE_HPS) is True
-    assert world.energised(ROLE_FAN) is True
-    assert world.energised(ROLE_MH) is False, "BCM 26 is active-HIGH; LOW is off"
+    assert world.is_energised(ROLE_HPS) is True
+    assert world.is_energised(ROLE_FAN) is True
+    assert world.is_energised(ROLE_MH) is False, "BCM 26 is active-HIGH; LOW is off"
 
     world.set_level("greenhouse", 26, 1)
-    assert world.energised(ROLE_MH) is True
+    assert world.is_energised(ROLE_MH) is True
 
 
 def test_a_line_nobody_wrote_is_unknown_not_off(world: World) -> None:
-    assert world.levels[("elantris", 5)] is None
-    assert world.energised(ROLE_CO2) is False
+    assert world.levels[BURNER] is None
+    assert world.is_energised(ROLE_CO2) is False
 
 
 def test_dark_and_spare_channels_drive_nothing(world: World) -> None:
@@ -75,7 +75,7 @@ def test_dark_and_spare_channels_drive_nothing(world: World) -> None:
 
 
 def test_the_burner_arrives_at_the_sensor_gradually(world: World) -> None:
-    world.set_level("elantris", 5, 0)
+    world.set_level(*BURNER, BURNER_ON_LEVEL)
 
     before = world.air.co2_ppm
     world.step(minutes=1, minute_of_day=600)
@@ -163,12 +163,12 @@ def test_golden_burn_cycle_matches_2026_09_10(model: Model) -> None:
 def test_overshoot_past_the_cutoff_is_reproduced(model: Model) -> None:
     """Turning off AT the threshold still overshoots, because CO2 is in flight."""
     world = World(model, WIRING, air=Air(co2_ppm=1150.0, temp_c=23.0, vapour_hpa=16.0))
-    world.set_level("elantris", 5, 0)
+    world.set_level(*BURNER, BURNER_ON_LEVEL)
     while world.read("entrance").co2_ppm < 1500:
         world.step(minutes=1, minute_of_day=1050)
     at_cutoff = world.read("entrance").co2_ppm
 
-    world.set_level("elantris", 5, 1)
+    world.set_level(*BURNER, BURNER_OFF_LEVEL)
     peak = at_cutoff
     for _ in range(6):
         world.step(minutes=1, minute_of_day=1050)
@@ -186,7 +186,7 @@ def test_the_fan_clears_enrichment(world: World) -> None:
 
 def test_both_boxes_act_on_one_greenhouse(world: World) -> None:
     """elantris's burner must change what greenhouse's sensor reads."""
-    world.set_level("elantris", 5, 0)
+    world.set_level(*BURNER, BURNER_ON_LEVEL)
     before = world.read("canopy").co2_ppm
     world.step(minutes=10, minute_of_day=600)
     assert world.read("canopy").co2_ppm > before

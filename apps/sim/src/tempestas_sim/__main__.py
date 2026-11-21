@@ -13,7 +13,7 @@ from .world import Air, Fixture, Model, World
 
 SIM_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PORT = 7100
-DEFAULT_START_VAPOUR_HPA = 14.0
+CLI_START_VAPOUR_HPA = 14.0
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -55,7 +55,7 @@ def build_world(arguments: argparse.Namespace) -> World:
     return World(
         Model.load(arguments.model),
         load_fixtures(arguments.wiring),
-        air=Air(co2_ppm=arguments.co2, temp_c=arguments.temp, vapour_hpa=DEFAULT_START_VAPOUR_HPA),
+        air=Air(co2_ppm=arguments.co2, temp_c=arguments.temp, vapour_hpa=CLI_START_VAPOUR_HPA),
         outdoor_mean_c=arguments.outdoor_mean,
         outdoor_swing_c=arguments.outdoor_swing,
     )
