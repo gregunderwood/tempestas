@@ -8,6 +8,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CommonModule } from './common/common.module';
+import { postgresConnectionOptions } from './common/postgres-connection';
 import { DevicesModule } from './devices/devices.module';
 import { DeviceEntity, PinTransitionEntity } from './devices/models';
 import { HardwareModule } from './hardware/hardware.module';
@@ -21,6 +22,20 @@ import { ZoneEntity } from './zones/models';
 import { ZonesModule } from './zones/zones.module';
 import { HealthModule } from './health/health.module';
 
+const WEB_BUNDLE_DIRECTORY = join(__dirname, '..', 'web');
+
+// Sized for a runaway client loop, the failure that actually happens on a home LAN.
+const RUNAWAY_CLIENT_LIMIT = { ttl: 60_000, limit: 300 };
+
+// Listed rather than globbed: a webpack bundle has no directory to scan.
+const ENTITIES = [
+  ZoneEntity,
+  NodeEntity,
+  DeviceEntity,
+  PinTransitionEntity,
+  SensorReadingEntity,
+];
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -28,44 +43,17 @@ import { HealthModule } from './health/health.module';
       envFilePath: ['apps/server/.env', '.env'],
     }),
     CommonModule,
-    // The Angular bundle, served by the API itself rather than by a reverse
-    // proxy. One process on the box, and the socket.io upgrade stays inside
-    // Nest - the `map $http_upgrade` mistake sitting in the old greenhouse's
-    // nginx.conf cannot be made if there is no proxy.
-    //
-    // Conditional because the bundle is only present on a deployed box: in dev
-    // the Angular dev server serves it and proxies /api here, and registering a
-    // static root that does not exist makes every unmatched route a 500 instead
-    // of a 404.
-    ...staticBundle(),
+    ...serveWebBundleWhenBuilt(),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        type: 'postgres' as const,
-        host: config.get<string>('DATABASE_HOST', '127.0.0.1'),
-        port: Number(config.get<string | number>('DATABASE_PORT', 5432)),
-        username: config.get<string>('DATABASE_USER', 'tempestas'),
-        password: config.get<string>('DATABASE_PASSWORD', 'tempestas'),
-        database: config.get<string>('DATABASE_NAME', 'tempestas'),
-        // Built into Postgres 13+, so no extension is required.
-        uuidExtension: 'pgcrypto' as const,
-        // Never true. Schema changes go through reviewed migrations only.
-        synchronize: false,
+        ...postgresConnectionOptions((name) => config.get<string>(name)),
         logging: config.get<string>('NODE_ENV') === 'development',
-        // Explicit list, not globs: a webpack bundle has no directory to scan.
-        entities: [
-          ZoneEntity,
-          NodeEntity,
-          DeviceEntity,
-          PinTransitionEntity,
-          SensorReadingEntity,
-        ],
+        entities: ENTITIES,
       }),
     }),
     ScheduleModule.forRoot(),
-    // Protects against a runaway client loop, which is the failure that
-    // actually happens on a home LAN - not an adversary.
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
+    ThrottlerModule.forRoot([RUNAWAY_CLIENT_LIMIT]),
     HardwareModule,
     RealtimeModule,
     NodesModule,
@@ -79,22 +67,14 @@ import { HealthModule } from './health/health.module';
 })
 export class AppModule {}
 
-/**
- * The built Angular bundle, when there is one next to the server bundle.
- *
- * `exclude` keeps the API and the socket out of the SPA fallback. Without it
- * an unknown /api path returns index.html with a 200, which is exactly the
- * shape of error this project exists to stop producing - a client cannot tell
- * a missing route from a working one.
- */
-function staticBundle() {
-  const root = join(__dirname, '..', 'web');
-  if (!existsSync(root)) {
+// Only a deployed box has the bundle; a static root that does not exist turns every 404 into a 500.
+function serveWebBundleWhenBuilt() {
+  if (!existsSync(WEB_BUNDLE_DIRECTORY)) {
     return [];
   }
   return [
     ServeStaticModule.forRoot({
-      rootPath: root,
+      rootPath: WEB_BUNDLE_DIRECTORY,
       exclude: ['/api/{*path}', '/socket.io/{*path}'],
     }),
   ];
