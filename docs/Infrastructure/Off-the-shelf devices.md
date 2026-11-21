@@ -53,11 +53,11 @@ This is the finding that decides everything below it.
 
 The dead-man's guarantee rests on an assumption the GPIO backend satisfies silently: **a managed
 line is always reachable.** A pad is on the same die as the process driving it. When the dead-man
-expires, or the server's LWT arrives, or the agent restarts and claims at failsafe, the write
+expires, or the agent restarts and claims at failsafe, the write
 _cannot_ fail for want of a network.
 
 A smart plug is reachable only across Wi-Fi and a broker. Every one of those moments — dead-man
-expiry, LWT, claim-at-failsafe on restart — becomes best-effort. Worse, the cases that trip the
+expiry, claim-at-failsafe on restart — becomes best-effort. Worse, the cases that trip the
 dead-man correlate with the cases that break reachability: if the bridge lost the brain because the
 network is unwell, it will likely fail to drive the plug safe for the same reason.
 

@@ -1,7 +1,14 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Subject } from 'rxjs';
 import { DivergenceLog } from '../common/divergence-log';
-import type { PinStateReport } from '../hardware/hardware.service';
+import type {
+  NodeHello,
+  PinStateReport,
+} from '../hardware/hardware.service';
 import type { Repository } from 'typeorm';
 import { ApiErrorCode, DeviceRole, NodeStatus } from '@tempestas/domain';
 import { FixedClock } from '../common/clock';
@@ -469,8 +476,12 @@ describe('DevicesService reconciliation during its own command', () => {
   });
 
   // `answers-the-command` models the node replying while the server still awaits its save.
-  function armed(onReport: 'answers-the-command' | 'unprompted') {
+  function armed(
+    onReport: 'answers-the-command' | 'unprompted',
+    storedBootId: string | null = 'boot-1',
+  ) {
     const pinStates = new Subject<PinStateReport>();
+    const hellos = new Subject<NodeHello>();
     const setPin = vi.fn(async () => {
       if (onReport === 'answers-the-command') pinStates.next(report());
     });
@@ -478,6 +489,7 @@ describe('DevicesService reconciliation during its own command', () => {
       setPin,
       syncPins: vi.fn(),
       pinStates$: pinStates.asObservable(),
+      hello$: hellos.asObservable(),
     } as unknown as HardwareService;
     const divergences = new DivergenceLog();
     const deviceRepository = {
@@ -491,20 +503,30 @@ describe('DevicesService reconciliation during its own command', () => {
       deviceRepository,
       {
         findOne: vi.fn().mockResolvedValue(NODE),
+        find: vi.fn().mockResolvedValue([{ ...NODE, bootId: storedBootId }]),
       } as unknown as Repository<NodeEntity>,
       hardware,
       new FixedClock(NOW),
       { publishDeviceState: vi.fn() } as unknown as RealtimeGateway,
       divergences,
     );
-    service.onModuleInit();
-    return { service, pinStates, divergences };
+    return { service, pinStates, hellos, divergences };
+  }
+
+  async function started(...options: Parameters<typeof armed>) {
+    const harness = armed(...options);
+    await harness.service.onModuleInit();
+    return harness;
+  }
+
+  function helloFrom(bootId: string): NodeHello {
+    return { nodeId: NODE.slug, bootId } as NodeHello;
   }
 
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   it('does not call its own command a divergence', async () => {
-    const { service, divergences } = armed('answers-the-command');
+    const { service, divergences } = await started('answers-the-command');
     await service.turnOff('dev-1');
     await settle();
     expect(divergences.since(new Date(0))).toHaveLength(0);
@@ -513,10 +535,89 @@ describe('DevicesService reconciliation during its own command', () => {
 
   // With nothing in flight, the node acted alone: exactly what the alarm is for.
   it('still reports a divergence when no command is in flight', async () => {
-    const { service, pinStates, divergences } = armed('unprompted');
+    const { service, pinStates, divergences } = await started('unprompted');
     pinStates.next(report());
     await settle();
     expect(divergences.since(new Date(0))).toHaveLength(1);
     service.onModuleDestroy();
+  });
+
+  // An agent claims its fail-safe level as it starts: docs/Safety.md 3c.
+  describe('after the node restarts', () => {
+    const recorded = (divergences: DivergenceLog) =>
+      divergences.since(new Date(0));
+
+    it('explains the first report after a new boot and warns rather than errs', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn');
+      const error = vi.spyOn(Logger.prototype, 'error');
+      const { service, pinStates, hellos, divergences } =
+        await started('unprompted');
+      hellos.next(helloFrom('boot-2'));
+      pinStates.next(report());
+      await settle();
+      expect(recorded(divergences)).toMatchObject([
+        { isExplainedByReboot: true },
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('restarted and claimed its fail-safe level'),
+      );
+      expect(error).not.toHaveBeenCalled();
+      service.onModuleDestroy();
+      warn.mockRestore();
+      error.mockRestore();
+    });
+
+    it('explains only the first report for each pin', async () => {
+      const { service, pinStates, hellos, divergences } =
+        await started('unprompted');
+      hellos.next(helloFrom('boot-2'));
+      pinStates.next(report());
+      pinStates.next(report());
+      await settle();
+      expect(
+        recorded(divergences).map((entry) => entry.isExplainedByReboot),
+      ).toEqual([true, false]);
+      service.onModuleDestroy();
+    });
+
+    it('does not explain a report after a hello from the same boot', async () => {
+      const { service, pinStates, hellos, divergences } =
+        await started('unprompted');
+      hellos.next(helloFrom('boot-1'));
+      pinStates.next(report());
+      await settle();
+      expect(recorded(divergences)).toMatchObject([
+        { isExplainedByReboot: false },
+      ]);
+      service.onModuleDestroy();
+    });
+
+    it('does not explain one when the stored boot id predates the column', async () => {
+      const { service, pinStates, hellos, divergences } = await started(
+        'unprompted',
+        null,
+      );
+      hellos.next(helloFrom('boot-2'));
+      pinStates.next(report());
+      await settle();
+      expect(recorded(divergences)).toMatchObject([
+        { isExplainedByReboot: false },
+      ]);
+      service.onModuleDestroy();
+    });
+
+    it('trusts a hello that arrives while the stored boot ids load', async () => {
+      const { service, pinStates, hellos, divergences } = armed('unprompted');
+      const starting = service.onModuleInit();
+      hellos.next(helloFrom('boot-2'));
+      await starting;
+      hellos.next(helloFrom('boot-3'));
+      pinStates.next(report());
+      await settle();
+      expect(recorded(divergences)).toMatchObject([
+        { isExplainedByReboot: true },
+      ]);
+      service.onModuleDestroy();
+    });
   });
 });

@@ -214,8 +214,8 @@ drives every managed line to its **declared** safe level and alarms `DEADMAN_TRI
 The config **refuses to start** if any managed line has no declared safe level. A line nobody
 has decided about is not acceptable on a board where one of them is a propane burner.
 
-The agent also watches the server's own LWT: `server/status = offline` means fail safe now
-rather than waiting out the dead-man.
+The agent also watches the server's own LWT, but `server/status = offline` only logs a warning: a
+deploy restarts the server, so the dead-man alone decides when the lines fail safe.
 
 ## The sensor
 

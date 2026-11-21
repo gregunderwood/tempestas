@@ -155,9 +155,9 @@ export class HealthService {
 
   // Bounded because this log does not survive a restart; the journal's ERROR lines are the durable record.
   private describeRecentDivergences(now: Date): string[] {
-    const recent = this.divergences.since(
-      secondsBefore(now, DIVERGENCE_WINDOW_SECONDS),
-    );
+    const recent = this.divergences
+      .since(secondsBefore(now, DIVERGENCE_WINDOW_SECONDS))
+      .filter((divergence) => !divergence.isExplainedByReboot);
     if (recent.length === 0) {
       return [];
     }

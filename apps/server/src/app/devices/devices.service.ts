@@ -28,6 +28,7 @@ import type { UpdateDeviceDto } from './dto/update-device.dto';
 import { canTurnOn, canTurnOnAt, isOn } from './device-state';
 import { correctionPatch, reconcilePinState } from './reconcile-pin-state';
 import { findDeviceOnPin } from './find-device-on-pin';
+import { NodeBoots } from './node-boots';
 
 type Direction = 'on' | 'off';
 
@@ -35,7 +36,8 @@ type Direction = 'on' | 'off';
 @Injectable()
 export class DevicesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DevicesService.name);
-  private pinStates?: Subscription;
+  private readonly subscriptions = new Subscription();
+  private readonly nodeBoots = new NodeBoots();
   // Our own command's `gpio/state` must not be reconciled as a divergence; see docs/Safety.md 3c.
   private readonly pinsMidCommand = new Set<string>();
 
@@ -50,19 +52,22 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     private readonly divergences: DivergenceLog,
   ) {}
 
-  onModuleInit(): void {
-    this.pinStates = this.hardware.pinStates$.subscribe((report) => {
-      // Caught here so one failure cannot end the subscription.
-      void this.reconcile(report).catch((error: unknown) => {
-        this.logger.error(
-          `Reconciling ${report.nodeId} pin ${report.pin} failed: ${String(error)}`,
-        );
-      });
-    });
+  async onModuleInit(): Promise<void> {
+    this.subscriptions.add(
+      this.hardware.hello$.subscribe((hello) =>
+        this.nodeBoots.recordHello(hello.nodeId, hello.bootId),
+      ),
+    );
+    this.subscriptions.add(
+      this.hardware.pinStates$.subscribe((report) =>
+        this.reconcileInBackground(report),
+      ),
+    );
+    await this.rememberStoredBootIds();
   }
 
   onModuleDestroy(): void {
-    this.pinStates?.unsubscribe();
+    this.subscriptions.unsubscribe();
   }
 
   async findAll(): Promise<Device[]> {
@@ -178,7 +183,33 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private async reconcile(report: PinStateReport): Promise<void> {
+  private async rememberStoredBootIds(): Promise<void> {
+    const nodes = await this.nodes.find();
+    for (const node of nodes) {
+      this.nodeBoots.rememberStoredBootId(node.slug, node.bootId);
+    }
+  }
+
+  private reconcileInBackground(report: PinStateReport): void {
+    // Decided as the report arrives, before any await can reorder it behind a later one.
+    const isFirstReportSinceBoot = this.nodeBoots.isFirstReportSinceBoot(
+      report.nodeId,
+      report.pin,
+    );
+    // Caught here so one failure cannot end the subscription.
+    void this.reconcile(report, isFirstReportSinceBoot).catch(
+      (error: unknown) => {
+        this.logger.error(
+          `Reconciling ${report.nodeId} pin ${report.pin} failed: ${String(error)}`,
+        );
+      },
+    );
+  }
+
+  private async reconcile(
+    report: PinStateReport,
+    isFirstReportSinceBoot: boolean,
+  ): Promise<void> {
     if (this.pinsMidCommand.has(toPinKey(report.nodeId, report.pin))) return;
 
     const device = await findDeviceOnPin(
@@ -201,13 +232,22 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       pin: report.pin,
       hardwareOn: verdict.hardwareOn,
       reason: verdict.reason,
+      isExplainedByReboot: isFirstReportSinceBoot,
       at: now,
     });
-    this.logger.error(
-      `DIVERGENCE on ${device.name} (${report.nodeId} pin ${report.pin}): ` +
-        `${verdict.reason}; corrected the row to ` +
-        `${describeOnOff(verdict.hardwareOn)} as of ${verdict.at.toISOString()}`,
-    );
+    const correction =
+      `${verdict.reason}; corrected the row to ` +
+      `${describeOnOff(verdict.hardwareOn)} as of ${verdict.at.toISOString()}`;
+    if (isFirstReportSinceBoot) {
+      this.logger.warn(
+        `${device.name} (${report.nodeId} pin ${report.pin}) changed when ` +
+          `${report.nodeId} restarted and claimed its fail-safe level: ${correction}`,
+      );
+    } else {
+      this.logger.error(
+        `DIVERGENCE on ${device.name} (${report.nodeId} pin ${report.pin}): ${correction}`,
+      );
+    }
     this.realtime.publishDeviceState(this.toDto(device));
   }
 
