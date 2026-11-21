@@ -14,27 +14,10 @@ import {
   type RulesCycle,
   type SystemStatus,
 } from '@tempestas/domain';
+import { describeError } from '../common/describe-error';
+import { LAN_ORIGINS } from '../common/lan-origins';
 
-/**
- * Fan-out to browsers. Named events on one socket, and nothing else.
- *
- * socket.io rather than a raw `rxjs/webSocket`: the old feed had no event
- * envelope and no reconnect, and a Pi on home WiFi needs both. Named events let
- * one connection carry readings, device state and system status.
- *
- * This class holds no repository and makes no decision. It caches the last value
- * of each event purely so a browser that connects mid-cycle renders immediately
- * instead of showing an empty dashboard for ten seconds - which matters most for
- * `system:status`, since that is what raises the stale-sensor banner.
- */
-@WebSocketGateway({
-  cors: {
-    origin: [
-      /^http:\/\/localhost:\d+$/,
-      /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/,
-    ],
-  },
-})
+@WebSocketGateway({ cors: { origin: LAN_ORIGINS } })
 export class RealtimeGateway
   implements OnGatewayConnection, OnGatewayDisconnect
 {
@@ -43,42 +26,32 @@ export class RealtimeGateway
   @WebSocketServer()
   private server?: Server;
 
-  private lastReadings = new Map<string, Reading>();
+  // Per sensor: replayed per node, a new dashboard would show one probe per node until the others spoke.
+  private lastReadingBySensor = new Map<string, Reading>();
   private lastStatus: SystemStatus | null = null;
   private latestRulesCycle: RulesCycle | null = null;
-  private clients = 0;
+  private connectedClientCount = 0;
 
   handleConnection(client: Socket): void {
-    this.clients += 1;
-    // Replay the current picture to this client only.
-    for (const reading of this.lastReadings.values()) {
-      client.emit(REALTIME_EVENTS.readingLatest, reading);
-    }
-    if (this.lastStatus) {
-      client.emit(REALTIME_EVENTS.systemStatus, this.lastStatus);
-    }
-    if (this.latestRulesCycle) {
-      client.emit(REALTIME_EVENTS.rulesCycle, this.latestRulesCycle);
-    }
-    this.logger.debug(`Client connected (${this.clients} total)`);
+    this.connectedClientCount += 1;
+    this.replayCurrentPicture(client);
+    this.logger.debug(`Client connected (${this.connectedClientCount} total)`);
   }
 
   handleDisconnect(): void {
-    this.clients = Math.max(0, this.clients - 1);
-    this.logger.debug(`Client disconnected (${this.clients} remaining)`);
+    this.connectedClientCount = Math.max(0, this.connectedClientCount - 1);
+    this.logger.debug(
+      `Client disconnected (${this.connectedClientCount} remaining)`,
+    );
   }
 
   publishReading(reading: Reading): void {
-    // Keyed per sensor: replayed by node, a newly opened dashboard would see one
-    // probe per node until the others next spoke.
-    this.lastReadings.set(sensorKey(reading), reading);
+    this.lastReadingBySensor.set(sensorKey(reading), reading);
     this.emit(REALTIME_EVENTS.readingLatest, reading);
   }
 
+  // Not cached: GET /api/devices is authoritative, and a replayed copy could contradict it.
   publishDeviceState(device: Device): void {
-    // Deliberately not cached: device state is authoritative from
-    // `GET /api/devices`, and a cached copy replayed on connect could contradict
-    // it. A client renders devices from the API and patches them from here.
     this.emit(REALTIME_EVENTS.deviceState, device);
   }
 
@@ -97,22 +70,27 @@ export class RealtimeGateway
   }
 
   connectedClients(): number {
-    return this.clients;
+    return this.connectedClientCount;
   }
 
-  /**
-   * A socket failure must never propagate into the caller. Every publisher here
-   * is mid-way through something that matters more than the dashboard - an
-   * ingest, a relay write, a rules evaluation - and none of them should fail
-   * because a browser went away.
-   */
+  private replayCurrentPicture(client: Socket): void {
+    for (const reading of this.lastReadingBySensor.values()) {
+      client.emit(REALTIME_EVENTS.readingLatest, reading);
+    }
+    if (this.lastStatus) {
+      client.emit(REALTIME_EVENTS.systemStatus, this.lastStatus);
+    }
+    if (this.latestRulesCycle) {
+      client.emit(REALTIME_EVENTS.rulesCycle, this.latestRulesCycle);
+    }
+  }
+
+  // Never throws: every caller is mid-way through an ingest, a relay write or an evaluation.
   private emit(event: string, payload: unknown): void {
     try {
       this.server?.emit(event, payload);
-    } catch (err: unknown) {
-      this.logger.warn(
-        `Failed to emit ${event}: ${err instanceof Error ? err.message : err}`,
-      );
+    } catch (error: unknown) {
+      this.logger.warn(`Failed to emit ${event}: ${describeError(error)}`);
     }
   }
 }

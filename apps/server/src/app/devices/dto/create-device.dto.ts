@@ -15,12 +15,9 @@ import {
   type GpioLevel,
   type NodeId,
 } from '@tempestas/domain';
+import { GPIO_LEVELS, MAX_GPIO_PIN, MIN_GPIO_PIN } from './gpio-constraints';
 
-/**
- * The DTO class lives here, not in @tempestas/domain, and `implements` the
- * shared interface. That keeps class-validator and reflect-metadata out of the
- * browser bundle while still failing compilation if the two sides disagree.
- */
+// Kept out of @tempestas/domain so class-validator stays out of the browser bundle.
 export class CreateDeviceDto implements CreateDevicePayload {
   @IsString()
   nodeId!: NodeId;
@@ -37,15 +34,15 @@ export class CreateDeviceDto implements CreateDevicePayload {
   description?: string | null;
 
   @IsInt()
-  @Min(0)
-  @Max(63)
+  @Min(MIN_GPIO_PIN)
+  @Max(MAX_GPIO_PIN)
   gpio!: number;
 
   @IsInt()
   @Min(0)
   onDelayDuration!: number;
 
-  @IsIn([0, 1])
+  @IsIn(GPIO_LEVELS)
   onLevel!: GpioLevel;
 
   @IsOptional()

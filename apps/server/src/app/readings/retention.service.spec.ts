@@ -7,10 +7,10 @@ import { RETENTION_BATCH_SIZE, RetentionService } from './retention.service';
 const NOW = new Date('2026-01-10T11:00:00Z');
 
 function makeService(deletedPerCall: number[], retentionDays: unknown = 90) {
-  let call = 0;
+  let callIndex = 0;
   const query = vi.fn(async () => {
-    const deleted = deletedPerCall[call] ?? 0;
-    call += 1;
+    const deleted = deletedPerCall[callIndex] ?? 0;
+    callIndex += 1;
     return [[], deleted];
   });
   const readings = { query } as unknown as Repository<SensorReadingEntity>;
@@ -25,9 +25,6 @@ function makeService(deletedPerCall: number[], retentionDays: unknown = 90) {
 }
 
 describe('RetentionService', () => {
-  // The old system deleted in one unbounded statement, which on millions of
-  // rows holds a write lock and saturates the SD card the burner controller
-  // depends on. Batching is the whole point of this service.
   it('deletes in batches until a short batch says it is done', async () => {
     const { service, query } = makeService([
       RETENTION_BATCH_SIZE,
@@ -58,11 +55,9 @@ describe('RetentionService', () => {
     const { service, query } = makeService([0]);
     await service.prune();
     const [, params] = query.mock.calls[0];
-    // 90 days before 2026-01-10T11:00:00Z
     expect((params[0] as Date).toISOString()).toBe('2025-10-12T11:00:00.000Z');
   });
 
-  // A bad value here deletes history, so it refuses instead of guessing.
   it.each([0, -1, 'ninety', ''])(
     'refuses to prune when RETENTION_DAYS is %s',
     async (value) => {
@@ -73,7 +68,6 @@ describe('RetentionService', () => {
   );
 
   it('has a per-run ceiling so one night cannot run forever', async () => {
-    // Always a full batch: the loop must still terminate.
     const { service, query } = makeService(
       new Array(500).fill(RETENTION_BATCH_SIZE),
     );

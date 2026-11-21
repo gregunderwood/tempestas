@@ -9,10 +9,7 @@ import {
 import type { ZoneRulesConfig } from '@tempestas/domain';
 import { NodeEntity } from '../nodes/models';
 
-/**
- * A zone is an airspace. Rules scope here rather than to a node, so a rule can
- * read the sensor at one end of the greenhouse and actuate a relay at the other.
- */
+// An airspace: rules scope here, not to a node, so a rule can read one end of the greenhouse and drive the other.
 @Entity({ name: 'zones' })
 export class ZoneEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -24,11 +21,6 @@ export class ZoneEntity {
   @Column({ type: 'text', name: 'display_name' })
   displayName!: string;
 
-  /**
-   * Thresholds, enabledRoles and the per-role sensor policy. Operational policy
-   * that controls a heater lives server-side as data, never shipped as consts
-   * in the browser bundle where a stale cache could disagree about a setpoint.
-   */
   @Column({ type: 'jsonb', name: 'rules_config' })
   rulesConfig!: ZoneRulesConfig;
 

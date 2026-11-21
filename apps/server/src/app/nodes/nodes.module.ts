@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { Clock, SystemClock } from '../common/clock';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { Clock, SystemClock } from '../common/clock';
 import { DeviceEntity } from '../devices/models';
 import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';

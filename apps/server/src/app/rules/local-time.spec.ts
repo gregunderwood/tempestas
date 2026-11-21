@@ -2,14 +2,7 @@ import { localTimeLabel, minutesSinceMidnight } from './local-time';
 
 const VANCOUVER = 'America/Vancouver';
 
-/**
- * These are the tests the Python system fails, and the reason for the port.
- *
- * It resolved local time through the host's CURRENT UTC offset, so a reading
- * taken in July was interpreted with January's offset. Every rule evaluation
- * near a window edge and every historical query was an hour out for half the
- * year.
- */
+// The tests the Python system fails: it resolved local time through the host's current UTC offset.
 describe('minutesSinceMidnight', () => {
   it('resolves an instant through the given zone, not the host', () => {
     // 20:04Z in January is 12:04 PST (-8).
@@ -18,8 +11,7 @@ describe('minutesSinceMidnight', () => {
     ).toBe(12 * 60 + 4);
   });
 
-  // THE case. Same UTC wall time, six months apart, different local time -
-  // because each instant resolves with ITS OWN offset.
+  // Same UTC wall time six months apart: each instant resolves with its own offset.
   it('gives a July and a January instant different local times', () => {
     const january = minutesSinceMidnight(
       new Date('2026-01-15T20:00:00Z'),
@@ -45,14 +37,7 @@ describe('minutesSinceMidnight', () => {
     ).toBe(3 * 60);
   });
 
-  // Fall back 2025: 01:30 local happens twice on November 2, an hour apart.
-  // Both are 01:30, both get 90, and the rules engine is RIGHT to treat them
-  // identically - "is it night?" has one answer at 01:30 however often 01:30
-  // happens. The point is that neither is silently shifted by an hour.
-  //
-  // 2025, not 2026: BC stayed on UTC-7 from 2026-11-01 (tzdata 2026b), so
-  // there was no 2026 fall-back. A 2026 date made this test's verdict depend
-  // on which tzdata the runtime happened to bundle.
+  // 2025, not 2026: BC has stayed on UTC-7 since 2026-11-01 (tzdata 2026b), so 2026 has no fall-back.
   it('gives both fall-back 01:30 instants the same local minute', () => {
     const beforeTransition = new Date('2025-11-02T08:30:00Z'); // 01:30 PDT
     const afterTransition = new Date('2025-11-02T09:30:00Z'); //  01:30 PST
@@ -77,8 +62,6 @@ describe('minutesSinceMidnight', () => {
     expect(minutesSinceMidnight(instant, VANCOUVER)).toBe(12 * 60 + 4);
   });
 
-  // A silent fallback to the host zone is precisely the bug this module exists
-  // to prevent, so a bad IANA name has to be loud.
   it('throws on an invalid zone rather than falling back to the host', () => {
     expect(() => minutesSinceMidnight(new Date(), 'Mars/Olympus_Mons')).toThrow(
       /Invalid timezone/,

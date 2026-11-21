@@ -1,11 +1,11 @@
 import { canTurnOn, canTurnOnAt, isOn, type DeviceTimes } from './device-state';
 
 const at = (iso: string) => new Date(iso);
-const device = (p: Partial<DeviceTimes> = {}): DeviceTimes => ({
+const device = (overrides: Partial<DeviceTimes> = {}): DeviceTimes => ({
   onAt: null,
   offAt: null,
   onDelayDuration: 300,
-  ...p,
+  ...overrides,
 });
 
 describe('isOn', () => {
@@ -40,8 +40,8 @@ describe('isOn', () => {
   });
 
   it('treats an exact onAt === offAt tie as OFF, pinning the strict > in the original', () => {
-    const t = at('2026-01-10T10:00:00Z');
-    expect(isOn(device({ onAt: t, offAt: t }))).toBe(false);
+    const instant = at('2026-01-10T10:00:00Z');
+    expect(isOn(device({ onAt: instant, offAt: instant }))).toBe(false);
   });
 });
 
@@ -57,19 +57,19 @@ describe('canTurnOnAt', () => {
   });
 
   it('returns offAt + onDelayDuration once it has cycled', () => {
-    const d = device({
+    const cycled = device({
       onAt: at('2026-01-10T09:00:00Z'),
       offAt: at('2026-01-10T10:00:00Z'),
       onDelayDuration: 300,
     });
-    expect(canTurnOnAt(d)?.toISOString()).toBe('2026-01-10T10:05:00.000Z');
+    expect(canTurnOnAt(cycled)?.toISOString()).toBe('2026-01-10T10:05:00.000Z');
   });
 });
 
 describe('canTurnOn', () => {
   it('is false while the device is on', () => {
-    const d = device({ onAt: at('2026-01-10T10:00:00Z') });
-    expect(canTurnOn(d, at('2026-01-10T12:00:00Z'))).toBe(false);
+    const cycled = device({ onAt: at('2026-01-10T10:00:00Z') });
+    expect(canTurnOn(cycled, at('2026-01-10T12:00:00Z'))).toBe(false);
   });
 
   // The regression that would otherwise brick every newly created device.
@@ -79,66 +79,60 @@ describe('canTurnOn', () => {
   });
 
   it('is false while still inside the cooldown', () => {
-    const d = device({
+    const cycled = device({
       onAt: at('2026-01-10T09:00:00Z'),
       offAt: at('2026-01-10T10:00:00Z'),
       onDelayDuration: 300,
     });
-    expect(canTurnOn(d, at('2026-01-10T10:04:59Z'))).toBe(false);
+    expect(canTurnOn(cycled, at('2026-01-10T10:04:59Z'))).toBe(false);
   });
 
   it('is true at exactly offAt + delay, pinning the boundary', () => {
-    const d = device({
+    const cycled = device({
       onAt: at('2026-01-10T09:00:00Z'),
       offAt: at('2026-01-10T10:00:00Z'),
       onDelayDuration: 300,
     });
-    expect(canTurnOn(d, at('2026-01-10T10:05:00Z'))).toBe(true);
+    expect(canTurnOn(cycled, at('2026-01-10T10:05:00Z'))).toBe(true);
   });
 
   it('is true after the cooldown', () => {
-    const d = device({
+    const cycled = device({
       onAt: at('2026-01-10T09:00:00Z'),
       offAt: at('2026-01-10T10:00:00Z'),
       onDelayDuration: 300,
     });
-    expect(canTurnOn(d, at('2026-01-10T10:06:00Z'))).toBe(true);
+    expect(canTurnOn(cycled, at('2026-01-10T10:06:00Z'))).toBe(true);
   });
 
   it('allows an immediate restart when onDelayDuration is 0', () => {
-    const d = device({
+    const cycled = device({
       onAt: at('2026-01-10T09:00:00Z'),
       offAt: at('2026-01-10T10:00:00Z'),
       onDelayDuration: 0,
     });
-    expect(canTurnOn(d, at('2026-01-10T10:00:00Z'))).toBe(true);
+    expect(canTurnOn(cycled, at('2026-01-10T10:00:00Z'))).toBe(true);
   });
 
   it('does not throw when offAt is in the future (clock skew)', () => {
-    const d = device({
+    const cycled = device({
       onAt: at('2026-01-10T09:00:00Z'),
       offAt: at('2026-01-10T23:00:00Z'),
       onDelayDuration: 300,
     });
-    expect(canTurnOn(d, at('2026-01-10T10:00:00Z'))).toBe(false);
+    expect(canTurnOn(cycled, at('2026-01-10T10:00:00Z'))).toBe(false);
   });
 
-  /**
-   * America/Vancouver falls back at 2026-11-01T09:00:00Z: 01:59 PDT (-07:00) is
-   * followed by 01:00 PST (-08:00). These two instants read the SAME wall clock
-   * of 01:30 but are an hour apart in real time. Comparing instants, the 300s
-   * cooldown has long expired. Comparing wall clocks, it would look like zero
-   * elapsed time. This is the bug class the port exists to eliminate.
-   */
+  // Vancouver falls back at 09:00Z: both instants read 01:30 local, an hour apart.
   it('compares instants, not wall clocks, across a DST fall-back', () => {
-    const offAtPdt = at('2026-11-01T08:30:00Z'); // 01:30:00 PDT
-    const nowPst = at('2026-11-01T09:30:00Z'); //   01:30:00 PST, one hour later
-    const d = device({
+    const offAtPdt = at('2026-11-01T08:30:00Z');
+    const nowPst = at('2026-11-01T09:30:00Z');
+    const cycled = device({
       onAt: at('2026-11-01T08:00:00Z'),
       offAt: offAtPdt,
       onDelayDuration: 300,
     });
     expect(nowPst.getTime() - offAtPdt.getTime()).toBe(3_600_000);
-    expect(canTurnOn(d, nowPst)).toBe(true);
+    expect(canTurnOn(cycled, nowPst)).toBe(true);
   });
 });

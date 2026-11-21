@@ -7,36 +7,24 @@ import { ReadingsQueryDto, StatsQueryDto } from './dto/readings-query.dto';
 export class ReadingsController {
   constructor(private readonly readings: ReadingsService) {}
 
-  /**
-   * Newest first unless `order` says otherwise, inside a resolved window and a row limit. Both windows and
-   * limits are always applied - see `reading-window.ts` for what the defaults
-   * resolve to and why they are not the old system's.
-   */
   @Get()
   findAll(@Query() query: ReadingsQueryDto): Promise<Reading[]> {
     return this.readings.findAll(query);
   }
 
-  /** One reading per sensor. Cheap, unwindowed, and what a dashboard opens with. */
   @Get('latest')
   findLatest(): Promise<Reading[]> {
     return this.readings.findLatestPerSensor();
   }
 
   @Get('stats')
-  stats(@Query() query: StatsQueryDto): Promise<ReadingStats> {
-    return this.readings.stats(query);
+  findStats(@Query() query: StatsQueryDto): Promise<ReadingStats> {
+    return this.readings.computeStats(query);
   }
 
-  /**
-   * The same window split at the zone's daylight boundary.
-   *
-   * Separate from `stats` rather than a flag on it, so the response shape does
-   * not change with a query parameter and a caller cannot be handed a body it
-   * did not expect.
-   */
+  // A route of its own, not a flag on `stats`, so no query parameter changes the response shape.
   @Get('stats/day-night')
-  dayNightStats(@Query() query: StatsQueryDto): Promise<DayNightStats> {
-    return this.readings.dayNightStats(query);
+  findDayNightStats(@Query() query: StatsQueryDto): Promise<DayNightStats> {
+    return this.readings.computeDayNightStats(query);
   }
 }
