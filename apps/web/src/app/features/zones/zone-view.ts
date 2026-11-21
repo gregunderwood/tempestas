@@ -20,7 +20,11 @@ import {
   MINUTES_PER_DAY,
   secondsSince,
 } from '../../shared/time';
-import { buildRuleBars, type ThresholdBar } from './threshold-bar';
+import {
+  FULL_SCALE_PERCENT,
+  buildRuleBars,
+  type ThresholdBar,
+} from './threshold-bar';
 import {
   chooseDecisionTone,
   describeDecision,
@@ -266,13 +270,13 @@ function buildDaylightStrip(
   nowMinute: number | null,
 ): DaylightStrip {
   const toPercent = (minute: number): number =>
-    (minute / MINUTES_PER_DAY) * 100;
+    (minute / MINUTES_PER_DAY) * FULL_SCALE_PERCENT;
   const crossesMidnight = startMinute > endMinute;
   const segments = crossesMidnight
     ? [
         {
           fromPercent: toPercent(startMinute),
-          widthPercent: 100 - toPercent(startMinute),
+          widthPercent: FULL_SCALE_PERCENT - toPercent(startMinute),
         },
         { fromPercent: 0, widthPercent: toPercent(endMinute) },
       ]
@@ -358,14 +362,17 @@ function buildRoleDeviceLines(
   return input.devices
     .filter((device) => device.zoneId === zone.id && device.role === role)
     .map((device) =>
-      buildDeviceLine(
-        device,
-        decision?.dispatched.find(
-          (dispatch) => dispatch.deviceId === device.id,
-        ),
-        input.now,
-      ),
+      buildDeviceLine(device, findDispatch(decision, device), input.now),
     );
+}
+
+function findDispatch(
+  decision: DecisionOutcome | null,
+  device: Device,
+): DeviceDispatch | undefined {
+  return decision?.dispatched.find(
+    (dispatch) => dispatch.deviceId === device.id,
+  );
 }
 
 export function buildDeviceLine(
