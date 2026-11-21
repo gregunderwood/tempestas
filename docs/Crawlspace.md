@@ -9,8 +9,8 @@ posture: a dead node, a lost link or a dead probe all end in heat.
 ⚠ Read [Safety](Safety.md) before wiring or energising anything.
 
 > [!note] Status
-> Planned. The zone script, the broker ACL and the [Pico Agent](Infrastructure/Pico%20Agent.md) are
-> written; nothing is installed. The heater waits for its contactor.
+> Steps 1–4 done on 2026-11-20: braize is online on elantris, admitted, and under rule control,
+> on the bench with no loads. Next are the lamp tests (step 5). The heater waits for its contactor.
 
 ## Decisions already made
 
@@ -50,13 +50,13 @@ K1's NC side, a released relay energises the coil and the heater runs.
 The node kind `pico` is a Postgres enum value. **Migrate before braize first connects**, or the
 server cannot store its `hello`.
 
-```bash
-tools/deploy.sh                                   # patji fails safe for ~8 s during the restart
-ssh elantris
-pg_dump -Fc tempestas > ~/backups/tempestas-$(date +%F)-before-pico.dump
-cd ~/tempestas && npm run migration:show          # only AddPicoNodeKind pending
-npm run migration:run
-```
+`tools/deploy.sh` ships the server and lists what is pending; patji fails safe for about 8 s
+during the restart. Then back up and run `AddPicoNodeKind` on elantris, as in
+[Migrations](Infrastructure/Migrations.md#on-elantris).
+
+✅ Done 2026-11-20, after a dump to `~/backups/tempestas-2026-11-20-before-pico.dump`. The restart
+left a 24-hour "divergence corrected" note in `/api/health` for patji's devices: they were on
+while the server was down, as designed.
 
 ### 2. Broker account
 
@@ -117,21 +117,27 @@ curl -s -X POST $API/nodes/$NODE_UUID/admit -H 'Content-Type: application/json' 
   -d "{\"zoneId\": \"$ZONE_UUID\", \"displayName\": \"Braize\", \"location\": \"Crawlspace\"}"
 ```
 
-Devices, **both `onLevel` 1** because both hang off NC:
+Devices, **both `onLevel` 1** because both hang off NC. The names say "Crawlspace" because the
+pumphouse already has a "Heater" and a "Heat tape", and `/api/health` names devices, not zones:
 
-| Name      | GPIO | onLevel | onDelayDuration | role        |
-| --------- | ---- | ------- | --------------- | ----------- |
-| Heater    | 20   | **1**   | 300             | `heater`    |
-| Heat tape | 18   | **1**   | 60              | `heat_tape` |
+| Name                 | GPIO | onLevel | onDelayDuration | role        |
+| -------------------- | ---- | ------- | --------------- | ----------- |
+| Crawlspace heater    | 20   | **1**   | 300             | `heater`    |
+| Crawlspace heat tape | 18   | **1**   | 60              | `heat_tape` |
 
 ```bash
 curl -s -X POST $API/devices -H 'Content-Type: application/json' -d "{\"nodeId\": \"braize\",
-  \"zoneId\": \"$ZONE_UUID\", \"name\": \"Heater\", \"gpio\": 20, \"onLevel\": 1,
+  \"zoneId\": \"$ZONE_UUID\", \"name\": \"Crawlspace heater\", \"gpio\": 20, \"onLevel\": 1,
   \"onDelayDuration\": 300, \"role\": \"heater\", \"rulesEnabled\": true}"
 curl -s -X POST $API/devices -H 'Content-Type: application/json' -d "{\"nodeId\": \"braize\",
-  \"zoneId\": \"$ZONE_UUID\", \"name\": \"Heat tape\", \"gpio\": 18, \"onLevel\": 1,
+  \"zoneId\": \"$ZONE_UUID\", \"name\": \"Crawlspace heat tape\", \"gpio\": 18, \"onLevel\": 1,
   \"onDelayDuration\": 60, \"role\": \"heat_tape\", \"rulesEnabled\": true}"
 ```
+
+✅ Steps 2–4 done 2026-11-20. braize's password is kept at `/etc/tempestas/braize-mqtt.pass`
+(0600 root) and in the gitignored `credentials.py`. The ACL checked out RC:0 on its own alarm
+topic and RC:135 on patji's alarm and on its own `gpio/set`. On admission both devices started
+ON, from the released relays, and the rules turned both off at 21 °C.
 
 ### 5. Bench test, before it goes under the house
 

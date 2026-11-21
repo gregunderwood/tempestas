@@ -10,6 +10,7 @@ the app and the standalone DataSource — schema changes are reviewed SQL, never
 - [../../apps/server/src/typeorm.config.ts](../../apps/server/src/typeorm.config.ts) — the DataSource the CLI uses (globs for entity discovery, unlike the app's explicit list)
 - [../../apps/server/src/migrations/](../../apps/server/src/migrations/) — the migrations, in timestamp order
 - `scripts` in [../../package.json](../../package.json) — the four `migration:*` commands
+- [../../apps/server/src/migrate.ts](../../apps/server/src/migrate.ts) — the same migrations inside the shipped bundle, as `main.js migrate:show|run|revert`
 
 ## How it works
 
@@ -25,6 +26,25 @@ npm run migration:revert                                        # one step back
 The CLI runs through `ts-node -r tsconfig-paths/register` against `apps/server/tsconfig.app.json`,
 and loads `apps/server/.env` — a different code path from the running app's `@nestjs/config`. If a
 migration cannot see the database, check that file first.
+
+### On elantris
+
+elantris has the build, not a checkout: no `package.json`, no `ts-node`, no source. The server
+bundle carries the same migrations, so run them from it, with the service's own env file. That
+file is root-only, so `systemd-run` reads it as the service does and runs node as `gunderwood`.
+`tools/deploy.sh` shows what is pending after every deploy; running them stays a separate step.
+
+```bash
+ssh elantris
+sudo -u postgres pg_dump -Fc tempestas > ~/backups/tempestas-$(date +%F)-before-<change>.dump
+migrate() {
+  sudo systemd-run --quiet --pipe --wait --uid=gunderwood \
+    -p EnvironmentFile=/etc/tempestas/server.env -E NODE_ENV=production \
+    /usr/local/bin/node ~/tempestas/dist/apps/server/main.js "migrate:$1"
+}
+migrate show                                                    # read it first
+migrate run
+```
 
 ### Naming
 
