@@ -31,7 +31,7 @@ export interface Statement {
 }
 
 // One row per table: the dump compares rows in storage order, which an UPDATE of several can shuffle.
-const ROWS_ADDED_AFTER = new Map<string, Statement[]>([
+export const ROWS_ADDED_AFTER = new Map<string, Statement[]>([
   [
     InitialSchema1788917132521.name,
     [

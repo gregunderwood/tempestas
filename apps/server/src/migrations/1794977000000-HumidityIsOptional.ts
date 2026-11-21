@@ -26,8 +26,9 @@ export class HumidityIsOptional1794977000000 implements MigrationInterface {
       );
     if (withoutHumidity > 0) {
       throw new Error(
-        `Readings without humidity: ${withoutHumidity}. Reverting would mean deleting their ` +
-          `temperatures; restore the backup taken before this migration instead`,
+        `Readings without humidity: ${withoutHumidity}. Reverting would delete their temperatures. ` +
+          `If the deploy being rolled back applied this migration, restore that deploy's backup; ` +
+          `otherwise fix forward with a new migration`,
       );
     }
     await queryRunner.query(

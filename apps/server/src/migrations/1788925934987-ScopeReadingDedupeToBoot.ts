@@ -6,9 +6,10 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * after a node reboot until the counter passed its previous high-water mark.
  * The symptom was indistinguishable from a stale sensor.
  *
- * Note the `down`: the narrower constraint cannot hold rows from two boots that
- * share a (node, sensor, seq), so it refuses and counts them rather than
- * deleting readings. On a populated database this revert is not guaranteed.
+ * Note the `down`: the narrower constraint cannot hold two rows that share a
+ * (node, sensor, seq), as two boots' rows do, so it refuses and counts them
+ * rather than deleting readings. On a populated database this revert is not
+ * guaranteed.
  */
 export class ScopeReadingDedupeToBoot1788925934987 implements MigrationInterface {
   name = 'ScopeReadingDedupeToBoot1788925934987';
@@ -32,8 +33,9 @@ export class ScopeReadingDedupeToBoot1788925934987 implements MigrationInterface
     `);
     if (repeated > 0) {
       throw new Error(
-        `Sequence numbers repeated across boots: ${repeated}. The old constraint cannot hold them ` +
-          `without deleting readings; restore the backup taken before this migration instead`,
+        `Sequence numbers repeated: ${repeated}. Reverting would delete readings. ` +
+          `If the deploy being rolled back applied this migration, restore that deploy's backup; ` +
+          `otherwise fix forward with a new migration`,
       );
     }
     await queryRunner.query(

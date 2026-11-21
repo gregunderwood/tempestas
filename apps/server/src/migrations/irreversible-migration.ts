@@ -8,7 +8,9 @@ export abstract class IrreversibleMigration implements MigrationInterface {
 
   async down(): Promise<void> {
     throw new Error(
-      `${this.name} cannot be reverted: ${this.irreversibleBecause}. Restore the backup taken before it ran.`,
+      `${this.name} cannot be reverted: ${this.irreversibleBecause}. ` +
+        `If the deploy being rolled back applied it, restore that deploy's backup; ` +
+        `otherwise fix forward with a new migration`,
     );
   }
 }
