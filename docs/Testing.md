@@ -33,7 +33,7 @@ how much boilerplate exists rather than whether the interlocks are tested.
 ### Run commands
 
 ```bash
-npx nx run-many -t lint,test,build,migration-round-trip     # the gate — always this before declaring done
+npx nx run-many -t lint,typecheck,test,build,migration-round-trip     # the gate — always this before declaring done
 npx nx test server                     # one project
 npx nx test server -- device-state     # one file, by substring
 ```

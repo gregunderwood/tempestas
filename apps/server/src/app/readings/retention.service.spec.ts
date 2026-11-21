@@ -6,9 +6,14 @@ import { RETENTION_BATCH_SIZE, RetentionService } from './retention.service';
 
 const NOW = new Date('2026-01-10T11:00:00Z');
 
+type RawQuery = (
+  sql: string,
+  parameters: [Date, number],
+) => Promise<[unknown[], number]>;
+
 function makeService(deletedPerCall: number[], retentionDays: unknown = 90) {
   let callIndex = 0;
-  const query = vi.fn(async () => {
+  const query = vi.fn<RawQuery>(async () => {
     const deleted = deletedPerCall[callIndex] ?? 0;
     callIndex += 1;
     return [[], deleted];
@@ -55,7 +60,7 @@ describe('RetentionService', () => {
     const { service, query } = makeService([0]);
     await service.prune();
     const [, params] = query.mock.calls[0];
-    expect((params[0] as Date).toISOString()).toBe('2025-10-12T11:00:00.000Z');
+    expect(params[0].toISOString()).toBe('2025-10-12T11:00:00.000Z');
   });
 
   it.each([0, -1, 'ninety', ''])(

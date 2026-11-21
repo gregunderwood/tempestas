@@ -102,7 +102,7 @@ Two rows deserve a note:
 ## The work, in order
 
 Each section is one or more commits that leave the greenhouse working. The gate after each is
-`npx nx run-many -t lint,test,build` plus `npx nx test server --coverage`.
+`npx nx run-many -t lint,typecheck,test,build` plus `npx nx test server --coverage`.
 
 ### A. Rule kinds per role (domain + engine) — ✅ built
 
