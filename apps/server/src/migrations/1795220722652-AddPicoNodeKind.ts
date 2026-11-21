@@ -1,0 +1,43 @@
+import { MigrationInterface, QueryRunner } from 'typeorm';
+
+/**
+ * `ADD VALUE` rather than the generator's rename-and-recreate: one statement that rewrites nothing.
+ * Postgres cannot drop an enum value, so `down` rebuilds the type, and refuses while a node is a Pico.
+ */
+export class AddPicoNodeKind1795220722652 implements MigrationInterface {
+  name = 'AddPicoNodeKind1795220722652';
+
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `ALTER TYPE "public"."nodes_kind_enum" ADD VALUE IF NOT EXISTS 'pico' BEFORE 'virtual'`,
+    );
+  }
+
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    const picoNodes: { slug: string }[] = await queryRunner.query(
+      `SELECT slug FROM nodes WHERE kind = 'pico'`,
+    );
+    if (picoNodes.length > 0) {
+      throw new Error(
+        `Nodes are still Picos (${picoNodes.map((node) => node.slug).join(', ')}); ` +
+          `change or remove them before reverting this migration`,
+      );
+    }
+    await queryRunner.query(
+      `ALTER TYPE "public"."nodes_kind_enum" RENAME TO "nodes_kind_enum_old"`,
+    );
+    await queryRunner.query(
+      `CREATE TYPE "public"."nodes_kind_enum" AS ENUM('rpi', 'esp32', 'virtual')`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "nodes" ALTER COLUMN "kind" DROP DEFAULT`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "nodes" ALTER COLUMN "kind" TYPE "public"."nodes_kind_enum" USING "kind"::"text"::"public"."nodes_kind_enum"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "nodes" ALTER COLUMN "kind" SET DEFAULT 'rpi'`,
+    );
+    await queryRunner.query(`DROP TYPE "public"."nodes_kind_enum_old"`);
+  }
+}
