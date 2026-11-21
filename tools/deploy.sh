@@ -7,11 +7,14 @@ set -euo pipefail
 HOST="${1:-elantris}"
 REMOTE="/home/gunderwood/tempestas"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MIGRATE="sudo systemd-run --quiet --pipe --wait --uid=gunderwood \
--p EnvironmentFile=/etc/tempestas/server.env -E NODE_ENV=production \
-/usr/local/bin/node $REMOTE/dist/apps/server/main.js"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+
+# Exactly the command lines tools/install-deploy-privileges.sh allows, so none of them asks for a password.
+run_unit_and_show_output() {
+  local unit="$1"
+  ssh -t "$HOST" "sudo systemctl start $unit; journalctl -o cat _SYSTEMD_INVOCATION_ID=\$(systemctl show -p InvocationID --value $unit)"
+}
 
 say "Gate"
 (cd "$HERE" && npx nx run-many -t lint,test,build)
@@ -35,11 +38,17 @@ rsync -a "$HERE/apps/agent-linux/systemd/" "$HOST:$REMOTE/apps/agent-linux/syste
 say "Installing runtime dependencies"
 ssh "$HOST" "cd $REMOTE/dist/apps/server && /usr/local/bin/npm ci --omit=dev --no-audit --no-fund"
 
-say "Restarting"
-ssh "$HOST" "sudo systemctl restart tempestas-server && sleep 3 && systemctl is-active tempestas-server"
+# Checked before the restart: the new code on an unmigrated schema crash-loops the server.
+say "Migrations"
+MIGRATIONS="$(run_unit_and_show_output tempestas-migrate@show.service)"
+echo "$MIGRATIONS"
+if grep -q '^\[ \]' <<<"$MIGRATIONS"; then
+  echo "Migrations are pending, so the server was NOT restarted. Back up, run them, then restart:" >&2
+  echo "  ssh -t $HOST sudo systemctl start tempestas-backup.service" >&2
+  echo "  ssh -t $HOST sudo systemctl start tempestas-migrate@run.service" >&2
+  echo "  ssh -t $HOST sudo systemctl restart tempestas-server.service" >&2
+  exit 1
+fi
 
-# Shown, never run: a schema change against the only copy of the history wants a backup first.
-say "Migrations (shown, not run)"
-ssh "$HOST" "$MIGRATE migrate:show"
-echo "To apply any pending above, back up first, then (docs/Infrastructure/Migrations.md):"
-echo "  ssh $HOST $MIGRATE migrate:run"
+say "Restarting"
+ssh -t "$HOST" "sudo systemctl restart tempestas-server.service && sleep 3 && systemctl is-active tempestas-server"

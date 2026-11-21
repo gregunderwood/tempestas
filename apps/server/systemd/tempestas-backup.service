@@ -1,0 +1,21 @@
+# Installed by tools/install-deploy-privileges.sh to /etc/systemd/system/tempestas-backup.service
+#
+#   sudo systemctl start tempestas-backup.service
+#   journalctl -u tempestas-backup.service -n 5 -o cat
+#
+# The script is installed root-owned under /usr/local/lib: run as postgres from
+# the deploy user's home, it would let that user edit what postgres runs.
+
+[Unit]
+Description=tempestas database backup
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+ExecStartPre=+/usr/bin/install -d -o postgres -g postgres -m 0700 /var/backups/tempestas
+ExecStart=/usr/local/lib/tempestas/backup-database.sh
+StandardOutput=journal
+StandardError=journal

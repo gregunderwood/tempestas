@@ -30,21 +30,20 @@ migration cannot see the database, check that file first.
 ### On elantris
 
 elantris has the build, not a checkout: no `package.json`, no `ts-node`, no source. The server
-bundle carries the same migrations, so run them from it, with the service's own env file. That
-file is root-only, so `systemd-run` reads it as the service does and runs node as `gunderwood`.
-`tools/deploy.sh` shows what is pending after every deploy; running them stays a separate step.
+bundle carries the same migrations, and `tempestas-migrate@.service` runs them from it with the
+server's own root-only env file. `tools/deploy.sh` checks for pending migrations **before** it
+restarts the server, and stops if there are any: the new code on an unmigrated schema crash-loops.
+Running them stays a separate step:
 
 ```bash
-ssh elantris
-sudo -u postgres pg_dump -Fc tempestas > ~/backups/tempestas-$(date +%F)-before-<change>.dump
-migrate() {
-  sudo systemd-run --quiet --pipe --wait --uid=gunderwood \
-    -p EnvironmentFile=/etc/tempestas/server.env -E NODE_ENV=production \
-    /usr/local/bin/node ~/tempestas/dist/apps/server/main.js "migrate:$1"
-}
-migrate show                                                    # read it first
-migrate run
+ssh -t elantris sudo systemctl start tempestas-backup.service        # pg_dump to /var/backups/tempestas
+ssh -t elantris sudo systemctl start tempestas-migrate@run.service
+ssh -t elantris sudo systemctl restart tempestas-server.service
+journalctl -u tempestas-migrate@run.service -n 20 -o cat              # what it applied
 ```
+
+The backup unit keeps the last 10 dumps, and its journal names the file it wrote. After
+`tools/install-deploy-privileges.sh`, none of these asks for a password.
 
 ### Naming
 
@@ -113,7 +112,7 @@ synchronize: true,   // ❌ never, in any config, for any reason
 - **Expand-contract, once anything is deployed.** Without it, "roll back the image" is a lie —
   the previous image still has to run against the migrated schema. Add the column, deploy, backfill,
   then remove the old one in a later migration.
-- **`pg_dump` before migrations on the Pi.** The deploy script does it; a manual run should too.
+- **`pg_dump` before migrations on the Pi.** `tempestas-backup.service` does it; never skip it.
 - **Enum changes are not free.** TypeORM rewrites the type, which on a large table is a table
   rewrite. `sensor_readings` will be the one that hurts.
 - **Destructive operations on populated tables** get a second pair of eyes and a dump first.
