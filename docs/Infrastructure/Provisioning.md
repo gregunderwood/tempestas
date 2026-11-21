@@ -32,10 +32,17 @@ Raspbian ships.
 1. **Node**, via nvm, then symlinked. systemd cannot see nvm.
 
    ```bash
-   nvm install 22
-   sudo ln -sfn ~/.nvm/versions/node/v22.23.2/bin/node /usr/local/bin/node
-   sudo ln -sfn ~/.nvm/versions/node/v22.23.2/bin/npm  /usr/local/bin/npm
+   nvm install 22.23.5
+   sudo ln -sfn ~/.nvm/versions/node/v22.23.5/bin/node /usr/local/bin/node
+   sudo ln -sfn ~/.nvm/versions/node/v22.23.5/bin/npm  /usr/local/bin/npm
    ```
+
+   Node carries its own copy of the timezone rules, separate from the OS's, and
+   older builds fall behind. v22.23.2 (tzdata 2026a) put `America/Vancouver` at
+   UTC-8 after BC moved to permanent UTC-7, which ran every local-time rule an hour
+   late. v22.23.4 and later carry 2026e. Check with
+   `node -p "process.versions.tz"`. The server compares its offsets with the OS's
+   every hour and reports any disagreement in `/api/health`.
 
    ⚠ The symlink must be called **`node`**. Naming it something else breaks
    `npm`, whose shebang is `#!/usr/bin/env node`. Verify the way systemd will

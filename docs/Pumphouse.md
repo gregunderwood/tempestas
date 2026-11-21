@@ -435,7 +435,7 @@ coming on:
 - [ ] Cold reboot: no chatter through boot, then the rule takes over
 - [ ] Then out to the pumphouse, and watch a day of WiFi before trusting it
 
-### G. Node's timezone data is older than the OS's
+### G. Node's timezone data is older than the OS's (done 2026-11-21, #6)
 
 Found while answering the timezone question, and independent of the pumphouse. **BC moved to
 permanent UTC-7 on 2026-11-01.** elantris's tzdata (2026b) knows that: `America/Vancouver` is
