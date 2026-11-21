@@ -3,9 +3,12 @@ import {
   type Device,
   type Reading,
   type RulesCycle,
-  type SystemStatus,
+  type UnsentSystemStatus,
 } from '@tempestas/domain';
+import { FixedClock } from '../common/clock';
 import { RealtimeGateway } from './realtime.gateway';
+
+const PUBLISHED_AT = new Date('2026-01-10T12:00:01.000Z');
 
 function reading(
   nodeId: string,
@@ -23,7 +26,7 @@ function reading(
   };
 }
 
-const STATUS: SystemStatus = {
+const STATUS: UnsentSystemStatus = {
   at: '2026-01-10T12:00:00.000Z',
   sensorStale: true,
   staleRoles: [],
@@ -33,6 +36,10 @@ const STATUS: SystemStatus = {
   isLeading: true,
   lastEvaluationAt: '2026-01-10T12:00:00.000Z',
 };
+
+function createGateway(clock = new FixedClock(PUBLISHED_AT)): RealtimeGateway {
+  return new RealtimeGateway(clock);
+}
 
 function attach(gateway: RealtimeGateway) {
   const emit = vi.fn();
@@ -49,7 +56,7 @@ function fakeClient() {
 
 describe('RealtimeGateway', () => {
   it('emits each event under its contract name', () => {
-    const gateway = new RealtimeGateway();
+    const gateway = createGateway();
     const emit = attach(gateway);
 
     gateway.publishReading(reading('elantris'));
@@ -65,7 +72,7 @@ describe('RealtimeGateway', () => {
 
   // The stale-sensor banner must not wait for the next tick to appear.
   it('replays the last reading per node and the last status to a new client', () => {
-    const gateway = new RealtimeGateway();
+    const gateway = createGateway();
     attach(gateway);
     gateway.publishReading(reading('elantris', 20));
     gateway.publishReading(reading('elantris', 21));
@@ -84,7 +91,7 @@ describe('RealtimeGateway', () => {
 
   // Keyed by node alone, a new dashboard showed one pumphouse probe until the other spoke.
   it('replays the last reading of EVERY sensor on a node', () => {
-    const gateway = new RealtimeGateway();
+    const gateway = createGateway();
     attach(gateway);
     gateway.publishReading(reading('pumphouse', 7, 'air'));
     gateway.publishReading(reading('pumphouse', 1.5, 'pipes'));
@@ -101,7 +108,7 @@ describe('RealtimeGateway', () => {
   });
 
   it('does not replay device state', () => {
-    const gateway = new RealtimeGateway();
+    const gateway = createGateway();
     attach(gateway);
     gateway.publishDeviceState({ id: 'dev-1' } as Device);
 
@@ -110,14 +117,43 @@ describe('RealtimeGateway', () => {
     expect(client.emit).not.toHaveBeenCalled();
   });
 
+  it('stamps a published status with the server clock as it is sent', () => {
+    const gateway = createGateway();
+    const emit = attach(gateway);
+
+    gateway.publishSystemStatus(STATUS);
+
+    expect(emit).toHaveBeenCalledWith(REALTIME_EVENTS.systemStatus, {
+      ...STATUS,
+      sentAt: PUBLISHED_AT.toISOString(),
+    });
+  });
+
+  // A replay stamped with its publish time would make a stalled server look like a browser clock running ahead.
+  it('stamps a replayed status with the time of the replay, not of the publish', () => {
+    const clock = new FixedClock(PUBLISHED_AT);
+    const gateway = createGateway(clock);
+    attach(gateway);
+    gateway.publishSystemStatus(STATUS);
+    clock.advanceSeconds(300);
+
+    const client = fakeClient();
+    gateway.handleConnection(client);
+
+    expect(client.emit).toHaveBeenCalledWith(REALTIME_EVENTS.systemStatus, {
+      ...STATUS,
+      sentAt: '2026-01-10T12:05:01.000Z',
+    });
+  });
+
   // Every publisher is mid-way through something that matters more than the dashboard.
   it('never throws when there is no server attached yet', () => {
-    const gateway = new RealtimeGateway();
+    const gateway = createGateway();
     expect(() => gateway.publishReading(reading('elantris'))).not.toThrow();
   });
 
   it('never throws when emitting fails', () => {
-    const gateway = new RealtimeGateway();
+    const gateway = createGateway();
     (gateway as unknown as { server: { emit: () => never } }).server = {
       emit: () => {
         throw new Error('socket gone');
@@ -127,7 +163,7 @@ describe('RealtimeGateway', () => {
   });
 
   it('tracks connected clients', () => {
-    const gateway = new RealtimeGateway();
+    const gateway = createGateway();
     attach(gateway);
     gateway.handleConnection(fakeClient());
     gateway.handleConnection(fakeClient());
@@ -153,7 +189,7 @@ describe('RealtimeGateway rules cycles', () => {
   }
 
   it('emits a cycle under rules:cycle', () => {
-    const gateway = new RealtimeGateway();
+    const gateway = createGateway();
     const emit = attach(gateway);
     gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:00.000Z'));
     expect(emit).toHaveBeenCalledWith(
@@ -163,7 +199,7 @@ describe('RealtimeGateway rules cycles', () => {
   });
 
   it('replays only the newest cycle to a client that connects', () => {
-    const gateway = new RealtimeGateway();
+    const gateway = createGateway();
     attach(gateway);
     gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:00.000Z'));
     gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:10.000Z'));
@@ -176,7 +212,7 @@ describe('RealtimeGateway rules cycles', () => {
   });
 
   it('replays nothing once the cycle has been forgotten', () => {
-    const gateway = new RealtimeGateway();
+    const gateway = createGateway();
     attach(gateway);
     gateway.publishRulesCycle(cycleAt('2026-01-10T12:00:00.000Z'));
     gateway.forgetRulesCycle();

@@ -24,7 +24,11 @@ export interface SystemStatus {
   /** False on a follower, which runs no rules and switches nothing. */
   isLeading: boolean;
   lastEvaluationAt: string | null;
+  /** Server clock as this copy left, replay included, so a browser can measure its own skew. */
+  sentAt: string;
 }
+
+export type UnsentSystemStatus = Omit<SystemStatus, 'sentAt'>;
 
 export interface RealtimePayloads {
   [REALTIME_EVENTS.readingLatest]: Reading;
