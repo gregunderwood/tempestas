@@ -115,13 +115,9 @@ def build_subscriptions(node_id: str) -> list[tuple[str, int]]:
 def wire(agent: Agent, client: mqtt.Client) -> None:
     config = agent.config
     handlers = {
-        contract.build_heartbeat_topic(config.node_id): lambda message: agent.on_heartbeat(
-            message.payload
-        ),
-        contract.SERVER_STATUS_TOPIC: lambda message: handle_server_status(agent, message.payload),
-        contract.build_gpio_set_topic(config.node_id): lambda message: handle_gpio_set(
-            agent, message
-        ),
+        contract.build_heartbeat_topic(config.node_id): handle_heartbeat,
+        contract.SERVER_STATUS_TOPIC: handle_server_status,
+        contract.build_gpio_set_topic(config.node_id): handle_gpio_set,
     }
 
     def on_connect(_client, _userdata, _flags, reason_code, _properties=None):
@@ -135,7 +131,7 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
     def on_message(_client, _userdata, message):
         handler = handlers.get(message.topic)
         if handler is not None:
-            handler(message)
+            handler(agent, message)
 
     client.on_connect = on_connect
     client.on_message = on_message
@@ -149,6 +145,10 @@ def announce(agent: Agent) -> None:
     agent.publish_gpio_state(agent.config.gpio.lines)
 
 
+def handle_heartbeat(agent: Agent, message) -> None:
+    agent.on_heartbeat(message.payload)
+
+
 def handle_gpio_set(agent: Agent, message) -> None:
     result = agent.on_command(message.payload, retained=bool(message.retain))
     if result is None:
@@ -157,9 +157,9 @@ def handle_gpio_set(agent: Agent, message) -> None:
     agent.publish_gpio_state(line["pin"] for line in result["lines"])
 
 
-def handle_server_status(agent: Agent, payload: bytes) -> None:
+def handle_server_status(agent: Agent, message) -> None:
     try:
-        body = json.loads(payload)
+        body = json.loads(message.payload)
     except (ValueError, UnicodeDecodeError):
         return
     if body.get("state") == "offline":
