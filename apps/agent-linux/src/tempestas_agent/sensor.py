@@ -1,42 +1,72 @@
-"""Sensor backends.
-
-`Scd4xSensor` is a raw smbus2 driver derived from the greenhouse's own
-`scd4x_healthcheck.py`, which has been correct on this hardware for a year.
-Using it instead of `adafruit-circuitpython-scd4x` on Blinka drops a large
-dependency tree (and its swig/liblgpio build requirements) and fixes a real bug:
-the datasheet says data_ready is true when the LOW 11 BITS are non-zero, which
-this checks and the Adafruit driver does not - it tests the whole word.
-
-The rule both backends obey: **never invent a reading**. An implausible or
-missing value is reported as invalid with a reason, never as a zero and never as
-the last known good value. A dead sensor stuck on a low CO2 would otherwise run
-a propane burner indefinitely.
-"""
+"""Sensor backends. The rule they all obey: never invent a reading."""
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from typing import Protocol
 
-# SCD4x command set, with the execution delays the datasheet requires.
+from .world_client import WorldUnreachable
+
+UNIT_PPM = "ppm"
+UNIT_CELSIUS = "C"
+UNIT_PERCENT = "%"
+
 _STOP_PERIODIC = 0x3F86
-_REINIT = 0x3646
+_REINITIALIZE = 0x3646
 _GET_SERIAL = 0x3682
 _SELF_TEST = 0x3639
 _START_PERIODIC = 0x21B1
 _GET_DATA_READY = 0xE4B8
 _READ_MEASUREMENT = 0xEC05
-_GET_TEMP_OFFSET = 0x2318
-_SET_TEMP_OFFSET = 0x241D
+_GET_TEMPERATURE_OFFSET = 0x2318
+_SET_TEMPERATURE_OFFSET = 0x241D
 _SET_ALTITUDE = 0x2427
 _PERFORM_FRC = 0x362F
 _SET_ASC = 0x2416
 _GET_ASC = 0x2313
 _PERSIST_SETTINGS = 0x3615
 
+# The datasheet's execution time per command; anything unlisted needs 1 ms.
+_EXECUTION_TIME_MS = {
+    _STOP_PERIODIC: 500,
+    _REINITIALIZE: 30,
+    _SELF_TEST: 10_000,
+    _PERFORM_FRC: 400,
+    _PERSIST_SETTINGS: 800,
+}
+_DEFAULT_EXECUTION_TIME_MS = 1
+
 # The datasheet's data_ready test: the low 11 bits, not the whole word.
 _DATA_READY_MASK = 0x07FF
+
+_SERIAL_WORD_COUNT = 3
+_MEASUREMENT_WORD_COUNT = 3
+_BYTES_PER_WORD_WITH_CRC = 3
+_BYTE_MASK = 0xFF
+_WORD_MASK = 0xFFFF
+_WORD_FULL_SCALE = 65535
+_TEMPERATURE_FLOOR_C = -45
+_TEMPERATURE_SPAN_C = 175
+_HUMIDITY_SPAN_PCT = 100
+
+_CRC8_INITIAL = 0xFF
+_CRC8_POLYNOMIAL = 0x31
+_CRC8_HIGH_BIT = 0x80
+_BITS_PER_BYTE = 8
+
+# The chip offsets the FRC correction so an unsigned word can carry a negative one.
+_FRC_CORRECTION_OFFSET = 0x8000
+_FRC_REJECTED = 0xFFFF
+
+_SCD4X_NO_ANSWER = 0
+SECONDS_PER_MINUTE = 60.0
+MILLISECONDS_PER_SECOND = 1000.0
+
+DEFAULT_CO2_MIN_PPM = 300
+DEFAULT_CO2_MAX_PPM = 5000
+DEFAULT_MAX_CO2_CHANGE_PPM_PER_MIN = 400.0
 
 
 @dataclass(frozen=True)
@@ -68,11 +98,7 @@ class SensorInfo:
 
 
 class SensorSet(Protocol):
-    """What the agent samples: one or more sensors, each published on its own topic.
-
-    A node with three pipe probes is one backend with three sensors, not three
-    backends - they share one bus and one read cycle.
-    """
+    """One or more sensors sharing a bus and a read cycle, each published on its own topic."""
 
     def start(self) -> None: ...
     def sensors(self) -> list[SensorInfo]: ...
@@ -87,19 +113,19 @@ class SensorSet(Protocol):
 class SingleSensor:
     """Presents a one-reading backend (SCD4x, simulated, world) as a sensor set."""
 
-    def __init__(self, backend: SensorBackend, info: SensorInfo) -> None:
+    def __init__(self, backend: SensorBackend, sensor_info: SensorInfo) -> None:
         self.backend = backend
-        self.info = info
+        self.sensor_info = sensor_info
 
     def start(self) -> None:
         self.backend.start()
 
     def sensors(self) -> list[SensorInfo]:
-        return [self.info]
+        return [self.sensor_info]
 
     def read_all(self) -> list[tuple[str, Reading]]:
         reading = self.backend.read()
-        return [] if reading is None else [(self.info.sensor_id, reading)]
+        return [] if reading is None else [(self.sensor_info.sensor_id, reading)]
 
     def stop(self) -> None:
         self.backend.stop()
@@ -118,170 +144,121 @@ class SensorBackend(Protocol):
     def describe(self) -> str: ...
 
 
-def crc8(data: bytes | list[int]) -> int:
-    """Sensirion CRC-8: poly 0x31, init 0xFF."""
-    crc = 0xFF
-    for b in data:
-        crc ^= b
-        for _ in range(8):
-            crc = ((crc << 1) ^ 0x31) & 0xFF if (crc & 0x80) else (crc << 1) & 0xFF
+def crc8(message: bytes | list[int]) -> int:
+    """Sensirion CRC-8."""
+    crc = _CRC8_INITIAL
+    for byte in message:
+        crc ^= byte
+        for _bit in range(_BITS_PER_BYTE):
+            shifted = (crc << 1) & _BYTE_MASK
+            crc = shifted ^ _CRC8_POLYNOMIAL if crc & _CRC8_HIGH_BIT else shifted
     return crc
 
 
-def decode_words(raw: list[int]) -> list[int]:
+def split_word(word: int) -> list[int]:
+    return [(word >> 8) & _BYTE_MASK, word & _BYTE_MASK]
+
+
+def decode_words(reply: list[int]) -> list[int]:
     """Split a reply into 16-bit words, verifying the CRC of each."""
     words = []
-    for i in range(0, len(raw), 3):
-        hi, lo, crc = raw[i], raw[i + 1], raw[i + 2]
-        if crc8([hi, lo]) != crc:
-            raise OSError(f"CRC mismatch on word {i // 3}; comms are flaky")
-        words.append((hi << 8) | lo)
+    for offset in range(0, len(reply), _BYTES_PER_WORD_WITH_CRC):
+        high_byte, low_byte, crc = reply[offset], reply[offset + 1], reply[offset + 2]
+        if crc8([high_byte, low_byte]) != crc:
+            word_index = offset // _BYTES_PER_WORD_WITH_CRC
+            raise OSError(f"CRC mismatch on word {word_index}; comms are flaky")
+        words.append((high_byte << 8) | low_byte)
     return words
 
 
 def convert_temperature(raw_word: int) -> float:
-    return -45 + 175 * raw_word / 65535
+    return _TEMPERATURE_FLOOR_C + _TEMPERATURE_SPAN_C * raw_word / _WORD_FULL_SCALE
 
 
 def convert_humidity(raw_word: int) -> float:
-    return 100 * raw_word / 65535
+    return _HUMIDITY_SPAN_PCT * raw_word / _WORD_FULL_SCALE
 
 
-def judge_co2(raw: int, lo: int, hi: int) -> Measurement:
-    """Is this word a measurement, or the sensor failing to have an answer?
+def encode_temperature_offset(offset_c: float) -> int:
+    return int(round(offset_c * _WORD_FULL_SCALE / _TEMPERATURE_SPAN_C)) & _WORD_MASK
 
-    The guard used to be `0 < raw < 40000` - the chip's whole output width - and
-    a dying SCD41 walked straight through it. Observed on elantris on
-    2026-09-12: 293 ppm (below outdoor air) and 15,723 ppm (three times the
-    sensor's own ceiling), both stored as genuine measurements.
 
-    Low readings are the dangerous direction. The rules engine resolves
-    `node:<slug>` to a SINGLE sample with no averaging, so one spurious 293 ppm
-    is a command to light a propane burner. A rejected reading is merely absent,
-    and Safety rule 4 turns absent into +Infinity, which keeps it off.
+def decode_temperature_offset(word: int) -> float:
+    return round(_TEMPERATURE_SPAN_C * word / _WORD_FULL_SCALE, 2)
 
-    The bounds are config, not constants, because they are a statement about
-    this greenhouse as much as about the chip. The floor is 300 rather than
-    outdoor air: a crop in a closed house genuinely depletes below 400, and a
-    sensor drifting low should read inaccurately rather than fall silent - on
-    2026-09-14 elantris converged on exactly 400 and everything beneath it
-    vanished, which made a miscalibrated sensor indistinguishable from a dead
-    one. Below 300 is refused, because no mechanism here produces that and low
-    is the direction that calls for CO2.
-    """
-    if raw == 0:
-        # The SCD4x's own way of saying it has no answer. Not 0 ppm.
-        return invalid("ppm", "ZERO_READING")
-    if raw < lo:
-        return invalid("ppm", f"BELOW_RANGE ({raw} < {lo})")
-    if raw > hi:
-        return invalid("ppm", f"ABOVE_RANGE ({raw} > {hi})")
-    return Measurement(float(raw), True, "ppm")
+
+def judge_co2(raw: int, minimum_ppm: int, maximum_ppm: int) -> Measurement:
+    """See "The CO2 range guard" in docs/Infrastructure/Linux Agent.md."""
+    if raw == _SCD4X_NO_ANSWER:
+        return invalid(UNIT_PPM, "ZERO_READING")
+    if raw < minimum_ppm:
+        return invalid(UNIT_PPM, f"BELOW_RANGE ({raw} < {minimum_ppm})")
+    if raw > maximum_ppm:
+        return invalid(UNIT_PPM, f"ABOVE_RANGE ({raw} > {maximum_ppm})")
+    return Measurement(float(raw), True, UNIT_PPM)
 
 
 class RateGuard:
-    """Refuse readings that arrive faster than the greenhouse can actually move.
-
-    The range guard catches impossible VALUES. This catches impossible
-    CHANGES, which is the failure the range guard cannot see: on 2026-09-13 the
-    sensor emitted jumps of 154, 184 and 489 ppm between consecutive 10-second
-    samples. Every one of those was inside 400-5000 and sailed through, while
-    being physically impossible - the worst was 2933 ppm/min.
-
-    The threshold is calibrated against a KNOWN-GOOD day, not against theory.
-    100 ppm/min is the fastest the greenhouse has genuinely moved, but that is a
-    net rate over minutes; per-sample rates carry the sensor's quantisation
-    noise over a 10-second window and routinely reach 285 ppm/min (p99) on a
-    healthy sensor, peaking at 390. A 200 ppm/min limit therefore refused 2.8%
-    of a clean day - MORE than it refused of a degraded one. 400 separates them:
-    nothing on the clean day, 1.1% on the degraded one.
-
-    Three cases have to be handled or the guard is worse than nothing:
-
-    - **A gap.** After a restart or a stretch of refusals there is no basis for
-      comparison, so accept and re-baseline rather than reject on a stale
-      reference.
-    - **A genuine step.** Forced recalibration moves the whole scale at once,
-      and a guard that never re-baselines would reject everything afterwards
-      forever. So after `resync_after` consecutive refusals it re-baselines -
-      but only on CORROBORATION. Accepting the next reading unconditionally is
-      what let 3647 ppm through on 2026-09-15 while the sensor was spewing: a
-      failing sensor produces refusals just as persistently as a real step does.
-      A genuine step settles at a new level, so the candidate must be confirmed
-      by a following reading close to it before either is believed.
-    - **Never re-baseline on a refusal.** A spike must not become the reference
-      the next reading is judged against, or one bad sample drags the guard
-      along behind it.
-    """
+    """Refuse impossible changes; see "The rate guard" in docs/Infrastructure/Linux Agent.md."""
 
     def __init__(
         self,
-        max_ppm_per_min: float = 400.0,
+        max_change_per_min: float = DEFAULT_MAX_CO2_CHANGE_PPM_PER_MIN,
         max_gap_s: float = 120.0,
         resync_after: int = 3,
-        corroborate_within_ppm: float = 60.0,
-        unit: str = "ppm",
+        corroborate_within: float = 60.0,
+        unit: str = UNIT_PPM,
     ) -> None:
-        # The arithmetic is unit-free, and the DS18B20 backend reuses it for
-        # degrees. `unit` only keeps the refusal message honest.
         self.unit = unit
-        self.max_ppm_per_min = max_ppm_per_min
+        self.max_change_per_min = max_change_per_min
         self.max_gap_s = max_gap_s
         self.resync_after = resync_after
-        # How close a confirming reading must be for a candidate step to be
-        # believed. Wide enough for a real setpoint move plus normal noise,
-        # far tighter than the scatter a failing sensor produces.
-        self.corroborate_within_ppm = corroborate_within_ppm
-        self._prev: tuple[float, float] | None = None  # (value, monotonic seconds)
-        self._rejected = 0
+        self.corroborate_within = corroborate_within
+        self._reference: tuple[float, float] | None = None
+        self._consecutive_refusals = 0
         self._candidate: float | None = None
 
-    def judge(self, value: float, at: float) -> tuple[bool, str | None]:
-        prev = self._prev
-        if prev is None:
-            self._prev = (value, at)
-            return True, None
+    def judge(self, value: float, observed_at: float) -> tuple[bool, str | None]:
+        if self._reference is None:
+            return self._accept(value, observed_at)
 
-        dt = at - prev[1]
-        if dt <= 0 or dt > self.max_gap_s:
-            # No usable reference. Accepting is the safe choice: the range
-            # guard still applies, and refusing here would blank the sensor
-            # after every restart.
-            self._prev = (value, at)
-            self._rejected = 0
-            return True, None
+        reference_value, reference_at = self._reference
+        elapsed_s = observed_at - reference_at
+        if not self._is_usable_gap(elapsed_s):
+            return self._accept(value, observed_at)
 
-        rate = abs(value - prev[0]) / (dt / 60.0)
-        if rate <= self.max_ppm_per_min:
-            self._prev = (value, at)
-            self._rejected = 0
-            return True, None
+        rate = abs(value - reference_value) / (elapsed_s / SECONDS_PER_MINUTE)
+        if rate <= self.max_change_per_min:
+            return self._accept(value, observed_at)
+        return self._refuse(value, observed_at, rate)
 
-        self._rejected += 1
-        if self._rejected >= self.resync_after:
-            # Persistent refusals mean EITHER the scale moved or the sensor is
-            # spewing, and those need opposite responses. Wait for corroboration
-            # to tell them apart: a real step settles, garbage scatters.
-            if (
-                self._candidate is not None
-                and abs(value - self._candidate) <= self.corroborate_within_ppm
-            ):
-                self._prev = (value, at)
-                self._rejected = 0
-                self._candidate = None
-                return True, None
-            self._candidate = value
-            return False, (
-                f"RATE_IMPLAUSIBLE ({rate:.0f} {self.unit}/min > {self.max_ppm_per_min:.0f}), "
-                f"awaiting corroboration"
-            )
-        return False, (
-            f"RATE_IMPLAUSIBLE ({rate:.0f} {self.unit}/min > {self.max_ppm_per_min:.0f})"
+    def _is_usable_gap(self, elapsed_s: float) -> bool:
+        return 0 < elapsed_s <= self.max_gap_s
+
+    def _accept(self, value: float, observed_at: float) -> tuple[bool, None]:
+        self._reference = (value, observed_at)
+        self._consecutive_refusals = 0
+        return True, None
+
+    def _refuse(self, value: float, observed_at: float, rate: float) -> tuple[bool, str | None]:
+        self._consecutive_refusals += 1
+        refusal = f"RATE_IMPLAUSIBLE ({rate:.0f} {self.unit}/min > {self.max_change_per_min:.0f})"
+        if self._consecutive_refusals < self.resync_after:
+            return False, refusal
+        if self._is_corroborated(value):
+            self._candidate = None
+            return self._accept(value, observed_at)
+        self._candidate = value
+        return False, f"{refusal}, awaiting corroboration"
+
+    def _is_corroborated(self, value: float) -> bool:
+        return (
+            self._candidate is not None and abs(value - self._candidate) <= self.corroborate_within
         )
 
 
 class Scd4xSensor:
-    """Raw I2C SCD4x. One sensor per bus address; all SCD4x share 0x62."""
+    """Raw I2C SCD4x, derived from the greenhouse's own scd4x_healthcheck.py."""
 
     def __init__(
         self,
@@ -289,242 +266,211 @@ class Scd4xSensor:
         address: int,
         offset_c: float | None,
         altitude_m: int | None,
-        co2_min: int = 300,
-        co2_max: int = 5000,
+        co2_min_ppm: int = DEFAULT_CO2_MIN_PPM,
+        co2_max_ppm: int = DEFAULT_CO2_MAX_PPM,
         asc_enabled: bool = False,
-        max_ppm_per_min: float = 400.0,
+        max_change_ppm_per_min: float = DEFAULT_MAX_CO2_CHANGE_PPM_PER_MIN,
         monotonic=None,
     ):
-        self._bus_no = bus
-        self._addr = address
+        self._bus_number = bus
+        self._address = address
         self._offset_c = offset_c
-        self._co2_min = co2_min
-        self._co2_max = co2_max
-        self._asc_enabled = asc_enabled
-        self.applied_asc: bool | None = None
-        import time as _time
-
-        self._monotonic = monotonic or _time.monotonic
-        # Zero disables it, for a deployment that genuinely changes faster than
-        # this greenhouse can.
-        self._rate_guard = RateGuard(max_ppm_per_min) if max_ppm_per_min > 0 else None
         self._altitude_m = altitude_m
+        self._co2_min_ppm = co2_min_ppm
+        self._co2_max_ppm = co2_max_ppm
+        self._asc_enabled = asc_enabled
+        self._monotonic = monotonic or time.monotonic
+        self._rate_guard = RateGuard(max_change_ppm_per_min) if max_change_ppm_per_min > 0 else None
         self._bus = None
         self.serial: str | None = None
-        # Read back during start(), while the chip is still idle. An attribute
-        # rather than a method because it CANNOT be read later: the SCD4x NACKs
-        # every configuration command once periodic measurement is running, and
-        # that surfaces as a Remote I/O error rather than a wrong answer.
+        # Captured in start(): the chip NACKs every configuration read once it is measuring.
         self.applied_offset_c: float | None = None
+        self.applied_asc: bool | None = None
 
     def start(self) -> None:
         from smbus2 import SMBus
 
-        self._bus = SMBus(self._bus_no)
-        # The chip may be mid periodic-measurement from a previous run, and
-        # every configuration command is rejected while it is.
-        self._send(_STOP_PERIODIC, exec_ms=500, tolerate=True)
-        self._send(_REINIT, exec_ms=30, tolerate=True)
-
-        self.serial = "".join(f"{w:04x}" for w in self._read_words(_GET_SERIAL, 3))
-
-        # Applied every startup rather than trusted to persist. The old code set
-        # it through a driver that never called persist_settings, so it has
-        # almost certainly been lost to every power cycle since.
-        if self._offset_c is not None:
-            self._send(_SET_TEMP_OFFSET, arg=self._encode_offset(self._offset_c))
-        if self._altitude_m is not None:
-            self._send(_SET_ALTITUDE, arg=self._altitude_m)
-
-        # Automatic Self-Calibration, set every startup for the same reason the
-        # offset is.
-        #
-        # ASC assumes the space returns to ~400 ppm outdoor air regularly and
-        # treats the lowest reading it has seen over about a week as that
-        # baseline. An ENRICHED greenhouse never returns there, so ASC keeps
-        # revising the baseline down toward a number the air never reaches, and
-        # the sensor reads progressively low - with no error, no flag, and
-        # nothing downstream able to tell. A sensor reading low is the direction
-        # that calls for more CO2.
-        #
-        # It ships from Sensirion ENABLED, and nothing here touched it before,
-        # so every reading this system has taken was on a sensor quietly
-        # recalibrating itself against an assumption that does not hold.
-        self._send(_SET_ASC, arg=1 if self._asc_enabled else 0)
-
-        # Read the offset back BEFORE measurement starts: this is the only
-        # window the chip will answer in, and an offset that silently failed to
-        # apply is exactly the failure this re-applying exists to catch.
-        self.applied_offset_c = round(175 * self._read_words(_GET_TEMP_OFFSET, 1)[0] / 65535, 2)
-        self.applied_asc = bool(self._read_words(_GET_ASC, 1)[0])
-
-        self._send(_START_PERIODIC)
+        self._bus = SMBus(self._bus_number)
+        self._force_idle()
+        self.serial = "".join(
+            f"{word:04x}" for word in self._read_words(_GET_SERIAL, _SERIAL_WORD_COUNT)
+        )
+        self._apply_configuration()
+        self._read_back_configuration()
+        self.start_periodic_measurement()
 
     def read(self) -> Reading | None:
-        if not (self._read_words(_GET_DATA_READY, 1)[0] & _DATA_READY_MASK):
+        if not self._is_data_ready():
             return None
-        co2_raw, t_raw, rh_raw = self._read_words(_READ_MEASUREMENT, 3)
-
-        co2 = judge_co2(co2_raw, self._co2_min, self._co2_max)
-        # Only rate-check a value that is otherwise credible. Feeding a rejected
-        # one to the guard would let it poison the baseline.
-        if co2.valid and self._rate_guard is not None:
-            ok, reason = self._rate_guard.judge(co2.value, self._monotonic())
-            if not ok:
-                co2 = invalid("ppm", reason or "RATE_IMPLAUSIBLE")
-
+        co2_word, temperature_word, humidity_word = self._read_words(
+            _READ_MEASUREMENT, _MEASUREMENT_WORD_COUNT
+        )
         return Reading(
-            co2_ppm=co2,
-            temperature_c=Measurement(round(convert_temperature(t_raw), 2), True, "C"),
-            humidity_pct=Measurement(round(convert_humidity(rh_raw), 1), True, "%"),
+            co2_ppm=self._judge_co2_word(co2_word),
+            temperature_c=Measurement(
+                round(convert_temperature(temperature_word), 2), True, UNIT_CELSIUS
+            ),
+            humidity_pct=Measurement(round(convert_humidity(humidity_word), 1), True, UNIT_PERCENT),
         )
 
     def self_test(self) -> int:
         """0x0000 is a pass. Takes about 10 seconds."""
-        return self._read_words(_SELF_TEST, 1, exec_ms=10_000)[0]
+        return self._read_words(_SELF_TEST, 1)[0]
 
     def forced_recalibration(self, target_ppm: int) -> int:
-        """Tell the sensor what it SHOULD be reading, and return the correction.
-
-        The repair for a baseline that has gone wrong. ASC assumes the lowest
-        reading of its window is fresh air at 400 ppm; on elantris a failing
-        sensor emitted a cluster of spurious lows around 300 ppm, ASC took those
-        for fresh air, and everything afterwards read about 115 ppm high.
-        Disabling ASC stops that drifting further but FREEZES the bad
-        correction - only an FRC undoes it.
-
-        Requirements the datasheet is strict about, because a bad FRC is worse
-        than the drift it repairs:
-
-        - The sensor must have been in periodic measurement for **at least 3
-          minutes** in the reference environment. The caller enforces this;
-          this method cannot tell how long it has been sitting there.
-        - Measurement must be STOPPED before the command. The chip rejects
-          configuration while sampling.
-
-        Returns the applied correction in ppm - a number worth logging, because
-        it says how far out the sensor was, and a large one is a reason to
-        distrust the sensor rather than to celebrate the fix.
-        """
-        self._send(_STOP_PERIODIC, exec_ms=500, tolerate=True)
-        raw = self._read_words(_PERFORM_FRC, 1, exec_ms=400, arg=target_ppm)[0]
-        self._send(_START_PERIODIC)
-        if raw == 0xFFFF:
+        # The caller must first run periodic measurement in the reference air for 3+ minutes.
+        self.stop_periodic_measurement()
+        raw = self._read_words(_PERFORM_FRC, 1, argument=target_ppm)[0]
+        self.start_periodic_measurement()
+        if raw == _FRC_REJECTED:
             raise OSError(
                 "forced recalibration REJECTED by the sensor. The usual cause is "
                 "too little time in the reference environment - it needs 3+ "
                 "minutes of periodic measurement there first."
             )
-        # The chip returns the correction offset by 0x8000 so it can express a
-        # negative one in an unsigned word.
-        return raw - 0x8000
+        return raw - _FRC_CORRECTION_OFFSET
 
     def persist_settings(self) -> None:
-        self._send(_PERSIST_SETTINGS, exec_ms=800)
+        self._send(_PERSIST_SETTINGS)
+
+    def stop_periodic_measurement(self) -> None:
+        self._send(_STOP_PERIODIC, is_refusal_tolerated=True)
+
+    def start_periodic_measurement(self) -> None:
+        self._send(_START_PERIODIC)
 
     def stop(self) -> None:
         if self._bus is None:
             return
-        self._send(_STOP_PERIODIC, exec_ms=500, tolerate=True)
+        self.stop_periodic_measurement()
         self._bus.close()
         self._bus = None
 
     def describe(self) -> str:
         offset = "unknown" if self.applied_offset_c is None else f"{self.applied_offset_c:.2f}C"
-        # ASC is in the startup line on purpose. It is invisible in the data -
-        # a sensor drifting under ASC looks exactly like a greenhouse getting
-        # leaner - so the log is the only place it can be caught.
-        asc = "?" if self.applied_asc is None else ("ON" if self.applied_asc else "off")
         return (
-            f"scd4x @ i2c-{self._bus_no}:0x{self._addr:02x} "
-            f"serial={self.serial or 'unknown'} offset={offset} asc={asc}"
+            f"scd4x @ i2c-{self._bus_number}:0x{self._address:02x} "
+            f"serial={self.serial or 'unknown'} offset={offset} asc={self._describe_asc()}"
         )
 
-    @staticmethod
-    def _encode_offset(offset_c: float) -> int:
-        return int(round(offset_c * 65535 / 175)) & 0xFFFF
+    def _force_idle(self) -> None:
+        # A previous run may have left it measuring, and it rejects configuration while it is.
+        self.stop_periodic_measurement()
+        self._send(_REINITIALIZE, is_refusal_tolerated=True)
 
-    def _send(self, cmd: int, arg: int | None = None, exec_ms: int = 1, tolerate: bool = False):
+    def _apply_configuration(self) -> None:
+        if self._offset_c is not None:
+            self._send(_SET_TEMPERATURE_OFFSET, argument=encode_temperature_offset(self._offset_c))
+        if self._altitude_m is not None:
+            self._send(_SET_ALTITUDE, argument=self._altitude_m)
+        self._send(_SET_ASC, argument=1 if self._asc_enabled else 0)
+
+    def _read_back_configuration(self) -> None:
+        self.applied_offset_c = decode_temperature_offset(
+            self._read_words(_GET_TEMPERATURE_OFFSET, 1)[0]
+        )
+        self.applied_asc = bool(self._read_words(_GET_ASC, 1)[0])
+
+    def _is_data_ready(self) -> bool:
+        return bool(self._read_words(_GET_DATA_READY, 1)[0] & _DATA_READY_MASK)
+
+    def _judge_co2_word(self, co2_word: int) -> Measurement:
+        co2 = judge_co2(co2_word, self._co2_min_ppm, self._co2_max_ppm)
+        # Only a credible value reaches the rate guard, so a refused one cannot become its baseline.
+        if not co2.valid or self._rate_guard is None:
+            return co2
+        is_plausible, reason = self._rate_guard.judge(co2.value, self._monotonic())
+        return co2 if is_plausible else invalid(UNIT_PPM, reason or "RATE_IMPLAUSIBLE")
+
+    def _describe_asc(self) -> str:
+        if self.applied_asc is None:
+            return "?"
+        return "ON" if self.applied_asc else "off"
+
+    def _send(
+        self, command: int, argument: int | None = None, is_refusal_tolerated: bool = False
+    ) -> None:
         from smbus2 import i2c_msg
 
-        payload = [(cmd >> 8) & 0xFF, cmd & 0xFF]
-        if arg is not None:
-            word = [(arg >> 8) & 0xFF, arg & 0xFF]
-            payload += word + [crc8(word)]
+        frame = split_word(command)
+        if argument is not None:
+            argument_bytes = split_word(argument)
+            frame += argument_bytes + [crc8(argument_bytes)]
         try:
-            self._bus.i2c_rdwr(i2c_msg.write(self._addr, payload))
+            self._bus.i2c_rdwr(i2c_msg.write(self._address, frame))
         except OSError:
-            # Only the idle-forcing commands at startup tolerate a refusal; a
-            # failure anywhere else must surface.
-            if not tolerate:
+            if not is_refusal_tolerated:
                 raise
-        time.sleep(exec_ms / 1000.0)
+        execution_time_ms = _EXECUTION_TIME_MS.get(command, _DEFAULT_EXECUTION_TIME_MS)
+        time.sleep(execution_time_ms / MILLISECONDS_PER_SECOND)
 
-    def _read_words(
-        self, cmd: int, nwords: int, exec_ms: int = 1, arg: int | None = None
-    ) -> list[int]:
+    def _read_words(self, command: int, word_count: int, argument: int | None = None) -> list[int]:
         from smbus2 import i2c_msg
 
-        # `arg` is for the few commands that take a parameter AND answer -
-        # forced recalibration is the only one today.
-        self._send(cmd, arg=arg, exec_ms=exec_ms)
-        msg = i2c_msg.read(self._addr, nwords * 3)
-        self._bus.i2c_rdwr(msg)
-        return decode_words(list(msg))
+        self._send(command, argument=argument)
+        read_message = i2c_msg.read(self._address, word_count * _BYTES_PER_WORD_WITH_CRC)
+        self._bus.i2c_rdwr(read_message)
+        return decode_words(list(read_message))
+
+
+SIMULATED_BURNER_PIN = 16
+SIMULATED_FAN_PIN = 20
+SIMULATED_START_MINUTES = 360
+MINUTES_PER_DAY = 24 * 60
+# The relays are active-LOW, so 0 means energised.
+ENERGISED_LEVEL = 0
 
 
 class SimulatedSensor:
-    """A closed loop, not a random number generator.
+    """A closed loop: the simulated relays push temperature and CO2, so rules are observable."""
 
-    Temperature follows a diurnal curve and CO2 decays toward ambient, both
-    pushed by whatever the simulated relays are doing. That makes "burner on ->
-    CO2 climbs -> the rule turns it off" observable with no hardware, which is
-    what lets the whole stack be exercised on a laptop.
-    """
+    _INITIAL_TEMPERATURE_C = 18.0
+    _INITIAL_CO2_PPM = 600.0
+    _INITIAL_HUMIDITY_PCT = 55.0
+    _DIURNAL_MEAN_C = 18
+    _DIURNAL_AMPLITUDE_C = 7
+    _DIURNAL_PHASE_MINUTES = 300
+    _TEMPERATURE_PULL = 0.05
+    _BURNER_HEATING_C = 0.25
+    _FAN_COOLING_C = 0.4
+    _CO2_DECAY_PPM = -8
+    _BURNER_CO2_PPM = 45
+    _FAN_CO2_PPM = 30
+    _CO2_RANGE_PPM = (400.0, 2500.0)
+    _HUMIDITY_RANGE_PCT = (20.0, 95.0)
+    _FAN_DRYING_PCT = -0.5
+    _IDLE_HUMIDIFYING_PCT = 0.2
 
     def __init__(
         self,
         gpio=None,
-        burner_pin: int = 16,
-        fan_pin: int = 20,
-        start_minutes: int = 360,
+        burner_pin: int = SIMULATED_BURNER_PIN,
+        fan_pin: int = SIMULATED_FAN_PIN,
+        start_minutes: int = SIMULATED_START_MINUTES,
     ):
         self._gpio = gpio
         self._burner_pin = burner_pin
         self._fan_pin = fan_pin
         self._minutes = start_minutes
-        self._temperature = 18.0
-        self._co2 = 600.0
-        self._humidity = 55.0
+        self._temperature = self._INITIAL_TEMPERATURE_C
+        self._co2 = self._INITIAL_CO2_PPM
+        self._humidity = self._INITIAL_HUMIDITY_PCT
 
     def start(self) -> None:
         return None
 
     def read(self) -> Reading:
-        import math
-
-        burner = self._line_energised(self._burner_pin)
-        fan = self._line_energised(self._fan_pin)
-
-        self._minutes = (self._minutes + 1) % (24 * 60)
-        diurnal = 18 + 7 * math.sin(((self._minutes - 300) / 1440) * 2 * math.pi)
-
-        delta = (diurnal - self._temperature) * 0.05 + (0.25 if burner else 0) - (0.4 if fan else 0)
-        self._temperature = round(self._temperature + delta, 2)
-
-        co2_delta = -8 + (45 if burner else 0) - (30 if fan else 0)
-        self._co2 = max(400.0, min(2500.0, self._co2 + co2_delta))
-        self._humidity = max(20.0, min(95.0, self._humidity + (-0.5 if fan else 0.2)))
-
+        is_burner_on = self._is_line_energised(self._burner_pin)
+        is_fan_on = self._is_line_energised(self._fan_pin)
+        self._minutes = (self._minutes + 1) % MINUTES_PER_DAY
+        self._advance_temperature(is_burner_on, is_fan_on)
+        self._advance_co2(is_burner_on, is_fan_on)
+        self._advance_humidity(is_fan_on)
         return Reading(
-            co2_ppm=Measurement(round(self._co2), True, "ppm"),
-            temperature_c=Measurement(self._temperature, True, "C"),
-            humidity_pct=Measurement(round(self._humidity, 1), True, "%"),
+            co2_ppm=Measurement(round(self._co2), True, UNIT_PPM),
+            temperature_c=Measurement(self._temperature, True, UNIT_CELSIUS),
+            humidity_pct=Measurement(round(self._humidity, 1), True, UNIT_PERCENT),
         )
-
-    def _line_energised(self, pin: int) -> bool:
-        # Four of the five relays are active-LOW, so 0 means energised.
-        return self._gpio is not None and self._gpio.level(pin) == 0
 
     def stop(self) -> None:
         return None
@@ -532,47 +478,66 @@ class SimulatedSensor:
     def describe(self) -> str:
         return "simulated scd4x (closed loop)"
 
+    def _advance_temperature(self, is_burner_on: bool, is_fan_on: bool) -> None:
+        day_fraction = (self._minutes - self._DIURNAL_PHASE_MINUTES) / MINUTES_PER_DAY
+        diurnal = self._DIURNAL_MEAN_C + self._DIURNAL_AMPLITUDE_C * math.sin(
+            day_fraction * 2 * math.pi
+        )
+        change = (
+            (diurnal - self._temperature) * self._TEMPERATURE_PULL
+            + (self._BURNER_HEATING_C if is_burner_on else 0)
+            - (self._FAN_COOLING_C if is_fan_on else 0)
+        )
+        self._temperature = round(self._temperature + change, 2)
+
+    def _advance_co2(self, is_burner_on: bool, is_fan_on: bool) -> None:
+        change = (
+            self._CO2_DECAY_PPM
+            + (self._BURNER_CO2_PPM if is_burner_on else 0)
+            - (self._FAN_CO2_PPM if is_fan_on else 0)
+        )
+        self._co2 = _clamp(self._co2 + change, self._CO2_RANGE_PPM)
+
+    def _advance_humidity(self, is_fan_on: bool) -> None:
+        change = self._FAN_DRYING_PCT if is_fan_on else self._IDLE_HUMIDIFYING_PCT
+        self._humidity = _clamp(self._humidity + change, self._HUMIDITY_RANGE_PCT)
+
+    def _is_line_energised(self, pin: int) -> bool:
+        return self._gpio is not None and self._gpio.level(pin) == ENERGISED_LEVEL
+
+
+def _clamp(value: float, bounds: tuple[float, float]) -> float:
+    lowest, highest = bounds
+    return max(lowest, min(highest, value))
+
 
 class WorldSensor:
-    """Reads one position in the shared greenhouse.
-
-    The position is the whole point. `entrance` and `canopy` are the same air
-    but not the same measurement, and a rule tuned against the wrong one is
-    wrong by ~143 ppm of CO2 - which is most of the dead band.
-    """
+    """Reads one position in the shared greenhouse; entrance and canopy differ by ~143 ppm."""
 
     def __init__(self, client, position: str, offset_c: float | None = None) -> None:
         self._client = client
         self._position = position
-        # Applied here rather than in the world, because on real hardware the
-        # offset lives in the sensor. Modelling it agent-side keeps the
-        # calibration path identical in the sandbox and in the greenhouse.
+        # Applied agent-side because on real hardware the offset lives in the sensor, not the air.
         self._offset_c = offset_c
 
     def start(self) -> None:
         return None
 
     def read(self) -> Reading | None:
-        from .world_client import WorldUnreachable
-
         try:
-            body = self._client.read_site(self._position)
-        except WorldUnreachable as exc:
-            # A sensor that cannot be reached has NO reading. Returning a
-            # fabricated one is the failure mode Safety rule 4 exists for.
-            return Reading(
-                co2_ppm=invalid("ppm", f"world unreachable: {exc}"),
-                temperature_c=invalid("C", "world unreachable"),
-                humidity_pct=invalid("%", "world unreachable"),
-            )
+            site = self._client.read_site(self._position)
+        except WorldUnreachable as error:
+            return _unreachable_reading(error)
 
-        temp = float(body["temperature_c"])
+        temperature_c = float(site["temperature_c"])
         if self._offset_c is not None:
-            temp -= self._offset_c
+            temperature_c -= self._offset_c
         return Reading(
-            co2_ppm=Measurement(value=float(body["co2_ppm"]), valid=True, unit="ppm"),
-            temperature_c=Measurement(value=round(temp, 2), valid=True, unit="C"),
-            humidity_pct=Measurement(value=float(body["humidity_pct"]), valid=True, unit="%"),
+            co2_ppm=Measurement(value=float(site["co2_ppm"]), valid=True, unit=UNIT_PPM),
+            temperature_c=Measurement(value=round(temperature_c, 2), valid=True, unit=UNIT_CELSIUS),
+            humidity_pct=Measurement(
+                value=float(site["humidity_pct"]), valid=True, unit=UNIT_PERCENT
+            ),
         )
 
     def stop(self) -> None:
@@ -580,3 +545,11 @@ class WorldSensor:
 
     def describe(self) -> str:
         return f"world sensor at {self._position}"
+
+
+def _unreachable_reading(error: WorldUnreachable) -> Reading:
+    return Reading(
+        co2_ppm=invalid(UNIT_PPM, f"world unreachable: {error}"),
+        temperature_c=invalid(UNIT_CELSIUS, "world unreachable"),
+        humidity_pct=invalid(UNIT_PERCENT, "world unreachable"),
+    )

@@ -16,10 +16,12 @@ from tempestas_agent.gpio import (
     decode_chipinfo,
 )
 
-# The board as wired: BCM 5 -> In6 (CO2), 6 -> In7, 4 -> In8. Active LOW, so 1
-# is the de-energised level and therefore the failsafe for all three.
+# BCM 5 -> In6 (CO2), 6 -> In7, 4 -> In8, active LOW, so 1 is the failsafe for all three.
 LINES = (5, 6, 4)
 FAILSAFE = {5: 1, 6: 1, 4: 1}
+FIRST_HANDLE = 100
+LINE_IN_USE_FLAG = 1
+LINE_IS_OUTPUT_FLAG = 2
 
 
 class FakeLgpio:
@@ -41,11 +43,11 @@ class FakeLgpio:
     def gpiochip_open(self, chip):
         if self.open_fails:
             raise OSError("no such chip")
-        return 100 + chip
+        return FIRST_HANDLE + chip
 
     def gpio_get_line_info(self, _handle, pin):
-        in_use = 1 if pin in self.held else 0
-        return [0, pin, in_use | 2, f"GPIO{pin}", self.held.get(pin, "")]
+        in_use = LINE_IN_USE_FLAG if pin in self.held else 0
+        return [0, pin, in_use | LINE_IS_OUTPUT_FLAG, f"GPIO{pin}", self.held.get(pin, "")]
 
     def gpio_claim_output(self, _handle, pin, level=0, lFlags=0):  # noqa: N803 - the C signature
         if pin in self.held:
@@ -77,29 +79,24 @@ def backend(fake: FakeLgpio | None = None, label: str = "pinctrl-bcm2711") -> Lg
     return LgpioBackend(label, lgpio=fake or FakeLgpio(), resolve=lambda _label: 0)
 
 
-# ------------------------------------------------------------------ chip lookup
-
-
-def test_decode_chipinfo_reads_the_kernel_struct():
-    buf = struct.pack("32s32sI", b"gpiochip0", b"pinctrl-bcm2711", 58)
-    assert decode_chipinfo(buf) == ("gpiochip0", "pinctrl-bcm2711", 58)
-
-
-def test_a_chip_label_that_is_not_present_names_what_was_found():
-    with pytest.raises(GpioUnavailable, match="pinctrl-rp1"):
-        LgpioBackend("pinctrl-rp1", lgpio=FakeLgpio(), resolve=_missing_chip("pinctrl-rp1")).claim(
-            LINES, FAILSAFE
-        )
-
-
-def _missing_chip(label):
+def resolve_missing_chip(label):
     def resolve(_label):
         raise GpioUnavailable(f"no gpiochip is labelled {label!r}; found ['pinctrl-bcm2711']")
 
     return resolve
 
 
-# ------------------------------------------------------------------ claiming
+def test_decode_chipinfo_reads_the_kernel_struct():
+    reply = struct.pack("32s32sI", b"gpiochip0", b"pinctrl-bcm2711", 58)
+    assert decode_chipinfo(reply) == ("gpiochip0", "pinctrl-bcm2711", 58)
+
+
+def test_a_chip_label_that_is_not_present_names_what_was_found():
+    hardware = LgpioBackend(
+        "pinctrl-rp1", lgpio=FakeLgpio(), resolve=resolve_missing_chip("pinctrl-rp1")
+    )
+    with pytest.raises(GpioUnavailable, match="pinctrl-rp1"):
+        hardware.claim(LINES, FAILSAFE)
 
 
 def test_claim_leaves_every_line_at_its_failsafe_level():
@@ -108,9 +105,7 @@ def test_claim_leaves_every_line_at_its_failsafe_level():
     assert fake.levels == {5: 1, 6: 1, 4: 1}
 
 
-# Mitigation 3 in docs/Safety.md, generalised: the bias pulls toward the SAFE
-# level rather than toward a fixed direction, so an active-HIGH line on some
-# future board gets a pull-down without anyone having to remember.
+# Mitigation 3 in docs/Safety.md, generalised so an active-HIGH line gets a pull-down.
 def test_the_bias_pulls_toward_the_safe_level_in_both_directions():
     fake = FakeLgpio()
     backend(fake).claim((5, 26), {5: 1, 26: 0})
@@ -123,11 +118,10 @@ def test_a_line_held_by_another_process_refuses_the_whole_startup():
         backend(fake).claim(LINES, FAILSAFE)
 
 
-# The advisory check only reads line info, which does not see kernel drivers.
-# When it misses, the kernel's own refusal has to be what stops us.
+# Line info does not see kernel drivers, so the kernel's own refusal has to stop us.
 def test_a_claim_the_kernel_refuses_still_stops_startup():
     fake = FakeLgpio()
-    fake.gpio_get_line_info = lambda _h, pin: [0, pin, 2, f"GPIO{pin}", ""]
+    fake.gpio_get_line_info = lambda _handle, pin: [0, pin, LINE_IS_OUTPUT_FLAG, f"GPIO{pin}", ""]
     fake.held = {6: "invisible"}
     with pytest.raises(GpioBusy, match="BCM 6"):
         backend(fake).claim(LINES, FAILSAFE)
@@ -135,7 +129,7 @@ def test_a_claim_the_kernel_refuses_still_stops_startup():
 
 def test_a_line_that_reads_back_wrong_refuses_startup():
     fake = FakeLgpio()
-    fake.gpio_read = lambda _h, pin: 0  # claimed at 1, pad says 0
+    fake.gpio_read = lambda _handle, pin: 0  # claimed at 1, pad says 0
     with pytest.raises(GpioUnavailable, match="reads back 0"):
         backend(fake).claim(LINES, FAILSAFE)
 
@@ -145,96 +139,83 @@ def test_a_missing_failsafe_level_is_refused_here_too():
         backend().claim(LINES, {5: 1, 6: 1})
 
 
-# Measured on hardware: re-claiming keeps the old level and reports success, so
-# a second claim would look like a reset and be a no-op on a live relay.
+# Measured: re-claiming keeps the old level and reports success, a no-op on a live relay.
 def test_claiming_twice_is_refused_rather_than_silently_doing_nothing():
-    hw = backend()
-    hw.claim(LINES, FAILSAFE)
+    hardware = backend()
+    hardware.claim(LINES, FAILSAFE)
     with pytest.raises(GpioUnavailable, match="exactly once"):
-        hw.claim(LINES, FAILSAFE)
-
-
-# ------------------------------------------------------------------ driving
+        hardware.claim(LINES, FAILSAFE)
 
 
 def test_write_and_readback_round_trip():
     fake = FakeLgpio()
-    hw = backend(fake)
-    hw.claim(LINES, FAILSAFE)
-    hw.write(5, 0)
-    assert hw.level(5) == 0
+    hardware = backend(fake)
+    hardware.claim(LINES, FAILSAFE)
+    hardware.write(5, 0)
+    assert hardware.level(5) == 0
     assert fake.levels[5] == 0
 
 
 def test_an_unmanaged_pin_is_refused():
-    hw = backend()
-    hw.claim(LINES, FAILSAFE)
+    hardware = backend()
+    hardware.claim(LINES, FAILSAFE)
     with pytest.raises(GpioUnavailable, match="not managed"):
-        hw.write(21, 0)
+        hardware.write(21, 0)
 
 
 def test_a_level_that_is_not_zero_or_one_is_refused():
-    hw = backend()
-    hw.claim(LINES, FAILSAFE)
+    hardware = backend()
+    hardware.claim(LINES, FAILSAFE)
     with pytest.raises(ValueError, match="must be 0 or 1"):
-        hw.write(5, 2)
+        hardware.write(5, 2)
 
 
-# Unknown is a real answer and the readback path must be able to give it. The
-# alternative is reporting a burner relay as off because a read errored.
+# Reporting a burner relay as off because a read errored is the alternative.
 def test_a_failed_readback_reports_unknown_rather_than_a_level():
     fake = FakeLgpio()
-    hw = backend(fake)
-    hw.claim(LINES, FAILSAFE)
+    hardware = backend(fake)
+    hardware.claim(LINES, FAILSAFE)
     fake.read_errors.add(5)
-    assert hw.level(5) is None
+    assert hardware.level(5) is None
 
 
 def test_level_before_any_claim_is_unknown():
     assert backend().level(5) is None
 
 
-# ------------------------------------------------------------------ failing safe
-
-
 def test_failsafe_drives_every_line_to_its_declared_level():
     fake = FakeLgpio()
-    hw = backend(fake)
-    hw.claim(LINES, FAILSAFE)
-    hw.write(5, 0)
-    hw.write(6, 0)
-    hw.failsafe()
+    hardware = backend(fake)
+    hardware.claim(LINES, FAILSAFE)
+    hardware.write(5, 0)
+    hardware.write(6, 0)
+    hardware.failsafe()
     assert fake.levels == {5: 1, 6: 1, 4: 1}
 
 
-# The dead-man drives the failsafe and THEN publishes its alarm. A raise here
-# would lose the alarm, which is the one message a human needs at that moment.
+# A raise would lose the dead-man's alarm, the one message a human needs at that moment.
 def test_failsafe_keeps_going_and_does_not_raise_when_one_line_fails():
     fake = FakeLgpio()
-    hw = backend(fake)
-    hw.claim(LINES, FAILSAFE)
-    hw.write(5, 0)
-    hw.write(6, 0)
+    hardware = backend(fake)
+    hardware.claim(LINES, FAILSAFE)
+    hardware.write(5, 0)
+    hardware.write(6, 0)
     fake.write_errors.add(5)
-    hw.failsafe()
+    hardware.failsafe()
     assert fake.levels[6] == 1
     assert fake.levels[5] == 0  # the one that failed, honestly still energised
 
 
-# Freeing the line is the operation that hurt the old system. Nothing in the
-# shutdown path may reach for it.
+# Freeing the line is the operation that hurt the old system.
 def test_close_drives_the_failsafe_and_never_releases_the_lines():
     fake = FakeLgpio()
-    hw = backend(fake)
-    hw.claim(LINES, FAILSAFE)
-    hw.write(5, 0)
-    hw.close()
+    hardware = backend(fake)
+    hardware.claim(LINES, FAILSAFE)
+    hardware.write(5, 0)
+    hardware.close()
     assert fake.levels[5] == 1
     assert fake.freed == []
     assert fake.chips_closed == []
-
-
-# ------------------------------------------------------------------ the seam
 
 
 def test_no_lines_means_no_gpio_even_when_a_chip_is_configured():
