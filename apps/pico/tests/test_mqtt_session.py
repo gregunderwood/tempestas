@@ -28,8 +28,8 @@ class FakeSocket:
         del self.incoming[:size]
         return chunk if chunk or self.timeout != 0 else None
 
-    def write(self, data, length=None):
-        self.written += bytes(data[:length] if length is not None else data)
+    def write(self, packet, length=None):
+        self.written += bytes(packet[:length] if length is not None else packet)
 
     def setblocking(self, is_blocking):
         self.timeout = None if is_blocking else 0
@@ -41,8 +41,19 @@ class FakeSocket:
         self.is_closed = True
 
 
-def connected_client(incoming, handled):
-    client = DeferringMqttClient("braize", "broker")
+PINGRESP = bytes((0xD0, 0))
+
+
+class WatchdogFeeds:
+    def __init__(self):
+        self.count = 0
+
+    def __call__(self):
+        self.count += 1
+
+
+def connected_client(incoming, handled, feed_watchdog=None):
+    client = DeferringMqttClient(feed_watchdog or WatchdogFeeds(), "braize", "broker")
     client.sock = FakeSocket(incoming)
     client.socket_timeout = 5
     client.set_message_handler(lambda topic, payload, is_retained: handled.append((topic, payload)))
@@ -92,3 +103,20 @@ def test_close_releases_the_socket_once():
     client.close()
     client.close()
     assert socket.is_closed and client.sock is None
+
+
+def test_feeds_the_watchdog_before_every_wait_for_a_packet():
+    feeds = WatchdogFeeds()
+    client = connected_client(publish_packet(b"heartbeat", b"{}") + puback_packet(FIRST_PACKET_ID), [], feeds)
+    client.publish(b"result", b"{}", False, 1)
+    assert feeds.count == 2
+
+
+def test_counts_pings_until_the_broker_answers():
+    client = connected_client(b"", [])
+    client.ping()
+    client.ping()
+    assert client.unanswered_pings == 2
+    client.sock.incoming += PINGRESP
+    client.check_msg()
+    assert client.unanswered_pings == 0

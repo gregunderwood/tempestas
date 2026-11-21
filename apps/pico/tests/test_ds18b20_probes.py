@@ -46,3 +46,32 @@ def test_says_when_a_named_probe_is_missing_and_ignores_an_unnamed_one():
     assert temperatures_of(probes) == []
     assert any("air" in line and "not on the bus" in line for line in log.lines)
     assert any("not configured" in line for line in log.lines)
+
+
+class OneWireError(Exception):
+    pass
+
+
+def test_a_bus_that_stops_answering_leaves_the_reading_out_instead_of_crashing():
+    probes, log, _ = build_probes({AIR_ROM: 21.0})
+    probes.bus_sensors.bus_failure = OneWireError()
+    assert temperatures_of(probes) == []
+    assert "conversion failed" in log.lines[-1]
+    probes.bus_sensors.bus_failure = None
+    assert temperatures_of(probes) == [("air", 21.0)]
+
+
+def test_a_probe_missing_at_boot_is_read_once_it_is_plugged_in():
+    probes, _, _ = build_probes({})
+    assert temperatures_of(probes) == []
+    probes.bus_sensors.temperatures_by_rom[AIR_ROM] = 4.5
+    assert temperatures_of(probes) == [("air", 4.5)]
+
+
+def test_a_failed_scan_at_boot_is_logged_not_raised():
+    bus_sensors = FakeBusSensors({AIR_ROM: 21.0})
+    bus_sensors.bus_failure = OneWireError()
+    log = RecordingLog()
+    probes = Ds18b20Probes(bus_sensors, {AIR_LINUX_ID: "air"}, lambda milliseconds: None, log)
+    probes.start()
+    assert any("scan failed" in line for line in log.lines)

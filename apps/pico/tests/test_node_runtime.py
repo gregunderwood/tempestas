@@ -55,6 +55,7 @@ class FakeClient:
     def __init__(self, failure=None):
         self.failure = failure
         self.is_closed = False
+        self.unanswered_pings = 0
 
     def check_msg(self):
         if self.failure is not None:
@@ -148,3 +149,19 @@ def test_a_message_that_breaks_its_handler_does_not_end_the_loop(runtime):
     runtime.connection.agent = QuietAgent(KeyError("pin"))
     runtime.connection.deliver(b"tempestas/v1/node/braize/gpio/set", b"{}", False)
     assert "could not be handled" in runtime.module.log.lines[-1]
+
+
+def test_drops_the_connection_when_wifi_goes(runtime):
+    client = FakeClient()
+    runtime.publisher.client = client
+    runtime.connection.wifi.is_connected = False
+    runtime.connection.serve_pending_messages()
+    assert runtime.publisher.client is None and client.is_closed
+
+
+def test_drops_the_connection_when_the_broker_stops_answering_pings(runtime):
+    client = FakeClient()
+    client.unanswered_pings = runtime.module.UNANSWERED_PINGS_BEFORE_DROPPING
+    runtime.publisher.client = client
+    runtime.connection.serve_pending_messages()
+    assert runtime.publisher.client is None

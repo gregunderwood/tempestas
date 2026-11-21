@@ -39,6 +39,7 @@ class MQTTClient:
         self.client_id = client_id
         self.sock = None
         self.socket_timeout = None  # tempestas
+        self.unanswered_pings = 0  # tempestas
         self.server = server
         self.port = port
         self.ssl = ssl
@@ -209,6 +210,7 @@ class MQTTClient:
         if res == b"\xd0":  # PINGRESP
             sz = self.sock.read(1)[0]
             assert sz == 0
+            self.unanswered_pings = 0  # tempestas: lets a dead link be noticed
             return None
         op = res[0]
         if op & 0xF0 != 0x30:
