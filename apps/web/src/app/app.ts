@@ -106,7 +106,7 @@ export class App implements OnInit {
     this.menuOpen.set(false);
   }
 
-  /** The closed menu's links are hidden, so focus goes back to the button that opened it. */
+  // The closed menu's links are hidden, so focus goes back to the button that opened it.
   closeMenuFromKeyboard(): void {
     if (!this.menuOpen()) return;
     this.closeMenu();

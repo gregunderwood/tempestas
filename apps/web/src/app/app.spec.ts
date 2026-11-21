@@ -32,7 +32,7 @@ const ROUTES: Route[] = [
   { path: 'zones', children: [] },
 ];
 
-function setup(status: SystemStatus | null, isConnected = true) {
+function renderShell(status: SystemStatus | null, isConnected = true) {
   const realtime = {
     ...fakeRealtime({
       connected: signal(isConnected),
@@ -68,7 +68,7 @@ async function navigateTo(fixture: { detectChanges(): void }, url: string) {
 
 describe('App shell', () => {
   it('links every screen from the nav', () => {
-    const { nav } = setup(statusOf());
+    const { nav } = renderShell(statusOf());
     const labels = Array.from(nav?.querySelectorAll('a') ?? []).map((link) =>
       link.textContent?.trim(),
     );
@@ -82,14 +82,14 @@ describe('App shell', () => {
   });
 
   it('marks the current screen for a screen reader', async () => {
-    const { fixture, nav } = setup(statusOf());
+    const { fixture, nav } = renderShell(statusOf());
     await navigateTo(fixture, '/readings');
     const current = nav?.querySelector('[aria-current="page"]');
     expect(current?.textContent).toContain('Readings');
   });
 
   it('titles the top bar from the route', async () => {
-    const { fixture, element } = setup(statusOf());
+    const { fixture, element } = renderShell(statusOf());
     await navigateTo(fixture, '/readings');
     expect(element.querySelector('.temp-heading')?.textContent).toBe(
       'Readings',
@@ -100,7 +100,7 @@ describe('App shell', () => {
   });
 
   it('lets a page name itself, until the next navigation', async () => {
-    const { fixture, element } = setup(statusOf());
+    const { fixture, element } = renderShell(statusOf());
     await navigateTo(fixture, '/readings');
     TestBed.inject(PageHeading).showPage({
       heading: 'greenhouse',
@@ -118,7 +118,7 @@ describe('App shell', () => {
   });
 
   it('keeps a page name through a navigation that stays on the page', async () => {
-    const { fixture, element } = setup(statusOf());
+    const { fixture, element } = renderShell(statusOf());
     await navigateTo(fixture, '/readings');
     TestBed.inject(PageHeading).showPage({
       heading: 'greenhouse',
@@ -131,7 +131,7 @@ describe('App shell', () => {
   });
 
   it('says so when the socket is down', () => {
-    const { element } = setup(statusOf(), false);
+    const { element } = renderShell(statusOf(), false);
     expect(element.textContent).toContain('offline');
   });
 });
@@ -144,21 +144,21 @@ describe('App shell stale-sensor banner', () => {
   });
 
   it('is raised when the server says sensors are stale', () => {
-    const { banner } = setup(staleStatus);
+    const { banner } = renderShell(staleStatus);
     expect(banner()?.textContent).toContain('holding its last state');
     expect(banner()?.textContent).toContain('co2_generator');
   });
 
   it('is absent when nothing is stale', () => {
-    expect(setup(statusOf()).banner()).toBeNull();
+    expect(renderShell(statusOf()).banner()).toBeNull();
   });
 
   it('is absent before the first status has arrived', () => {
-    expect(setup(null).banner()).toBeNull();
+    expect(renderShell(null).banner()).toBeNull();
   });
 
   it('sits full width above the page, never inside the nav the narrow layout hides', () => {
-    const { element, nav, banner } = setup(staleStatus);
+    const { element, nav, banner } = renderShell(staleStatus);
     const content = element.querySelector('.temp-content');
     expect(banner()?.parentElement).toBe(content);
     expect(nav?.contains(banner())).toBe(false);
@@ -166,7 +166,7 @@ describe('App shell stale-sensor banner', () => {
   });
 
   it('stays in place while the narrow layout has its menu open', () => {
-    const { fixture, menuButton, nav, banner } = setup(staleStatus);
+    const { fixture, menuButton, nav, banner } = renderShell(staleStatus);
     menuButton?.click();
     fixture.detectChanges();
     expect(nav?.classList.contains('temp-rail-open')).toBe(true);
@@ -175,20 +175,22 @@ describe('App shell stale-sensor banner', () => {
   });
 
   it('offers no way to dismiss it', () => {
-    expect(setup(staleStatus).banner()?.querySelector('button')).toBeNull();
+    expect(
+      renderShell(staleStatus).banner()?.querySelector('button'),
+    ).toBeNull();
   });
 });
 
 // Below 64rem the nav is a drawer; a closed one must leave the tab order and not survive a navigation.
 describe('App shell menu', () => {
   it('starts closed and says so to a screen reader', () => {
-    const { menuButton, nav } = setup(statusOf());
+    const { menuButton, nav } = renderShell(statusOf());
     expect(menuButton?.getAttribute('aria-expanded')).toBe('false');
     expect(nav?.classList.contains('temp-rail-open')).toBe(false);
   });
 
   it('opens and closes on the button', () => {
-    const { fixture, menuButton, nav } = setup(statusOf());
+    const { fixture, menuButton, nav } = renderShell(statusOf());
     menuButton?.click();
     fixture.detectChanges();
     expect(menuButton?.getAttribute('aria-expanded')).toBe('true');
@@ -201,12 +203,12 @@ describe('App shell menu', () => {
   });
 
   it('points the button at the nav it controls', () => {
-    const { menuButton, nav } = setup(statusOf());
+    const { menuButton, nav } = renderShell(statusOf());
     expect(menuButton?.getAttribute('aria-controls')).toBe(nav?.id);
   });
 
   it('closes on Escape', () => {
-    const { fixture, menuButton, nav } = setup(statusOf());
+    const { fixture, menuButton, nav } = renderShell(statusOf());
     menuButton?.click();
     fixture.detectChanges();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
@@ -215,7 +217,7 @@ describe('App shell menu', () => {
   });
 
   it('hands focus back to the menu button on Escape', () => {
-    const { fixture, menuButton, nav } = setup(statusOf());
+    const { fixture, menuButton, nav } = renderShell(statusOf());
     menuButton?.click();
     fixture.detectChanges();
     nav?.querySelector<HTMLElement>('a')?.focus();
@@ -225,7 +227,7 @@ describe('App shell menu', () => {
   });
 
   it('closes on the scrim', () => {
-    const { fixture, element, menuButton, nav } = setup(statusOf());
+    const { fixture, element, menuButton, nav } = renderShell(statusOf());
     menuButton?.click();
     fixture.detectChanges();
     element.querySelector<HTMLElement>('.temp-scrim')?.click();
@@ -234,7 +236,7 @@ describe('App shell menu', () => {
   });
 
   it('closes when a navigation completes', async () => {
-    const { fixture, menuButton, nav } = setup(statusOf());
+    const { fixture, menuButton, nav } = renderShell(statusOf());
     menuButton?.click();
     fixture.detectChanges();
     await navigateTo(fixture, '/readings');
