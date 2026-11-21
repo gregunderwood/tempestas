@@ -2,6 +2,8 @@
 
 NODE_ID = "braize"
 NODE_KIND = "pico"
+# Which file in boards/ the deploy installs as board.py.
+BOARD = "pico_w"
 AGENT_VERSION = "0.1.0"
 
 BROKER_HOST = "192.168.2.70"

@@ -4,7 +4,15 @@ from types import SimpleNamespace
 
 from contract import SERVER_STATUS_TOPIC, AlarmCode
 from ds18b20_probes import Ds18b20Probes
-from fakes import SET_CLOCK_EPOCH_SECONDS, FakeBusSensors, FakeClock, FakeMachine, FakePublisher, RecordingLog
+from fakes import (
+    SET_CLOCK_EPOCH_SECONDS,
+    FakeBusSensors,
+    FakeClock,
+    FakeMachine,
+    FakePublisher,
+    RecordingLog,
+    load_board,
+)
 from iso_time import format_iso
 from node_agent import NodeAgent
 from relay_lines import DRIVEN_LOW_LEVEL, RELEASED_LEVEL, ReleasedWhenHighLines
@@ -38,6 +46,7 @@ class AgentUnderTest:
         self.machine = FakeMachine()
         self.relay_lines = ReleasedWhenHighLines(
             self.machine,
+            load_board("pico_w", self.machine),
             (HEATER_PIN, HEAT_TAPE_PIN),
             {HEATER_PIN: RELEASED_LEVEL, HEAT_TAPE_PIN: RELEASED_LEVEL},
         )

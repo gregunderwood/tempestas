@@ -20,6 +20,7 @@ select = ["E", "F", "I", "B", "SIM"]
 
 [tool.ruff.lint.isort]
 known-first-party = [
+  "board",
   "command_guard",
   "contract",
   "credentials",
