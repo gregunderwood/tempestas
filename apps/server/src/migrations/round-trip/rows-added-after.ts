@@ -1,8 +1,8 @@
 import type { DataSource } from 'typeorm';
 import { AddPinTransitions1789170000000, InitialSchema1788917132521 } from '..';
 
-const ZONE_ID = '00000000-0000-4000-8000-000000000001';
-const NODE_ID = '00000000-0000-4000-8000-000000000002';
+export const ZONE_ID = '00000000-0000-4000-8000-000000000001';
+export const NODE_ID = '00000000-0000-4000-8000-000000000002';
 const DEVICE_ID = '00000000-0000-4000-8000-000000000003';
 const READING_ID = '00000000-0000-4000-8000-000000000004';
 const PIN_TRANSITION_ID = '00000000-0000-4000-8000-000000000005';
@@ -25,13 +25,13 @@ const GREENHOUSE_RULES_BEFORE_DEAD_BAND = {
   timezone: 'America/Edmonton',
 };
 
-interface RowInsert {
+export interface Statement {
   sql: string;
   parameters: unknown[];
 }
 
 // One row per table: the dump compares rows in storage order, which an UPDATE of several can shuffle.
-const ROWS_ADDED_AFTER = new Map<string, RowInsert[]>([
+export const ROWS_ADDED_AFTER = new Map<string, Statement[]>([
   [
     InitialSchema1788917132521.name,
     [
@@ -108,8 +108,15 @@ const ROWS_ADDED_AFTER = new Map<string, RowInsert[]>([
   ],
 ]);
 
-export async function addRowsAfter(migrationName: string, source: DataSource) {
-  for (const { sql, parameters } of ROWS_ADDED_AFTER.get(migrationName) ?? []) {
+export async function runStatements(
+  statements: Statement[],
+  source: DataSource,
+) {
+  for (const { sql, parameters } of statements) {
     await source.query(sql, parameters);
   }
+}
+
+export async function addRowsAfter(migrationName: string, source: DataSource) {
+  await runStatements(ROWS_ADDED_AFTER.get(migrationName) ?? [], source);
 }
