@@ -78,6 +78,23 @@ class AgentUnderTest:
             is_retained,
         )
 
+    def sync(self, level, pin=HEATER_PIN):
+        self.deliver(
+            "/gpio/sync",
+            {
+                "schema": "gpioSync/1",
+                "node": NODE_ID,
+                "ts": format_iso(self.clock.epoch_seconds()),
+                "controller": CONTROLLER,
+                "epoch": 1,
+                "dryRun": False,
+                "intent": [{"pin": pin, "level": level}],
+            },
+        )
+
+    def has_logged(self, fragment):
+        return any(fragment in line for line in self.agent.log.lines)
+
     def levels(self):
         return [self.relay_lines.read_level(pin) for pin in (HEATER_PIN, HEAT_TAPE_PIN)]
 
@@ -137,21 +154,19 @@ def test_refuses_a_foreign_controller_and_leaves_the_lines_alone():
 def test_ignores_a_sync_request_without_touching_the_lines():
     node = AgentUnderTest()
     node.heartbeat()
-    node.deliver(
-        "/gpio/sync",
-        {
-            "schema": "gpioSync/1",
-            "node": NODE_ID,
-            "ts": format_iso(node.clock.epoch_seconds()),
-            "controller": CONTROLLER,
-            "epoch": 1,
-            "dryRun": False,
-            "intent": [{"pin": HEATER_PIN, "level": DRIVEN_LOW_LEVEL}],
-        },
-    )
+    node.sync(DRIVEN_LOW_LEVEL)
     assert node.levels() == [RELEASED_LEVEL, RELEASED_LEVEL]
     assert node.publisher.messages == []
-    assert any("ignored a gpio/sync" in line for line in node.agent.log.lines)
+    assert node.has_logged("ignored a gpio/sync")
+
+
+def test_ignores_a_sync_request_before_any_heartbeat_and_binds_no_controller():
+    node = AgentUnderTest()
+    node.sync(DRIVEN_LOW_LEVEL)
+    assert node.levels() == [RELEASED_LEVEL, RELEASED_LEVEL]
+    assert node.publisher.messages == []
+    assert node.has_logged("ignored a gpio/sync")
+    assert node.agent.bound_controller is None
 
 
 def test_drops_a_retained_command():
