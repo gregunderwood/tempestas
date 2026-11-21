@@ -4,16 +4,13 @@ version = "0.1.0"
 description = "The tempestas node agent: owns one box's sensors and relays, speaks MQTT."
 requires-python = ">=3.11"
 dependencies = [
-  # Raw I2C. Deliberately NOT adafruit-circuitpython-scd4x + Blinka - see
-  # docs/Hardware.md: the raw driver is smaller, needs no swig/liblgpio build,
-  # and gets the data_ready bit mask right where the Adafruit driver does not.
+  # Raw I2C, deliberately not adafruit-circuitpython-scd4x + Blinka; see docs/Hardware.md.
   "smbus2>=0.5.0",
   "paho-mqtt>=2.1.0",
 ]
 
 [project.optional-dependencies]
-# Only on a Pi. Never RPi.GPIO, rpi-lgpio or gpiozero - they fight our handle
-# for the same lines. See docs/Safety.md.
+# Only on a Pi. Never RPi.GPIO, rpi-lgpio or gpiozero: they fight our handle for the same lines.
 gpio = ["lgpio>=0.2.2.0"]
 
 [dependency-groups]

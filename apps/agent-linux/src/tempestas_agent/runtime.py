@@ -1,16 +1,4 @@
-"""Talking to systemd, and refusing to be started twice.
-
-Both of these exist because of specific failures rather than tidiness:
-
-  * `Type=notify` replaces the old system's unconditional `sleep 5` in the app
-    and `sleep 15` in the unit. Sleeping is a guess; readiness is a fact, and
-    anything ordered after this unit deserves the fact.
-  * The single-instance lock exists because two agents sharing a `node_id` fight
-    over one MQTT client id: the broker evicts the older one, its will fires, and
-    the two then alternate `hello`s with different boot ids - which reads in the
-    server log as a node rebooting in a loop. That happened during development
-    and took a while to see. The lock makes it impossible rather than unlikely.
-"""
+"""Talking to systemd, and refusing to be started twice."""
 
 from __future__ import annotations
 
@@ -18,29 +6,45 @@ import fcntl
 import logging
 import os
 import socket
+import subprocess
 from pathlib import Path
 
 log = logging.getLogger("tempestas.agent")
 
+AGENT_SERVICE = "tempestas-agent"
+SYSTEMCTL_TIMEOUT_S = 5
+ABSTRACT_SOCKET_MARKER = "@"
+UNKNOWN_HOLDER = "unknown"
+
 
 def sd_notify(state: str) -> bool:
-    """Send a notification to systemd. A no-op when not run by systemd."""
     address = os.environ.get("NOTIFY_SOCKET")
     if not address:
         return False
-    # A leading '@' means the abstract socket namespace, which Python spells
-    # with a leading NUL.
-    if address.startswith("@"):
+    if address.startswith(ABSTRACT_SOCKET_MARKER):
+        # systemd spells the abstract namespace with '@'; Python spells it with a leading NUL.
         address = "\0" + address[1:]
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
-            sock.connect(address)
-            sock.sendall(state.encode())
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notify_socket:
+            notify_socket.connect(address)
+            notify_socket.sendall(state.encode())
         return True
-    except OSError as err:
-        # Never fatal: failing to tell systemd we are ready is much less bad
-        # than not running.
-        log.warning("could not notify systemd: %s", err)
+    except OSError as error:
+        # Never fatal: failing to report readiness is much less bad than not running.
+        log.warning("could not notify systemd: %s", error)
+        return False
+
+
+def is_agent_service_active() -> bool:
+    try:
+        completed = subprocess.run(
+            ["systemctl", "is-active", AGENT_SERVICE],
+            capture_output=True,
+            text=True,
+            timeout=SYSTEMCTL_TIMEOUT_S,
+        )
+        return completed.stdout.strip() == "active"
+    except Exception:
         return False
 
 
@@ -49,11 +53,7 @@ class AlreadyRunning(RuntimeError):
 
 
 class SingleInstance:
-    """An advisory flock, held for the life of the process.
-
-    Advisory on purpose: it also lets a CLI safely refuse to run against a live
-    service, which is the same guarantee the GPIO chip handle will need.
-    """
+    """An advisory flock, held for the life of the process."""
 
     def __init__(self, path: str | Path):
         self._path = Path(path)
@@ -64,18 +64,14 @@ class SingleInstance:
         handle = self._path.open("a+")
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as err:
-            handle.seek(0)
-            holder = handle.read().strip() or "unknown"
+        except BlockingIOError as error:
+            holder = _read_holder_pid(handle)
             handle.close()
             raise AlreadyRunning(
                 f"another agent already holds {self._path} (pid {holder}); "
                 f"two agents on one node_id fight over the same MQTT client id"
-            ) from err
-        handle.seek(0)
-        handle.truncate()
-        handle.write(str(os.getpid()))
-        handle.flush()
+            ) from error
+        _record_own_pid(handle)
         self._handle = handle
 
     def release(self) -> None:
@@ -89,5 +85,17 @@ class SingleInstance:
         self.acquire()
         return self
 
-    def __exit__(self, *_exc) -> None:
+    def __exit__(self, *_exception_details) -> None:
         self.release()
+
+
+def _read_holder_pid(handle) -> str:
+    handle.seek(0)
+    return handle.read().strip() or UNKNOWN_HOLDER
+
+
+def _record_own_pid(handle) -> None:
+    handle.seek(0)
+    handle.truncate()
+    handle.write(str(os.getpid()))
+    handle.flush()

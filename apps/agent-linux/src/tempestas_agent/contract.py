@@ -1,21 +1,4 @@
-"""The MQTT contract, Python side.
-
-This mirrors `libs/domain/src/lib/hardware/mqtt-contract.ts`. The mirroring is
-checked by `tests/test_contract_matches_typescript.py`, which parses the
-TypeScript rather than trusting anyone to keep two files in step by hand.
-
-The safety rules this file carries are not style preferences:
-
-  * COMMANDS ARE NEVER RETAINED, and the retain flag alone does not enforce it -
-    MQTT only sets that flag when delivery is caused by a NEW SUBSCRIPTION, so a
-    retained command published while we are already connected looks completely
-    ordinary. The defence that works is ownership: refuse any command whose
-    `issuedBy` is not the controller we are bound to.
-  * An EMPTY command payload is how a retained command is cleared. Ignore it;
-    never parse it, never react to it.
-  * Every command carries `expiresAt` and must be refused when late.
-  * STALE IS NOT OFF. A line we cannot read back is `known: false`, not 0.
-"""
+"""Python mirror of mqtt-contract.ts; tests/test_contract_matches_typescript.py holds it there."""
 
 from __future__ import annotations
 
@@ -79,8 +62,7 @@ def build_alarm_topic(node_id: str) -> str:
 
 SERVER_STATUS_TOPIC = f"{MQTT_ROOT}/server/status"
 
-# QoS and retain per topic, encoded so they cannot drift into folklore.
-# `retain=False` on the command topics is the single most important entry here.
+# `retain=False` on the command topics is the most important entry here.
 QOS = {
     "hello": (1, False),
     "status": (1, True),
@@ -113,7 +95,6 @@ class AlarmCode:
 
 
 def read_schema_major(schema: object) -> int | None:
-    """`"sample/2"` -> 2. None when it is not a schema string at all."""
     if not isinstance(schema, str):
         return None
     parts = schema.split("/")
