@@ -51,6 +51,14 @@ ssh elantris journalctl -u tempestas-migrate@run.service -n 20 -o cat   # what i
 `/var/backups/tempestas`, and its journal names the file it wrote. After
 `tools/install-deploy-privileges.sh`, none of this asks for a password.
 
+A host whose Postgres runs in Docker (greenhouse) has no `postgresql.service` to hang the backup on,
+so there `run` and `revert` keep asking for a password, and the backup is by hand first:
+
+```bash
+sudo docker exec tempestas-db pg_dump -U tempestas -Fc tempestas > ~/backups/tempestas-$(date +%F)-before-<change>.dump
+sudo systemctl start tempestas-migrate@run.service
+```
+
 ### Naming
 
 `<timestamp>-<PascalCaseName>.ts`, generated. The class name carries the same timestamp
