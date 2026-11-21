@@ -15,128 +15,111 @@ import type {
   Zone,
 } from '@tempestas/domain';
 
-/**
- * Every call is typed against `@tempestas/domain` - the same interfaces the
- * server's DTOs `implement`. The old client hand-duplicated its types and got
- * `Reading.id` wrong (declared `number`, actually a UUID); here that mistake
- * cannot compile.
- */
+const API_ROOT = '/api';
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly http = inject(HttpClient);
-  private readonly base = '/api';
-
-  // ------------------------------------------------------------------ nodes
 
   nodes(options: RequestOptions = {}): Observable<Node[]> {
-    return this.http.get<Node[]>(`${this.base}/nodes`, {
-      context: buildRequestContext(options),
-    });
+    return this.getFromApi<Node[]>('/nodes', options);
   }
 
   admitNode(id: string, payload: AdmitNodePayload = {}): Observable<Node> {
-    return this.http.post<Node>(`${this.base}/nodes/${id}/admit`, payload);
+    return this.postToApi<Node>(`/nodes/${id}/admit`, payload);
   }
 
   disableNode(id: string): Observable<Node> {
-    return this.http.post<Node>(`${this.base}/nodes/${id}/disable`, {});
+    return this.postToApi<Node>(`/nodes/${id}/disable`);
   }
 
-  // ---------------------------------------------------------------- devices
-
   devices(options: RequestOptions = {}): Observable<Device[]> {
-    return this.http.get<Device[]>(`${this.base}/devices`, {
-      context: buildRequestContext(options),
-    });
+    return this.getFromApi<Device[]>('/devices', options);
   }
 
   turnOn(id: string): Observable<Device> {
-    return this.http.post<Device>(`${this.base}/devices/${id}/on`, {});
+    return this.postToApi<Device>(`/devices/${id}/on`);
   }
 
   turnOff(id: string): Observable<Device> {
-    return this.http.post<Device>(`${this.base}/devices/${id}/off`, {});
+    return this.postToApi<Device>(`/devices/${id}/off`);
   }
 
-  /** Bypasses the cooldown, not the already-on check. Never a plain toggle. */
+  // Bypasses the cooldown, not the already-on check, so it is never a plain toggle.
   forceOn(id: string): Observable<Device> {
-    return this.http.post<Device>(`${this.base}/devices/${id}/force-on`, {});
+    return this.postToApi<Device>(`/devices/${id}/force-on`);
   }
 
   setRulesEnabled(id: string, rulesEnabled: boolean): Observable<Device> {
-    return this.http.patch<Device>(`${this.base}/devices/${id}`, {
+    return this.http.patch<Device>(`${API_ROOT}/devices/${id}`, {
       rulesEnabled,
     });
   }
 
-  // --------------------------------------------------------------- readings
-
   latestReadings(options: RequestOptions = {}): Observable<Reading[]> {
-    return this.http.get<Reading[]>(`${this.base}/readings/latest`, {
-      context: buildRequestContext(options),
-    });
+    return this.getFromApi<Reading[]>('/readings/latest', options);
   }
 
   readings(
     query: ReadingsQuery = {},
     options: RequestOptions = {},
   ): Observable<Reading[]> {
-    return this.http.get<Reading[]>(`${this.base}/readings`, {
-      params: toParams(query),
-      context: buildRequestContext(options),
-    });
+    return this.getFromApi<Reading[]>('/readings', options, query);
   }
 
   stats(query: ReadingsQuery = {}): Observable<ReadingStats> {
-    return this.http.get<ReadingStats>(`${this.base}/readings/stats`, {
-      params: toParams(query),
-    });
+    return this.getFromApi<ReadingStats>('/readings/stats', {}, query);
   }
 
-  /** The same window split at the zone's own daylight boundary. */
   dayNightStats(
     query: ReadingsQuery = {},
     options: RequestOptions = {},
   ): Observable<DayNightStats> {
-    return this.http.get<DayNightStats>(
-      `${this.base}/readings/stats/day-night`,
-      {
-        params: toParams(query),
-        context: buildRequestContext(options),
-      },
+    return this.getFromApi<DayNightStats>(
+      '/readings/stats/day-night',
+      options,
+      query,
     );
   }
 
-  // ------------------------------------------------------------------ zones
-
   fetchZones(options: RequestOptions = {}): Observable<Zone[]> {
-    return this.http.get<Zone[]>(`${this.base}/zones`, {
-      context: buildRequestContext(options),
-    });
+    return this.getFromApi<Zone[]>('/zones', options);
   }
-
-  // ------------------------------------------------------------------ rules
 
   fetchLatestRulesCycle(
     options: RequestOptions = {},
   ): Observable<RulesCycle | null> {
-    return this.http
-      .get<{ cycle: RulesCycle | null }>(`${this.base}/rules/latest-cycle`, {
-        context: buildRequestContext(options),
-      })
-      .pipe(map((body) => body.cycle));
+    return this.getFromApi<{ cycle: RulesCycle | null }>(
+      '/rules/latest-cycle',
+      options,
+    ).pipe(map((body) => body.cycle));
   }
 
-  /** Every input alongside every decision. The debugging endpoint. */
   lastEvaluation(): Observable<RulesEvaluation[]> {
-    return this.http.get<RulesEvaluation[]>(
-      `${this.base}/rules/last-evaluation`,
-    );
+    return this.getFromApi<RulesEvaluation[]>('/rules/last-evaluation');
+  }
+
+  private getFromApi<Payload>(
+    path: string,
+    options: RequestOptions = {},
+    query?: ReadingsQuery,
+  ): Observable<Payload> {
+    return this.http.get<Payload>(`${API_ROOT}${path}`, {
+      params: query === undefined ? undefined : buildQueryParams(query),
+      context: buildRequestContext(options),
+    });
+  }
+
+  private postToApi<Payload>(
+    path: string,
+    body: object = {},
+  ): Observable<Payload> {
+    return this.http.post<Payload>(`${API_ROOT}${path}`, body);
   }
 }
 
-/** Undefined keys are dropped rather than sent as the string "undefined". */
-export function toParams(query: ReadingsQuery): HttpParams {
+// Undefined keys are dropped rather than sent as the string "undefined".
+function buildQueryParams(query: ReadingsQuery): HttpParams {
   let params = new HttpParams();
   for (const [key, value] of Object.entries(query)) {
     if (value !== undefined && value !== null) {

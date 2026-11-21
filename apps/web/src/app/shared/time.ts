@@ -3,6 +3,9 @@ export const SECONDS_PER_MINUTE = 60;
 export const MINUTES_PER_HOUR = 60;
 export const MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR;
 
+// setTimeout overflows past this and fires immediately.
+export const LONGEST_TIMEOUT_MILLISECONDS = 2_147_483_647;
+
 export function secondsSince(isoTime: string, now: number): number {
   return Math.max(
     0,

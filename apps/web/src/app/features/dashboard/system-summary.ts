@@ -3,6 +3,7 @@ import type {
   DecisionOutcome,
   DeviceRole,
   RulesCycle,
+  RulesEvaluation,
   SystemStatus,
 } from '@tempestas/domain';
 import {
@@ -15,6 +16,11 @@ import {
 import { secondsSince } from '../../shared/time';
 
 export const UNKNOWN_VALUE = '—';
+
+const OUTCOMES_THAT_REACHED_THE_RELAY: ReadonlySet<string> = new Set([
+  'applied',
+  'already-in-state',
+]);
 
 export type SystemTone = 'calm' | 'warn' | 'alarm';
 
@@ -112,11 +118,9 @@ export function buildZoneTiles(
   );
 }
 
-const REACHED_THE_RELAY = new Set(['applied', 'already-in-state']);
-
 function describeUnappliedDispatch(decision: DecisionOutcome): string | null {
   const unapplied = decision.dispatched.find(
-    (dispatch) => !REACHED_THE_RELAY.has(dispatch.outcome),
+    (dispatch) => !OUTCOMES_THAT_REACHED_THE_RELAY.has(dispatch.outcome),
   );
   return describeDispatch(unapplied);
 }
@@ -140,7 +144,7 @@ function formatClimate(
 
 function listZonesWhere(
   cycle: RulesCycle | null,
-  isMatch: (evaluation: RulesCycle['evaluations'][number]) => boolean,
+  isMatch: (evaluation: RulesEvaluation) => boolean,
 ): string[] {
   return (
     cycle?.evaluations
