@@ -33,10 +33,14 @@ how much boilerplate exists rather than whether the interlocks are tested.
 ### Run commands
 
 ```bash
-npx nx run-many -t lint,test,build     # the gate — always this before declaring done
+npx nx run-many -t lint,test,build,migration-round-trip     # the gate — always this before declaring done
 npx nx test server                     # one project
 npx nx test server -- device-state     # one file, by substring
 ```
+
+`migration-round-trip` needs Docker: it runs every migration against a throwaway Postgres. Its
+config is [../apps/server/vitest.round-trip.config.ts](../apps/server/vitest.round-trip.config.ts),
+named so the workspace does not pick it up as part of `test`.
 
 Vitest globals are on: `describe`, `it`, `expect` and `vi` need no import.
 

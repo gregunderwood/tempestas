@@ -9,5 +9,11 @@
     "target": "es2021"
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "vitest.config.ts"]
+  "exclude": [
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts",
+    "vitest.config.ts",
+    "src/migrations/round-trip/**",
+    "vitest.round-trip.config.ts"
+  ]
 }

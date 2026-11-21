@@ -22,7 +22,7 @@ invariants which keep a burner safe are visible in the code rather than remember
 ### Final-step commands (always run before declaring work done)
 
 ```bash
-npx nx run-many -t lint,test,build     # the gate
+npx nx run-many -t lint,test,build,migration-round-trip     # the gate
 npx nx test server --coverage          # the thresholds are only checked here
 npx prettier --write .                 # format
 ```
@@ -250,7 +250,7 @@ The docs and the commit history are the time capsule.
 
 ## Pitfalls
 
-- **`npx nx run-many -t lint,test,build` is non-negotiable.** See above — `test` cannot see a type error.
+- **`npx nx run-many -t lint,test,build,migration-round-trip` is non-negotiable.** See above — `test` cannot see a type error.
 - **`libs/domain` bans `rxjs`.** An observable in the shared contract would drag a framework into
   the Python-facing types. Streams are a server concern.
 - **Postgres reorders `jsonb` keys.** Never compare a jsonb column with `JSON.stringify`; compare
