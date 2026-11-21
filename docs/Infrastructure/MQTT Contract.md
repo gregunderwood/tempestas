@@ -33,6 +33,8 @@ tempestas/v1/node/{nodeId}/gpio/state/{pin}           node→server  QoS1  retai
 tempestas/v1/node/{nodeId}/gpio/result                node→server  QoS1  retain=false
 tempestas/v1/node/{nodeId}/control/heartbeat          server→node  QoS0  retain=false
 tempestas/v1/node/{nodeId}/alarm                      node→server  QoS1  retain=false
+tempestas/v1/node/{nodeId}/update                     server→node  QoS1  retain=FALSE ← hazard (1.1)
+tempestas/v1/node/{nodeId}/update/status              node→server  QoS1  retain=false  (1.1)
 tempestas/v1/node/{nodeId}/status                     node LWT     QoS1  retain=true
 tempestas/v1/server/status                            server LWT   QoS1  retain=true
 ```
@@ -120,6 +122,63 @@ interface MqttEnvelope {
   successful readback; the caller must not persist a state change otherwise.
 - **`alarm`** — an `AlarmCode` plus severity. Never retained: a retained alarm resurrects a cleared
   fault.
+- **`update`** (1.1) — `id`, `issuedBy`, `expiresAt`, `app`, `version`, `manifestUrl`,
+  `manifestSha256`. Tells a node to install a version of its own agent. See
+  [the update command](#the-update-command).
+- **`update/status`** (1.1) — the command's `id`, a `state` and an optional `reason`. Not retained:
+  the server keeps the history, and a retained `healthy` would describe an update long gone.
+
+## The update command
+
+Added in contract 1.1, so a 1.0 node never subscribes to it and simply never answers. It can replace
+the code on a node that drives a burner relay, so it is a command in every sense `gpio/set` is: the
+server is its only legitimate publisher, it expires, and it is never retained.
+
+```ts
+interface UpdateCommandPayload extends MqttEnvelope {
+  id: string;
+  issuedBy: string;
+  expiresAt: string;
+  app: AgentApp; // 'agent-linux' | 'agent-micropython'
+  version: string; // <contract major>.<contract minor>.<patch>
+  manifestUrl: string; // http(s)
+  manifestSha256: string; // 64 lowercase hex digits
+}
+```
+
+A node judges it in the same order as `gpio/set`, and answers a refusal in one of three ways.
+[`judgeUpdateCommand`](../../libs/domain/src/lib/hardware/update-command.ts) is the reference, and
+each agent's own judge must agree with its spec.
+
+| Refusal                                        | Answer                                  |
+| ---------------------------------------------- | --------------------------------------- |
+| empty payload (a retained clear)               | logged only                             |
+| retain flag set                                | alarm `RETAINED_COMMAND_DROPPED`        |
+| not JSON, or an unknown schema major           | logged only                             |
+| `issuedBy` ≠ bound controller                  | alarm `CONTROLLER_CONFLICT`             |
+| past `expiresAt`                               | alarm `COMMAND_EXPIRED`                 |
+| missing or unparseable `expiresAt`, or no `id` | logged only                             |
+| `app` is not the agent this node runs          | `update/status` `failed`, with a reason |
+| `version` is for another contract major        | `update/status` `failed`, with a reason |
+| a non-http(s) `manifestUrl`, a malformed hash  | `update/status` `failed`, with a reason |
+
+The first five are the `gpio/set` rules unchanged, including that a node with no bound controller
+yet takes any issuer. The last three come from the server, which needs to hear why its update went
+nowhere. A node never crosses a contract major on its own: that needs the server to move first.
+
+Integrity rests on two hashes: `manifestSha256` arrives in a command only the server can publish,
+and the manifest it pins carries a sha256 for every file. The bundles are not signed.
+
+Once accepted, the node reports its progress on `update/status`, keyed by the command's `id`:
+
+```
+downloading → verifying → installing → restarting → healthy
+                                                  ↘ rolled-back
+                       any step                   → failed
+```
+
+`rolled-back` means the new version was installed and did not come up healthy, so the previous one
+is running again. `failed` means it never got that far and nothing changed. Both carry a `reason`.
 
 ## The retained-command trap
 
@@ -156,6 +215,8 @@ in `tools/` implements all of them as a reference:
   `CONTROLLER_CONFLICT`. This is the layer that stops a foreign command being obeyed.
 - **Drop any inbound command carrying the retain flag** and alarm `RETAINED_COMMAND_DROPPED`.
 - **Refuse a command past its `expiresAt`** and alarm `COMMAND_EXPIRED`.
+- **Apply all three to `update` as well** (1.1), and refuse an update for another `app` or another
+  contract major with an `update/status` of `failed`.
 - **Ignore an empty command payload.** A zero-length payload is how a retained command is cleared;
   parsing it throws, and reacting to it creates a publish loop.
 - **Publish `status: offline` (retained) before a clean shutdown.** MQTT **suppresses the will on a
@@ -237,8 +298,11 @@ What this means for anything speaking the contract:
 
 - **A node may not publish another node's topics**, so `node` in a payload can be trusted to match
   the topic it arrived on. That is an ACL guarantee, not a parsing one.
-- **A node may not publish `gpio/set` at all**, including to itself. The `issuedBy` ownership check
-  still runs, because the ACL is one broker's configuration and the check is the contract.
+- **A node may not publish `gpio/set` or `update` at all**, including to itself. The `issuedBy`
+  ownership check still runs, because the ACL is one broker's configuration and the check is the
+  contract.
+- **Only `tempestas-server` may publish `update`**, and a node may publish only its own
+  `update/status`.
 - **Only `tempestas-server` may publish `server/status`**, so another node cannot fake the server's
   LWT.
 - **Read and write are separate grants.** A credential that publishes samples cannot subscribe to

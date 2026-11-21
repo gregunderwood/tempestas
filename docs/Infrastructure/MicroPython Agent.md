@@ -77,6 +77,15 @@ A `gpio/sync` is subscribed to but never applied, as on the Linux agent: only a 
 a line. The Pico logs each one it ignores, so a sync sent to it shows up on the serial console
 rather than vanishing.
 
+## The update command
+
+Contract 1.1 adds `update` and `update/status`, and `contract.py` carries their topics, schemas,
+QoS and the `UpdateState` values, matched against the Linux agent's. The agent reports contract 1.1
+but does not subscribe to `update` yet, so it never answers one. When it does, it judges it exactly
+as it judges `gpio/set`, including refusing quietly until NTP has set the clock, and refuses an
+update for another app or another contract major with an `update/status` of `failed`. The full
+rules are in [MQTT Contract](MQTT%20Contract.md#the-update-command).
+
 ## Running the tests
 
 The device code is plain MicroPython with its hardware passed in, so the tests run under CPython
