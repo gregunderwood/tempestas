@@ -26,14 +26,19 @@ describe('pickNewerCycle', () => {
 
 describe('chooseCurrentCycle', () => {
   const cycle = cycleAt('2026-11-20T21:14:00.000Z');
-  const statusLeading = (isLeading: boolean) => ({ isLeading }) as SystemStatus;
+  const buildStatusLeading = (isLeading: boolean) =>
+    ({ isLeading }) as SystemStatus;
 
   it('shows no cycle on a server that has stopped leading', () => {
-    expect(chooseCurrentCycle(statusLeading(false), cycle, cycle)).toBeNull();
+    expect(
+      chooseCurrentCycle(buildStatusLeading(false), cycle, cycle),
+    ).toBeNull();
   });
 
   it('shows the cycle while leading, or before any status arrives', () => {
-    expect(chooseCurrentCycle(statusLeading(true), cycle, null)).toBe(cycle);
+    expect(chooseCurrentCycle(buildStatusLeading(true), cycle, null)).toBe(
+      cycle,
+    );
     expect(chooseCurrentCycle(null, null, cycle)).toBe(cycle);
   });
 });

@@ -9,31 +9,22 @@ import {
   type SystemStatus,
 } from '@tempestas/domain';
 import {
-  appendDevicePush,
-  recordDevicePush,
+  storeDevicePush,
   type NumberedPush,
   type PushedDevice,
 } from './device-pushes';
 
-/**
- * The socket feed, as signals.
- *
- * socket.io rather than a raw WebSocket because a Pi on home WiFi needs
- * reconnection and an event envelope, and the old feed had neither.
- *
- * Note what is NOT here: device state is not treated as authoritative. It
- * arrives as a patch on top of what `GET /api/devices` said, because the server
- * derives `isOn` from timestamps and a socket message can always be missed.
- */
+const SOCKET_TRANSPORTS = ['websocket', 'polling'];
+
+// Device state arrives as a patch on what the API said, since a socket message can always be missed.
 @Injectable({ providedIn: 'root' })
 export class RealtimeService implements OnDestroy {
-  /** Latest reading per sensor, keyed `node/sensor` - a node may carry several probes. */
   readonly readings = signal<Record<string, Reading>>({});
   readonly status = signal<SystemStatus | null>(null);
   readonly connected = signal(false);
   readonly reconnectCount = signal(0);
   readonly devicePushes = signal<ReadonlyMap<string, PushedDevice>>(new Map());
-  /** Every push in arrival order, so two switches of one relay between reads are both seen. */
+  // Every push in arrival order, so two switches of one relay between reads are both seen.
   readonly recentDevicePushes = signal<readonly NumberedPush[]>([]);
   readonly latestRulesCycle = signal<RulesCycle | null>(null);
 
@@ -41,37 +32,29 @@ export class RealtimeService implements OnDestroy {
   private hasConnectedBefore = false;
 
   connect(): void {
-    if (this.socket) {
-      return;
-    }
-    this.socket = io({ transports: ['websocket', 'polling'] });
+    if (this.socket) return;
+    const socket = io({ transports: SOCKET_TRANSPORTS });
+    this.socket = socket;
 
-    this.socket.on('connect', () => this.recordConnect());
-    this.socket.on('disconnect', () => this.connected.set(false));
+    socket.on('connect', () => this.recordConnect());
+    socket.on('disconnect', () => this.connected.set(false));
+    socket.on(REALTIME_EVENTS.readingLatest, (reading: Reading) =>
+      this.recordReading(reading),
+    );
+    socket.on(REALTIME_EVENTS.deviceState, (device: Device) =>
+      storeDevicePush(this, device, Date.now()),
+    );
+    socket.on(REALTIME_EVENTS.systemStatus, (status: SystemStatus) =>
+      this.recordStatus(status),
+    );
+    socket.on(REALTIME_EVENTS.rulesCycle, (cycle: RulesCycle) =>
+      this.latestRulesCycle.set(cycle),
+    );
+  }
 
-    this.socket.on(REALTIME_EVENTS.readingLatest, (reading: Reading) => {
-      this.readings.update((all) => ({
-        ...all,
-        [sensorKey(reading)]: reading,
-      }));
-    });
-    this.socket.on(REALTIME_EVENTS.deviceState, (device: Device) => {
-      const receivedAt = Date.now();
-      this.devicePushes.update((pushes) =>
-        recordDevicePush(pushes, device, receivedAt),
-      );
-      this.recentDevicePushes.update((recentPushes) =>
-        appendDevicePush(recentPushes, { device, receivedAt }),
-      );
-    });
-    this.socket.on(REALTIME_EVENTS.systemStatus, (status: SystemStatus) => {
-      this.status.set(status);
-      // The server forgets its cycle when it stops leading but sends no event saying so.
-      if (status.isLeading === false) this.latestRulesCycle.set(null);
-    });
-    this.socket.on(REALTIME_EVENTS.rulesCycle, (cycle: RulesCycle) => {
-      this.latestRulesCycle.set(cycle);
-    });
+  ngOnDestroy(): void {
+    this.socket?.close();
+    this.socket = undefined;
   }
 
   private recordConnect(): void {
@@ -82,8 +65,16 @@ export class RealtimeService implements OnDestroy {
     this.connected.set(true);
   }
 
-  ngOnDestroy(): void {
-    this.socket?.close();
-    this.socket = undefined;
+  private recordReading(reading: Reading): void {
+    this.readings.update((readings) => ({
+      ...readings,
+      [sensorKey(reading)]: reading,
+    }));
+  }
+
+  private recordStatus(status: SystemStatus): void {
+    this.status.set(status);
+    // The server forgets its cycle when it stops leading but sends no event saying so.
+    if (status.isLeading === false) this.latestRulesCycle.set(null);
   }
 }

@@ -9,15 +9,16 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timeout, type Observable } from 'rxjs';
-import type { RequestOptions } from './background-request';
+import {
+  IN_BACKGROUND,
+  IN_FOREGROUND,
+  type RequestOptions,
+} from './background-request';
 import { RealtimeService } from './realtime.service';
 
 export const REQUEST_TIMEOUT_MILLISECONDS = 15_000;
 export const FIRST_RETRY_AFTER_MILLISECONDS = 10_000;
 export const LONGEST_RETRY_AFTER_MILLISECONDS = 60_000;
-
-const IN_FOREGROUND: RequestOptions = { isBackground: false };
-const IN_BACKGROUND: RequestOptions = { isBackground: true };
 
 export type SourceState = 'loading' | 'loaded' | 'out-of-date' | 'failed';
 
