@@ -8,7 +8,7 @@ from iso_time import format_iso, is_clock_set
 
 MILLISECONDS_PER_SECOND = 1000
 ONLINE_STATE = "online"
-SERVER_OFFLINE_STATE = "offline"
+OFFLINE_STATE = "offline"
 NOT_MEASURED = "NOT_MEASURED"
 CRITICAL_SEVERITY = "critical"
 INFO_SEVERITY = "info"
@@ -44,10 +44,10 @@ class NodeAgent:
     def list_subscriptions(self):
         node_id = self.node_id
         return [
-            (contract.build_gpio_set_topic(node_id), 1),
-            (contract.build_gpio_sync_topic(node_id), 1),
-            (contract.build_heartbeat_topic(node_id), 0),
-            (contract.SERVER_STATUS_TOPIC, 1),
+            (contract.build_gpio_set_topic(node_id), read_quality_of_service("gpioSet")),
+            (contract.build_gpio_sync_topic(node_id), read_quality_of_service("gpioSync")),
+            (contract.build_heartbeat_topic(node_id), read_quality_of_service("heartbeat")),
+            (contract.SERVER_STATUS_TOPIC, read_quality_of_service("serverStatus")),
         ]
 
     def on_message(self, topic, payload, is_retained):
@@ -254,8 +254,13 @@ class NodeAgent:
         return epoch_seconds if is_clock_set(epoch_seconds) else None
 
 
+def read_quality_of_service(message_name):
+    quality_of_service, _is_retained = contract.QOS[message_name]
+    return quality_of_service
+
+
 def is_server_offline(server_status):
-    return server_status is not None and server_status.get("state") == SERVER_OFFLINE_STATE
+    return server_status is not None and server_status.get("state") == OFFLINE_STATE
 
 
 def build_unmeasured_metric(unit):
