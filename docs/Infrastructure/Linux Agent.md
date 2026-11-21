@@ -21,7 +21,7 @@ commit rather than becoming a two-repo dance that will eventually be done wrong 
 - [../../apps/agent-linux/src/tempestas_agent/sensor.py](../../apps/agent-linux/src/tempestas_agent/sensor.py) — raw SCD4x over I²C, and the closed-loop simulator
 - [../../apps/agent-linux/src/tempestas_agent/ds18b20.py](../../apps/agent-linux/src/tempestas_agent/ds18b20.py) — DS18B20 probes over the kernel's 1-Wire sysfs
 - [../../apps/agent-linux/src/tempestas_agent/gpio.py](../../apps/agent-linux/src/tempestas_agent/gpio.py) — the relay backends: `NoGpio`, `SimulatedGpio`, `LgpioBackend`
-- [../../apps/agent-linux/agent.example.toml](../../apps/agent-linux/agent.example.toml) — every option, with the reasoning
+- [../../apps/agent-linux/agent.example.toml](../../apps/agent-linux/agent.example.toml) — every option; the reasoning behind each is on this page
 
 ## Running it
 
@@ -217,6 +217,90 @@ read-back of it** has to happen inside the idle window at startup, which is why
 `applied_offset_c` is an attribute captured during `start()` rather than a method you can call
 later. `tests/test_sensor.py` pins that ordering with a fake bus that records command words.
 
+The temperature offset, altitude and ASC are applied at **every** startup and read back, never
+trusted to persist: the Adafruit setter the old system used never called `persist_settings`, so
+anything set through it was lost to every power cycle.
+
+### The CO2 range guard
+
+`judge_co2` refuses a word outside `[co2_min_ppm, co2_max_ppm]` (300 to 5000 by default). The
+guard used to be `0 < raw < 40000`, the chip's whole output width, and a dying SCD41 walked
+straight through it: on 2026-09-12 elantris stored 293 ppm and 15,723 ppm as genuine.
+
+Low readings are the dangerous direction. The rules engine resolves `node:<slug>` to a single
+sample with no averaging, so one spurious low reading is a command to light the burner. A refused
+reading is absent, and Safety rule 4 turns absent into +Infinity, which keeps the burner off.
+
+The floor is 300, not outdoor air. A crop in a closed house genuinely depletes below 400, and a
+sensor reading somewhat low should go inaccurate rather than silent: on 2026-09-14 elantris
+converged on exactly 400 and everything beneath it vanished, which made a miscalibrated sensor
+impossible to tell from a dead one. Below 300 stays refused, because no mechanism here produces it
+and low is the direction that calls for CO2. A sealed house with a heavy crop lowers the floor in
+config rather than losing the guard. The ceiling is the SCD4x's specified range; the chip can emit
+up to 40000. The bounds are config rather than constants because they describe this greenhouse
+as much as the chip.
+
+### Automatic self-calibration is off by default
+
+Sensirion ship ASC enabled. It treats the lowest reading of roughly the past week as 400 ppm
+outdoor air. An enriched greenhouse never returns there, so ASC keeps revising the baseline toward
+a number the air never reaches, and the sensor reads progressively low, with no error and nothing
+downstream able to tell. Low is the direction that calls for more CO2. Nothing touched ASC before
+2026-09-12, so every earlier reading was taken on a sensor quietly recalibrating itself.
+
+`automatic_self_calibration = true` is right for a sensor-only node in unenriched air, where it
+needs no manual recalibration. The applied value is in the startup log line (`asc=ON`/`asc=off`),
+because a sensor drifting under ASC looks exactly like a greenhouse getting leaner.
+
+### The rate guard
+
+The range guard sees impossible values; `RateGuard` sees impossible **changes**. On 2026-09-13 the
+sensor emitted jumps of 154, 184 and 489 ppm between consecutive 10-second samples, all inside the
+range, the worst at 2933 ppm/min.
+
+The limit is calibrated against a known-good day, not theory. 100 ppm/min is the fastest the
+greenhouse has genuinely moved, but that is a net rate over minutes. Per-sample rates carry the
+sensor's quantisation noise over a 10-second window and reach 285 ppm/min at p99 on a healthy
+sensor, peaking near 390. A 200 ppm/min limit refused 2.8% of a clean day, more than it refused of
+a degraded one; 400 refuses nothing clean and 1.1% degraded. Zero disables it.
+
+Three cases have to be handled or the guard is worse than nothing:
+
+- **A gap.** After a restart, or with time going backwards, there is no usable reference, so the
+  reading is accepted and becomes the new baseline. The range guard still applies.
+- **A genuine step.** Forced recalibration moves the whole scale at once. After `resync_after`
+  consecutive refusals the guard proposes the reading as a candidate, and re-baselines only when
+  the next reading lands within `corroborate_within` of it. Re-baselining unconditionally is what
+  let 3647 ppm through on 2026-09-15 while an overheated sensor was spewing: a failing sensor
+  refuses just as persistently as a real step, but a real step settles and garbage scatters.
+- **A refusal never becomes the reference,** or one spike drags the guard along behind it.
+
+The arithmetic is unit-free, and the DS18B20 backend reuses it per probe at 10 °C/min with a
+1 °C corroboration window.
+
+### Forced recalibration
+
+`tools/scd4x_frc.py --target <ppm>` is the repair for a baseline that has gone wrong. On elantris a
+failing sensor emitted a cluster of lows near 300 ppm, ASC took them for fresh air, and everything
+afterwards read about 115 ppm high. Disabling ASC stops further drift but freezes the bad
+correction; only an FRC undoes it.
+
+- The sensor needs **at least 3 minutes** of periodic measurement in the reference air first (the
+  tool settles for 4), and measurement must be stopped for the command itself.
+- The chip returns the correction offset by `0x8000`, and `0xFFFF` means it refused. The
+  correction is the adjustment made, so its sign is the opposite of the error the sensor carried.
+  A correction above 250 ppm is a reason to distrust the sensor, not to celebrate the fix.
+- Only calibrate when you can say what the air actually is. Outdoor air is about 420-430 ppm. A
+  greenhouse approaches it only with the door open and time to mix; a crop in daylight pulls it
+  below outdoor, and a closed house at night sits well above. A wrong reference does not fail, it
+  moves the error and looks just as authoritative.
+- The tool refuses a spread above 40 ppm across the last six readings, and a trend above
+  0.5 ppm/min across the settle. Spread alone cost a calibration on 2026-09-12: readings fell
+  599 to 571 at a steady 1.5 ppm/min while the last six sat within 11 ppm of each other.
+
+`tools/scd4x_check.py` runs the chip's self-test and samples for a while. Both tools refuse to run
+while the agent is active: the SCD4x answers one reader, and two pollers interleave into nonsense.
+
 ## DS18B20 probes
 
 patji, the pumphouse node, reads two or three waterproof DS18B20s on one 1-Wire bus (BCM4, the
@@ -254,6 +338,10 @@ change.
   before believing that.
 - **`pkill -f tempestas-agent` may not match** the process you mean; `uv run` and the venv
   entrypoint appear differently. Kill by PID.
+- **The MQTT session is clean.** A persistent session is a queue of commands waiting to replay on
+  reconnect, which for a relay that may be holding a burner is a hazard rather than a convenience.
+- **The retained `gpio/state` is republished on every connect.** Otherwise a restarting controller
+  reads the level from before the agent's own restart, not the failsafe its claim just applied.
 - **A graceful stop publishes `status: offline` explicitly.** MQTT suppresses the will on a
   clean disconnect, so without that the node is left looking online forever.
 - **`hello` is not retained,** so a node announces only on its own MQTT connect. A controller that
