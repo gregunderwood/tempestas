@@ -32,9 +32,9 @@ const PERSISTED_ROW = {
 
 function makeService(
   resolution: SampleResolution,
-  raw: unknown[] = [PERSISTED_ROW],
+  insertedRows: unknown[] = [PERSISTED_ROW],
 ) {
-  const execute = vi.fn().mockResolvedValue({ raw });
+  const execute = vi.fn().mockResolvedValue({ raw: insertedRows });
   const returning = vi.fn(() => ({ execute }));
   const orIgnore = vi.fn(() => ({ returning }));
   const values = vi.fn(() => ({ orIgnore }));
@@ -61,7 +61,6 @@ function makeService(
   return { service, values, orIgnore, insert, publishReading };
 }
 
-/** The uuid is what the FK is written from; the bootId scopes the dedupe. */
 const ADMITTED = {
   accepted: true,
   node: { id: 'node-uuid', bootId: 'boot-7' },
@@ -84,8 +83,6 @@ describe('ReadingsIngestService', () => {
     });
   });
 
-  // The whole point of the gate: unbelievable data never enters the table, so
-  // nothing downstream has to remember to re-check.
   it('discards a sample from a pending node without writing anything', async () => {
     const { service, insert } = makeService({
       accepted: false,
@@ -115,16 +112,12 @@ describe('ReadingsIngestService', () => {
     expect(insert).not.toHaveBeenCalled();
   });
 
-  // MQTT QoS 1 is at-least-once. A duplicate sample would mean a duplicate
-  // rules evaluation, so it is absorbed by the unique index, not by a read.
   it('absorbs a QoS-1 duplicate via ON CONFLICT DO NOTHING', async () => {
     const { service, orIgnore } = makeService(ADMITTED, []);
     await expect(service.ingest(sample())).resolves.toBe('duplicate');
     expect(orIgnore).toHaveBeenCalled();
   });
 
-  // A dead sensor whose last good value was low would otherwise let the burner
-  // run indefinitely on a phantom "CO2 is low".
   it('stores an invalid CO2 as null, never as zero', async () => {
     const { service, values } = makeService(ADMITTED);
     await service.ingest(sample({ co2: null }));
@@ -138,10 +131,7 @@ describe('ReadingsIngestService', () => {
   });
 });
 
-// The dedupe key has to include the boot generation. A node's sequence counter
-// restarts at 1 when its agent does - an ESP32 has nowhere cheap to persist one
-// - so without this every sample after a reboot collided with the previous
-// boot's rows and was dropped, presenting as a stale sensor rather than a fault.
+// A node's seq restarts at 1 with its agent, so a node-only key would drop samples after a reboot.
 describe('dedupe is scoped to the node boot', () => {
   it('writes the boot generation alongside the sequence number', async () => {
     const { service, values } = makeService(ADMITTED);
@@ -164,8 +154,6 @@ describe('dedupe is scoped to the node boot', () => {
   });
 });
 
-// The phase 6 checkpoint on the ingest side: a browser gets the row that was
-// actually written, not a reconstruction of it, and only when one was written.
 describe('realtime fan-out', () => {
   it('publishes the persisted row, with its server-stamped id and time', async () => {
     const { service, publishReading } = makeService(ADMITTED);
@@ -188,8 +176,6 @@ describe('realtime fan-out', () => {
     expect(publishReading).not.toHaveBeenCalled();
   });
 
-  // A pending node must not reach the dashboard either. Discarding at ingest is
-  // what keeps every consumer downstream from having to re-check.
   it('publishes nothing for a discarded sample', async () => {
     const { service, publishReading } = makeService({
       accepted: false,

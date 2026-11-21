@@ -2,51 +2,53 @@ import { DateTime } from 'luxon';
 import { isWithinWindow } from '../rules/rules.engine';
 import {
   resolveSegments,
-  wallClockMinutes,
+  parseWallClockMinutes,
   type Segments,
 } from './daylight-segments';
 
-const TZ = 'America/Vancouver';
+const TIMEZONE = 'America/Vancouver';
 const DAY_START = '06:30';
 const DAY_END = '18:30';
 
-/** A local wall-clock time in the greenhouse's zone, as an instant. */
-const at = (iso: string) => DateTime.fromISO(iso, { zone: TZ }).toJSDate();
-const localLabel = (d: Date) =>
-  DateTime.fromJSDate(d, { zone: TZ }).toFormat('yyyy-MM-dd HH:mm');
+const atLocal = (iso: string) =>
+  DateTime.fromISO(iso, { zone: TIMEZONE }).toJSDate();
+const localLabel = (instant: Date) =>
+  DateTime.fromJSDate(instant, { zone: TIMEZONE }).toFormat('yyyy-MM-dd HH:mm');
 
-function segments(nowIso: string): Segments {
-  const result = resolveSegments(at(nowIso), DAY_START, DAY_END, TZ);
+function segmentsAt(nowIso: string): Segments {
+  const result = resolveSegments(atLocal(nowIso), DAY_START, DAY_END, TIMEZONE);
   if (!result) throw new Error('expected segments');
   return result;
 }
 
-describe('wallClockMinutes', () => {
+describe('parseWallClockMinutes', () => {
   it.each([
     ['00:00', 0],
     ['06:30', 390],
     ['18:30', 1110],
     ['23:59', 1439],
   ])('%s is %s minutes', (value, expected) => {
-    expect(wallClockMinutes(value)).toBe(expected);
+    expect(parseWallClockMinutes(value)).toBe(expected);
   });
 
   it.each(['24:00', '12:60', '6:5', 'noon', ''])(
     'refuses %s rather than guessing',
     (value) => {
-      expect(() => wallClockMinutes(value)).toThrow(/wall-clock/);
+      expect(() => parseWallClockMinutes(value)).toThrow(/wall-clock/);
     },
   );
 });
 
 describe('resolveSegments', () => {
-  // By day the sequence reads previous day, last night, today so far - three
-  // contiguous periods, oldest first, rather than a 24-hour window that would
-  // drag yesterday afternoon in with this morning.
+  // Contiguous periods, not a 24-hour window that drags yesterday afternoon in with this morning.
   it('during the day ends with today so far', () => {
-    const periods = segments('2026-09-10T15:00');
-    expect(periods.map((p) => p.kind)).toEqual(['day', 'night', 'day']);
-    expect(periods.map((p) => localLabel(p.from))).toEqual([
+    const periods = segmentsAt('2026-09-10T15:00');
+    expect(periods.map((period) => period.kind)).toEqual([
+      'day',
+      'night',
+      'day',
+    ]);
+    expect(periods.map((period) => localLabel(period.from))).toEqual([
       '2026-09-09 06:30',
       '2026-09-09 18:30',
       '2026-09-10 06:30',
@@ -56,9 +58,13 @@ describe('resolveSegments', () => {
 
   // At night the same rule gives the mirror image.
   it('in the evening ends with tonight so far', () => {
-    const periods = segments('2026-09-10T21:00');
-    expect(periods.map((p) => p.kind)).toEqual(['night', 'day', 'night']);
-    expect(periods.map((p) => localLabel(p.from))).toEqual([
+    const periods = segmentsAt('2026-09-10T21:00');
+    expect(periods.map((period) => period.kind)).toEqual([
+      'night',
+      'day',
+      'night',
+    ]);
+    expect(periods.map((period) => localLabel(period.from))).toEqual([
       '2026-09-09 18:30',
       '2026-09-10 06:30',
       '2026-09-10 18:30',
@@ -66,10 +72,9 @@ describe('resolveSegments', () => {
     expect(localLabel(periods[2].to)).toBe('2026-09-10 21:00');
   });
 
-  // After midnight the night in progress began YESTERDAY evening. Getting this
-  // wrong would report a period starting a few hours in the future.
+  // Getting this wrong would report a period starting a few hours in the future.
   it('after midnight the running night still starts the evening before', () => {
-    const periods = segments('2026-09-11T02:00');
+    const periods = segmentsAt('2026-09-11T02:00');
     const running = periods[periods.length - 1];
     expect(running.kind).toBe('night');
     expect(localLabel(running.from)).toBe('2026-09-10 18:30');
@@ -86,12 +91,13 @@ describe('resolveSegments', () => {
       '2026-09-11T00:00',
       '2026-09-11T05:00',
     ]) {
-      const now = at(nowIso);
-      const periods = segments(nowIso);
+      const now = atLocal(nowIso);
+      const periods = segmentsAt(nowIso);
       expect(periods).toHaveLength(3);
-      for (let i = 1; i < periods.length; i++) {
-        expect(periods[i - 1].to.getTime()).toBe(periods[i].from.getTime());
-        expect(periods[i - 1].kind).not.toBe(periods[i].kind);
+      for (let index = 1; index < periods.length; index++) {
+        const previous = periods[index - 1];
+        expect(previous.to.getTime()).toBe(periods[index].from.getTime());
+        expect(previous.kind).not.toBe(periods[index].kind);
       }
       expect(periods[periods.length - 1].to.getTime()).toBe(now.getTime());
     }
@@ -99,21 +105,26 @@ describe('resolveSegments', () => {
 
   it('returns as many periods as asked for', () => {
     expect(
-      resolveSegments(at('2026-09-10T15:00'), DAY_START, DAY_END, TZ, 5),
+      resolveSegments(
+        atLocal('2026-09-10T15:00'),
+        DAY_START,
+        DAY_END,
+        TIMEZONE,
+        5,
+      ),
     ).toHaveLength(5);
   });
 
   // Start-inclusive: the instant the window opens is already day.
   it('treats the boundary instant as the start of the new period', () => {
-    expect(segments('2026-09-10T06:30').at(-1)?.kind).toBe('day');
-    expect(segments('2026-09-10T18:30').at(-1)?.kind).toBe('night');
+    expect(segmentsAt('2026-09-10T06:30').at(-1)?.kind).toBe('day');
+    expect(segmentsAt('2026-09-10T18:30').at(-1)?.kind).toBe('night');
   });
 
-  // Guessing here would turn a mistyped config into a confident wrong answer.
   it('returns null for a zero-length daylight window', () => {
-    expect(resolveSegments(at('2026-09-10T15:00'), '06:30', '06:30', TZ)).toBe(
-      null,
-    );
+    expect(
+      resolveSegments(atLocal('2026-09-10T15:00'), '06:30', '06:30', TIMEZONE),
+    ).toBe(null);
   });
 
   it('refuses an invalid timezone rather than falling back to the host', () => {
@@ -122,12 +133,9 @@ describe('resolveSegments', () => {
     ).toThrow(/Invalid timezone/);
   });
 
-  // Boundaries are SET in the zone, not added as minutes to midnight. On a
-  // spring-forward day the clock skips an hour, so adding 390 minutes lands on
-  // 07:30 and every period is mislabelled - the DST bug this codebase has
-  // already fixed once.
+  // Adding 390 minutes to midnight on a spring-forward day lands on 07:30, not 06:30.
   it('crosses a DST change with the correct local boundary', () => {
-    const periods = segments('2026-03-08T15:00');
+    const periods = segmentsAt('2026-03-08T15:00');
     const running = periods[periods.length - 1];
     expect(localLabel(running.from)).toBe('2026-03-08 06:30');
     const night = periods[periods.length - 2];
@@ -140,10 +148,7 @@ describe('resolveSegments', () => {
   });
 });
 
-/**
- * The screen must not draw the day/night line anywhere other than where the
- * rules engine draws it, or it explains a decision the controller never made.
- */
+// A screen drawing the line elsewhere would explain a decision the controller never made.
 describe('resolveSegments agrees with the rules engine about now', () => {
   it.each([
     ['06:30', '18:30'],
@@ -151,13 +156,13 @@ describe('resolveSegments agrees with the rules engine about now', () => {
     ['00:00', '12:00'],
     ['23:00', '01:00'],
   ])('for a %s-%s window, at every half hour', (startTime, endTime) => {
-    const start = wallClockMinutes(startTime);
-    const end = wallClockMinutes(endTime);
+    const start = parseWallClockMinutes(startTime);
+    const end = parseWallClockMinutes(endTime);
     for (let minutes = 0; minutes < 1440; minutes += 30) {
-      const now = DateTime.fromISO('2026-09-10T00:00', { zone: TZ })
+      const now = DateTime.fromISO('2026-09-10T00:00', { zone: TIMEZONE })
         .plus({ minutes })
         .toJSDate();
-      const result = resolveSegments(now, startTime, endTime, TZ);
+      const result = resolveSegments(now, startTime, endTime, TIMEZONE);
       if (!result) throw new Error('expected segments');
       const engineSaysDay = isWithinWindow(minutes, start, end);
       expect(result[result.length - 1].kind).toBe(
