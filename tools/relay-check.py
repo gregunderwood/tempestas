@@ -22,7 +22,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "apps/hardware/src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "apps/agent-linux/src"))
 
 from tempestas_agent import gpio as g  # noqa: E402
 

@@ -5,7 +5,7 @@ set -euo pipefail
 
 PORT="${1:-/dev/ttyACM0}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEVICE="$HERE/apps/pico/device"
+DEVICE="$HERE/apps/agent-micropython/device"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 PORT_WAIT_SECONDS=10
 # The RP2040's WATCHDOG CTRL register; bit 30 is ENABLE, and once set it cannot be cleared.
@@ -30,12 +30,12 @@ wait_for_port() {
 }
 
 if [ ! -f "$DEVICE/credentials.py" ]; then
-  echo "No apps/pico/device/credentials.py. Copy credentials.example.py and fill it in." >&2
+  echo "No apps/agent-micropython/device/credentials.py. Copy credentials.example.py and fill it in." >&2
   exit 1
 fi
 
 say "Gate"
-(cd "$HERE/apps/pico" && "$UV" run ruff check . && "$UV" run pytest -q)
+(cd "$HERE/apps/agent-micropython" && "$UV" run ruff check . && "$UV" run pytest -q)
 
 say "Fetching mpremote"
 # Fetched before the reset, so none of the boot grace is spent downloading it.

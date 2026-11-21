@@ -13,8 +13,8 @@ every list below, and why "it compiles and the tests pass" is not the bar here.
 - Where a thing belongs / zones vs nodes vs devices / the hardware seam → Read [./docs/Architecture.md](./docs/Architecture.md)
 - The MQTT topics, payloads, QoS or retain flags → Read [./docs/Infrastructure/MQTT Contract.md](./docs/Infrastructure/MQTT%20Contract.md)
 - Node registration, admission, capabilities, `pending` → Read [./docs/Infrastructure/Nodes.md](./docs/Infrastructure/Nodes.md)
-- The Python agent on a node (`apps/hardware`) → Read [./docs/Infrastructure/Node Agent.md](./docs/Infrastructure/Node%20Agent.md)
-- The MicroPython agent on a Pico W (`apps/pico`) → Read [./docs/Infrastructure/Pico Agent.md](./docs/Infrastructure/Pico%20Agent.md)
+- The CPython agent on a Linux node (`apps/agent-linux`) → Read [./docs/Infrastructure/Linux Agent.md](./docs/Infrastructure/Linux%20Agent.md)
+- The MicroPython agent on a microcontroller (`apps/agent-micropython`) → Read [./docs/Infrastructure/MicroPython Agent.md](./docs/Infrastructure/MicroPython%20Agent.md)
 - Home Assistant, external automation, or "could HA run the rules instead?" → Read [./docs/Infrastructure/Home Assistant.md](./docs/Infrastructure/Home%20Assistant.md)
 - Smart plugs, vendor sensors, pumps, "can we just plug it in?" → Read [./docs/Infrastructure/Off-the-shelf devices.md](./docs/Infrastructure/Off-the-shelf%20devices.md)
 - Entities, schema decisions, queries → Read [./docs/Infrastructure/Database.md](./docs/Infrastructure/Database.md)
@@ -94,7 +94,8 @@ See [docs/Architecture.md](docs/Architecture.md) for full details.
 - **Rules scope to the zone, not the node** — a rule reads a sensor at one end of the greenhouse
   and actuates a relay at the other.
 - **Nx monorepo**: `apps/server` (NestJS), `apps/web` (Angular), `libs/domain` (shared contract),
-  `apps/hardware` (Python node agent, phase 8).
+  `apps/agent-linux` (the CPython node agent), `apps/agent-micropython` (the MicroPython node
+  agent), and `apps/broker` (Mosquitto's config and ACL).
 - **One seam to hardware**: the abstract `HardwareService`. Nothing outside `app/hardware/` may
   import `mqtt`. `HARDWARE_DRIVER=fake|mqtt` is what lets everything be built and tested with no
   Pi, no sidecar and no relays.

@@ -172,7 +172,7 @@ Nx monorepo is 1–2 GiB, and an Angular dev server another 1.5–2.5 GiB, again
 puts Postgres and the sidecar in reach of the OOM killer, and on this box the OOM killer can take
 out the burner controller. It is a safety problem wearing a performance costume.
 
-**Remote-SSH is still fine, scoped:** open `apps/hardware/` as the Remote-SSH folder rather than the
+**Remote-SSH is still fine, scoped:** open `apps/agent-linux/` as the Remote-SSH folder rather than the
 monorepo root, so no tsserver indexes the TypeScript side. Use it for the sidecar, systemd units,
 the Caddyfile and ops work.
 
