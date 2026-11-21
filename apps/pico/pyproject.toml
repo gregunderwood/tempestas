@@ -1,0 +1,37 @@
+[project]
+name = "tempestas-pico"
+version = "0.1.0"
+description = "The tempestas node agent for a Raspberry Pi Pico W, in MicroPython"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 110
+src = ["device", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+  "command_guard",
+  "contract",
+  "credentials",
+  "ds18b20_probes",
+  "iso_time",
+  "node_runtime",
+  "tempestas_mqtt",
+  "node_agent",
+  "relay_lines",
+  "settings",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["device", "tests"]

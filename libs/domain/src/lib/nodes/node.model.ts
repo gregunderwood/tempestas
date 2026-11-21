@@ -6,7 +6,7 @@
  * The uniformity invariant: nothing outside this file may branch on `NodeKind`.
  * The server asks only "does this node expose pin N?" and "which metrics does
  * this sensor publish?" - both answered by `NodeCapabilities`. That is what makes
- * adding a Raspberry Pi, or an ESP32, a matter of data rather than code.
+ * adding a Raspberry Pi, an ESP32 or a Pico W a matter of data rather than code.
  */
 
 /** The node's slug. Immutable after admission - it is the MQTT topic segment. */
@@ -15,6 +15,7 @@ export type NodeId = string;
 export enum NodeKind {
   RaspberryPi = 'rpi',
   Esp32 = 'esp32',
+  PicoW = 'pico',
   /** A stand-in for something that speaks no MQTT, e.g. the legacy Flask system. */
   Virtual = 'virtual',
 }
