@@ -1,10 +1,8 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  DestroyRef,
   computed,
   inject,
-  signal,
   type Signal,
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
@@ -15,6 +13,7 @@ import { injectLiveSource, type SourceState } from '../../core/live-source';
 import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
 import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
+import { injectServerNow } from '../../core/server-now';
 import { Pinboard } from '../../shared/pinboard/pinboard';
 import { buildZoneCards, type ZoneCard } from './zone-view';
 import { formatDuration } from './zone-words';
@@ -552,7 +551,7 @@ export class ZonesPage {
   private readonly cycle = injectLiveRulesCycle();
   private readonly readings = injectLiveReadings();
   private readonly devices = injectLiveDevices();
-  private readonly now = signal(Date.now());
+  private readonly now = injectServerNow(CLOCK_TICK_MILLISECONDS);
 
   private readonly sources: NamedSource[] = [
     { name: 'zones', sourceState: this.zones.sourceState },
@@ -593,14 +592,6 @@ export class ZonesPage {
       now: this.now(),
     });
   });
-
-  constructor() {
-    const clock = setInterval(
-      () => this.now.set(Date.now()),
-      CLOCK_TICK_MILLISECONDS,
-    );
-    inject(DestroyRef).onDestroy(() => clearInterval(clock));
-  }
 
   private nameSourcesIn(state: SourceState): string[] {
     return this.sources

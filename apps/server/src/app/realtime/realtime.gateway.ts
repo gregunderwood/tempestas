@@ -13,7 +13,9 @@ import {
   type Reading,
   type RulesCycle,
   type SystemStatus,
+  type UnsentSystemStatus,
 } from '@tempestas/domain';
+import { Clock } from '../common/clock';
 import { describeError } from '../common/describe-error';
 import { LAN_ORIGINS } from '../common/lan-origins';
 
@@ -28,9 +30,11 @@ export class RealtimeGateway
 
   // Per sensor: replayed per node, a new dashboard would show one probe per node until the others spoke.
   private lastReadingBySensor = new Map<string, Reading>();
-  private lastStatus: SystemStatus | null = null;
+  private lastStatus: UnsentSystemStatus | null = null;
   private latestRulesCycle: RulesCycle | null = null;
   private connectedClientCount = 0;
+
+  constructor(private readonly clock: Clock) {}
 
   handleConnection(client: Socket): void {
     this.connectedClientCount += 1;
@@ -55,9 +59,9 @@ export class RealtimeGateway
     this.emit(REALTIME_EVENTS.deviceState, device);
   }
 
-  publishSystemStatus(status: SystemStatus): void {
+  publishSystemStatus(status: UnsentSystemStatus): void {
     this.lastStatus = status;
-    this.emit(REALTIME_EVENTS.systemStatus, status);
+    this.emit(REALTIME_EVENTS.systemStatus, this.stampSentAt(status));
   }
 
   publishRulesCycle(cycle: RulesCycle): void {
@@ -78,11 +82,18 @@ export class RealtimeGateway
       client.emit(REALTIME_EVENTS.readingLatest, reading);
     }
     if (this.lastStatus) {
-      client.emit(REALTIME_EVENTS.systemStatus, this.lastStatus);
+      client.emit(
+        REALTIME_EVENTS.systemStatus,
+        this.stampSentAt(this.lastStatus),
+      );
     }
     if (this.latestRulesCycle) {
       client.emit(REALTIME_EVENTS.rulesCycle, this.latestRulesCycle);
     }
+  }
+
+  private stampSentAt(status: UnsentSystemStatus): SystemStatus {
+    return { ...status, sentAt: this.clock.now().toISOString() };
   }
 
   // Never throws: every caller is mid-way through an ingest, a relay write or an evaluation.

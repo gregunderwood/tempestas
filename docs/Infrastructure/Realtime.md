@@ -87,6 +87,22 @@ cached and replayed, rather than waiting up to 10 s for the next tick.
 
 See [Safety](../Safety.md).
 
+## Ages are measured on the server's clock
+
+Every age the browser shows (rules ran, decided, read) subtracts a server timestamp from "now".
+A phone a few minutes off would otherwise show "Rules have not run for over a minute" for good
+(phone ahead), or hide a real stall for that long (phone behind).
+
+So `system:status` carries `sentAt`, the server clock as that copy left the server. The gateway
+stamps it on every emit **and on every replay**: a replayed status keeps its old `at`, and
+measuring skew from that would mistake a stalled server for a browser clock running ahead, which
+is exactly the case that hides staleness. `RealtimeService.serverClockOffsetMilliseconds` is
+`sentAt` minus the browser's receive time, re-measured on every status, and `injectServerNow`
+adds it to the browser clock. Until the first status arrives the offset is zero.
+
+Network delay makes the offset read low by that delay, so an age can be milliseconds short. The
+stale-sensor banner itself is unaffected either way: `sensorStale` is decided on the server.
+
 ## Patterns to follow
 
 ### ✅ Publish after the durable write

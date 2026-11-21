@@ -16,6 +16,16 @@ import {
 
 const SOCKET_TRANSPORTS = ['websocket', 'polling'];
 
+// Network delay makes this read slightly low, which ages a timestamp by milliseconds too few.
+export function measureServerClockOffset(
+  status: SystemStatus,
+  receivedAt: number,
+): number {
+  const offset = Date.parse(status.sentAt) - receivedAt;
+  // A status without a readable sentAt would make every age NaN and silence the stall alert.
+  return Number.isFinite(offset) ? offset : 0;
+}
+
 // Device state arrives as a patch on what the API said, since a socket message can always be missed.
 @Injectable({ providedIn: 'root' })
 export class RealtimeService implements OnDestroy {
@@ -27,6 +37,7 @@ export class RealtimeService implements OnDestroy {
   // Every push in arrival order, so two switches of one relay between reads are both seen.
   readonly recentDevicePushes = signal<readonly NumberedPush[]>([]);
   readonly latestRulesCycle = signal<RulesCycle | null>(null);
+  readonly serverClockOffsetMilliseconds = signal(0);
 
   private socket?: Socket;
   private hasConnectedBefore = false;
@@ -74,6 +85,9 @@ export class RealtimeService implements OnDestroy {
 
   private recordStatus(status: SystemStatus): void {
     this.status.set(status);
+    this.serverClockOffsetMilliseconds.set(
+      measureServerClockOffset(status, Date.now()),
+    );
     // The server forgets its cycle when it stops leading but sends no event saying so.
     if (status.isLeading === false) this.latestRulesCycle.set(null);
   }
