@@ -34,6 +34,7 @@ interface RenderOptions {
   firstCycle?: RulesCycle | null;
   failingRequests?: ApiRequest[];
   pendingRequests?: ApiRequest[];
+  browserClockAheadSeconds?: number;
 }
 
 type ApiRequest =
@@ -56,8 +57,11 @@ function respondTo<Body>(
 }
 
 function renderZonesPage(options: RenderOptions = {}): RenderedPage {
-  vi.setSystemTime(NOW);
+  const browserClockAheadMilliseconds =
+    (options.browserClockAheadSeconds ?? 0) * 1_000;
+  vi.setSystemTime(NOW.getTime() + browserClockAheadMilliseconds);
   const realtime = fakeRealtime();
+  realtime.serverClockOffsetMilliseconds.set(-browserClockAheadMilliseconds);
   const firstCycle =
     options.firstCycle === undefined
       ? cycleOf([pumphouseEvaluation()])
@@ -174,6 +178,22 @@ describe('ZonesPage', () => {
   it('says the rules have stopped once a minute passes with no new cycle', () => {
     const { page, render } = renderZonesPage();
     expect(alertText(page)).toBeUndefined();
+    vi.advanceTimersByTime(61_000);
+    render();
+    expect(alertText(page)).toContain('Rules have not run for over a minute.');
+  });
+
+  it('does not say the rules have stopped when the browser clock runs ahead of the server', () => {
+    const { page } = renderZonesPage({ browserClockAheadSeconds: 300 });
+    expect(alertText(page)).toBeUndefined();
+    expect(page.textContent).toContain('rules ran 3 s ago');
+  });
+
+  it('still says the rules have stopped when the browser clock runs behind the server', () => {
+    const { page, render } = renderZonesPage({
+      browserClockAheadSeconds: -300,
+    });
+    expect(page.textContent).toContain('rules ran 3 s ago');
     vi.advanceTimersByTime(61_000);
     render();
     expect(alertText(page)).toContain('Rules have not run for over a minute.');

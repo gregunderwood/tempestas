@@ -107,6 +107,7 @@ function statusOf(overrides: Partial<SystemStatus> = {}): SystemStatus {
     nodesPending: 0,
     isLeading: true,
     lastEvaluationAt: NOW.toISOString(),
+    sentAt: NOW.toISOString(),
     ...overrides,
   };
 }
@@ -146,6 +147,7 @@ interface DashboardSetup {
   dayNight?: DayNightStats | null;
   periodStartReadings?: Reading[];
   periodStartResponses?: (Reading[] | 'fail')[];
+  browserClockAheadSeconds?: number;
 }
 
 interface RenderedDashboard {
@@ -158,8 +160,11 @@ interface RenderedDashboard {
 }
 
 function renderDashboard(options: DashboardSetup = {}): RenderedDashboard {
-  vi.setSystemTime(NOW);
+  const browserClockAheadMilliseconds =
+    (options.browserClockAheadSeconds ?? 0) * 1_000;
+  vi.setSystemTime(NOW.getTime() + browserClockAheadMilliseconds);
   const realtime = fakeRealtime();
+  realtime.serverClockOffsetMilliseconds.set(-browserClockAheadMilliseconds);
   const readingsQueries: ReadingsQuery[] = [];
   realtime.status.set(
     options.status === undefined ? statusOf() : options.status,
@@ -529,6 +534,30 @@ describe('Dashboard stat cards', () => {
     });
     expect(text()).toContain('28-b: no reading for 10 min');
     expect(text()).not.toContain('28-a: no reading');
+  });
+
+  it('ages decisions and readings by the server clock when the browser clock runs ahead', () => {
+    const { page } = renderDashboard({
+      cycle: cycleOf([pumphouseEvaluation()]),
+      readings: [reading({ createdAt: minutesAgo(0.5) })],
+      browserClockAheadSeconds: 300,
+    });
+    expect(page.querySelector('.tile')?.textContent).toContain(
+      'decided 3 s ago',
+    );
+    expect(page.querySelector('.age')?.textContent).toContain('Read 30 s ago');
+    expect(page.querySelector('.card--quiet')).toBeNull();
+  });
+
+  it('still marks a quiet reading when the browser clock runs behind the server', () => {
+    const { page } = renderDashboard({
+      readings: [reading({ createdAt: minutesAgo(10) })],
+      browserClockAheadSeconds: -300,
+    });
+    expect(page.querySelector('.age')?.textContent).toContain(
+      'no reading for 10 min',
+    );
+    expect(page.querySelector('.card--quiet')).not.toBeNull();
   });
 
   it('shows only the metrics each sensor declares, captioned by sensor', () => {

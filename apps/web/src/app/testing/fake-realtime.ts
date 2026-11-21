@@ -21,6 +21,7 @@ export type FakeRealtime = Pick<
   | 'devicePushes'
   | 'recentDevicePushes'
   | 'latestRulesCycle'
+  | 'serverClockOffsetMilliseconds'
 >;
 
 export function fakeRealtime(
@@ -34,6 +35,7 @@ export function fakeRealtime(
     devicePushes: signal<ReadonlyMap<string, PushedDevice>>(new Map()),
     recentDevicePushes: signal<readonly NumberedPush[]>([]),
     latestRulesCycle: signal<RulesCycle | null>(null),
+    serverClockOffsetMilliseconds: signal(0),
     ...overrides,
   };
 }

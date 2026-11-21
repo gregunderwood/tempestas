@@ -19,6 +19,7 @@ function statusOf(overrides: Partial<SystemStatus> = {}): SystemStatus {
     nodesPending: 0,
     isLeading: true,
     lastEvaluationAt: '2026-01-10T12:00:00.000Z',
+    sentAt: '2026-01-10T12:00:00.000Z',
     ...overrides,
   };
 }
