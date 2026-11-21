@@ -10,6 +10,7 @@ import {
   type ZoneFailure,
   type Zone,
 } from '@tempestas/domain';
+import { MILLISECONDS_PER_SECOND } from '../../shared/time';
 
 export const NOW = new Date('2026-11-20T21:14:00.000Z');
 
@@ -78,6 +79,12 @@ export const GREENHOUSE: Zone = {
   },
 };
 
+function secondsBeforeNow(seconds: number): string {
+  return new Date(
+    NOW.getTime() - seconds * MILLISECONDS_PER_SECOND,
+  ).toISOString();
+}
+
 export function node(slug: string, zoneId: string | null): Node {
   return {
     id: `n-${slug}`,
@@ -113,7 +120,7 @@ export function probe(
     temperature,
     humidity: null,
     co2: null,
-    createdAt: new Date(NOW.getTime() - ageSeconds * 1000).toISOString(),
+    createdAt: secondsBeforeNow(ageSeconds),
   };
 }
 
@@ -162,7 +169,7 @@ export function pumphouseEvaluation(
   return {
     zoneId: 'z-pump',
     zoneSlug: 'pumphouse',
-    evaluatedAt: new Date(NOW.getTime() - 3000).toISOString(),
+    evaluatedAt: secondsBeforeNow(3),
     minutesSinceMidnightLocal: 854,
     localTime: '14:14',
     timezone: 'America/Vancouver',
