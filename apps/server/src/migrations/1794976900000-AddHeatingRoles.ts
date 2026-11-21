@@ -32,8 +32,10 @@ export class AddHeatingRoles1794976900000 implements MigrationInterface {
     );
     if (inUse.length > 0) {
       throw new Error(
-        `Devices still use the heating roles (${inUse.map((d) => d.name).join(', ')}); ` +
-          `remove or re-role them before reverting this migration`,
+        `Devices still use the heating roles (${inUse.map((device) => device.name).join(', ')}). ` +
+          `Reverting would mean deleting them or giving a heater a role its rules would drive wrongly. ` +
+          `If the deploy being rolled back applied this migration, restore that deploy's backup; ` +
+          `otherwise fix forward with a new migration`,
       );
     }
     await queryRunner.query(`DROP INDEX "public"."ix_devices_zone_role"`);
