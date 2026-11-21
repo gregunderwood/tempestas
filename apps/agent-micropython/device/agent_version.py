@@ -1,3 +1,4 @@
+AGENT_NAME = "agent-micropython"
 UNSTAMPED_VERSION = "0.0.0+dev"
 
 

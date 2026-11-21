@@ -22,6 +22,7 @@ def test_root_and_schemas_match():
     assert micropython_contract.MQTT_ROOT == linux_contract.MQTT_ROOT
     assert micropython_contract.SCHEMAS == linux_contract.SCHEMAS
     assert micropython_contract.SUPPORTED_MAJOR == linux_contract.SUPPORTED_MAJOR
+    assert micropython_contract.MQTT_CONTRACT_MINOR == linux_contract.MQTT_CONTRACT_MINOR
 
 
 def test_qos_and_retain_match():

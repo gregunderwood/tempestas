@@ -18,6 +18,7 @@ SCHEMAS = {
 }
 
 SUPPORTED_MAJOR = 1
+MQTT_CONTRACT_MINOR = 0
 
 
 def build_node_root(node_id: str) -> str:

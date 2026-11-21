@@ -1,4 +1,5 @@
 import {
+  MQTT_CONTRACT_MAJOR,
   MQTT_ROOT,
   MQTT_SCHEMAS,
   schemaMajor,
@@ -26,7 +27,7 @@ import type {
 // A message that cannot be fully understood is dropped, never partially applied.
 
 /** The contract major this build speaks. An unknown major is refused, not parsed. */
-export const SUPPORTED_MAJOR = 1;
+export const SUPPORTED_MAJOR = MQTT_CONTRACT_MAJOR;
 
 export const EMPTY_PAYLOAD_REASON = 'empty payload';
 
@@ -181,6 +182,8 @@ export function decodeHello(
     value: {
       nodeId,
       kind: payload.kind,
+      agentName:
+        typeof payload.agentName === 'string' ? payload.agentName : null,
       agentVersion:
         typeof payload.agentVersion === 'string'
           ? payload.agentVersion

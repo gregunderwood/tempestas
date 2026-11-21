@@ -95,7 +95,9 @@ export function node(slug: string, zoneId: string | null): Node {
     status: NodeStatus.Admitted,
     online: true,
     lastSeenAt: null,
+    agentName: null,
     agentVersion: null,
+    contractStanding: 'current',
     capabilities: {
       contractVersion: 1,
       hasRtc: true,

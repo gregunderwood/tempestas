@@ -111,12 +111,13 @@ restart drives the relays to their fail-safe levels until the server commands th
 
 ### The version a node reports
 
-`agentVersion` in `hello` is `<pyproject version>+<commit>`, for example `0.1.0+861cde6`, with
-`-dirty` when the agent's directory had uncommitted changes. The deploy script writes it to
+`hello` names the app, `agent-linux`, and an `agentVersion` of
+`<contract major>.<contract minor>.<patch>+<commit>`, for example `1.0.3+861cde6`, with `-dirty`
+when the agent's directory had uncommitted changes. The deploy script writes it to
 `tempestas_agent/deployed_version.py` on the host, and
 [tools/describe-agent-version.sh](../../tools/describe-agent-version.sh) builds it for both agents. A
-checkout that was never deployed by the script reports `+dev`. It answers "which code is on this
-node?"; compatibility is the MQTT contract version's job, not this.
+checkout that was never deployed by the script reports `0.0.0+dev`. What each number promises is in
+[MQTT Contract](MQTT%20Contract.md#versions); the version in `pyproject.toml` is not used.
 
 ### The unit
 

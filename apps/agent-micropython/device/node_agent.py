@@ -3,7 +3,7 @@
 import json
 
 import contract
-from agent_version import read_agent_version
+from agent_version import AGENT_NAME, read_agent_version
 from command_guard import judge_command, parse_json_object
 from iso_time import format_iso, is_clock_set
 
@@ -183,6 +183,7 @@ class NodeAgent:
         sample_interval_milliseconds = int(self.settings.SAMPLE_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND)
         return {
             "contractVersion": contract.SUPPORTED_MAJOR,
+            "contractMinor": contract.MQTT_CONTRACT_MINOR,
             "sensors": [
                 {
                     "sensorId": sensor_id,
@@ -202,6 +203,7 @@ class NodeAgent:
     def build_hello_payload(self):
         payload = self.build_envelope("hello")
         payload["kind"] = self.settings.NODE_KIND
+        payload["agentName"] = AGENT_NAME
         payload["agentVersion"] = self.agent_version
         payload["bootId"] = self.boot_id
         payload["capabilities"] = self.describe_capabilities()
