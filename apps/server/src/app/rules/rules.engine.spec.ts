@@ -100,7 +100,7 @@ function decide(role: DeviceRole, scenario: Scenario = {}): RuleDecision {
         },
     staleRoles: scenario.stale ?? [],
   });
-  const decision = decisions.find((decision) => decision.role === role);
+  const decision = decisions.find((candidate) => candidate.role === role);
   if (!decision) throw new Error(`no decision for ${role}`);
   return decision;
 }
@@ -371,7 +371,7 @@ function pumphouse(
     },
     staleRoles: overrides.stale ? [DeviceRole.Heater, DeviceRole.HeatTape] : [],
   });
-  const decision = decisions.find((decision) => decision.role === role);
+  const decision = decisions.find((candidate) => candidate.role === role);
   if (!decision) throw new Error(`no decision for ${role}`);
   return decision;
 }
