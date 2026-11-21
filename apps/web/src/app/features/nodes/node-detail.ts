@@ -497,13 +497,13 @@ export class NodeDetail {
       new Date(nextBoundary).getTime() -
       Date.now() +
       BOUNDARY_SLACK_MILLISECONDS;
-    if (!canScheduleTimeout(delay)) return;
+    if (isOutsideTimeoutRange(delay)) return;
     this.boundaryTimer = setTimeout(() => this.reload.next(), delay);
   }
 }
 
-function canScheduleTimeout(delay: number): boolean {
-  return delay > 0 && delay <= MAXIMUM_TIMEOUT_MILLISECONDS;
+function isOutsideTimeoutRange(delay: number): boolean {
+  return delay <= 0 || delay > MAXIMUM_TIMEOUT_MILLISECONDS;
 }
 
 function sortNewestFirst(segments: readonly SegmentStats[]): SegmentStats[] {
