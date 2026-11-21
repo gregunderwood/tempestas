@@ -77,9 +77,13 @@ export class ApiService {
     });
   }
 
-  readings(query: ReadingsQuery = {}): Observable<Reading[]> {
+  readings(
+    query: ReadingsQuery = {},
+    options: RequestOptions = {},
+  ): Observable<Reading[]> {
     return this.http.get<Reading[]>(`${this.base}/readings`, {
       params: toParams(query),
+      context: buildRequestContext(options),
     });
   }
 
@@ -90,11 +94,15 @@ export class ApiService {
   }
 
   /** The same window split at the zone's own daylight boundary. */
-  dayNightStats(query: ReadingsQuery = {}): Observable<DayNightStats> {
+  dayNightStats(
+    query: ReadingsQuery = {},
+    options: RequestOptions = {},
+  ): Observable<DayNightStats> {
     return this.http.get<DayNightStats>(
       `${this.base}/readings/stats/day-night`,
       {
         params: toParams(query),
+        context: buildRequestContext(options),
       },
     );
   }
