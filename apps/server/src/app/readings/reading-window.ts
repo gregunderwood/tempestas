@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import type { ReadingsQuery } from '@tempestas/domain';
+import { MILLISECONDS_PER_DAY } from '../common/time-units';
 
 export interface ReadingWindow {
   from: Date;
@@ -7,8 +8,6 @@ export interface ReadingWindow {
 }
 
 type WindowQuery = Pick<ReadingsQuery, 'days' | 'from' | 'to'>;
-
-const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export function resolveReadingWindow(
   query: WindowQuery,

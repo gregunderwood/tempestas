@@ -9,6 +9,7 @@ import {
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
 import { DivergenceLog } from '../common/divergence-log';
+import { MILLISECONDS_PER_SECOND, SECONDS_PER_DAY } from '../common/time-units';
 import { NodesService } from '../nodes/nodes.service';
 import { SensorReadingEntity } from '../readings/models';
 import { RulesService } from '../rules/rules.service';
@@ -17,9 +18,6 @@ import { collectStaleRoles } from '../rules/stale-roles';
 // "Up" is not the question: no fresh readings, or no fresh evaluation, is a greenhouse running open-loop.
 export const READINGS_STALE_AFTER_SECONDS = 120;
 export const EVALUATION_STALE_AFTER_SECONDS = 60;
-
-const SECONDS_PER_DAY = 24 * 60 * 60;
-const MILLISECONDS_PER_SECOND = 1000;
 
 // A day, so an overnight failsafe is still reported in the morning and then clears on its own.
 const DIVERGENCE_WINDOW_SECONDS = SECONDS_PER_DAY;

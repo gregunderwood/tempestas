@@ -9,8 +9,8 @@ import {
   type RulesInput,
   type StalePolicy,
 } from '@tempestas/domain';
+import { MINUTES_PER_HOUR } from '../common/time-units';
 
-const MINUTES_PER_HOUR = 60;
 const LAST_HOUR_OF_DAY = 23;
 const LAST_MINUTE_OF_HOUR = 59;
 const WALL_CLOCK_PATTERN = /^(\d{1,2}):(\d{2})$/;

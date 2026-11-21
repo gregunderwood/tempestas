@@ -1,6 +1,6 @@
 // Pure: nothing here may call `new Date()`, so DST and boundary cases are testable.
 
-const MILLISECONDS_PER_SECOND = 1000;
+import { MILLISECONDS_PER_SECOND } from '../common/time-units';
 
 export interface DeviceTimes {
   onAt: Date | null;

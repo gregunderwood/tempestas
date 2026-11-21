@@ -1,4 +1,4 @@
-const MILLISECONDS_PER_SECOND = 1000;
+import { MILLISECONDS_PER_SECOND } from './time-units';
 
 export abstract class Clock {
   abstract now(): Date;
