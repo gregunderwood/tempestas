@@ -14,6 +14,8 @@ import { NodesService } from '../nodes/nodes.service';
 import { SensorReadingEntity } from '../readings/models';
 import { RulesService } from '../rules/rules.service';
 import { collectStaleRoles } from '../rules/stale-roles';
+import { describeTimezoneDisagreement } from './timezone-agreement';
+import { TimezoneCheckService } from './timezone-check.service';
 
 // "Up" is not the question: no fresh readings, or no fresh evaluation, is a greenhouse running open-loop.
 export const READINGS_STALE_AFTER_SECONDS = 120;
@@ -43,6 +45,7 @@ export class HealthService {
     private readonly rules: RulesService,
     private readonly clock: Clock,
     private readonly divergences: DivergenceLog,
+    private readonly timezones: TimezoneCheckService,
   ) {}
 
   async check(): Promise<HealthReport> {
@@ -86,6 +89,9 @@ export class HealthService {
     }
 
     problems.push(...this.describeRecentDivergences(now));
+    problems.push(
+      ...this.timezones.findDisagreements().map(describeTimezoneDisagreement),
+    );
 
     return {
       status: problems.some(isDegrading) ? 'degraded' : 'ok',

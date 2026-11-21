@@ -6,6 +6,8 @@ import type { SensorReadingEntity } from '../readings/models';
 import type { RulesService } from '../rules/rules.service';
 import { HealthService } from './health.service';
 import { DivergenceLog } from '../common/divergence-log';
+import type { TimezoneDisagreement } from './timezone-agreement';
+import type { TimezoneCheckService } from './timezone-check.service';
 
 const NOW = new Date('2026-01-10T12:00:00Z');
 
@@ -33,6 +35,7 @@ interface Setup {
   failingZones?: Map<string, string>;
   latestReadingPerSensor?: { slug: string; sensorId: string; latest: Date }[];
   divergences?: DivergenceLog;
+  timezoneDisagreements?: TimezoneDisagreement[];
 }
 
 function makeService(setup: Setup = {}) {
@@ -77,6 +80,9 @@ function makeService(setup: Setup = {}) {
     rules,
     new FixedClock(NOW),
     setup.divergences ?? new DivergenceLog(),
+    {
+      findDisagreements: () => setup.timezoneDisagreements ?? [],
+    } as unknown as TimezoneCheckService,
   );
 }
 
@@ -238,6 +244,24 @@ describe('HealthService divergence reporting', () => {
     }).check();
     expect(health.problems).not.toContainEqual(
       expect.stringContaining('divergence'),
+    );
+  });
+});
+
+describe('HealthService timezone agreement', () => {
+  it('calls the system degraded when Node and the OS disagree on local time', async () => {
+    const health = await makeService({
+      timezoneDisagreements: [
+        {
+          timezone: 'America/Vancouver',
+          serverOffset: '-08:00',
+          systemOffset: '-07:00',
+        },
+      ],
+    }).check();
+    expect(health.status).toBe('degraded');
+    expect(health.problems).toContain(
+      'Node and the OS disagree on local time in America/Vancouver: Node says -08:00, the OS says -07:00',
     );
   });
 });
