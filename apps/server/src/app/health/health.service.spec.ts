@@ -205,7 +205,7 @@ describe('HealthService', () => {
 
 // A divergence means something upstream already failed, and this is what non-browsers poll.
 describe('HealthService divergence reporting', () => {
-  function loggedAt(at: Date): DivergenceLog {
+  function loggedAt(at: Date, isExplainedByReboot = false): DivergenceLog {
     const log = new DivergenceLog();
     log.record({
       deviceName: 'CO2 Generator',
@@ -213,6 +213,7 @@ describe('HealthService divergence reporting', () => {
       pin: 5,
       hardwareOn: false,
       reason: 'hardware reports de-energised, the row said on',
+      isExplainedByReboot,
       at,
     });
     return log;
@@ -234,6 +235,15 @@ describe('HealthService divergence reporting', () => {
       divergences: loggedAt(new Date(NOW.getTime() - 8 * 3600_000)),
     }).check();
     expect(health.problems).toContainEqual(
+      expect.stringContaining('divergence'),
+    );
+  });
+
+  it('leaves out the fail-safe a node claimed as it restarted', async () => {
+    const health = await makeService({
+      divergences: loggedAt(new Date(NOW.getTime() - 60_000), true),
+    }).check();
+    expect(health.problems).not.toContainEqual(
       expect.stringContaining('divergence'),
     );
   });

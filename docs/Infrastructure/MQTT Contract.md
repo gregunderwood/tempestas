@@ -49,7 +49,8 @@ These are protocol requirements, not implementation preferences, and every chang
    [the retained-command trap](#the-retained-command-trap) below, which is the most important thing
    on this page.
 2. **Stale is not off.** A node's LWT makes its pins `unknown`, not `0`.
-3. **The server has an LWT too**, so every node fails safe when the brain dies, not just one.
+3. **The server has an LWT too**, so every node knows when the brain dies. Nodes log it and hold:
+   a deploy restarts the server, and the dead-man fails them safe if it does not come back.
 4. **Levels, not on/off.** The wire carries electrical levels only; the server owns the
    active-high/active-low translation. The single exception is a node's configured **failsafe
    level**, which must live on the node — when the server is gone there is nobody to ask what
@@ -197,8 +198,8 @@ What this means for anything speaking the contract:
   the topic it arrived on. That is an ACL guarantee, not a parsing one.
 - **A node may not publish `gpio/set` at all**, including to itself. The `issuedBy` ownership check
   still runs, because the ACL is one broker's configuration and the check is the contract.
-- **Only `tempestas-server` may publish `server/status`**, so a node watching the server's LWT
-  cannot be tricked into failing safe by another node.
+- **Only `tempestas-server` may publish `server/status`**, so another node cannot fake the server's
+  LWT.
 - **Read and write are separate grants.** A credential that publishes samples cannot subscribe to
   them - which is why a logger needs its own read-only identity rather than borrowing a node's.
 
