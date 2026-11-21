@@ -17,7 +17,7 @@ import { ZoneEntity } from '../zones/models';
 import { NodeEntity } from '../nodes/models';
 import { SensorReadingEntity } from './models';
 import {
-  nextBoundary,
+  findNextBoundary,
   resolveSegments,
   type Segment,
 } from './daylight-segments';
@@ -25,19 +25,32 @@ import { resolveReadingWindow, type ReadingWindow } from './reading-window';
 import { parseZoneRulesConfig } from '../rules/rules-config';
 
 const DEFAULT_LIMIT = 500;
+const DEFAULT_TIMEZONE = 'America/Vancouver';
+const DEFAULT_DAYLIGHT_START = '06:30';
+const DEFAULT_DAYLIGHT_END = '18:30';
 
-const CREATED_AT_DIRECTION: Record<ReadingOrder, 'ASC' | 'DESC'> = {
+const CREATED_AT_DIRECTION: Record<ReadingOrder, SortDirection> = {
   [ReadingOrder.NewestFirst]: 'DESC',
   [ReadingOrder.OldestFirst]: 'ASC',
 };
 
-/**
- * The read side of `sensor_readings`.
- *
- * Every query is bounded by an explicit window and an explicit row limit. That
- * is not politeness: the old API's list endpoint had neither, over 2.87M rows
- * with no index on `created_at`, on the same SD card the controller writes to.
- */
+type SortDirection = 'ASC' | 'DESC';
+type Metric = 'temperature' | 'humidity' | 'co2';
+type Daylight = DayNightStats['daylight'];
+
+interface RawAverages {
+  temperature: string | null;
+  humidity: string | null;
+  co2: string | null;
+}
+
+interface MetricExtremes {
+  lowest: Reading | null;
+  highest: Reading | null;
+}
+
+const EXTREME_METRICS: readonly Metric[] = ['temperature', 'humidity', 'co2'];
+
 @Injectable()
 export class ReadingsService {
   constructor(
@@ -50,47 +63,31 @@ export class ReadingsService {
   ) {}
 
   async findAll(query: ReadingsQuery): Promise<Reading[]> {
-    const window = this.window(query);
-    const rows = await this.scoped(query, window)
+    const window = this.resolveWindow(query);
+    const rows = await this.queryReadingsInWindow(query, window)
       .orderBy(
-        'r.createdAt',
+        'reading.createdAt',
         CREATED_AT_DIRECTION[query.order ?? ReadingOrder.NewestFirst],
       )
       .limit(query.limit ?? DEFAULT_LIMIT)
       .getMany();
-    return rows.map(toDto);
+    return rows.map(toReading);
   }
 
-  /**
-   * One row per sensor on every node, newest first. What the dashboard opens
-   * with. Per sensor, not per node, or a node with a probe per pipe shows
-   * whichever probe spoke last and hides the others.
-   */
   async findLatestPerSensor(): Promise<Reading[]> {
     const rows = await this.readings
-      .createQueryBuilder('r')
-      .innerJoinAndSelect('r.node', 'n')
-      .distinctOn(['r.nodeId', 'r.sensorId'])
-      .orderBy('r.nodeId')
-      .addOrderBy('r.sensorId')
-      .addOrderBy('r.createdAt', 'DESC')
+      .createQueryBuilder('reading')
+      .innerJoinAndSelect('reading.node', 'node')
+      .distinctOn(['reading.nodeId', 'reading.sensorId'])
+      .orderBy('reading.nodeId')
+      .addOrderBy('reading.sensorId')
+      .addOrderBy('reading.createdAt', 'DESC')
       .getMany();
-    return rows
-      .map(toDto)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return rows.map(toReading).sort(compareNewestFirst);
   }
 
-  /**
-   * The last few alternating daylight and night periods, oldest first.
-   *
-   * No combined figure: a window spanning both averages two different jobs
-   * together and describes neither. Split at the ZONE's own
-   * daylight window, because that is what the rules engine branches
-   * on - a screen drawing the line elsewhere would explain a decision the
-   * controller never made.
-   */
-  async dayNightStats(query: ReadingsQuery): Promise<DayNightStats> {
-    const daylight = await this.daylightFor(query.nodeId);
+  async computeDayNightStats(query: ReadingsQuery): Promise<DayNightStats> {
+    const daylight = await this.resolveDaylightFor(query.nodeId);
     const now = this.clock.now();
     const segments = resolveSegments(
       now,
@@ -103,11 +100,12 @@ export class ReadingsService {
     }
 
     const periods = await Promise.all(
-      segments.map((segment, i) =>
-        this.segmentStats(query, segment, i === segments.length - 1),
-      ),
+      segments.map((segment, index) => {
+        const isRunning = index === segments.length - 1;
+        return this.computeSegmentStats(query, segment, isRunning);
+      }),
     );
-    const boundary = nextBoundary(
+    const boundary = findNextBoundary(
       now,
       daylight.startTime,
       daylight.endTime,
@@ -120,14 +118,44 @@ export class ReadingsService {
     };
   }
 
-  private async segmentStats(
+  async computeStats(query: ReadingsQuery): Promise<ReadingStats> {
+    const window = this.resolveWindow(query);
+
+    const averages = await this.queryReadingsInWindow(query, window)
+      .select('AVG(reading.temperature)', 'temperature')
+      .addSelect('AVG(reading.humidity)', 'humidity')
+      // AVG skips NULLs, so an invalid CO2 is never averaged in as a zero.
+      .addSelect('AVG(reading.co2)', 'co2')
+      .getRawOne<RawAverages>();
+
+    const [temperature, humidity, co2] = await Promise.all(
+      EXTREME_METRICS.map((metric) => this.findExtremes(query, window, metric)),
+    );
+
+    return {
+      min: {
+        temperature: temperature.lowest,
+        humidity: humidity.lowest,
+        co2: co2.lowest,
+      },
+      max: {
+        temperature: temperature.highest,
+        humidity: humidity.highest,
+        co2: co2.highest,
+      },
+      average: toAverages(averages),
+      from: window.from.toISOString(),
+      to: window.to.toISOString(),
+    };
+  }
+
+  private async computeSegmentStats(
     query: ReadingsQuery,
     segment: Segment,
     inProgress: boolean,
   ): Promise<SegmentStats> {
-    // The segment's own bounds, not the caller's: `days`, `from` and `to` would
-    // otherwise widen a period that is defined by where the boundaries fell.
-    const stats = await this.stats({
+    // The segment's own bounds: the caller's `days`, `from` and `to` would widen it.
+    const stats = await this.computeStats({
       nodeId: query.nodeId,
       from: segment.from.toISOString(),
       to: segment.to.toISOString(),
@@ -141,138 +169,102 @@ export class ReadingsService {
     };
   }
 
-  /**
-   * The daylight boundary a node's readings should be split at.
-   *
-   * A node with no zone gets the deployment default rather than an error: this
-   * is a presentation of history, and refusing to show any statistics because a
-   * node has not been assigned yet helps nobody.
-   */
-  private async daylightFor(
-    nodeId: string | undefined,
-  ): Promise<DayNightStats['daylight']> {
-    const fallback = {
-      startTime: '06:30',
-      endTime: '18:30',
+  // A node with no zone still gets the deployment default: this is history, not control.
+  private async resolveDaylightFor(
+    nodeSlug: string | undefined,
+  ): Promise<Daylight> {
+    const fallback: Daylight = {
+      startTime: DEFAULT_DAYLIGHT_START,
+      endTime: DEFAULT_DAYLIGHT_END,
       timezone: this.defaultTimezone(),
     };
-    if (!nodeId) return fallback;
+    if (!nodeSlug) return fallback;
 
     const node = await this.nodes.findOne({
-      where: { slug: nodeId },
+      where: { slug: nodeSlug },
       relations: { zone: true },
     });
-    const raw = (node?.zone as ZoneEntity | null | undefined)?.rulesConfig;
-    if (!raw) return fallback;
-    const parsed = parseZoneRulesConfig(raw);
+    const rulesConfig = (node?.zone as ZoneEntity | null | undefined)
+      ?.rulesConfig;
+    if (!rulesConfig) return fallback;
+    const parsed = parseZoneRulesConfig(rulesConfig);
     if (parsed.ok === false) return fallback;
     const { daylight, timezone } = parsed.config;
-    // A zone with no daylight window - a pumphouse has no day job - still gets
-    // a day/night split in its own timezone, at the deployment default.
     if (!daylight) return { ...fallback, timezone };
     return { startTime: daylight.start, endTime: daylight.end, timezone };
   }
 
-  async stats(query: ReadingsQuery): Promise<ReadingStats> {
-    const window = this.window(query);
-
-    const averages = await this.scoped(query, window)
-      .select('AVG(r.temperature)', 'temperature')
-      .addSelect('AVG(r.humidity)', 'humidity')
-      // AVG ignores NULLs, which is what we want: an invalid CO2 must not be
-      // averaged in as a zero. It returns NULL only when every row was invalid.
-      .addSelect('AVG(r.co2)', 'co2')
-      .getRawOne<{
-        temperature: string | null;
-        humidity: string | null;
-        co2: string | null;
-      }>();
-
-    const [minTemp, maxTemp, minHum, maxHum, minCo2, maxCo2] =
-      await Promise.all([
-        this.extreme(query, window, 'temperature', 'ASC'),
-        this.extreme(query, window, 'temperature', 'DESC'),
-        this.extreme(query, window, 'humidity', 'ASC'),
-        this.extreme(query, window, 'humidity', 'DESC'),
-        this.extreme(query, window, 'co2', 'ASC'),
-        this.extreme(query, window, 'co2', 'DESC'),
-      ]);
-
-    return {
-      min: { temperature: minTemp, humidity: minHum, co2: minCo2 },
-      max: { temperature: maxTemp, humidity: maxHum, co2: maxCo2 },
-      average: toAverages(averages),
-      // Echoed back so the dashboard can label the window it is showing, and so
-      // a caller can see what its parameters actually resolved to.
-      from: window.from.toISOString(),
-      to: window.to.toISOString(),
-    };
-  }
-
-  /**
-   * The whole reading that produced an extreme, not just the value, so the UI
-   * can link to the record and say which node and when.
-   */
-  private async extreme(
+  private async findExtremes(
     query: ReadingsQuery,
     window: ReadingWindow,
-    metric: 'temperature' | 'humidity' | 'co2',
-    direction: 'ASC' | 'DESC',
-  ): Promise<Reading | null> {
-    const row = await this.scoped(query, window)
-      // NULLs sort as larger than any value in Postgres by default, so an
-      // invalid CO2 would win a DESC ordering and be reported as the maximum.
-      .andWhere(`r.${metric} IS NOT NULL`)
-      .orderBy(`r.${metric}`, direction)
-      .addOrderBy('r.createdAt', 'DESC')
-      .limit(1)
-      .getOne();
-    return row ? toDto(row) : null;
+    metric: Metric,
+  ): Promise<MetricExtremes> {
+    const [lowest, highest] = await Promise.all([
+      this.findExtreme(query, window, metric, 'ASC'),
+      this.findExtreme(query, window, metric, 'DESC'),
+    ]);
+    return { lowest, highest };
   }
 
-  private scoped(
+  private async findExtreme(
+    query: ReadingsQuery,
+    window: ReadingWindow,
+    metric: Metric,
+    direction: SortDirection,
+  ): Promise<Reading | null> {
+    const row = await this.queryReadingsInWindow(query, window)
+      // Postgres sorts NULL above every value, so an invalid CO2 would win a DESC ordering.
+      .andWhere(`reading.${metric} IS NOT NULL`)
+      .orderBy(`reading.${metric}`, direction)
+      .addOrderBy('reading.createdAt', 'DESC')
+      .limit(1)
+      .getOne();
+    return row ? toReading(row) : null;
+  }
+
+  private queryReadingsInWindow(
     query: ReadingsQuery,
     window: ReadingWindow,
   ): SelectQueryBuilder<SensorReadingEntity> {
     const builder = this.readings
-      .createQueryBuilder('r')
-      .innerJoinAndSelect('r.node', 'n')
-      .where('r.createdAt >= :from', { from: window.from })
-      .andWhere('r.createdAt <= :to', { to: window.to });
+      .createQueryBuilder('reading')
+      .innerJoinAndSelect('reading.node', 'node')
+      .where('reading.createdAt >= :from', { from: window.from })
+      .andWhere('reading.createdAt <= :to', { to: window.to });
 
     if (query.nodeId) {
-      // The slug, as everywhere on the wire.
-      builder.andWhere('n.slug = :slug', { slug: query.nodeId });
+      builder.andWhere('node.slug = :slug', { slug: query.nodeId });
     }
     if (query.sensorId) {
-      builder.andWhere('r.sensorId = :sensorId', { sensorId: query.sensorId });
+      builder.andWhere('reading.sensorId = :sensorId', {
+        sensorId: query.sensorId,
+      });
     }
     return builder;
   }
 
-  /** Never the host locale - that was the old DST bug. */
+  // Never the host locale: that was the old DST bug.
   private defaultTimezone(): string {
-    return this.config.get<string>('TEMPESTAS_TZ', 'America/Vancouver');
+    return this.config.get<string>('TEMPESTAS_TZ', DEFAULT_TIMEZONE);
   }
 
-  private window(query: ReadingsQuery): ReadingWindow {
+  private resolveWindow(query: ReadingsQuery): ReadingWindow {
     try {
       return resolveReadingWindow(
         query,
         this.clock.now(),
-        this.config.get<string>('TEMPESTAS_TZ', 'America/Vancouver'),
+        this.defaultTimezone(),
       );
-    } catch (err: unknown) {
-      // A RangeError here is a bad request, not a server fault.
+    } catch (error: unknown) {
       throw new BadRequestException({
         code: ApiErrorCode.ValidationFailed,
-        message: err instanceof Error ? err.message : 'Invalid window',
+        message: error instanceof Error ? error.message : 'Invalid window',
       });
     }
   }
 }
 
-export function toDto(row: SensorReadingEntity): Reading {
+function toReading(row: SensorReadingEntity): Reading {
   return {
     id: row.id,
     nodeId: row.node.slug,
@@ -284,24 +276,20 @@ export function toDto(row: SensorReadingEntity): Reading {
   };
 }
 
-/** Postgres returns AVG as a string, and as null for an empty window. */
-function toAverages(
-  raw:
-    | {
-        temperature: string | null;
-        humidity: string | null;
-        co2: string | null;
-      }
-    | undefined,
-): ReadingAverages {
+function compareNewestFirst(first: Reading, second: Reading): number {
+  return second.createdAt.localeCompare(first.createdAt);
+}
+
+// Postgres returns AVG as a string, and as null for an empty window.
+function toAverages(raw: RawAverages | undefined): ReadingAverages {
   return {
-    temperature: round2(raw?.temperature),
-    humidity: round2(raw?.humidity),
+    temperature: roundToHundredths(raw?.temperature),
+    humidity: roundToHundredths(raw?.humidity),
     co2: raw?.co2 == null ? null : Math.round(Number(raw.co2)),
   };
 }
 
-function round2(value: string | null | undefined): number | null {
+function roundToHundredths(value: string | null | undefined): number | null {
   if (value == null) return null;
   return Math.round(Number(value) * 100) / 100;
 }

@@ -59,15 +59,15 @@ function makeService(
   const mocks = {
     findOne: vi.fn().mockResolvedValue(device),
     find: vi.fn().mockResolvedValue([device]),
-    save: vi.fn(async (d: DeviceEntity) => d),
-    remove: vi.fn(async (d: DeviceEntity) => d),
+    save: vi.fn(async (device: DeviceEntity) => device),
+    remove: vi.fn(async (device: DeviceEntity) => device),
     create: vi.fn(
       (fields: Partial<DeviceEntity>) => ({ ...fields }) as DeviceEntity,
     ),
     nodeFindOne: vi.fn().mockResolvedValue(node),
   };
-  const repo = mocks as unknown as Repository<DeviceEntity>;
-  const nodeRepo = {
+  const deviceRepository = mocks as unknown as Repository<DeviceEntity>;
+  const nodeRepository = {
     findOne: mocks.nodeFindOne,
   } as unknown as Repository<NodeEntity>;
   const hardware = {
@@ -78,11 +78,12 @@ function makeService(
   const publishDeviceState = vi.fn();
   const realtime = { publishDeviceState } as unknown as RealtimeGateway;
   const service = new DevicesService(
-    repo,
-    nodeRepo,
+    deviceRepository,
+    nodeRepository,
     hardware,
     new FixedClock(NOW),
     realtime,
+    new DivergenceLog(),
   );
   return { service, setPin, save: mocks.save, mocks, publishDeviceState };
 }
@@ -131,8 +132,7 @@ describe('DevicesService interlocks', () => {
     expect(setPin).not.toHaveBeenCalled();
   });
 
-  // The interlock has to hold for the in-process caller (the rules engine),
-  // which is the entire reason the Python version went over loopback HTTP.
+  // Must hold for the in-process rules engine, the reason the Python version used loopback HTTP.
   it('refuses during the cooldown and publishes NOTHING', async () => {
     const cooling = burner({
       onAt: new Date('2026-01-10T11:00:00Z'),
@@ -180,9 +180,7 @@ describe('DevicesService interlocks', () => {
     expect(setPin).not.toHaveBeenCalled();
   });
 
-  // A pending node is inert in BOTH directions: its readings are discarded on
-  // the way in, and it is refused commands on the way out. Otherwise a stray
-  // ESP32 could be handed a burner relay before anyone admitted it.
+  // A pending node is inert both ways, so a stray ESP32 cannot be handed a burner relay.
   it('refuses to command a device on a node that is not admitted', async () => {
     const onPending = burner({
       node: { id: 'node-uuid', slug: 'ghost', status: NodeStatus.Pending },
@@ -208,8 +206,7 @@ describe('DevicesService interlocks', () => {
     expect(setPin).not.toHaveBeenCalled();
   });
 
-  // The old system logged the GPIO failure and updated the row anyway, so the
-  // database drifted from the hardware and the UI lied about the heater.
+  // The old system updated the row anyway, and the UI lied about the heater.
   it('does NOT persist state when the hardware write fails', async () => {
     const setPin = vi.fn().mockRejectedValue(new Error('READBACK_MISMATCH'));
     const { service, save } = makeService(burner(), setPin);
@@ -228,8 +225,7 @@ describe('DevicesService lookups', () => {
     expect(dto).toMatchObject({ id: 'dev-1', nodeId: 'elantris', isOn: true });
   });
 
-  // Rules bind to `role`, not to the display name. The old system resolved
-  // devices by name, so renaming one in the UI silently disabled its rule.
+  // Rules bind to `role`, so renaming a device cannot silently disable its rule.
   it('looks devices up by zone and role', async () => {
     const { service, mocks } = makeService(burner());
     await service.findByRole('zone-1', DeviceRole.Co2Generator);
@@ -249,9 +245,7 @@ describe('DevicesService lookups', () => {
 });
 
 describe('DevicesService.create', () => {
-  // `nodeId` on the wire is the node SLUG - the MQTT topic segment - while the
-  // FK is the node's uuid. Conflating them addressed a hardware command to a
-  // uuid, which is a real bug this repo has already had once.
+  // Conflating slug and uuid once addressed a hardware command to a uuid.
   it('resolves the node slug to its uuid for the FK', async () => {
     const { service, mocks } = makeService(burner());
     const dto = await service.create({
@@ -282,9 +276,7 @@ describe('DevicesService.create', () => {
     );
   });
 
-  // A constraint the database cannot express: a device may only claim a pin its
-  // node says it exposes. Otherwise a relay is bound to a pin that will never
-  // be driven, and it fails silently at actuation time instead of at creation.
+  // Fails at creation rather than silently at actuation time.
   it('refuses a pin the node does not expose, and lists the ones it does', async () => {
     const { service, mocks } = makeService(burner());
     await expect(
@@ -304,9 +296,7 @@ describe('DevicesService.create', () => {
     expect(mocks.save).not.toHaveBeenCalled();
   });
 
-  // A node reports its pins when it connects, which can be long before the
-  // device exists. patji's relays were released (loads ON, by design) while
-  // the new rows said off, and every rule tick was answered "already off".
+  // patji's relays were released (loads ON) while the new rows said off.
   describe('starts from what the node last reported', () => {
     const extraRelay = {
       nodeId: 'elantris',
@@ -405,8 +395,7 @@ describe('DevicesService mutations', () => {
 });
 
 describe('DevicesService realtime fan-out', () => {
-  // Published only after the hardware acknowledged AND the row saved, so the
-  // dashboard can never show a state the relay did not reach.
+  // Only after the hardware acknowledged and the row saved.
   it('publishes the new state once a write succeeds', async () => {
     const { service, publishDeviceState } = makeService(burner());
     await service.turnOn('dev-1');
@@ -440,10 +429,7 @@ describe('DevicesService realtime fan-out', () => {
   });
 });
 
-// An offline node, an unacknowledged command and a readback mismatch are
-// expected states with distinct remedies. Surfacing them as a bare 500 is the
-// exact class of response this project exists to stop producing: the client
-// cannot tell "the node is gone" from "the server is broken".
+// Expected hardware states with distinct remedies must never surface as a bare 500.
 describe('DevicesService hardware failure translation', () => {
   it.each([
     [ApiErrorCode.NodeOffline, 409],
@@ -470,17 +456,7 @@ describe('DevicesService hardware failure translation', () => {
   });
 });
 
-/**
- * A commanded change reaches the server twice: once as the node's `gpio/state`,
- * once as `drive()`'s own save. The node answers in milliseconds, so the state
- * report routinely arrives while the row still holds the old value - and
- * reconciliation called that a divergence on every commanded off.
- *
- * Seen live the first time the rules engine cut the burner at 1500 ppm: the
- * DIVERGENCE line was logged one line before the `-> off` that caused it.
- * Harmless to the data, corrosive to the alarm - one that fires every time
- * teaches whoever reads the log to skip the line that matters.
- */
+// Seen live: DIVERGENCE logged one line before the `-> off` that caused it.
 describe('DevicesService reconciliation during its own command', () => {
   const report = (): PinStateReport => ({
     nodeId: NODE.slug,
@@ -492,11 +468,7 @@ describe('DevicesService reconciliation during its own command', () => {
     live: true,
   });
 
-  /**
-   * `onReport` decides WHEN the node speaks. Passing it into `setPin` models
-   * the real sequence - the node answers the command in milliseconds, while the
-   * server is still awaiting its own save.
-   */
+  // `answers-the-command` models the node replying while the server still awaits its save.
   function armed(onReport: 'answers-the-command' | 'unprompted') {
     const pinStates = new Subject<PinStateReport>();
     const setPin = vi.fn(async () => {
@@ -508,15 +480,15 @@ describe('DevicesService reconciliation during its own command', () => {
       pinStates$: pinStates.asObservable(),
     } as unknown as HardwareService;
     const divergences = new DivergenceLog();
-    const repo = {
+    const deviceRepository = {
       // A fresh row each load, as a real repository gives.
       findOne: vi.fn(async () =>
         burner({ onAt: new Date(NOW.getTime() - 60_000), offAt: null }),
       ),
-      save: vi.fn(async (d: DeviceEntity) => d),
+      save: vi.fn(async (device: DeviceEntity) => device),
     } as unknown as Repository<DeviceEntity>;
     const service = new DevicesService(
-      repo,
+      deviceRepository,
       {
         findOne: vi.fn().mockResolvedValue(NODE),
       } as unknown as Repository<NodeEntity>,
@@ -529,7 +501,7 @@ describe('DevicesService reconciliation during its own command', () => {
     return { service, pinStates, divergences };
   }
 
-  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   it('does not call its own command a divergence', async () => {
     const { service, divergences } = armed('answers-the-command');
@@ -539,9 +511,7 @@ describe('DevicesService reconciliation during its own command', () => {
     service.onModuleDestroy();
   });
 
-  // The guard must not swallow a real one. A report with nothing in flight is
-  // the node acting alone - a dead-man trip or a failsafe - which is precisely
-  // what the alarm exists for.
+  // With nothing in flight, the node acted alone: exactly what the alarm is for.
   it('still reports a divergence when no command is in flight', async () => {
     const { service, pinStates, divergences } = armed('unprompted');
     pinStates.next(report());

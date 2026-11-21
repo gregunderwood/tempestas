@@ -118,6 +118,11 @@ HardwareService (abstract)  ──fake──►  FakeHardwareService   closed-lo
 - The fake driver is a **closed loop**, not a random number generator: the burner raises temperature
   and CO2, the fan lowers them. So "burner on → CO2 climbs → rule turns it off" is observable with
   no hardware, and the rules engine is genuinely exercised.
+- Its constants come from the greenhouse on 2026-09-10 with the real generator, but it is a shape
+  model, not a fitted one. The field numbers are internally inconsistent (decay with the burner off
+  implies a smaller leak coefficient than the gain near the setpoint does, most likely mixing lag
+  between burner and sensor), so the simulator takes the cleanest measurements and claims no more
+  precision than that.
 
 ### The uniformity invariant
 
@@ -187,6 +192,18 @@ every DTO between its API and its app. That is the specific mistake this layout 
 - **Entities are listed explicitly** in `app.module.ts`, not discovered by glob: a webpack bundle
   has no directory to scan. Add a new entity in both `app.module.ts` and its feature module's
   `TypeOrmModule.forFeature`.
+- **The API serves the built web bundle itself**, not a reverse proxy: one process on the box, and
+  the socket.io upgrade stays inside Nest, so the `map $http_upgrade` mistake in the old
+  greenhouse's `nginx.conf` cannot be made. It is registered only when the bundle exists, because a
+  static root that does not exist turns every unmatched route into a 500. `/api` and `/socket.io`
+  are excluded from the SPA fallback; without that an unknown API path returns `index.html` with a
+  200, and a client cannot tell a missing route from a working one.
+- **The `ValidationPipe` is global**, with `whitelist` and `forbidNonWhitelisted`, so unknown keys
+  are rejected rather than stripped silently. `lvcc` installs class-validator and never wires it
+  up, so its DTOs are decorative.
+- **`GET /api/health` always answers 200**, even when degraded. The body carries the verdict and
+  the reasons; a non-200 would make a load balancer or a phone shortcut hide exactly what somebody
+  is trying to read.
 - **`app/hardware/` is `@Global()`.** Injecting `HardwareService` needs no import; injecting a
   repository still does.
 - **A service that subscribes to a hardware observable must serialise its writes.** `hello` and

@@ -1,35 +1,37 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { NodeStatus, sensorKey, type HealthReport } from '@tempestas/domain';
+import {
+  NodeStatus,
+  sensorKey,
+  type HealthReport,
+  type RulesEvaluation,
+} from '@tempestas/domain';
 import { Clock } from '../common/clock';
 import { DivergenceLog } from '../common/divergence-log';
-
-/**
- * How far back a corrected divergence still counts as a problem. Long enough
- * that an overnight failsafe is still reported when somebody looks in the
- * morning, short enough that it clears on its own.
- */
-const DIVERGENCE_WINDOW_S = 24 * 60 * 60;
-
-/**
- * How far back a sensor still counts as one that should be reporting. A probe
- * removed on purpose stops being reported a day later; one that died overnight
- * is still named in the morning.
- */
-const SENSOR_MEMORY_S = 24 * 60 * 60;
+import { MILLISECONDS_PER_SECOND, SECONDS_PER_DAY } from '../common/time-units';
 import { NodesService } from '../nodes/nodes.service';
 import { SensorReadingEntity } from '../readings/models';
 import { RulesService } from '../rules/rules.service';
+import { collectStaleRoles } from '../rules/stale-roles';
 
-/**
- * "Up" is not the question. A process that answers HTTP while no reading has
- * arrived in an hour, or while the rules engine has stopped evaluating, is a
- * greenhouse running open-loop - so those two are part of the verdict, not
- * extra detail underneath it.
- */
+// "Up" is not the question: no fresh readings, or no fresh evaluation, is a greenhouse running open-loop.
 export const READINGS_STALE_AFTER_SECONDS = 120;
 export const EVALUATION_STALE_AFTER_SECONDS = 60;
+
+// A day, so an overnight failsafe is still reported in the morning and then clears on its own.
+const DIVERGENCE_WINDOW_SECONDS = SECONDS_PER_DAY;
+
+// A day, so a probe removed on purpose stops being named while one that died overnight still is.
+const SENSOR_MEMORY_SECONDS = SECONDS_PER_DAY;
+
+// A pending node is the admission gate working, so it is told but does not degrade the verdict.
+const AWAITING_ADMISSION = 'awaiting admission';
+
+interface QuietSensor {
+  key: string;
+  ageSeconds: number;
+}
 
 @Injectable()
 export class HealthService {
@@ -45,105 +47,53 @@ export class HealthService {
 
   async check(): Promise<HealthReport> {
     const now = this.clock.now();
+
+    // Without the database, report what is knowable rather than a 500.
+    if (!(await this.isDatabaseReachable())) {
+      return unreachableDatabaseReport();
+    }
+
     const problems: string[] = [];
-
-    let db = false;
-    try {
-      await this.dataSource.query('select 1');
-      db = true;
-    } catch {
-      problems.push('database unreachable');
-    }
-
-    // Everything below needs the database, so on a failed probe report what is
-    // knowable rather than a 500 - the caller is trying to find out what broke.
-    if (!db) {
-      return {
-        status: 'degraded',
-        db,
-        uptimeSeconds: Math.round(process.uptime()),
-        nodes: { total: 0, online: 0, pending: 0 },
-        readings: { latestAt: null, ageSeconds: null },
-        rules: { lastEvaluationAt: null, ageSeconds: null, staleRoles: [] },
-        problems,
-      };
-    }
-
     const counts = await this.nodes.counts();
-    const latestReading = await this.readings
-      .createQueryBuilder('r')
-      .select('MAX(r.createdAt)', 'latest')
-      .getRawOne<{ latest: Date | string | null }>();
 
-    const latestAt = latestReading?.latest
-      ? new Date(latestReading.latest)
+    const latestReadingAt = await this.findLatestReadingAt();
+    const readingAge = latestReadingAt
+      ? ageSeconds(latestReadingAt, now)
       : null;
-    const readingAge = latestAt ? ageSeconds(latestAt, now) : null;
-    if (readingAge === null) {
-      problems.push('no readings have ever been persisted');
-    } else if (readingAge > READINGS_STALE_AFTER_SECONDS) {
-      problems.push(`newest reading is ${readingAge}s old`);
+    problems.push(...describeReadingAge(readingAge));
+
+    for (const sensor of await this.findQuietSensors(now)) {
+      problems.push(
+        `sensor ${sensor.key} has not reported for ${sensor.ageSeconds}s`,
+      );
     }
 
-    // One probe dying beside a working one is invisible everywhere else: `min`
-    // simply carries on with the probes that remain, which is the right control
-    // behaviour and exactly why it has to be said somewhere.
-    for (const sensor of await this.quietSensors(now)) {
-      problems.push(`sensor ${sensor.key} has not reported for ${sensor.age}s`);
-    }
-
-    const evaluations = this.rules.lastEvaluation();
-    const evaluatedAt = evaluations[0]
-      ? new Date(evaluations[0].evaluatedAt)
-      : null;
+    const evaluations = this.rules.findLastEvaluations();
+    const evaluatedAt = newestEvaluatedAt(evaluations);
     const evaluationAge = evaluatedAt ? ageSeconds(evaluatedAt, now) : null;
-    if (evaluationAge === null) {
-      problems.push('the rules engine has not evaluated yet');
-    } else if (evaluationAge > EVALUATION_STALE_AFTER_SECONDS) {
-      problems.push(`last rules evaluation was ${evaluationAge}s ago`);
-    }
+    problems.push(...describeEvaluationAge(evaluationAge));
 
-    // A zone that fails evaluation drives nothing at all - for the pumphouse,
-    // a heater nobody is controlling. Named, with the reason, so the fix is in
-    // the message rather than in the journal.
-    for (const [slug, reason] of this.rules.failingZones()) {
+    for (const [slug, reason] of this.rules.findFailingZones()) {
       problems.push(`zone "${slug}" is not being evaluated: ${reason}`);
     }
 
-    const staleRoles = [...new Set(evaluations.flatMap((e) => e.staleRoles))];
+    const staleRoles = collectStaleRoles(evaluations);
     if (staleRoles.length > 0) {
       problems.push(`stale sensors for: ${staleRoles.join(', ')}`);
     }
     if (counts.pending > 0) {
-      // Not degraded: a pending node is the admission gate working. But it is
-      // the thing somebody curling this endpoint most often needs told.
-      problems.push(`${counts.pending} node(s) awaiting admission`);
+      problems.push(`${counts.pending} node(s) ${AWAITING_ADMISSION}`);
     }
 
-    // A relay and its row having disagreed means something upstream already
-    // failed, so it stays on this surface rather than being corrected quietly.
-    // The window is bounded because this log does not survive a restart - the
-    // ERROR entries in the journal are the durable record.
-    const recent = this.divergences.since(
-      new Date(now.getTime() - DIVERGENCE_WINDOW_S * 1000),
-    );
-    if (recent.length > 0) {
-      const names = [...new Set(recent.map((d) => d.deviceName))];
-      problems.push(
-        `hardware/database divergence corrected for: ${names.join(', ')}`,
-      );
-    }
-
-    // A pending node alone is not degradation, so it is excluded from the verdict.
-    const degrading = problems.filter((p) => !p.includes('awaiting admission'));
+    problems.push(...this.describeRecentDivergences(now));
 
     return {
-      status: degrading.length === 0 ? 'ok' : 'degraded',
-      db,
+      status: problems.some(isDegrading) ? 'degraded' : 'ok',
+      db: true,
       uptimeSeconds: Math.round(process.uptime()),
       nodes: counts,
       readings: {
-        latestAt: latestAt?.toISOString() ?? null,
+        latestAt: latestReadingAt?.toISOString() ?? null,
         ageSeconds: readingAge,
       },
       rules: {
@@ -155,34 +105,112 @@ export class HealthService {
     };
   }
 
-  /** Sensors on admitted nodes that reported in the last day and have since stopped. */
-  private async quietSensors(
-    now: Date,
-  ): Promise<{ key: string; age: number }[]> {
+  private async isDatabaseReachable(): Promise<boolean> {
+    try {
+      await this.dataSource.query('select 1');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async findLatestReadingAt(): Promise<Date | null> {
+    const latestReading = await this.readings
+      .createQueryBuilder('reading')
+      .select('MAX(reading.createdAt)', 'latest')
+      .getRawOne<{ latest: Date | string | null }>();
+    return latestReading?.latest ? new Date(latestReading.latest) : null;
+  }
+
+  // A probe dying beside a working one is invisible elsewhere: `min` simply carries on without it.
+  private async findQuietSensors(now: Date): Promise<QuietSensor[]> {
     const rows = await this.readings
-      .createQueryBuilder('r')
-      .innerJoin('r.node', 'n')
-      .select('n.slug', 'slug')
-      .addSelect('r.sensorId', 'sensorId')
-      .addSelect('MAX(r.createdAt)', 'latest')
-      .where('r.createdAt > :since', {
-        since: new Date(now.getTime() - SENSOR_MEMORY_S * 1000),
+      .createQueryBuilder('reading')
+      .innerJoin('reading.node', 'node')
+      .select('node.slug', 'slug')
+      .addSelect('reading.sensorId', 'sensorId')
+      .addSelect('MAX(reading.createdAt)', 'latest')
+      .where('reading.createdAt > :since', {
+        since: secondsBefore(now, SENSOR_MEMORY_SECONDS),
       })
-      .andWhere('n.status = :status', { status: NodeStatus.Admitted })
-      .groupBy('n.slug')
-      .addGroupBy('r.sensorId')
+      .andWhere('node.status = :status', { status: NodeStatus.Admitted })
+      .groupBy('node.slug')
+      .addGroupBy('reading.sensorId')
       .getRawMany<{ slug: string; sensorId: string; latest: Date | string }>();
 
     return rows
       .map((row) => ({
         key: sensorKey({ nodeId: row.slug, sensorId: row.sensorId }),
-        age: ageSeconds(new Date(row.latest), now),
+        ageSeconds: ageSeconds(new Date(row.latest), now),
       }))
-      .filter((sensor) => sensor.age > READINGS_STALE_AFTER_SECONDS)
-      .sort((a, b) => a.key.localeCompare(b.key));
+      .filter((sensor) => sensor.ageSeconds > READINGS_STALE_AFTER_SECONDS)
+      .sort((first, second) => first.key.localeCompare(second.key));
+  }
+
+  // Bounded because this log does not survive a restart; the journal's ERROR lines are the durable record.
+  private describeRecentDivergences(now: Date): string[] {
+    const recent = this.divergences.since(
+      secondsBefore(now, DIVERGENCE_WINDOW_SECONDS),
+    );
+    if (recent.length === 0) {
+      return [];
+    }
+    const deviceNames = [
+      ...new Set(recent.map((divergence) => divergence.deviceName)),
+    ];
+    return [
+      `hardware/database divergence corrected for: ${deviceNames.join(', ')}`,
+    ];
   }
 }
 
+function unreachableDatabaseReport(): HealthReport {
+  return {
+    status: 'degraded',
+    db: false,
+    uptimeSeconds: Math.round(process.uptime()),
+    nodes: { total: 0, online: 0, pending: 0 },
+    readings: { latestAt: null, ageSeconds: null },
+    rules: { lastEvaluationAt: null, ageSeconds: null, staleRoles: [] },
+    problems: ['database unreachable'],
+  };
+}
+
+function describeReadingAge(readingAge: number | null): string[] {
+  if (readingAge === null) {
+    return ['no readings have ever been persisted'];
+  }
+  if (readingAge > READINGS_STALE_AFTER_SECONDS) {
+    return [`newest reading is ${readingAge}s old`];
+  }
+  return [];
+}
+
+function describeEvaluationAge(evaluationAge: number | null): string[] {
+  if (evaluationAge === null) {
+    return ['the rules engine has not evaluated yet'];
+  }
+  if (evaluationAge > EVALUATION_STALE_AFTER_SECONDS) {
+    return [`last rules evaluation was ${evaluationAge}s ago`];
+  }
+  return [];
+}
+
+function newestEvaluatedAt(evaluations: RulesEvaluation[]): Date | null {
+  return evaluations[0] ? new Date(evaluations[0].evaluatedAt) : null;
+}
+
+function isDegrading(problem: string): boolean {
+  return !problem.includes(AWAITING_ADMISSION);
+}
+
+function secondsBefore(now: Date, seconds: number): Date {
+  return new Date(now.getTime() - seconds * MILLISECONDS_PER_SECOND);
+}
+
 function ageSeconds(instant: Date, now: Date): number {
-  return Math.max(0, Math.round((now.getTime() - instant.getTime()) / 1000));
+  return Math.max(
+    0,
+    Math.round((now.getTime() - instant.getTime()) / MILLISECONDS_PER_SECOND),
+  );
 }

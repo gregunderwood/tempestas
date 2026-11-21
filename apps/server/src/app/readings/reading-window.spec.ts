@@ -1,7 +1,7 @@
 import { resolveReadingWindow } from './reading-window';
 
 const VANCOUVER = 'America/Vancouver';
-/** 12:04 PST. */
+// 12:04 PST.
 const NOW = new Date('2026-01-10T20:04:00Z');
 
 describe('resolveReadingWindow', () => {
@@ -11,9 +11,6 @@ describe('resolveReadingWindow', () => {
     expect(to).toBe(NOW);
   });
 
-  // The old default ran from *yesterday* 23:59:59 to *today* 23:59:59: a window
-  // that starts a day early and ends in the future. The echoed `to` then told
-  // the dashboard it was showing data up to a time that had not happened.
   it('never returns a `to` in the future, even when asked', () => {
     const { to } = resolveReadingWindow(
       { to: '2026-06-01T00:00:00Z' },
@@ -44,8 +41,7 @@ describe('resolveReadingWindow', () => {
     expect(from.toISOString()).toBe('2026-01-04T08:00:00.000Z');
   });
 
-  // Calendar arithmetic, not 24-hour arithmetic. March 8 2026 is a 23-hour day
-  // in Vancouver, so subtracting days must land on local midnight either way.
+  // March 8 2026 is a 23-hour day in Vancouver.
   it('lands on local midnight across a spring-forward boundary', () => {
     const afterTransition = new Date('2026-03-09T20:00:00Z'); // 13:00 PDT
     const { from } = resolveReadingWindow(
@@ -75,7 +71,6 @@ describe('resolveReadingWindow', () => {
     expect(from.toISOString()).toBe('2026-01-10T08:00:00.000Z');
   });
 
-  // Swapping them would hide a client bug and quietly return the wrong data.
   it('refuses a reversed range rather than swapping it', () => {
     expect(() =>
       resolveReadingWindow(
@@ -95,9 +90,7 @@ describe('resolveReadingWindow', () => {
     },
   );
 
-  // `?from=` arrives as an empty string, which this treats as absent. That is
-  // not the layer that should reject it: `@IsISO8601()` on the DTO does, since
-  // `@IsOptional()` only skips null and undefined.
+  // `@IsISO8601()` on the DTO rejects `?from=`; `@IsOptional()` skips only null and undefined.
   it('treats an empty string as absent', () => {
     const { from } = resolveReadingWindow({ from: '' }, NOW, VANCOUVER);
     expect(from.toISOString()).toBe('2026-01-09T20:04:00.000Z');

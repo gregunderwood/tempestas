@@ -14,12 +14,7 @@ import { NodesService } from './nodes.service';
 import { AdmitNodeDto } from './dto/admit-node.dto';
 import { UpdateNodeDto } from './dto/update-node.dto';
 
-/**
- * There is no POST /nodes. A node comes into existence by announcing itself on
- * MQTT and lands as `pending`; the only thing a human does is admit it. That
- * asymmetry is deliberate - it keeps the registry a record of what is actually
- * on the network rather than a wish list somebody typed.
- */
+// No POST: a node exists by announcing itself on MQTT, and the only thing a human does is admit it.
 @Controller('nodes')
 export class NodesController {
   constructor(private readonly nodes: NodesService) {}
@@ -37,18 +32,18 @@ export class NodesController {
   @Put(':id')
   update(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateNodeDto,
+    @Body() changes: UpdateNodeDto,
   ): Promise<Node> {
-    return this.nodes.update(id, dto);
+    return this.nodes.update(id, changes);
   }
 
   @Post(':id/admit')
   @HttpCode(200)
   admit(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: AdmitNodeDto,
+    @Body() admission: AdmitNodeDto,
   ): Promise<Node> {
-    return this.nodes.admit(id, dto);
+    return this.nodes.admit(id, admission);
   }
 
   @Post(':id/disable')

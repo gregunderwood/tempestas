@@ -16,13 +16,16 @@ import {
   type StatsQuery,
 } from '@tempestas/domain';
 
-/** Query strings arrive as strings; `@Type` is what makes `days=7` a number. */
+const MAX_WINDOW_DAYS = 365;
+const MAX_ROWS_PER_PAGE = 5000;
+
+// Query strings arrive as strings; `@Type` is what makes `days=7` a number.
 export class ReadingsQueryDto implements ReadingsQuery {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(365)
+  @Max(MAX_WINDOW_DAYS)
   days?: number;
 
   @IsOptional()
@@ -33,8 +36,8 @@ export class ReadingsQueryDto implements ReadingsQuery {
   @IsISO8601()
   to?: string;
 
-  /** The node SLUG, as everywhere on the wire. */
-  @ValidateIf(isNodeIdNeeded)
+  // The node slug, as everywhere on the wire.
+  @ValidateIf(isNodeOrSensorNamed)
   @IsDefined({
     message:
       'nodeId is required with sensorId: a sensor id is unique only on its node',
@@ -50,20 +53,15 @@ export class ReadingsQueryDto implements ReadingsQuery {
   @IsEnum(ReadingOrder)
   order?: ReadingOrder;
 
-  /**
-   * Bounded, and low by default. An unbounded list over 90 days of retention is
-   * three quarters of a million rows through a Pi on WiFi; the dashboard wants
-   * `/stats` for a window, not the window itself.
-   */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(5000)
+  @Max(MAX_ROWS_PER_PAGE)
   limit?: number;
 }
 
-function isNodeIdNeeded(query: ReadingsQueryDto): boolean {
+function isNodeOrSensorNamed(query: ReadingsQueryDto): boolean {
   return query.nodeId !== undefined || query.sensorId !== undefined;
 }
 

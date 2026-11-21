@@ -56,16 +56,14 @@ describe('RealtimeGateway', () => {
     gateway.publishDeviceState({ id: 'dev-1' } as Device);
     gateway.publishSystemStatus(STATUS);
 
-    expect(emit.mock.calls.map((c) => c[0])).toEqual([
+    expect(emit.mock.calls.map((call) => call[0])).toEqual([
       REALTIME_EVENTS.readingLatest,
       REALTIME_EVENTS.deviceState,
       REALTIME_EVENTS.systemStatus,
     ]);
   });
 
-  // A browser that connects mid-cycle should render immediately rather than
-  // showing an empty dashboard for ten seconds - and the stale-sensor banner in
-  // particular must not wait for the next tick to appear.
+  // The stale-sensor banner must not wait for the next tick to appear.
   it('replays the last reading per node and the last status to a new client', () => {
     const gateway = new RealtimeGateway();
     attach(gateway);
@@ -84,8 +82,7 @@ describe('RealtimeGateway', () => {
     expect(events[2][0]).toBe(REALTIME_EVENTS.systemStatus);
   });
 
-  // Keyed by node alone, a newly opened dashboard showed one pumphouse probe
-  // until the other next spoke.
+  // Keyed by node alone, a new dashboard showed one pumphouse probe until the other spoke.
   it('replays the last reading of EVERY sensor on a node', () => {
     const gateway = new RealtimeGateway();
     attach(gateway);
@@ -97,14 +94,12 @@ describe('RealtimeGateway', () => {
 
     const events = (client.emit as unknown as { mock: { calls: unknown[][] } })
       .mock.calls;
-    expect(events.map((e) => (e[1] as Reading).sensorId)).toEqual([
+    expect(events.map((event) => (event[1] as Reading).sensorId)).toEqual([
       'air',
       'pipes',
     ]);
   });
 
-  // Device state is authoritative from GET /api/devices. A cached copy replayed
-  // on connect could contradict it, so it is deliberately not cached.
   it('does not replay device state', () => {
     const gateway = new RealtimeGateway();
     attach(gateway);
@@ -115,9 +110,7 @@ describe('RealtimeGateway', () => {
     expect(client.emit).not.toHaveBeenCalled();
   });
 
-  // Every publisher is mid-way through something that matters more than the
-  // dashboard - an ingest, a relay write, a rules evaluation - so a socket
-  // failure must never propagate into the caller.
+  // Every publisher is mid-way through something that matters more than the dashboard.
   it('never throws when there is no server attached yet', () => {
     const gateway = new RealtimeGateway();
     expect(() => gateway.publishReading(reading('elantris'))).not.toThrow();

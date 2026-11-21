@@ -219,6 +219,16 @@ Given fencing, a wrong answer is safe, so the election can be as simple as a hum
 - **Demote** stops heartbeating. The old leader's commands would be refused anyway.
 - A promotion **refuses** if it can see a higher epoch already in flight.
 
+What a follower's server does today, in `MqttHardwareService`:
+
+- **It does not heartbeat.** The heartbeat is the binding that grants the right to command, so a
+  follower creating one would have nodes obeying two controllers.
+- **It registers no server LWT.** A follower crashing is no reason for the greenhouse to fail safe,
+  and its retained `offline` would sit on the topic telling every node exactly that.
+- **It refuses `setPin` and `syncPins` locally** with `CONTROLLER_IS_FOLLOWER`. The node would deny
+  the command anyway, but as a `CONTROLLER_CONFLICT` alarm, and a click on a follower's UI must not
+  manufacture a real incident signal.
+
 That is enough for "take over if wanted", it cannot split-brain, and it needs no consensus library.
 Automatic failover can come later, and when it does the honest way to get it is a **third witness**
 — a Mac, or a cheap third box — not two machines trying to agree.

@@ -11,14 +11,7 @@ import {
   parseWallClock,
 } from './rules.engine';
 
-/**
- * The greenhouse as actually configured, in rule-kind form. Every expectation
- * table in this file predates rule kinds and is unchanged: that is the proof
- * the conversion moved the numbers without moving the behaviour.
- *
- * `dayOffAtC` is 26 here, as the tables were written against, though the live
- * zone runs 28.
- */
+// The tables predate rule kinds and are unchanged; `dayOffAtC` is 26 as written, though the live zone runs 28.
 const GREENHOUSE: ZoneRulesConfig = {
   enabledRoles: [
     DeviceRole.Lights,
@@ -84,8 +77,7 @@ interface Scenario {
 }
 
 function decide(role: DeviceRole, scenario: Scenario = {}): RuleDecision {
-  // `'co2Ppm' in scenario`, not `?? 800`: an explicit null IS the case under
-  // test in the most important assertion in this file.
+  // `in`, not `?? 800`: an explicit null is the case under test.
   const sample = climate(
     scenario.temperatureC ?? 20,
     'co2Ppm' in scenario ? (scenario.co2Ppm as number | null) : 800,
@@ -108,7 +100,7 @@ function decide(role: DeviceRole, scenario: Scenario = {}): RuleDecision {
         },
     staleRoles: scenario.stale ?? [],
   });
-  const decision = decisions.find((d) => d.role === role);
+  const decision = decisions.find((candidate) => candidate.role === role);
   if (!decision) throw new Error(`no decision for ${role}`);
   return decision;
 }
@@ -122,15 +114,13 @@ describe('evaluateRules shape', () => {
       climateByRole: {},
       staleRoles: [],
     });
-    expect(decisions.map((d) => d.role)).toEqual([
+    expect(decisions.map((decision) => decision.role)).toEqual([
       DeviceRole.Lights,
       DeviceRole.Co2Generator,
       DeviceRole.ExhaustFan,
     ]);
   });
 
-  // Ownership is explicit, never inferred from which devices exist: "no lights
-  // device" must not mean the same thing as "the other Pi owns lights".
   it('no-ops a role this deployment does not own, whatever the climate says', () => {
     const decision = decide(DeviceRole.Lights, {
       temperatureC: 5,
@@ -194,8 +184,7 @@ describe('lights - a heat source with 1 °C hysteresis', () => {
 });
 
 describe('the day window - start inclusive, end exclusive', () => {
-  // Observed through the lights rule at 20 °C: inside the window it turns on,
-  // outside it reports outside-window.
+  // Observed through the lights rule at 20 °C.
   it.each([
     [6 * 60 + 29, 'outside-window'],
     [6 * 60 + 30, 'temp-below-setpoint'],
@@ -209,9 +198,7 @@ describe('the day window - start inclusive, end exclusive', () => {
 });
 
 describe('CO2 generator - enrichment by day, heat by night', () => {
-  // A dead band, as lights and the exhaust fan have. Measured with a real
-  // burner: a single setpoint cut at 1509 ppm and wanted back on at 1494, so
-  // every cycle would have been an ignition for seconds of burn.
+  // A single setpoint cut at 1509 ppm and wanted back on at 1494: an ignition for seconds of burn.
   it.each([
     [25, 800, 'on', 'co2-below-threshold'],
     [25, 1399, 'on', 'co2-below-threshold'],
@@ -236,9 +223,7 @@ describe('CO2 generator - enrichment by day, heat by night', () => {
     },
   );
 
-  // THE assertion that matters most in this file. A dead sensor stuck on a low
-  // reading would otherwise run a propane burner indefinitely on a phantom
-  // "CO2 is low".
+  // A dead sensor stuck low would otherwise run a propane burner indefinitely.
   it('stays OFF by day when CO2 is unknown, even though it is cool enough', () => {
     expect(
       decide(DeviceRole.Co2Generator, { temperatureC: 25, co2Ppm: null }),
@@ -261,8 +246,7 @@ describe('CO2 generator - enrichment by day, heat by night', () => {
     ).toMatchObject({ desired, reason });
   });
 
-  // The night branch is the heater, and it must never consult CO2. A stale or
-  // dead CO2 sensor withholding heat on a cold night is how plants die.
+  // The night branch is the heater; a dead CO2 sensor withholding heat is how plants die.
   it('heats at night with an unknown CO2', () => {
     expect(
       decide(DeviceRole.Co2Generator, {
@@ -273,8 +257,7 @@ describe('CO2 generator - enrichment by day, heat by night', () => {
     ).toMatchObject({ desired: 'on', reason: 'frost-protection' });
   });
 
-  // High CO2 at night is expected and harmless here: the greenhouse leaks, and
-  // this generator has never pushed it past ~2500 ppm.
+  // Harmless: the greenhouse leaks, and this generator has never pushed past ~2500 ppm.
   it('heats at night even at 5000 ppm', () => {
     expect(
       decide(DeviceRole.Co2Generator, {
@@ -345,7 +328,7 @@ describe('isWithinWindow', () => {
   });
 });
 
-/** The pumphouse as planned: freeze protection, and heat on when blind. */
+// Freeze protection, and heat on when blind.
 const PUMPHOUSE: ZoneRulesConfig = {
   enabledRoles: [DeviceRole.Heater, DeviceRole.HeatTape],
   sensorPolicy: { default: { source: 'min', maxAgeMs: 120_000 } },
@@ -388,7 +371,7 @@ function pumphouse(
     },
     staleRoles: overrides.stale ? [DeviceRole.Heater, DeviceRole.HeatTape] : [],
   });
-  const decision = decisions.find((d) => d.role === role);
+  const decision = decisions.find((candidate) => candidate.role === role);
   if (!decision) throw new Error(`no decision for ${role}`);
   return decision;
 }
@@ -402,7 +385,7 @@ describe('a heat thermostat - the pumphouse', () => {
       climateByRole: {},
       staleRoles: [],
     });
-    expect(decisions.map((d) => d.role)).toEqual([
+    expect(decisions.map((decision) => decision.role)).toEqual([
       DeviceRole.Heater,
       DeviceRole.HeatTape,
     ]);
@@ -446,9 +429,7 @@ describe('a heat thermostat - the pumphouse', () => {
 });
 
 describe('onStale - what a role does when its sensors go quiet', () => {
-  // THE pumphouse case. Holding would leave a heater that was off when the
-  // probes died off however cold it got; "on" costs electricity, "off" costs
-  // the pipes.
+  // Holding would leave an off heater off however cold it got; "on" costs electricity, "off" the pipes.
   it('turns a role ON when told to, and says it was the stale policy', () => {
     expect(pumphouse(DeviceRole.Heater, 20, { stale: true })).toEqual({
       role: DeviceRole.Heater,
@@ -458,8 +439,7 @@ describe('onStale - what a role does when its sensors go quiet', () => {
     });
   });
 
-  // The last-known reading is warm and says "off"; stale means it is not
-  // believed, whatever it says.
+  // The warm last-known reading says off; stale means it is not believed.
   it('ignores the last-known temperature entirely', () => {
     expect(pumphouse(DeviceRole.HeatTape, 30, { stale: true }).desired).toBe(
       'on',
@@ -491,8 +471,6 @@ describe('onStale - what a role does when its sensors go quiet', () => {
     ).toMatchObject({ desired: 'noop', reason: 'sensor-stale' });
   });
 
-  // Ownership comes first: a stale sensor must not drive a role this zone
-  // does not control.
   it('never drives an unowned role, stale or not', () => {
     expect(
       pumphouse(DeviceRole.Heater, 0, {
@@ -504,8 +482,7 @@ describe('onStale - what a role does when its sensors go quiet', () => {
 });
 
 describe('a config the validator should have refused', () => {
-  // Unreachable through RulesService, which parses first. If it is ever
-  // reached, the zone fails loudly rather than an owned role doing nothing.
+  // Unreachable through RulesService, which parses first.
   it('throws for an enabled role with no rule', () => {
     expect(() =>
       pumphouse(DeviceRole.Heater, 0, {
@@ -530,8 +507,7 @@ describe('a config the validator should have refused', () => {
 });
 
 describe('ROLE_ORDER', () => {
-  // A role missing from the order is a role no zone can ever evaluate, and
-  // nothing else would say so.
+  // A role missing from the order is one no zone can ever evaluate, silently.
   it('contains every role exactly once', () => {
     expect([...ROLE_ORDER].sort()).toEqual(Object.values(DeviceRole).sort());
   });

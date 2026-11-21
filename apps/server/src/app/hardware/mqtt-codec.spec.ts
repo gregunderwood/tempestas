@@ -152,8 +152,7 @@ describe('decodeSample', () => {
     });
   });
 
-  // An invalid CO2 is a legitimate, meaningful state - null, never zero - and
-  // the burner's daytime branch fails safe on it.
+  // Null, never zero: the burner's daytime branch fails safe on it.
   it('maps an invalid CO2 to null and keeps the sample', () => {
     const payload = samplePayload({
       measurements: {
@@ -173,8 +172,7 @@ describe('decodeSample', () => {
     });
   });
 
-  // What a DS18B20 sends: temperature only. Dropping the sample over a value no
-  // rule reads would leave the pumphouse with no temperature at all.
+  // What a DS18B20 sends; dropping it would leave the pumphouse with no temperature.
   it('keeps a temperature-only sample, with humidity and CO2 null', () => {
     const notMeasured = (unit: string) => ({
       value: null,
@@ -195,8 +193,7 @@ describe('decodeSample', () => {
     });
   });
 
-  // Every rule reads temperature. A sample without it is not a partial reading,
-  // it is nothing - and half-applying it would hand the engine a phantom value.
+  // Every rule reads temperature, so a sample without it is nothing.
   it('drops a sample whose temperature is invalid', () => {
     const payload = samplePayload({
       measurements: {
@@ -257,8 +254,7 @@ describe('decodeHello', () => {
     });
   });
 
-  // Without a bootId a reboot is undetectable and the reading dedupe loses its
-  // scope, so it is not an optional field.
+  // Without a bootId a reboot is undetectable and the reading dedupe loses its scope.
   it.each([[undefined], ['']])('refuses a hello with bootId %s', (bootId) => {
     expect(
       decodeHello(helloPayload({ bootId }), 'elantris', NOW),
@@ -305,8 +301,7 @@ describe('decodeStatus', () => {
     ).toEqual({ ok: true, value: { nodeId: 'elantris', online, at: NOW } });
   });
 
-  // Guessing either way is wrong: "stale is not off", and guessing online is
-  // worse still.
+  // Stale is not off, and guessing online is worse still.
   it('refuses an unknown state rather than defaulting', () => {
     expect(
       decodeStatus(
@@ -341,10 +336,7 @@ describe('decodeGpioState', () => {
     });
   });
 
-  // The node's timestamp ends up in a device's `offAt`, which decides when the
-  // minimum-off window started. Defaulting a bad one to our clock would restart
-  // a burner's cooldown from whenever we happened to receive the message, so it
-  // is refused instead.
+  // Defaulting to our clock would restart a burner's cooldown from receipt.
   it.each([
     ['', 'empty'],
     ['not-a-date', 'garbage'],
@@ -418,8 +410,7 @@ describe('verifyResult', () => {
     expect(verifyResult(result(), requested)).toBeNull();
   });
 
-  // The old system logged a failed GPIO write and updated the row anyway, so
-  // the UI showed a heater running when it was not.
+  // The old system updated the row anyway, and the UI showed a heater running.
   it('fails on a readback that disagrees with the command', () => {
     const mismatch = result({
       lines: [{ pin: 16, requested: 0, readback: 1, ok: true }],
@@ -427,8 +418,7 @@ describe('verifyResult', () => {
     expect(verifyResult(mismatch, requested)).toMatchObject({ ok: false });
   });
 
-  // `null` means the node could not read the line back. Unknown state on a
-  // burner relay is exactly what must not be believed.
+  // `null` means unknown, and unknown on a burner relay must not be believed.
   it('fails on an unknown readback, even when the node says ok', () => {
     const unknown = result({
       lines: [{ pin: 16, requested: 0, readback: null, ok: true }],

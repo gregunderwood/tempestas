@@ -117,6 +117,12 @@ synchronize: true,   // ❌ never, in any config, for any reason
 - **Enum changes are not free.** TypeORM rewrites the type, which on a large table is a table
   rewrite. `sensor_readings` will be the one that hurts.
 - **Destructive operations on populated tables** get a second pair of eyes and a dump first.
+- **The CLI globs only the timestamped files.** A plain `migrations/**/*` also matches
+  `migrations/index.ts`, the barrel the bundled runner imports, so every migration is seen twice
+  and TypeORM refuses with "Duplicate migrations". The bundled runner lists entities and migrations
+  explicitly because a webpack bundle has no directory to scan.
+- **`uuidExtension: 'pgcrypto'`** makes TypeORM emit `gen_random_uuid()`, built into Postgres 13+,
+  rather than `uuid_generate_v4()`, which needs the `uuid-ossp` extension installed.
 
 ## When to update this file
 

@@ -89,6 +89,10 @@ Two things it does deliberately:
 - **Seeded from the table before deciding.** Retained `gpio/state` is
   republished by every node on every connect; without reading the last row
   first, a restart would write a transition where no relay moved.
+- **A live report is never stale.** Only a retained replay can be older than the last row. A live
+  report dated before it means the node's clock is behind (a Pi has no RTC), so it is recorded and
+  filed at receipt, keeping history in order. Skipping it hid patji failing safe to ON after a
+  reboot on 2026-11-18.
 
 Not covered by the readings retention job. A reading is a measurement the
 greenhouse will make again tomorrow; a transition happened once.

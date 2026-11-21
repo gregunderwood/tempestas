@@ -18,12 +18,6 @@ import type { PinTransitionEntity } from './models';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { PatchDeviceRulesDto, UpdateDeviceDto } from './dto/update-device.dto';
 
-/**
- * Errors leave as real HTTP status codes with a machine-readable `code`.
- * The old API returned `{ error: "..." }` inside a 200 body, which is why the
- * Angular client had four near-identical `if (res.error)` blocks and no
- * interceptor anywhere.
- */
 @Controller('devices')
 export class DevicesController {
   constructor(
@@ -36,13 +30,7 @@ export class DevicesController {
     return this.devices.findAll();
   }
 
-  /**
-   * Relay history, for fitting the climate model against real behaviour.
-   *
-   * Declared BEFORE `:id`, or Express matches "transitions" as a device id and
-   * the UUID pipe rejects it with a validation error that looks like a bug in
-   * the caller.
-   */
+  // Declared before `:id`, or the UUID pipe rejects "transitions" as a device id.
   @Get('transitions')
   transitionHistory(
     @Query('from') from?: string,
@@ -51,10 +39,10 @@ export class DevicesController {
     @Query('limit') limit?: string,
   ): Promise<PinTransitionEntity[]> {
     return this.transitions.query({
-      from: from ? new Date(from) : undefined,
-      to: to ? new Date(to) : undefined,
+      from: parseOptionalDate(from),
+      to: parseOptionalDate(to),
       nodeId,
-      limit: limit ? Number(limit) : undefined,
+      limit: parseOptionalNumber(limit),
     });
   }
 
@@ -107,4 +95,12 @@ export class DevicesController {
   forceOn(@Param('id', ParseUUIDPipe) id: string): Promise<Device> {
     return this.devices.forceOn(id);
   }
+}
+
+function parseOptionalDate(text?: string): Date | undefined {
+  return text ? new Date(text) : undefined;
+}
+
+function parseOptionalNumber(text?: string): number | undefined {
+  return text ? Number(text) : undefined;
 }

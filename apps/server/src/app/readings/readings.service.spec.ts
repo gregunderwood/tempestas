@@ -42,24 +42,24 @@ describe('ReadingsService.findAll', () => {
   it('lists newest first by default', async () => {
     const { service, orderings } = makeServiceRecordingQueries();
     await service.findAll({ days: 1 });
-    expect(orderings).toEqual([['r.createdAt', 'DESC']]);
+    expect(orderings).toEqual([['reading.createdAt', 'DESC']]);
   });
 
   it('lists oldest first when asked, so a client can find where a window began', async () => {
     const { service, orderings } = makeServiceRecordingQueries();
     await service.findAll({ days: 1, order: ReadingOrder.OldestFirst });
-    expect(orderings).toEqual([['r.createdAt', 'ASC']]);
+    expect(orderings).toEqual([['reading.createdAt', 'ASC']]);
   });
 
   it('narrows to one sensor of a node when asked', async () => {
     const { service, conditions } = makeServiceRecordingQueries();
     await service.findAll({ days: 1, nodeId: 'patji', sensorId: 'pipes' });
-    expect(conditions).toContain('r.sensorId = :sensorId');
+    expect(conditions).toContain('reading.sensorId = :sensorId');
   });
 
   it('keeps every sensor when no sensor is named', async () => {
     const { service, conditions } = makeServiceRecordingQueries();
     await service.findAll({ days: 1, nodeId: 'patji' });
-    expect(conditions).not.toContain('r.sensorId = :sensorId');
+    expect(conditions).not.toContain('reading.sensorId = :sensorId');
   });
 });
