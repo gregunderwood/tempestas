@@ -75,6 +75,7 @@ export interface ReadingsQuery {
   nodeId?: NodeId;
   /** Only with `nodeId`: a sensor id is unique on its node, not across nodes. */
   sensorId?: string;
+  /** Newest first when absent. */
   order?: ReadingOrder;
   /** Bounded on purpose: retention holds far more rows than any screen should fetch. */
   limit?: number;
