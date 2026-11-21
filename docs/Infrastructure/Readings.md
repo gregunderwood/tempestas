@@ -21,13 +21,16 @@ same SD card the burner controller writes to.
 
 ```
 GET /api/readings?days=&from=&to=&nodeId=&limit=     newest first, windowed and limited
-GET /api/readings/latest                            one row per node, unwindowed
+GET /api/readings/latest                            one row per sensor, unwindowed
 GET /api/readings/stats?days=&from=&to=&nodeId=      min/max/average over the window
 ```
 
 `nodeId` is the node **slug**, as everywhere on the wire. `limit` defaults to **500** and caps at
 5,000 — 90 days of retention at one sample per node per 10 s is over three quarters of a million
 rows, and a dashboard wants `/stats` over a window rather than the window itself.
+
+`/latest` is one row per **sensor**, not per node: a node with a probe per pipe would otherwise
+show whichever probe spoke last and hide the others.
 
 `/stats` returns each extreme as a **whole reading**, so the UI can link to the record and say which
 node and when — not just a bare number.
@@ -120,7 +123,7 @@ delaying the data the burner is controlled from.
 - **`AVG` returns a string** through the pg driver, and null for an empty window. Coerce and round
   explicitly.
 - **`distinctOn` requires the leading `ORDER BY` to match.** `/readings/latest` is
-  `DISTINCT ON (node_id) … ORDER BY node_id, created_at DESC`; reordering it breaks the query rather
+  `DISTINCT ON (node_id, sensor_id) … ORDER BY node_id, sensor_id, created_at DESC`; reordering it breaks the query rather
   than slowing it.
 - **A window is not a zone.** These endpoints are global; nothing here filters by zone yet.
 
