@@ -21,6 +21,7 @@ commit rather than becoming a two-repo dance that will eventually be done wrong 
 - [../../apps/agent-linux/src/tempestas_agent/sensor.py](../../apps/agent-linux/src/tempestas_agent/sensor.py) — raw SCD4x over I²C, and the closed-loop simulator
 - [../../apps/agent-linux/src/tempestas_agent/ds18b20.py](../../apps/agent-linux/src/tempestas_agent/ds18b20.py) — DS18B20 probes over the kernel's 1-Wire sysfs
 - [../../apps/agent-linux/src/tempestas_agent/gpio.py](../../apps/agent-linux/src/tempestas_agent/gpio.py) — the relay backends: `NoGpio`, `SimulatedGpio`, `LgpioBackend`
+- [../../tools/deploy-agent-linux.sh](../../tools/deploy-agent-linux.sh) — test, copy, stamp the version, restart
 - [../../apps/agent-linux/agent.example.toml](../../apps/agent-linux/agent.example.toml) — every option; the reasoning behind each is on this page
 
 ## Running it
@@ -96,6 +97,28 @@ Each one contradicts what was assumed, and each has a test and a comment next to
   to exit anyway.
 
 ## Deployment
+
+### Every deploy
+
+```bash
+tools/deploy-agent-linux.sh [host ...]   # elantris and patji when none are named
+```
+
+It runs the agent's lint and tests, copies the code to `~/tempestas/apps/agent-linux` on each host,
+stamps the version, and restarts the agent. The venv is an editable install, so new code needs no
+reinstall; the script says when `pyproject.toml` or `uv.lock` changed and `uv sync` is due. A
+restart drives the relays to their fail-safe levels until the server commands them again.
+
+### The version a node reports
+
+`agentVersion` in `hello` is `<pyproject version>+<commit>`, for example `0.1.0+861cde6`, with
+`-dirty` when the agent's directory had uncommitted changes. The deploy script writes it to
+`tempestas_agent/deployed_version.py` on the host, and
+[tools/describe-agent-version.sh](../../tools/describe-agent-version.sh) builds it for both agents. A
+checkout that was never deployed by the script reports `+dev`. It answers "which code is on this
+node?"; compatibility is the MQTT contract version's job, not this.
+
+### The unit
 
 The unit lives at [../../apps/agent-linux/systemd/tempestas-agent.service](../../apps/agent-linux/systemd/tempestas-agent.service)
 and is installed by staging it in the repo checkout and then `sudo install`-ing it — never by

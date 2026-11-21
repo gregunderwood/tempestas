@@ -92,7 +92,6 @@ class WorldConfig:
 class AgentConfig:
     node_id: str
     kind: str = "rpi"
-    agent_version: str = "0.1.0"
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     sensor: SensorConfig = field(default_factory=SensorConfig)
     gpio: GpioConfig = field(default_factory=GpioConfig)
@@ -121,7 +120,6 @@ def load(path: str | Path | None = None, environment: dict[str, str] | None = No
     return AgentConfig(
         node_id=node_id,
         kind=document.get("kind", AgentConfig.kind),
-        agent_version=document.get("agent_version", AgentConfig.agent_version),
         mqtt=mqtt,
         sensor=sensor,
         gpio=gpio,
