@@ -1,9 +1,4 @@
-"""Whether a gpio/set may be obeyed. Pure, so every refusal can be asserted in a test.
-
-The checks mirror apps/hardware's judge_command, cheapest and most dangerous first, plus one
-the Pi does not need: a Pico has no real-time clock, so until NTP has set it a command's
-expiresAt cannot be judged, and an unjudgeable command is refused.
-"""
+"""Refuses what the Pi agent refuses, plus anything sent before NTP has set the clock."""
 
 import json
 

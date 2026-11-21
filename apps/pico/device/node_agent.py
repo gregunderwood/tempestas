@@ -1,9 +1,4 @@
-"""The agent: announce, sample, obey carefully, fail safe.
-
-Hardware and time are injected, so everything here runs under CPython in the tests exactly as
-it runs on the Pico. The behaviour mirrors apps/hardware's Agent; docs/Infrastructure/MQTT
-Contract.md lists the obligations.
-"""
+"""Hardware and time are passed in, so the tests run this exactly as the Pico does."""
 
 import json
 

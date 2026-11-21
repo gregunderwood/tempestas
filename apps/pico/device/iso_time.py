@@ -1,5 +1,4 @@
-"""ISO-8601 in UTC, by integer arithmetic: MicroPython has no datetime, mktime is local time, and the
-Pico's 32-bit floats cannot hold an epoch second (near 2026 they step by 128 s)."""
+"""Integers only: the Pico's 32-bit floats step by 128 s near today's epoch seconds."""
 
 import time
 

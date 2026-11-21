@@ -101,11 +101,16 @@ class FakeBusSensors:
     def __init__(self, temperatures_by_rom):
         self.temperatures_by_rom = temperatures_by_rom
         self.conversions = 0
+        self.bus_failure = None
 
     def scan(self):
+        if self.bus_failure is not None:
+            raise self.bus_failure
         return list(self.temperatures_by_rom)
 
     def convert_temp(self):
+        if self.bus_failure is not None:
+            raise self.bus_failure
         self.conversions += 1
 
     def read_temp(self, rom):

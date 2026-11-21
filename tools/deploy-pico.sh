@@ -14,6 +14,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEVICE="$HERE/apps/pico/device"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 PORT_WAIT_SECONDS=10
+# The RP2040's WATCHDOG CTRL register; bit 30 is ENABLE, and once set it cannot be cleared.
+REFUSE_IF_WATCHDOG_ARMED="import machine
+if machine.mem32[0x40058000] & (1 << 30):
+    raise RuntimeError('watchdog already armed: missed the boot grace, run the deploy again')"
 AGENT_FILES=(
   main.py node_runtime.py node_agent.py mqtt_session.py command_guard.py contract.py
   iso_time.py relay_lines.py ds18b20_probes.py settings.py credentials.py
@@ -49,6 +53,6 @@ sleep 1
 wait_for_port
 
 say "Copying the agent"
-(cd "$DEVICE" && mpremote cp "${AGENT_FILES[@]}" : + cp -r lib : + reset)
+(cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + cp "${AGENT_FILES[@]}" : + cp -r lib : + reset)
 
 say "Done. Watch it with: uv tool run mpremote connect $PORT resume repl"
