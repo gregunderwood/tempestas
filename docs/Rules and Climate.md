@@ -137,6 +137,11 @@ from**, and the climate sample beside it carries `sourceSensorIds` (`node/sensor
 where one node holds several probes. A decision whose provenance is unknowable is a decision
 nobody can debug.
 
+It also names the probes that **decided** each value: `decidingSensorIds` for temperature and
+`co2DecidingSensorIds` for CO2. Under `min` or `max` the two can be different probes, the coldest
+end not being the end with the least CO2. The zones page tags the probe behind the measurement the
+decision turned on: CO2 for a `co2-burner` deciding on its daytime CO2 band, temperature otherwise.
+
 With several probes and `min`, a probe that goes quiet simply drops out and the rule carries on
 with the rest. That is the right control behaviour and exactly why it is said elsewhere:
 `GET /api/health` names any sensor that reported in the last day and has since stopped.

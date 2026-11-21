@@ -103,6 +103,11 @@ interface NamedSource {
                     <span class="probe__value"
                       >{{ probe.temperatureC | number: '1.1-1' }} °C</span
                     >
+                    @if (probe.co2Ppm !== null) {
+                      <span class="probe__value"
+                        >{{ probe.co2Ppm | number: '1.0-0' }} ppm CO₂</span
+                      >
+                    }
                     <span class="probe__age">
                       @if (probe.isQuiet) {
                         quiet {{ formatDuration(probe.ageSeconds) }}

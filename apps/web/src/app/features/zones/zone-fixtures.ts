@@ -114,6 +114,7 @@ export function probe(
   sensorId: string,
   temperature: number,
   ageSeconds = 4,
+  co2: number | null = null,
 ): Reading {
   return {
     id: `r-${sensorId}`,
@@ -121,7 +122,7 @@ export function probe(
     sensorId,
     temperature,
     humidity: null,
-    co2: null,
+    co2,
     createdAt: secondsBeforeNow(ageSeconds),
   };
 }
@@ -167,6 +168,7 @@ export function pumphouseEvaluation(
     sourceNodeIds: ['patji'],
     sourceSensorIds: ['patji/air', 'patji/pipes'],
     decidingSensorIds: ['patji/pipes'],
+    co2DecidingSensorIds: [],
   };
   return {
     zoneId: 'z-pump',

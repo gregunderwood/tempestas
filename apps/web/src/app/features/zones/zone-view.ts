@@ -8,6 +8,7 @@ import {
   type Node,
   type Reading,
   type RoleRule,
+  type RuleReason,
   type RulesCycle,
   type RulesEvaluation,
   type Zone,
@@ -39,6 +40,13 @@ import {
 
 export const RULES_RUN_OLD_AFTER_SECONDS = 60;
 
+// A co2-burner's only dead band is its daytime CO2 band.
+const CO2_BURNER_REASONS_DECIDED_ON_CO2: readonly RuleReason[] = [
+  'co2-below-threshold',
+  'co2-at-threshold',
+  'dead-band',
+];
+
 export interface DeviceLine {
   id: string;
   name: string;
@@ -55,6 +63,7 @@ export interface ProbeLine {
   key: string;
   label: string;
   temperatureC: number;
+  co2Ppm: number | null;
   ageSeconds: number;
   isQuiet: boolean;
   tag: string | null;
@@ -415,7 +424,7 @@ function buildProbeLines(
 
   const enabledRoles = zone.rulesConfig.enabledRoles ?? [];
   const controlledRolesByProbe = mapControlledRolesToProbes(
-    findRolesDecidedByProbes(enabledRoles, evaluation),
+    findDecidingProbesByRole(zone.rulesConfig, evaluation),
   );
   return probes.map((probe) => ({
     ...probe,
@@ -442,30 +451,59 @@ function toProbeReading(
     key: sensorKey(reading),
     label: hasSeveralNodes ? sensorKey(reading) : reading.sensorId,
     temperatureC: reading.temperature,
+    co2Ppm: reading.co2,
     ageSeconds,
     isQuiet: ageSeconds > READING_QUIET_AFTER_SECONDS,
   };
 }
 
-function findRolesDecidedByProbes(
-  enabledRoles: readonly DeviceRole[],
+function findDecidingProbesByRole(
+  config: ZoneRulesConfig,
   evaluation: RulesEvaluation | null,
-): [DeviceRole, ClimateSample][] {
+): [DeviceRole, string[]][] {
   if (!evaluation) return [];
-  return enabledRoles.flatMap((role): [DeviceRole, ClimateSample][] => {
+  const enabledRoles = config.enabledRoles ?? [];
+  return enabledRoles.flatMap((role): [DeviceRole, string[]][] => {
     const climate = evaluation.climateByRole[role];
     const isDecidedByProbes =
       climate !== undefined && !evaluation.staleRoles.includes(role);
-    return isDecidedByProbes ? [[role, climate]] : [];
+    if (!isDecidedByProbes) return [];
+    const decision = evaluation.decisions.find(
+      (candidate) => candidate.role === role,
+    );
+    return [
+      [role, selectDecidingProbes(config.rules[role], decision, climate)],
+    ];
   });
 }
 
+function selectDecidingProbes(
+  rule: RoleRule | undefined,
+  decision: DecisionOutcome | undefined,
+  climate: ClimateSample,
+): string[] {
+  return wasDecidedOnCo2(rule, decision)
+    ? climate.co2DecidingSensorIds
+    : climate.decidingSensorIds;
+}
+
+function wasDecidedOnCo2(
+  rule: RoleRule | undefined,
+  decision: DecisionOutcome | undefined,
+): boolean {
+  return (
+    rule?.kind === 'co2-burner' &&
+    decision !== undefined &&
+    CO2_BURNER_REASONS_DECIDED_ON_CO2.includes(decision.reason)
+  );
+}
+
 function mapControlledRolesToProbes(
-  decidedRoles: [DeviceRole, ClimateSample][],
+  decidingProbesByRole: [DeviceRole, string[]][],
 ): Map<string, string[]> {
   const controlledRolesByProbe = new Map<string, string[]>();
-  for (const [role, climate] of decidedRoles) {
-    for (const probeKey of climate.decidingSensorIds) {
+  for (const [role, decidingProbeKeys] of decidingProbesByRole) {
+    for (const probeKey of decidingProbeKeys) {
       const controlledRoles = controlledRolesByProbe.get(probeKey) ?? [];
       controlledRolesByProbe.set(probeKey, [
         ...controlledRoles,

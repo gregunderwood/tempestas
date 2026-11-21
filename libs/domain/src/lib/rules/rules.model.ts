@@ -11,8 +11,10 @@ export interface ClimateSample {
   sourceNodeIds: NodeId[];
   /** As `node/sensor`. */
   sourceSensorIds: string[];
-  /** One for `min`/`max` unless tied, otherwise every contributor. */
+  /** For temperature. One for `min`/`max` unless tied, otherwise every contributor. */
   decidingSensorIds: string[];
+  /** As `decidingSensorIds`, for CO2, which `min`/`max` can take from a different probe. Never a null-CO2 probe. */
+  co2DecidingSensorIds: string[];
 }
 
 export interface RulesInput {
