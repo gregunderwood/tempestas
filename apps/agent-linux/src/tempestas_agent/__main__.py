@@ -140,7 +140,7 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
 def announce(agent: Agent) -> None:
     node_id = agent.config.node_id
     agent.publish("status", contract.build_status_topic(node_id), agent.status_payload("online"))
-    agent.publish("hello", contract.build_hello_topic(node_id), agent.hello_payload())
+    agent.say_hello()
     # Retained, so a restarting controller would otherwise read the level from before our restart.
     agent.publish_gpio_state(agent.config.gpio.lines)
 
@@ -158,16 +158,7 @@ def handle_gpio_set(agent: Agent, message) -> None:
 
 
 def handle_server_status(agent: Agent, message) -> None:
-    try:
-        body = json.loads(message.payload)
-    except (ValueError, UnicodeDecodeError):
-        return
-    # A deploy restarts the server too; the dead-man decides whether it is really gone.
-    if body.get("state") == "offline":
-        log.warning(
-            "the server reported itself offline - holding the lines for the dead-man (%.0fs)",
-            agent.config.deadman_s,
-        )
+    agent.on_server_status(message.payload, retained=bool(message.retain))
 
 
 def start(agent: Agent, config: AgentConfig) -> None:

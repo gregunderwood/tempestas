@@ -228,6 +228,46 @@ class TestDeadman:
         assert agent.bound_controller == "nestjs-99"
 
 
+def _server_status(state: str) -> bytes:
+    return json.dumps({"schema": "status/1", "state": state}).encode()
+
+
+class TestServerStatus:
+    def test_says_hello_again_when_the_server_comes_back_online(self):
+        agent, _ = make_agent(lines=(16,), failsafe={16: 1})
+        agent.on_server_status(_server_status("offline"), retained=False)
+        agent.on_server_status(_server_status("online"), retained=False)
+
+        hellos = [
+            (payload, qos, retain)
+            for topic, payload, qos, retain in agent.client.published
+            if topic == contract.build_hello_topic("bench")
+        ]
+        assert len(hellos) == 1
+        hello, qos, retain = hellos[0]
+        assert (qos, retain) == contract.QOS["hello"]
+        assert hello["bootId"] == agent.boot_id
+        assert hello["capabilities"]["gpio"]["pins"] == [16]
+
+    def test_does_not_repeat_the_hello_for_the_retained_online_replayed_on_connect(self):
+        agent, _ = make_agent()
+        agent.on_server_status(_server_status("online"), retained=True)
+        assert agent.client.published == []
+
+    def test_going_offline_publishes_nothing_and_leaves_the_lines_alone(self):
+        agent, _ = make_agent(lines=(16,), failsafe={16: 1})
+        agent.on_heartbeat(_heartbeat())
+        agent.gpio.write(16, 0)
+        agent.on_server_status(_server_status("offline"), retained=False)
+        assert agent.client.published == []
+        assert agent.gpio.level(16) == 0
+
+    def test_ignores_a_payload_that_is_not_json(self):
+        agent, _ = make_agent()
+        agent.on_server_status(b"not json", retained=False)
+        assert agent.client.published == []
+
+
 class TestBackendWiring:
     def test_no_lines_builds_a_backend_that_cannot_open_a_chip(self):
         config = AgentConfig(node_id="bench", sensor=SensorConfig(kind="simulated"))
