@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import socket
+import tempfile
+
 import pytest
 
 from tempestas_agent.runtime import AlreadyRunning, SingleInstance, sd_notify
 
+# Below the ~104-character AF_UNIX path cap, which pytest's tmp_path exceeds.
+SHORT_TEMPORARY_ROOT = "/tmp"
+DATAGRAM_SIZE = 64
+
 
 class TestSingleInstance:
-    # Two agents sharing a node_id fight over one MQTT client id: the broker
-    # evicts the older, its will fires, and the pair alternate hellos with
-    # different boot ids - which reads as a node rebooting in a loop.
+    # Two agents on one node_id fight over one MQTT client id and read as a reboot loop.
     def test_a_second_agent_is_refused(self, tmp_path):
         lock = tmp_path / "agent.lock"
         with SingleInstance(lock), pytest.raises(AlreadyRunning, match="already holds"):
@@ -20,13 +27,10 @@ class TestSingleInstance:
         lock = tmp_path / "agent.lock"
         with SingleInstance(lock):
             pass
-        # The next one gets it without complaint.
         with SingleInstance(lock):
             pass
 
     def test_it_records_the_holding_pid(self, tmp_path):
-        import os
-
         lock = tmp_path / "agent.lock"
         with SingleInstance(lock):
             assert lock.read_text().strip() == str(os.getpid())
@@ -43,25 +47,18 @@ class TestSdNotify:
         assert sd_notify("READY=1") is False
 
     def test_sends_to_the_socket_systemd_provides(self, monkeypatch):
-        import shutil
-        import socket as socket_mod
-        import tempfile
-
-        # A short directory on purpose: an AF_UNIX path is capped near 104
-        # characters and pytest's tmp_path is comfortably longer than that.
-        directory = tempfile.mkdtemp(dir="/tmp")
-        path = f"{directory}/n.sock"
-        server = socket_mod.socket(socket_mod.AF_UNIX, socket_mod.SOCK_DGRAM)
+        directory = tempfile.mkdtemp(dir=SHORT_TEMPORARY_ROOT)
+        path = f"{directory}/notify.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         try:
             server.bind(path)
             monkeypatch.setenv("NOTIFY_SOCKET", path)
             assert sd_notify("READY=1") is True
-            assert server.recv(64) == b"READY=1"
+            assert server.recv(DATAGRAM_SIZE) == b"READY=1"
         finally:
             server.close()
             shutil.rmtree(directory, ignore_errors=True)
 
-    # Failing to tell systemd we are ready is much less bad than not running.
     def test_a_broken_socket_is_not_fatal(self, monkeypatch, tmp_path):
         monkeypatch.setenv("NOTIFY_SOCKET", str(tmp_path / "does-not-exist.sock"))
         assert sd_notify("READY=1") is False
