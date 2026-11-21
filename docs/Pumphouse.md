@@ -459,9 +459,8 @@ Two parts, both needed:
 
 ### H. Housekeeping
 
-- Delete `tools/stage-b-soak.py` and `apps/agent-linux/systemd/tempestas-stage-b-soak.service`. Its
-  job, tuning elantris's temperature offset, was done on 2026-09-10, and the legacy controller it
-  reads from is off for the season. The unit is already disabled on elantris; remove it there too.
+- [x] Delete the stage-B soak logger and its unit. Its job, tuning elantris's temperature offset,
+      was done on 2026-09-10, and the legacy controller it read from is off for the season.
 
 ## Open questions
 
