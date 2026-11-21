@@ -3,6 +3,7 @@
 import json
 
 import contract
+from agent_version import read_agent_version
 from command_guard import judge_command, parse_json_object
 from iso_time import format_iso, is_clock_set
 
@@ -28,6 +29,7 @@ class NodeAgent:
         self.log = log
         self.boot_id = boot_id
         self.node_id = settings.NODE_ID
+        self.agent_version = read_agent_version()
         self.sequence_number = 0
         self.bound_controller = None
         self.last_heartbeat_ticks = None
@@ -197,7 +199,7 @@ class NodeAgent:
     def build_hello_payload(self):
         payload = self.build_envelope("hello")
         payload["kind"] = self.settings.NODE_KIND
-        payload["agentVersion"] = self.settings.AGENT_VERSION
+        payload["agentVersion"] = self.agent_version
         payload["bootId"] = self.boot_id
         payload["capabilities"] = self.describe_capabilities()
         return payload

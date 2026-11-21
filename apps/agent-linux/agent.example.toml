@@ -2,7 +2,6 @@
 
 node_id = "elantris"
 kind = "rpi"
-agent_version = "0.1.0"
 
 # No heartbeat for this long and the node fails safe on its own; the night value is still open.
 deadman_s = 30.0

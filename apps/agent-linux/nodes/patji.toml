@@ -3,7 +3,6 @@
 
 node_id = "patji"
 kind = "rpi"
-agent_version = "0.1.0"
 
 # "Hold, then on": both loads hang off NC contacts, so a dead elantris leaves them running.
 deadman_s = 600.0

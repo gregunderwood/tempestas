@@ -111,11 +111,15 @@ tools/deploy-agent-micropython.sh [/dev/ttyACM0]
 ```
 
 It runs the agent's tests, hard-resets the board, catches it inside `main.py`'s 5 s boot grace,
-copies the agent and `boards/<settings.BOARD>.py` as `board.py`, and resets again. The board
+copies the agent, `boards/<settings.BOARD>.py` as `board.py` and a `deployed_version.py` holding
+the version, and resets again. The board
 file's `refuse_if_watchdog_armed()` runs first, so a deploy that missed the grace stops before it
 copies anything. Watch it with
 `uv tool run mpremote connect /dev/ttyACM0 resume repl` — `resume` stops mpremote from
 interrupting the agent.
+
+The version stamp works as it does for the Linux agent (see "The version a node reports" in
+[Linux Agent](Linux%20Agent.md)). A board flashed by hand reports `0.0.0+dev`.
 
 ### Adding a board
 
