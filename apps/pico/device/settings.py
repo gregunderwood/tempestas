@@ -1,7 +1,7 @@
 """This node's configuration. Credentials are in credentials.py, which is never committed."""
 
-NODE_ID = "crawlspace-pico"
-NODE_KIND = "esp32"
+NODE_ID = "braize"
+NODE_KIND = "pico"
 AGENT_VERSION = "0.1.0"
 
 BROKER_HOST = "192.168.2.70"

@@ -9,7 +9,7 @@ from iso_time import format_iso
 from node_agent import NodeAgent
 from relay_lines import DRIVEN_LOW_LEVEL, RELEASED_LEVEL, ReleasedWhenHighLines
 
-NODE_ID = "crawlspace-pico"
+NODE_ID = "braize"
 CONTROLLER = "nestjs-1"
 HEATER_PIN = 20
 HEAT_TAPE_PIN = 18
@@ -20,7 +20,7 @@ AIR_PROBE = {"28-3ce1d4436ee8": "air"}
 
 SETTINGS = SimpleNamespace(
     NODE_ID=NODE_ID,
-    NODE_KIND="esp32",
+    NODE_KIND="pico",
     AGENT_VERSION="0.1.0",
     DEADMAN_SECONDS=DEADMAN_SECONDS,
     SAMPLE_INTERVAL_SECONDS=10,
@@ -88,6 +88,7 @@ def test_announces_online_hello_and_the_lines_on_connect():
     }
     assert hello.payload["capabilities"]["sensors"][0]["sensorId"] == "air"
     assert hello.payload["capabilities"]["hasRtc"] is False
+    assert hello.payload["kind"] == "pico"
     assert [(state.payload["pin"], state.payload["level"], state.is_retained) for state in states] == [
         (HEATER_PIN, RELEASED_LEVEL, True),
         (HEAT_TAPE_PIN, RELEASED_LEVEL, True),
