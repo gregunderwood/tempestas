@@ -1,8 +1,4 @@
-"""Boot and the main loop on the Pico: fail safe first, then connect, then serve.
-
-A hang anywhere ends in a watchdog reset, and a reset releases every pin, so the worst this
-loop can do is leave the loads in their failsafe state.
-"""
+"""Any hang ends in a watchdog reset, which releases every pin: the failsafe."""
 
 import binascii
 import json
@@ -30,7 +26,9 @@ WIFI_POLL_MILLISECONDS = 250
 RECONNECT_AFTER_MILLISECONDS = 15000
 CLOCK_RESYNC_AFTER_MILLISECONDS = 3600000
 CLOCK_RETRY_AFTER_MILLISECONDS = 60000
-SOCKET_TIMEOUT_SECONDS = 5
+# Connect and CONNACK each wait this long, back to back, inside the 8 s watchdog.
+SOCKET_TIMEOUT_SECONDS = 3
+UNANSWERED_PINGS_BEFORE_DROPPING = 2
 WIFI_POWER_SAVE_OFF = 0xA11140
 MILLISECONDS_PER_SECOND = 1000
 BOOT_ID_BYTES = 6
@@ -145,6 +143,7 @@ class Connection:
     def connect_to_broker(self):
         node_id = settings.NODE_ID
         client = DeferringMqttClient(
+            self.watchdog.feed,
             "tempestas-" + node_id,
             settings.BROKER_HOST,
             port=settings.BROKER_PORT,
@@ -179,6 +178,12 @@ class Connection:
     def serve_pending_messages(self):
         client = self.publisher.client
         if client is None:
+            return
+        if not self.wifi.isconnected():
+            self.publisher.drop("wifi lost")
+            return
+        if client.unanswered_pings >= UNANSWERED_PINGS_BEFORE_DROPPING:
+            self.publisher.drop("broker stopped answering pings")
             return
         try:
             while client.check_msg() is not None:

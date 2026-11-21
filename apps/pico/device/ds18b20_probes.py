@@ -1,8 +1,4 @@
-"""DS18B20 probes on one 1-Wire bus, named by ROM in the same form a Pi's kernel uses.
-
-Never invents a reading: a probe that fails is left out of the cycle, so the server sees it go
-stale rather than seeing a number nobody measured.
-"""
+"""A failed probe is left out of the cycle, never guessed, so the server sees it go stale."""
 
 import binascii
 
@@ -34,8 +30,7 @@ class Ds18b20Probes:
         self.roms_by_linux_id = {}
 
     def start(self):
-        for rom in self.bus_sensors.scan():
-            self.roms_by_linux_id[format_rom_as_linux_id(rom)] = rom
+        self.scan()
         for linux_id, sensor_id in self.named_probes.items():
             if linux_id not in self.roms_by_linux_id:
                 self.log("probe %s (%s) is not on the bus" % (sensor_id, linux_id))
@@ -46,10 +41,27 @@ class Ds18b20Probes:
     def sensor_ids(self):
         return list(self.named_probes.values())
 
+    def scan(self):
+        try:
+            found_roms = self.bus_sensors.scan()
+        except Exception as error:
+            self.log("1-Wire scan failed: %r" % error)
+            return
+        self.roms_by_linux_id = {format_rom_as_linux_id(rom): rom for rom in found_roms}
+
+    def is_any_named_probe_missing(self):
+        return any(linux_id not in self.roms_by_linux_id for linux_id in self.named_probes)
+
     def read_all(self):
+        if self.is_any_named_probe_missing():
+            self.scan()
         if not self.roms_by_linux_id:
             return []
-        self.bus_sensors.convert_temp()
+        try:
+            self.bus_sensors.convert_temp()
+        except Exception as error:
+            self.log("1-Wire conversion failed: %r" % error)
+            return []
         self.sleep_milliseconds(CONVERSION_MILLISECONDS)
         readings = []
         for linux_id, sensor_id in self.named_probes.items():

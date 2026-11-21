@@ -1,9 +1,4 @@
-"""The relay inputs. Level 1 releases the pin; level 0 drives it low.
-
-The board's inputs are active-low optocouplers with their own pull-up to 5 V. Releasing the pin
-lets the relay drop out, and it is also what a reset, a crash or a dead Pico does, so the
-failsafe level and an unpowered Pico agree. Driving 3.3 V high into a 5 V input is never done.
-"""
+"""Never driven high: 3.3 V into the board's 5 V optocouplers is not reliably off, released is."""
 
 SIO_BASE = 0xD0000000
 GPIO_OUT_REGISTER = SIO_BASE + 0x010

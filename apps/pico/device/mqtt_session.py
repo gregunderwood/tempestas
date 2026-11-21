@@ -1,9 +1,4 @@
-"""The MQTT client the agent uses: messages that arrive mid-publish wait their turn.
-
-umqtt waits for a PUBACK by reading the socket, and hands any PUBLISH it meets on the way to the
-callback. A handler that publishes from there would read, and throw away, the outer publish's
-PUBACK, and the outer publish would then wait for it forever.
-"""
+"""Holds messages that arrive mid-publish, so a handler cannot steal the publish's PUBACK."""
 
 from tempestas_mqtt import MQTTClient
 
@@ -11,8 +6,9 @@ PUBLISH_OPERATION = 0x30
 
 
 class DeferringMqttClient(MQTTClient):
-    def __init__(self, *arguments, **keyword_arguments):
+    def __init__(self, feed_watchdog, *arguments, **keyword_arguments):
         super().__init__(*arguments, **keyword_arguments)
+        self.feed_watchdog = feed_watchdog
         self.deferred_messages = []
         self.is_awaiting_acknowledgement = False
         self.message_handler = None
@@ -40,6 +36,19 @@ class DeferringMqttClient(MQTTClient):
             send(*arguments)
         finally:
             self.is_awaiting_acknowledgement = was_awaiting
+
+    def connect(self, clean_session=True, timeout=None):
+        self.feed_watchdog()
+        return super().connect(clean_session, timeout)
+
+    def wait_msg(self):
+        # Each wait can block for the socket timeout, so a chain of them must not starve the watchdog.
+        self.feed_watchdog()
+        return super().wait_msg()
+
+    def ping(self):
+        self.unanswered_pings += 1
+        super().ping()
 
     def check_msg(self):
         if not self.deferred_messages:
