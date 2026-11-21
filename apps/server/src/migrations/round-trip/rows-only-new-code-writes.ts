@@ -75,7 +75,7 @@ export const ROWS_ONLY_NEW_CODE_WRITES = new Map<string, RowsOnlyNewCodeWrites>(
         ],
         revert: {
           outcome: 'refuses',
-          namingThem: /Sequence numbers repeated across boots: 1\./,
+          namingThem: /Sequence numbers repeated: 1\./,
         },
       },
     ],

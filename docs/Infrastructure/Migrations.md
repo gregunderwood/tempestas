@@ -136,7 +136,8 @@ export class DropLegacyReadings1800000000000 extends IrreversibleMigration {
 
 Dropping data has no honest `down`. Extend
 [../../apps/server/src/migrations/irreversible-migration.ts](../../apps/server/src/migrations/irreversible-migration.ts)
-and say why. Its `down` refuses to run, with that reason and a pointer to the backup. The round trip
+and say why. Its `down` refuses to run with that reason, and points at the deploy's backup or at a
+fix forward. The round trip
 then checks that a revert is refused and changes nothing. An unmarked migration whose `down` does not
 restore the database fails the gate.
 
@@ -166,8 +167,15 @@ if (picoNodes.length > 0) {
 
 When the old schema cannot hold what the new code wrote, check first and throw a message that
 names the rows, or counts them, and says what to do. Never delete them to make the revert fit.
-Five `down`s refuse today on rows elantris already has, so a rollback over them means restoring
-the backup taken before the migration.
+
+Restore a backup only if the deploy being rolled back applied the migration: its backup is minutes
+old. A migration applied long ago is older than any backup worth restoring, and restoring one
+would lose everything recorded since. Fix those forward with a new migration. The refusal messages
+say exactly this.
+
+Four `down`s refuse today on rows elantris has: the Pico, the heating roles, the pumphouse rules
+and the readings without humidity. A fifth, repeated sequence numbers, almost certainly does too:
+every agent restart begins its count again, and the agents restart on every deploy.
 
 ### ❌ Don't rely on `synchronize`
 

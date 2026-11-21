@@ -10,7 +10,11 @@ import {
   readMigrationTimestamp,
   type MigrationClass,
 } from '../migration-timestamp';
-import { addRowsAfter, runStatements } from './rows-added-after';
+import {
+  ROWS_ADDED_AFTER,
+  addRowsAfter,
+  runStatements,
+} from './rows-added-after';
 import {
   ROWS_ONLY_NEW_CODE_WRITES,
   type RowsOnlyNewCodeWrites,
@@ -83,14 +87,14 @@ const revertLast = (migrationsSoFar: MigrationClass[], database?: string) =>
     database,
   );
 
-function readDatabase(database = MAIN_DATABASE): string {
+function readDump(database: string, ...dumpOptions: string[]): string {
   const dump = runDocker(
     'exec',
     throwawayPostgres.containerId,
     'pg_dump',
     '--username',
     SUPERUSER,
-    '--exclude-table-data=public.migrations',
+    ...dumpOptions,
     database,
   );
   return dump
@@ -103,6 +107,12 @@ function readDatabase(database = MAIN_DATABASE): string {
     )
     .join('\n');
 }
+
+const readDatabase = (database = MAIN_DATABASE) =>
+  readDump(database, '--exclude-table-data=public.migrations');
+
+const readSchema = (database = MAIN_DATABASE) =>
+  readDump(database, '--schema-only');
 
 // A copy, so a revert that succeeds over the new rows leaves the chain for the next migration untouched.
 async function withCopyOfMainDatabase(action: (copy: string) => Promise<void>) {
@@ -120,9 +130,11 @@ async function withCopyOfMainDatabase(action: (copy: string) => Promise<void>) {
   }
 }
 
+// Returns the schema from before the migration, for the revert over new rows to return to.
 async function expectRoundTrip(migrationsSoFar: MigrationClass[]) {
   // Also creates TypeORM's migrations table before the first baseline.
   await applyPending(migrationsSoFar.slice(0, -1));
+  const schemaBefore = readSchema();
   const databaseBefore = readDatabase();
   await applyPending(migrationsSoFar);
   const databaseAfterUp = readDatabase();
@@ -133,7 +145,7 @@ async function expectRoundTrip(migrationsSoFar: MigrationClass[]) {
       migration.irreversibleBecause,
     );
     expect(readDatabase()).toBe(databaseAfterUp);
-    return;
+    return schemaBefore;
   }
 
   await revertLast(migrationsSoFar);
@@ -141,11 +153,13 @@ async function expectRoundTrip(migrationsSoFar: MigrationClass[]) {
 
   await applyPending(migrationsSoFar);
   expect(readDatabase()).toBe(databaseAfterUp);
+  return schemaBefore;
 }
 
 async function expectRevertOverNewRows(
   migrationsSoFar: MigrationClass[],
   newRows: RowsOnlyNewCodeWrites,
+  schemaBefore: string,
 ) {
   await withCopyOfMainDatabase(async (copy) => {
     await withConnection(
@@ -157,6 +171,7 @@ async function expectRevertOverNewRows(
 
     if (newRows.revert.outcome === 'reverts') {
       await revertLast(migrationsSoFar, copy);
+      expect(readSchema(copy)).toBe(schemaBefore);
       return;
     }
     await expect(revertLast(migrationsSoFar, copy)).rejects.toThrow(
@@ -169,9 +184,10 @@ async function expectRevertOverNewRows(
 describe('every migration, in order, on a database with a row in each table', () => {
   migrationsInOrder.forEach((migrationClass, position) => {
     const migrationsSoFar = migrationsInOrder.slice(0, position + 1);
+    let schemaBefore = '';
 
     it(`${migrationClass.name} goes up, down and up again to the same schema and rows`, async () => {
-      await expectRoundTrip(migrationsSoFar);
+      schemaBefore = await expectRoundTrip(migrationsSoFar);
       await withConnection(migrationsSoFar, (source) =>
         addRowsAfter(migrationClass.name, source),
       );
@@ -184,8 +200,22 @@ describe('every migration, in order, on a database with a row in each table', ()
           `Say in rows-only-new-code-writes.ts which rows only ${migrationClass.name}'s new code writes, and whether its down reverts or refuses them`,
         );
       }
-      await expectRevertOverNewRows(migrationsSoFar, newRows);
+      await expectRevertOverNewRows(migrationsSoFar, newRows, schemaBefore);
     });
+  });
+
+  it('keys its rows by migrations that exist, so a rename cannot orphan them', () => {
+    const migrationNames = migrationsInOrder.map(
+      (migrationClass) => migrationClass.name,
+    );
+    for (const rowsByMigration of [
+      ROWS_ADDED_AFTER,
+      ROWS_ONLY_NEW_CODE_WRITES,
+    ]) {
+      expect(migrationNames).toEqual(
+        expect.arrayContaining([...rowsByMigration.keys()]),
+      );
+    }
   });
 
   it('refuses to revert a migration marked irreversible, and changes nothing', async () => {
