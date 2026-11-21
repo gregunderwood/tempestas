@@ -14,7 +14,6 @@ package = false
 [tool.ruff]
 line-length = 110
 src = ["device", "tests"]
-extend-exclude = ["device/lib"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "SIM"]
@@ -26,7 +25,6 @@ known-first-party = [
   "credentials",
   "ds18b20_probes",
   "iso_time",
-  "mqtt_session",
   "node_runtime",
   "tempestas_mqtt",
   "node_agent",
@@ -36,4 +34,4 @@ known-first-party = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["device", "device/lib", "tests"]
+pythonpath = ["device", "tests"]

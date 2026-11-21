@@ -19,7 +19,7 @@ REFUSE_IF_WATCHDOG_ARMED="import machine
 if machine.mem32[0x40058000] & (1 << 30):
     raise RuntimeError('watchdog already armed: missed the boot grace, run the deploy again')"
 AGENT_FILES=(
-  main.py node_runtime.py node_agent.py mqtt_session.py command_guard.py contract.py
+  main.py node_runtime.py node_agent.py tempestas_mqtt.py command_guard.py contract.py
   iso_time.py relay_lines.py ds18b20_probes.py settings.py credentials.py
 )
 
@@ -53,6 +53,6 @@ sleep 1
 wait_for_port
 
 say "Copying the agent"
-(cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + cp "${AGENT_FILES[@]}" : + cp -r lib : + reset)
+(cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + cp "${AGENT_FILES[@]}" : + reset)
 
 say "Done. Watch it with: uv tool run mpremote connect $PORT resume repl"

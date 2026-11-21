@@ -15,9 +15,9 @@ import contract
 import credentials
 import settings
 from ds18b20_probes import Ds18b20Probes
-from mqtt_session import DeferringMqttClient
 from node_agent import NodeAgent
 from relay_lines import ReleasedWhenHighLines
+from tempestas_mqtt import MqttSession
 
 WATCHDOG_TIMEOUT_MILLISECONDS = 8000
 LOOP_PAUSE_MILLISECONDS = 100
@@ -163,22 +163,21 @@ class Connection:
 
     def connect_to_broker(self):
         node_id = settings.NODE_ID
-        client = DeferringMqttClient(
+        client = MqttSession(
             self.watchdog.feed,
             "tempestas-" + node_id,
             settings.BROKER_HOST,
-            port=settings.BROKER_PORT,
-            user=credentials.MQTT_USERNAME,
-            password=credentials.MQTT_PASSWORD,
-            keepalive=settings.KEEPALIVE_SECONDS,
+            settings.BROKER_PORT,
+            credentials.MQTT_USERNAME,
+            credentials.MQTT_PASSWORD,
+            settings.KEEPALIVE_SECONDS,
         )
         quality_of_service, is_retained = contract.QOS["status"]
         offline = json.dumps(self.agent.status_payload("offline"))
         client.set_last_will(contract.topic_status(node_id), offline, is_retained, quality_of_service)
         client.set_message_handler(self.deliver)
         try:
-            # A persistent session is a queue of commands waiting to replay, so always start clean.
-            client.connect(clean_session=True, timeout=SOCKET_TIMEOUT_SECONDS)
+            client.connect(SOCKET_TIMEOUT_SECONDS)
             for topic, subscription_qos in self.agent.subscriptions():
                 client.subscribe(topic, subscription_qos)
         except Exception as error:
@@ -208,7 +207,7 @@ class Connection:
             self.publisher.drop("broker stopped answering pings")
             return
         try:
-            while self.publisher.client is client and client.check_msg() is not None:
+            while self.publisher.client is client and client.serve_one_message():
                 self.watchdog.feed()
             if self.publisher.client is client:
                 self.ping_when_due(client)
