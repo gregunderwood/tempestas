@@ -89,8 +89,7 @@ describe('newNodeFromHello', () => {
 });
 
 describe('patchFromHello', () => {
-  // The single most important property in this file: a node cannot admit
-  // itself, un-admit itself, or undo a human's rejection by re-announcing.
+  // The most important property here: re-announcing cannot admit, un-admit or undo a rejection.
   it('cannot touch status, whatever the node claims', () => {
     for (const status of [
       NodeStatus.Pending,
@@ -130,8 +129,7 @@ describe('patchFromHello', () => {
   });
 
   it('will not claim a reboot it cannot prove', () => {
-    // A row first seen before boot_id existed. Inventing a reboot here would
-    // put a lie in the log used to diagnose the next outage.
+    // A row first seen before boot_id existed.
     const { outcomes } = patchFromHello(registered({ bootId: null }), hello());
     expect(outcomes).toEqual(['seen']);
   });
@@ -156,9 +154,6 @@ describe('patchFromHello', () => {
     expect(outcomes).toContain('agent-upgraded');
   });
 
-  // capabilities round-trip through jsonb, and Postgres does not preserve
-  // object key order. A JSON.stringify comparison would log a capability
-  // change on every single restart.
   it('is not fooled by jsonb reordering the keys', () => {
     const reordered = {
       hasRtc: true,
@@ -182,9 +177,7 @@ describe('patchFromHello', () => {
   });
 });
 
-// Found by running the real agent: an agent restarting with new capabilities is
-// BOTH a reboot and a capability change. Reporting only the reboot hid a node
-// dropping every GPIO pin it had while a device was still bound to one.
+// Reporting only the reboot once hid a node dropping every GPIO pin while a device was bound to one.
 describe('a hello can be several things at once', () => {
   it('reports a reboot AND a capability change together', () => {
     const { outcomes } = patchFromHello(
@@ -248,12 +241,7 @@ describe('pinsWithdrawn', () => {
   });
 });
 
-/**
- * The stored flag is set by a retained status and cleared by the last will, so
- * a node that vanishes while the CONTROLLER is down is never corrected -
- * nobody is connected to receive the will. Three fake nodes sat on the screen
- * as "online" 28 hours after they were last heard from.
- */
+// Three nodes once sat on the screen as online 28 hours after they were last heard from.
 describe('isNodeOnline', () => {
   const NOW = new Date('2026-09-10T22:00:00.000Z');
   const ago = (ms: number) => new Date(NOW.getTime() - ms);
@@ -272,9 +260,7 @@ describe('isNodeOnline', () => {
     ).toBe(false);
   });
 
-  // The case a naive age check on lastSeenAt alone gets wrong: it only advances
-  // on an ONLINE transition, so for a node connected all day it is the time it
-  // connected. A reading is the per-sample evidence.
+  // lastSeenAt only advances on an online transition, so alone it would mark this node offline.
   it('is online on recent readings even when it connected hours ago', () => {
     expect(
       isNodeOnline(
@@ -297,8 +283,6 @@ describe('isNodeOnline', () => {
     ).toBe(true);
   });
 
-  // Only ever narrows. A node the registry saw drop stays down whatever its
-  // history says - stale is not online.
   it('never revives a node the registry believes offline', () => {
     expect(
       isNodeOnline(
@@ -340,8 +324,6 @@ describe('isNodeOnline', () => {
     ).toBe(false);
   });
 
-  // Long enough that a WiFi blip does not flap the dashboard, short enough that
-  // a vanished node shows as gone within minutes.
   it('allows far more than a sample interval or a broker will', () => {
     expect(NODE_OFFLINE_AFTER_MS).toBeGreaterThan(60_000);
     expect(NODE_OFFLINE_AFTER_MS).toBeLessThanOrEqual(10 * MINUTE);
