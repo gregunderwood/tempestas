@@ -236,3 +236,11 @@ def test_close_releases_the_socket_once():
     session.close()
     session.close()
     assert fake_socket.is_closed and session.socket_connection is None
+
+
+def test_hands_over_messages_still_held_so_a_dropped_session_does_not_lose_them():
+    session = connected_session(publish_packet(b"set", b"{}", 1, packet_id=5))
+    session.is_awaiting_acknowledgement = True
+    session.receive_packet()
+    assert session.take_deferred_messages() == [(b"set", b"{}", False)]
+    assert session.take_deferred_messages() == []

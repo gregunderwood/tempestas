@@ -1,9 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * `ADD VALUE` rather than the generator's rename-and-recreate: one statement that rewrites nothing.
- * Postgres cannot drop an enum value, so `down` rebuilds the type, and refuses while a node is a Pico.
- */
+/** Postgres cannot drop an enum value, so `down` rebuilds the type that `up` only extends. */
 export class AddPicoNodeKind1795220722652 implements MigrationInterface {
   name = 'AddPicoNodeKind1795220722652';
 

@@ -20,6 +20,7 @@ class NodeAgent:
         self.clock = clock
         self.log = log
         self.boot_id = boot_id
+        self.node_id = settings.NODE_ID
         self.sequence_number = 0
         self.bound_controller = None
         self.last_heartbeat_ticks = None
@@ -28,12 +29,12 @@ class NodeAgent:
 
     def announce(self):
         """On every connect: online, hello, then the lines as they are."""
-        self.send("status", contract.topic_status(self.node_id()), self.status_payload("online"))
-        self.send("hello", contract.topic_hello(self.node_id()), self.hello_payload())
+        self.send("status", contract.topic_status(self.node_id), self.build_status_payload("online"))
+        self.send("hello", contract.topic_hello(self.node_id), self.build_hello_payload())
         self.publish_gpio_states(self.relay_lines.lines)
 
-    def subscriptions(self):
-        node_id = self.node_id()
+    def list_subscriptions(self):
+        node_id = self.node_id
         return [
             (contract.topic_gpio_set(node_id), 1),
             (contract.topic_gpio_sync(node_id), 1),
@@ -42,7 +43,7 @@ class NodeAgent:
         ]
 
     def on_message(self, topic, payload, is_retained):
-        node_id = self.node_id()
+        node_id = self.node_id
         if topic == contract.topic_heartbeat(node_id):
             self.on_heartbeat(payload)
         elif topic == contract.SERVER_STATUS_TOPIC:
@@ -59,12 +60,12 @@ class NodeAgent:
         line_results = [self.apply_line(line) for line in command["lines"]]
         self.send(
             "gpioResult",
-            contract.topic_gpio_result(self.node_id()),
-            self.result_payload(command["id"], line_results),
+            contract.topic_gpio_result(self.node_id),
+            self.build_result_payload(command["id"], line_results),
         )
-        self.publish_gpio_states(self.managed_pins_of(line_results))
+        self.publish_gpio_states(self.select_managed_pins(line_results))
 
-    def managed_pins_of(self, line_results):
+    def select_managed_pins(self, line_results):
         return [
             line_result["pin"] for line_result in line_results if line_result["pin"] in self.relay_lines.lines
         ]
@@ -74,7 +75,7 @@ class NodeAgent:
         requested = line["level"]
         try:
             self.relay_lines.write(pin, requested)
-            readback = self.relay_lines.level(pin)
+            readback = self.relay_lines.read_level(pin)
         except Exception as error:
             self.log("pin %d could not be driven: %s" % (pin, error))
             return {"pin": pin, "requested": requested, "readback": None, "ok": False, "error": str(error)}
@@ -128,8 +129,8 @@ class NodeAgent:
 
     def publish_readings(self):
         for reading in self.probes.read_all():
-            topic = contract.topic_sample(self.node_id(), reading.sensor_id)
-            self.send("sample", topic, self.sample_payload(reading))
+            topic = contract.topic_sample(self.node_id, reading.sensor_id)
+            self.send("sample", topic, self.build_sample_payload(reading))
 
     def publish_gpio_states(self, pins):
         if self.read_set_clock() is None:
@@ -138,7 +139,7 @@ class NodeAgent:
             return
         for pin in pins:
             self.send(
-                "gpioState", contract.topic_gpio_state(self.node_id(), pin), self.gpio_state_payload(pin)
+                "gpioState", contract.topic_gpio_state(self.node_id, pin), self.build_gpio_state_payload(pin)
             )
 
     def on_clock_set(self):
@@ -148,14 +149,19 @@ class NodeAgent:
 
     def publish_alarm(self, alarm_code, severity, message):
         self.send(
-            "alarm", contract.topic_alarm(self.node_id()), self.alarm_payload(alarm_code, severity, message)
+            "alarm",
+            contract.topic_alarm(self.node_id),
+            self.build_alarm_payload(alarm_code, severity, message),
         )
 
-    def send(self, qos_name, topic, payload):
-        quality_of_service, is_retained = contract.QOS[qos_name]
-        self.publisher.publish(topic, json.dumps(payload), is_retained, quality_of_service)
+    def send(self, message_name, topic, payload):
+        quality_of_service, is_retained = contract.QOS[message_name]
+        should_hold_while_offline = message_name in contract.HELD_WHILE_OFFLINE
+        self.publisher.publish(
+            topic, json.dumps(payload), is_retained, quality_of_service, should_hold_while_offline
+        )
 
-    def capabilities(self):
+    def describe_capabilities(self):
         sample_interval_milliseconds = int(self.settings.SAMPLE_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND)
         return {
             "contractVersion": contract.SUPPORTED_MAJOR,
@@ -172,59 +178,56 @@ class NodeAgent:
             "hasRtc": False,
         }
 
-    def envelope(self, schema_name):
-        return {"schema": contract.SCHEMAS[schema_name], "node": self.node_id(), "ts": self.now_iso()}
+    def build_envelope(self, schema_name):
+        return {"schema": contract.SCHEMAS[schema_name], "node": self.node_id, "ts": self.now_iso()}
 
-    def hello_payload(self):
-        payload = self.envelope("hello")
+    def build_hello_payload(self):
+        payload = self.build_envelope("hello")
         payload["kind"] = self.settings.NODE_KIND
         payload["agentVersion"] = self.settings.AGENT_VERSION
         payload["bootId"] = self.boot_id
-        payload["capabilities"] = self.capabilities()
+        payload["capabilities"] = self.describe_capabilities()
         return payload
 
-    def status_payload(self, state):
-        payload = self.envelope("status")
+    def build_status_payload(self, state):
+        payload = self.build_envelope("status")
         payload["state"] = state
         return payload
 
-    def sample_payload(self, reading):
+    def build_sample_payload(self, reading):
         self.sequence_number += 1
-        payload = self.envelope("sample")
+        payload = self.build_envelope("sample")
         payload["seq"] = self.sequence_number
         payload["sensor"] = reading.sensor_id
         payload["measurements"] = {
-            "co2Ppm": not_measured("ppm"),
+            "co2Ppm": build_unmeasured_metric("ppm"),
             "tempC": {"value": round(reading.temperature_celsius, 2), "valid": True, "unit": "C"},
-            "humidityPct": not_measured("%"),
+            "humidityPct": build_unmeasured_metric("%"),
         }
         payload["sensorStatus"] = {"ok": True, "consecutiveFailures": 0, "lastSuccessTs": self.now_iso()}
         return payload
 
-    def gpio_state_payload(self, pin):
-        level = self.relay_lines.level(pin)
-        payload = self.envelope("gpioState")
+    def build_gpio_state_payload(self, pin):
+        level = self.relay_lines.read_level(pin)
+        payload = self.build_envelope("gpioState")
         payload["pin"] = pin
         payload["level"] = level
         payload["known"] = level in (0, 1)
         return payload
 
-    def result_payload(self, command_id, line_results):
-        payload = self.envelope("gpioResult")
+    def build_result_payload(self, command_id, line_results):
+        payload = self.build_envelope("gpioResult")
         payload["id"] = command_id
         payload["ok"] = all(line_result["ok"] for line_result in line_results)
         payload["lines"] = line_results
         return payload
 
-    def alarm_payload(self, alarm_code, severity, message):
-        payload = self.envelope("alarm")
+    def build_alarm_payload(self, alarm_code, severity, message):
+        payload = self.build_envelope("alarm")
         payload["code"] = alarm_code
         payload["severity"] = severity
         payload["message"] = message
         return payload
-
-    def node_id(self):
-        return self.settings.NODE_ID
 
     def now_iso(self):
         return format_iso(self.clock.epoch_seconds())
@@ -234,5 +237,5 @@ class NodeAgent:
         return epoch_seconds if is_clock_set(epoch_seconds) else None
 
 
-def not_measured(unit):
+def build_unmeasured_metric(unit):
     return {"value": None, "valid": False, "unit": unit, "reason": NOT_MEASURED}

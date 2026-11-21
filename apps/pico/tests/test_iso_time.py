@@ -53,3 +53,23 @@ def test_formats_utc_with_a_z():
 def test_knows_an_unset_clock_from_a_set_one():
     assert not is_clock_set(0)
     assert is_clock_set(datetime(2026, 11, 20, tzinfo=UTC).timestamp())
+
+
+def test_refuses_a_day_its_month_does_not_have():
+    for text in [
+        "2026-02-29T00:00:00Z",
+        "2026-02-30T00:00:00Z",
+        "2026-04-31T00:00:00Z",
+        "2100-02-29T00:00:00Z",
+    ]:
+        assert parse_iso(text) is None
+
+
+def test_accepts_the_last_day_of_every_month_and_a_leap_day():
+    for text in [
+        "2026-01-31T00:00:00Z",
+        "2026-02-28T00:00:00Z",
+        "2026-04-30T00:00:00Z",
+        "2028-02-29T00:00:00Z",
+    ]:
+        assert parse_iso(text) == int(datetime.fromisoformat(text).timestamp())

@@ -32,7 +32,7 @@ class ReleasedWhenHighLines:
         else:
             self.machine.Pin(pin, self.machine.Pin.IN, None)
 
-    def level(self, pin):
+    def read_level(self, pin):
         """Read from the chip's registers, not from what was last asked for."""
         pin_mask = 1 << pin
         is_driven = self.machine.mem32[GPIO_OUTPUT_ENABLE_REGISTER] & pin_mask
