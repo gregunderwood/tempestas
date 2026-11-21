@@ -26,39 +26,38 @@ function evaluation(overrides: Partial<RulesEvaluation> = {}): RulesEvaluation {
 }
 
 interface Setup {
-  dbUp?: boolean;
+  isDatabaseUp?: boolean;
   latestReading?: Date | null;
   counts?: { total: number; online: number; pending: number };
   evaluations?: RulesEvaluation[];
   failingZones?: Map<string, string>;
-  /** Rows of the per-sensor latest query. */
-  sensors?: { slug: string; sensorId: string; latest: Date }[];
+  latestReadingPerSensor?: { slug: string; sensorId: string; latest: Date }[];
   divergences?: DivergenceLog;
 }
 
 function makeService(setup: Setup = {}) {
   const dataSource = {
     query: vi.fn(async () => {
-      if (setup.dbUp === false) throw new Error('ECONNREFUSED');
+      if (setup.isDatabaseUp === false) throw new Error('ECONNREFUSED');
       return [{ '1': 1 }];
     }),
   } as unknown as DataSource;
 
-  const builder = {
-    select: () => builder,
-    addSelect: () => builder,
-    innerJoin: () => builder,
-    where: () => builder,
-    andWhere: () => builder,
-    groupBy: () => builder,
-    addGroupBy: () => builder,
+  const queryBuilder = {
+    select: () => queryBuilder,
+    addSelect: () => queryBuilder,
+    innerJoin: () => queryBuilder,
+    where: () => queryBuilder,
+    andWhere: () => queryBuilder,
+    groupBy: () => queryBuilder,
+    addGroupBy: () => queryBuilder,
     getRawOne: async () => ({
       latest: setup.latestReading === undefined ? NOW : setup.latestReading,
     }),
-    getRawMany: async () => setup.sensors ?? [],
+    getRawMany: async () => setup.latestReadingPerSensor ?? [],
   };
   const readings = {
-    createQueryBuilder: () => builder,
+    createQueryBuilder: () => queryBuilder,
   } as unknown as Repository<SensorReadingEntity>;
 
   const nodes = {
@@ -67,8 +66,8 @@ function makeService(setup: Setup = {}) {
       .mockResolvedValue(setup.counts ?? { total: 2, online: 2, pending: 0 }),
   } as unknown as NodesService;
   const rules = {
-    lastEvaluation: vi.fn(() => setup.evaluations ?? [evaluation()]),
-    failingZones: vi.fn(() => setup.failingZones ?? new Map()),
+    findLastEvaluations: vi.fn(() => setup.evaluations ?? [evaluation()]),
+    findFailingZones: vi.fn(() => setup.failingZones ?? new Map()),
   } as unknown as RulesService;
 
   return new HealthService(
@@ -94,8 +93,6 @@ describe('HealthService', () => {
     expect(report.rules.ageSeconds).toBe(0);
   });
 
-  // "Up" is not the question. A process answering HTTP while nothing has
-  // arrived in two minutes is a greenhouse running open-loop.
   it('is degraded when readings have stopped arriving', async () => {
     const report = await makeService({
       latestReading: new Date('2026-01-10T11:50:00Z'),
@@ -125,8 +122,7 @@ describe('HealthService', () => {
     expect(report.readings).toEqual({ latestAt: null, ageSeconds: null });
   });
 
-  // A zone that fails evaluation drives nothing - for the pumphouse, a heater
-  // nobody is controlling. The reason goes in the message, not just the log.
+  // A failing zone is a heater nobody is controlling; the reason belongs in the message.
   it('names a zone that is not being evaluated, and why', async () => {
     const report = await makeService({
       failingZones: new Map([
@@ -142,11 +138,10 @@ describe('HealthService', () => {
     );
   });
 
-  // With `min` the rule carries on with the probes that remain, which is right
-  // - and is why a dead one has to be named here or nowhere.
+  // With `min` the rule carries on without a dead probe, so this is the only place it is named.
   it('names a sensor that has gone quiet beside ones that have not', async () => {
     const report = await makeService({
-      sensors: [
+      latestReadingPerSensor: [
         { slug: 'pumphouse', sensorId: 'air', latest: NOW },
         {
           slug: 'pumphouse',
@@ -163,7 +158,7 @@ describe('HealthService', () => {
 
   it('does not name a sensor that is merely between samples', async () => {
     const report = await makeService({
-      sensors: [
+      latestReadingPerSensor: [
         {
           slug: 'pumphouse',
           sensorId: 'pipes',
@@ -182,8 +177,6 @@ describe('HealthService', () => {
     expect(report.rules.staleRoles).toEqual([DeviceRole.Co2Generator]);
   });
 
-  // A pending node is the admission gate working, not a fault - but it is the
-  // thing somebody curling this endpoint most often needs told.
   it('reports a pending node without calling the system degraded', async () => {
     const report = await makeService({
       counts: { total: 3, online: 3, pending: 1 },
@@ -194,7 +187,7 @@ describe('HealthService', () => {
 
   // The caller is trying to find out what broke; a 500 tells them nothing.
   it('reports what is knowable when the database is unreachable', async () => {
-    const report = await makeService({ dbUp: false }).check();
+    const report = await makeService({ isDatabaseUp: false }).check();
     expect(report).toMatchObject({
       status: 'degraded',
       db: false,
@@ -204,9 +197,7 @@ describe('HealthService', () => {
   });
 });
 
-// A relay and its row having disagreed means something upstream already failed.
-// Correcting the row is the fix; keeping it on a surface somebody reads is the
-// alarm, and this endpoint is what anything that is not a browser polls.
+// A divergence means something upstream already failed, and this is what non-browsers poll.
 describe('HealthService divergence reporting', () => {
   function loggedAt(at: Date): DivergenceLog {
     const log = new DivergenceLog();
@@ -231,8 +222,7 @@ describe('HealthService divergence reporting', () => {
     expect(health.status).toBe('degraded');
   });
 
-  // An overnight failsafe has to still be reported when somebody looks in the
-  // morning, so the window is a day rather than minutes.
+  // An overnight failsafe must still be reported in the morning.
   it('still reports one from eight hours ago', async () => {
     const health = await makeService({
       divergences: loggedAt(new Date(NOW.getTime() - 8 * 3600_000)),
