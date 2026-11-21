@@ -9,7 +9,7 @@ greenhouse, so it forces the rules engine to stop assuming every zone is a green
 > [!note] Status
 > **In progress.** Phase 0 is done: elantris's broker is back up with a boot-retry drop-in (see
 > [Provisioning](Infrastructure/Provisioning.md)). **A to C are built** and their lasting content
-> lives in [Rules and Climate](Rules%20and%20Climate.md) and [Node Agent](Infrastructure/Node%20Agent.md).
+> lives in [Rules and Climate](Rules%20and%20Climate.md) and [Linux Agent](Infrastructure/Linux%20Agent.md).
 > **D is live on elantris** apart from the devices. Next is E: flashing patji.
 > The greenhouse season is over, so the greenhouse zone can be changed freely as long as its
 > behaviour next season is provably unchanged.
@@ -251,12 +251,12 @@ Provisioning). **The devices are not created yet:** they need the node admitted,
 the Pi flashed (E). The probe ROM ids in `patji.toml` are placeholders that the agent
 refuses to start with until they are read off the bus. The plan as written follows.
 
-- [apps/hardware/nodes/patji.toml](../apps/hardware/nodes/patji.toml): `node_id = "patji"`,
+- [apps/agent-linux/nodes/patji.toml](../apps/agent-linux/nodes/patji.toml): `node_id = "patji"`,
   `lines = [5, 6]`, `chip_label = "pinctrl-bcm2835"`, failsafe `5 = 1` and `6 = 1`,
   **`deadman_s = 600`**. That is the "hold, then on": both lines fail to the same "on", so a
   single node-wide timer gives the hold with no agent change. A WiFi blip shorter than ten
   minutes changes nothing.
-- [tempestas.acl](../apps/hardware/mosquitto/tempestas.acl): a `patji` identity scoped like
+- [tempestas.acl](../apps/broker/mosquitto/tempestas.acl): a `patji` identity scoped like
   `elantris` (its own subtree, never `gpio/set`), replacing its old sensor-only block. The password is
   generated **on elantris** and verified with MQTT v5, both per Provisioning.
 - The agent unit: the repo's own, unchanged. Its `SupplementaryGroups=i2c gpio` works here
@@ -385,7 +385,7 @@ with the router's reservation. Check
   `uv` on ARMv6, and the apt `lgpio` saves an afternoon of compiling.
 - The credential, without it ever passing through the laptop's terminal:
   `ssh elantris sudo cat /etc/tempestas/patji-agent.env | ssh patji 'sudo install -d -m 0755 /etc/tempestas && sudo tee /etc/tempestas/agent.env >/dev/null && sudo chmod 0600 /etc/tempestas/agent.env'`
-- [patji.toml](../apps/hardware/nodes/patji.toml) to `~/tempestas/etc/agent.toml`. It will not
+- [patji.toml](../apps/agent-linux/nodes/patji.toml) to `~/tempestas/etc/agent.toml`. It will not
   start until the probe ROMs are filled in, which happens when the board is built (F).
 - The agent unit, `systemd-analyze verify`ed. Enabled only once the probe ROMs are in.
 
@@ -454,7 +454,7 @@ Two parts, both needed:
 
 ### H. Housekeeping
 
-- Delete `tools/stage-b-soak.py` and `apps/hardware/systemd/tempestas-stage-b-soak.service`. Its
+- Delete `tools/stage-b-soak.py` and `apps/agent-linux/systemd/tempestas-stage-b-soak.service`. Its
   job, tuning elantris's temperature offset, was done on 2026-09-10, and the legacy controller it
   reads from is off for the season. The unit is already disabled on elantris; remove it there too.
 

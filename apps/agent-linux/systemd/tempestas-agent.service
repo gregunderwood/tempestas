@@ -1,0 +1,93 @@
+# Install to /etc/systemd/system/tempestas-agent.service
+#
+# Kept in the repository rather than hand-edited on the box: everything under
+# /etc that this system needs should be installable by a provision script, so
+# Postgres stays the only stateful thing on the node.
+
+[Unit]
+Description=tempestas node agent
+# %% is a literal % - systemd reads a bare % as a specifier and drops the line.
+Documentation=https://github.com/gregunderwood/tempestas/blob/main/docs/Infrastructure/Linux%%20Agent.md
+# Ordering, not a sleep. The old system waited an unconditional 15s in the unit
+# and another 5s inside the app, which is a guess that is either wasteful or
+# wrong.
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+# These belong in [Unit], NOT [Service]. Put them under [Service] and systemd
+# logs `Unknown key 'StartLimitIntervalSec'` and carries on with the 10s
+# default - which is how a rule that reads as enforced turns out never to have
+# been applied. `systemd-analyze verify` is what caught it. Five starts in five
+# minutes, then stop and stay stopped.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# There is deliberately no ordering against the I2C bus. systemd only creates
+# .device units for devices udev tags for it, and i2c is not one - so
+# `After=dev-i2c\x2d1.device` looks like ordering while doing nothing at all,
+# which is worse than no ordering. Instead the agent opens the bus, fails fast
+# if it is not there, and Restart=on-failure retries. A failure that retries
+# beats a sleep that guesses.
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=gunderwood
+Group=gunderwood
+# i2c for the sensor, gpio for /dev/gpiochip0 (crw-rw---- root:gpio). Listed
+# explicitly rather than inherited from the user's own groups, so the unit says
+# what it needs instead of depending on how the account happens to be set up.
+SupplementaryGroups=i2c gpio
+
+WorkingDirectory=/home/gunderwood/tempestas/apps/agent-linux
+# The venv interpreter by absolute path. systemd cannot see `uv run`, and it
+# cannot see nvm either - both are shell-level conveniences.
+ExecStart=/home/gunderwood/tempestas/apps/agent-linux/.venv/bin/tempestas-agent \
+    --config /home/gunderwood/tempestas/etc/agent.toml
+Environment=PYTHONUNBUFFERED=1
+# MQTT_USERNAME / MQTT_PASSWORD, 0600 root. systemd reads it as root before
+# dropping to User=, so the credential is never in agent.toml, shell history or
+# `ps`. Required, not `-`: a node with no credential should fail to start here,
+# loudly, rather than start and be refused by the broker every few seconds.
+EnvironmentFile=/etc/tempestas/agent.env
+
+# Gives us /run/tempestas for the advisory lock, cleaned up automatically.
+RuntimeDirectory=tempestas
+RuntimeDirectoryMode=0755
+
+# on-failure, NEVER unlimited Restart=always. The old unit restarted forever,
+# which combined with a boot-time relay click test to become repeated ignition
+# attempts on a gas burner. The start limit itself is in [Unit], above.
+#
+# Restart is also the recovery for a killed agent: a SIGKILL leaves the pads
+# driving whatever they last drove, burner included, so the thing that turns it
+# off is this unit coming back and claiming the lines at their failsafe.
+# RestartSec is therefore the width of that exposure - see docs/Safety.md.
+Restart=on-failure
+RestartSec=5
+
+# The OOM killer is a safety hazard on this box: it can take out the process
+# that controls a burner. Make this the last thing it considers.
+OOMScoreAdjust=-900
+MemoryMin=64M
+
+# The 5.4GB log was possible because the app owned its own file. This one writes
+# to stdout and owns nothing; journald caps itself.
+StandardOutput=journal
+StandardError=journal
+
+# Modest hardening. Not NoNewPrivileges-everything: this needs /dev/i2c-1, and
+# a lockdown that breaks the sensor is worse than one that is merely tidy.
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/gunderwood/tempestas
+# /dev is left alone on purpose. PrivateDevices=yes would give this unit a
+# scrubbed /dev with no /dev/i2c-1 and no /dev/gpiochip0, which is a lockdown
+# that breaks the sensor and every relay in exchange for tidiness.
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
