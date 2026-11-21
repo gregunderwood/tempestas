@@ -35,7 +35,7 @@ function renderDevicesPage(
   return {
     page: fixture.nativeElement as HTMLElement,
     turnOnAndRender: (switched) => {
-      fixture.componentInstance.on(switched);
+      fixture.componentInstance.turnOn(switched);
       TestBed.tick();
       fixture.detectChanges();
     },
