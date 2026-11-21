@@ -60,6 +60,14 @@ npm run migration:run
 
 ### 2. Broker account
 
+`~/tempestas` on elantris is not a checkout, and `tools/deploy.sh` ships only the build, so copy
+the ACL and the zone script over from here first:
+
+```bash
+scp apps/hardware/mosquitto/tempestas.acl elantris:tempestas/apps/hardware/mosquitto/
+scp tools/crawlspace-zone.sql elantris:tempestas/tools/
+```
+
 The `braize` block is in [tempestas.acl](../apps/hardware/mosquitto/tempestas.acl). Install the
 file and create the password on elantris, per
 [Provisioning](Infrastructure/Provisioning.md#-broker-credentials-generate-the-hash-on-the-broker):
