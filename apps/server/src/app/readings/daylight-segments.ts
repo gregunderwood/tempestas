@@ -1,4 +1,7 @@
 import { DateTime } from 'luxon';
+import { MINUTES_PER_HOUR } from '../common/time-units';
+// The same parser the rules engine branches on, so the two cannot disagree about a boundary.
+import { parseWallClock } from '../rules/rules.engine';
 
 export type SegmentKind = 'day' | 'night';
 
@@ -22,12 +25,8 @@ interface DaylightMinutes {
 }
 
 const DEFAULT_SEGMENT_COUNT = 3;
-const MINUTES_PER_HOUR = 60;
 const EXTRA_DAYS_BEHIND = 2;
 const DAYS_AHEAD = 1;
-const WALL_CLOCK_PATTERN = /^(\d{1,2}):(\d{2})$/;
-const LAST_HOUR = 23;
-const LAST_MINUTE = 59;
 
 export function findNextBoundary(
   now: Date,
@@ -43,18 +42,6 @@ export function findNextBoundary(
     (boundary) => boundary.at.toMillis() > local.toMillis(),
   );
   return future ? future.at.toJSDate() : null;
-}
-
-/** Minutes since local midnight. Mirrors `parseWallClock` in the rules engine. */
-export function parseWallClockMinutes(value: string): number {
-  const match = WALL_CLOCK_PATTERN.exec(value);
-  if (!match) throw invalidWallClock(value);
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (hours > LAST_HOUR || minutes > LAST_MINUTE) {
-    throw invalidWallClock(value);
-  }
-  return hours * MINUTES_PER_HOUR + minutes;
 }
 
 /** Null for a zero-length daylight window: guessing would make a config typo look confident. */
@@ -84,8 +71,8 @@ function parseDaylightMinutes(
   startTime: string,
   endTime: string,
 ): DaylightMinutes | null {
-  const startMinutes = parseWallClockMinutes(startTime);
-  const endMinutes = parseWallClockMinutes(endTime);
+  const startMinutes = parseWallClock(startTime);
+  const endMinutes = parseWallClock(endTime);
   if (startMinutes === endMinutes) return null;
   return { startMinutes, endMinutes };
 }
@@ -121,7 +108,7 @@ function listBoundaries(
     });
   }
   return boundaries.sort(
-    (earlier, later) => earlier.at.toMillis() - later.at.toMillis(),
+    (first, second) => first.at.toMillis() - second.at.toMillis(),
   );
 }
 
@@ -137,8 +124,4 @@ function setWallClock(day: DateTime, minutesSinceMidnight: number): DateTime {
 
 function isLast(items: readonly unknown[], index: number): boolean {
   return index === items.length - 1;
-}
-
-function invalidWallClock(value: string): Error {
-  return new Error(`Invalid wall-clock time "${value}"; expected HH:MM`);
 }
