@@ -101,8 +101,7 @@ function pullImageIfMissing() {
   }
 }
 
-// Production connects as an owner that is not a superuser, so a migration needing superuser fails here too.
-function createApplicationDatabase(containerId: string) {
+export function runAsSuperuser(containerId: string, ...statements: string[]) {
   runDocker(
     'exec',
     containerId,
@@ -111,9 +110,15 @@ function createApplicationDatabase(containerId: string) {
     SUPERUSER,
     '--set',
     'ON_ERROR_STOP=1',
-    '--command',
+    ...statements.flatMap((statement) => ['--command', statement]),
+  );
+}
+
+// Production connects as an owner that is not a superuser, so a migration needing superuser fails here too.
+function createApplicationDatabase(containerId: string) {
+  runAsSuperuser(
+    containerId,
     `CREATE ROLE ${APPLICATION_ROLE} LOGIN NOSUPERUSER PASSWORD '${APPLICATION_PASSWORD}'`,
-    '--command',
     `CREATE DATABASE ${APPLICATION_ROLE} OWNER ${APPLICATION_ROLE}`,
   );
 }

@@ -110,9 +110,12 @@ puts back the wrong value, fails and names that migration. The first failure sto
 - **It connects as a non-superuser.** Migrations run as a `tempestas` role that owns its database
   but is not a superuser. A migration that needs superuser rights, such as `CREATE EXTENSION`
   for an untrusted extension, fails here instead of during a deploy.
-- **It does not try rows only the new code could write.** These are the rows a rollback meets in
-  production: a Pico node, a heater, a reading without humidity. The guarded `down`s refuse
-  those with a message, and their own specs cover that.
+- **It also tries rows only the new code writes.** These are the rows a rollback meets in
+  production: a Pico node, a heater, the pumphouse rules, a reading without humidity, two boots
+  sharing a sequence number. For each migration, a copy of the database gets the rows from
+  [rows-only-new-code-writes.ts](../../apps/server/src/migrations/round-trip/rows-only-new-code-writes.ts)
+  and the revert must do what that file says: either revert, or refuse with a message naming the
+  rows and change nothing. Every migration needs an entry, so a new one cannot skip the question.
 - **It needs Docker.** It is its own target because each migration builds on the one before.
 
 A unit test also checks that [index.ts](../../apps/server/src/migrations/index.ts) lists every
@@ -150,7 +153,21 @@ export class AddNodeBootId1788923106173 implements MigrationInterface {
 ### ❌ Don't edit a migration that has been applied anywhere
 
 Write a new one. Editing an applied migration leaves the `migrations` table claiming work that the
-schema does not reflect.
+schema does not reflect. The exception is a guard at the top of a `down`: it changes nothing a
+migration did, only whether reverting it refuses with a message instead of a Postgres error.
+
+### ✅ Make a `down` refuse by name
+
+```ts
+if (picoNodes.length > 0) {
+  throw new Error(`Nodes are still Picos (${slugs}); change or remove them before reverting this migration`);
+}
+```
+
+When the old schema cannot hold what the new code wrote, check first and throw a message that
+names the rows, or counts them, and says what to do. Never delete them to make the revert fit.
+Five `down`s refuse today on rows elantris already has, so a rollback over them means restoring
+the backup taken before the migration.
 
 ### ❌ Don't rely on `synchronize`
 

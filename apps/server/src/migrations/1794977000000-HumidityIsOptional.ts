@@ -7,8 +7,8 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * drop every pumphouse sample whole - temperature included - because of a
  * value no rule ever reads. CO2 already worked this way: null means unknown.
  *
- * `down` fails with Postgres's own error if any humidity-less row exists. That
- * is deliberate: the alternative is deleting real temperature history.
+ * `down` refuses and counts the humidity-less rows if any exist. That is
+ * deliberate: the alternative is deleting real temperature history.
  */
 export class HumidityIsOptional1794977000000 implements MigrationInterface {
   name = 'HumidityIsOptional1794977000000';
@@ -20,6 +20,16 @@ export class HumidityIsOptional1794977000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    const [{ withoutHumidity }]: { withoutHumidity: number }[] =
+      await queryRunner.query(
+        `SELECT count(*)::int AS "withoutHumidity" FROM sensor_readings WHERE humidity IS NULL`,
+      );
+    if (withoutHumidity > 0) {
+      throw new Error(
+        `Readings without humidity: ${withoutHumidity}. Reverting would mean deleting their ` +
+          `temperatures; restore the backup taken before this migration instead`,
+      );
+    }
     await queryRunner.query(
       `ALTER TABLE "sensor_readings" ALTER COLUMN "humidity" SET NOT NULL`,
     );
