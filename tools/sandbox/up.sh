@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Bring up the sandbox with production's topology: one shared greenhouse, one broker, two agents.
-# Why it is built this way: README.md.
+# Bring up the sandbox with production's topology; why it is built this way is in README.md.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

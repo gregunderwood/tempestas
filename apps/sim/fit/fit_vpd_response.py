@@ -113,14 +113,14 @@ def robust_slope(samples: list[Sample]) -> float | None:
 
 
 def fit_line_robust(points: list[tuple[float, float]]) -> RobustLine:
-    """Theil-Sen, with R^2 over inliers; least squares sign-inverts on one bad window."""
+    """Theil-Sen over (CO2, dC/dt); least squares sign-inverts on one bad window."""
     slopes = pairwise_slopes(points, lambda gap: gap != 0)
     if not slopes:
         return RobustLine(0.0, 0.0, 0.0, [])
     slope = statistics.median(slopes)
-    intercept = statistics.median(y - slope * x for x, y in points)
+    intercept = statistics.median(rate - slope * co2 for co2, rate in points)
 
-    residuals = [y - (intercept + slope * x) for x, y in points]
+    residuals = [rate - (intercept + slope * co2) for co2, rate in points]
     median_absolute_deviation = statistics.median(abs(residual) for residual in residuals)
     limit = (
         OUTLIER_STANDARD_DEVIATIONS * NORMAL_MAD_TO_STANDARD_DEVIATION * median_absolute_deviation
@@ -132,9 +132,9 @@ def fit_line_robust(points: list[tuple[float, float]]) -> RobustLine:
     inliers = [point for index, point in enumerate(points) if index not in set(outliers)]
     if len(inliers) < MIN_INLIERS:
         return RobustLine(intercept, slope, 0.0, outliers)
-    mean = statistics.fmean(y for _, y in inliers)
-    total_sum_of_squares = sum((y - mean) ** 2 for _, y in inliers)
-    residual_sum_of_squares = sum((y - (intercept + slope * x)) ** 2 for x, y in inliers)
+    mean = statistics.fmean(rate for _, rate in inliers)
+    total_sum_of_squares = sum((rate - mean) ** 2 for _, rate in inliers)
+    residual_sum_of_squares = sum((rate - (intercept + slope * co2)) ** 2 for co2, rate in inliers)
     r_squared = 1 - residual_sum_of_squares / total_sum_of_squares if total_sum_of_squares else 0.0
     return RobustLine(intercept, slope, r_squared, outliers)
 

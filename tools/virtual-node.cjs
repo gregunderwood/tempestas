@@ -1,7 +1,5 @@
 // A node in a few dozen lines, proof the contract is plain enough for an ESP32 sidecar to speak.
-//
 //   node tools/virtual-node.cjs <slug> <tempC> <seconds>
-//
 // Kill it with `kill -9` to see its last will fire; a clean exit fires none, by MQTT design.
 
 const { connect } = require('mqtt');

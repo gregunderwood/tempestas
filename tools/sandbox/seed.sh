@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Seed both boxes' databases like production: one zone, both nodes admitted, every device wired
-# with its real polarity. Both, because boxes differ in who may write, not in who may know.
+# Seed both boxes like production, because they differ in who may write, not in who may know.
 set -euo pipefail
 
 LEADER="${LEADER:-http://127.0.0.1:7010}"
