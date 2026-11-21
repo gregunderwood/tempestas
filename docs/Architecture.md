@@ -118,6 +118,11 @@ HardwareService (abstract)  ──fake──►  FakeHardwareService   closed-lo
 - The fake driver is a **closed loop**, not a random number generator: the burner raises temperature
   and CO2, the fan lowers them. So "burner on → CO2 climbs → rule turns it off" is observable with
   no hardware, and the rules engine is genuinely exercised.
+- Its constants come from the greenhouse on 2026-09-10 with the real generator, but it is a shape
+  model, not a fitted one. The field numbers are internally inconsistent (decay with the burner off
+  implies a smaller leak coefficient than the gain near the setpoint does, most likely mixing lag
+  between burner and sensor), so the simulator takes the cleanest measurements and claims no more
+  precision than that.
 
 ### The uniformity invariant
 

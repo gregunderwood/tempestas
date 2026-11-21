@@ -19,6 +19,7 @@ import {
   HardwareService,
   type PinStateReport,
 } from '../hardware/hardware.service';
+import { toPinKey } from '../hardware/pin-key';
 import { DivergenceLog } from '../common/divergence-log';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { DeviceEntity } from './models';
@@ -26,33 +27,17 @@ import type { CreateDeviceDto } from './dto/create-device.dto';
 import type { UpdateDeviceDto } from './dto/update-device.dto';
 import { canTurnOn, canTurnOnAt, isOn } from './device-state';
 import { correctionPatch, reconcilePinState } from './reconcile-pin-state';
+import { findDeviceOnPin } from './find-device-on-pin';
 
-/**
- * The single owner of the on/off interlocks.
- *
- * The Python system enforced these by having its rules engine POST to its own
- * REST API over loopback ~43,000 times a day. Here the rules engine calls this
- * service in-process instead - but the guarantee has to stay in exactly one
- * place, which is this file.
- */
+type Direction = 'on' | 'off';
+
+// The single owner of the on/off interlocks; every switch funnels through `drive()`.
 @Injectable()
 export class DevicesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DevicesService.name);
   private pinStates?: Subscription;
-  /**
-   * Pins this service is mid-command on, as `node:pin`.
-   *
-   * A commanded change reaches us twice: once as the node's `gpio/state`, and
-   * once as our own write when `drive()` finishes. The state report routinely
-   * wins, because the node answers in milliseconds while we are still awaiting
-   * the save - so reconciliation saw a row that still said "on" for a relay the
-   * node had just opened ON OUR INSTRUCTION and called it a divergence.
-   *
-   * That fired on every commanded off. An alarm that cries wolf each time is
-   * worse than no alarm: it teaches whoever reads the log to skip the line that
-   * matters.
-   */
-  private readonly inFlight = new Set<string>();
+  // Our own command's `gpio/state` must not be reconciled as a divergence; see docs/Safety.md 3c.
+  private readonly pinsMidCommand = new Set<string>();
 
   constructor(
     @InjectRepository(DeviceEntity)
@@ -66,17 +51,11 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    // A node changes lines on its own when its dead-man trips or when it sees
-    // this controller's last will, and it is the only party that knows. Without
-    // this subscription the driver held the correct level and nothing read it,
-    // so a row stayed wrong until a human noticed - and the interlock reads
-    // that row, so a burner could be locked out of turning on.
     this.pinStates = this.hardware.pinStates$.subscribe((report) => {
-      void this.reconcile(report).catch((err: unknown) => {
-        // Never allowed to kill the subscription: dropping it would silently
-        // restore the exact blindness this exists to remove.
+      // Caught here so one failure cannot end the subscription.
+      void this.reconcile(report).catch((error: unknown) => {
         this.logger.error(
-          `Reconciling ${report.nodeId} pin ${report.pin} failed: ${String(err)}`,
+          `Reconciling ${report.nodeId} pin ${report.pin} failed: ${String(error)}`,
         );
       });
     });
@@ -86,56 +65,12 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     this.pinStates?.unsubscribe();
   }
 
-  /**
-   * Bring a device row into line with what its node reports.
-   *
-   * The hardware wins for the level. The correction records `offAt` at the
-   * moment the NODE observed the line, so the minimum-off window runs from when
-   * the relay really opened rather than from when we found out, and `onAt` is
-   * left alone - the timestamps are the audit trail.
-   */
-  private async reconcile(report: PinStateReport): Promise<void> {
-    // Our own command, still completing. The node has already acted and said
-    // so; the row catches up a moment later in `drive()`.
-    if (this.inFlight.has(`${report.nodeId}:${report.pin}`)) return;
-
-    const device = await this.devices.findOne({
-      where: { gpio: report.pin, node: { slug: report.nodeId } },
-      relations: { node: true },
-    });
-    if (!device) return;
-
-    const now = this.clock.now();
-    const verdict = reconcilePinState(device, report, now);
-    if (verdict.action !== 'correct') return;
-
-    Object.assign(device, correctionPatch(verdict));
-    await this.devices.save(device);
-
-    this.divergences.record({
-      deviceName: device.name,
-      nodeId: report.nodeId,
-      pin: report.pin,
-      hardwareOn: verdict.hardwareOn,
-      reason: verdict.reason,
-      at: now,
-    });
-    // ERROR, not WARN: the row and the relay disagreeing means something
-    // upstream already failed, and this is the durable record of it.
-    this.logger.error(
-      `DIVERGENCE on ${device.name} (${report.nodeId} pin ${report.pin}): ` +
-        `${verdict.reason}; corrected the row to ` +
-        `${verdict.hardwareOn ? 'ON' : 'OFF'} as of ${verdict.at.toISOString()}`,
-    );
-    this.realtime.publishDeviceState(this.toDto(device));
-  }
-
   async findAll(): Promise<Device[]> {
     const rows = await this.devices.find({
       relations: { node: true },
       order: { name: 'ASC' },
     });
-    return rows.map((r) => this.toDto(r));
+    return rows.map((row) => this.toDto(row));
   }
 
   async findOneEntity(id: string): Promise<DeviceEntity> {
@@ -164,16 +99,8 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
   }
 
   async create(dto: CreateDeviceDto): Promise<Device> {
-    // `nodeId` on the wire is the node SLUG - it is the MQTT topic segment and
-    // the stable human-chosen identifier. The FK is the node's uuid.
-    const node = await this.nodes.findOne({ where: { slug: dto.nodeId } });
-    if (!node) {
-      throw new NotFoundException({
-        code: ApiErrorCode.NotFound,
-        message: `Node "${dto.nodeId}" not found`,
-      });
-    }
-    this.assertPinAvailable(node, dto.gpio);
+    const node = await this.findNodeBySlug(dto.nodeId);
+    assertPinAvailable(node, dto.gpio);
 
     const row = this.devices.create({
       ...dto,
@@ -183,39 +110,11 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       rulesEnabled: dto.rulesEnabled ?? true,
       role: dto.role ?? null,
     } as Partial<DeviceEntity>);
-
-    // Start from what the relay is doing, not from "off". The node reported
-    // this pin before the device existed, so `reconcile` never saw it - and on
-    // a fail-to-on node (patji, 2026-11-18) that left a running heater recorded
-    // as off, with every rule tick answered "already off". Same verdict as
-    // `reconcile`; logged as seeding, because nothing has diverged yet.
-    const report = this.hardware.lastPinReport(node.slug, dto.gpio);
-    if (report) {
-      const verdict = reconcilePinState(row, report, this.clock.now());
-      if (verdict.action === 'correct') {
-        Object.assign(row, correctionPatch(verdict));
-        this.logger.log(
-          `${row.name} starts ${verdict.hardwareOn ? 'ON' : 'OFF'}: ` +
-            `${node.slug} pin ${dto.gpio} reported level ${String(report.level)}`,
-        );
-      }
-    }
+    this.seedFromLastReport(row, node, dto.gpio);
 
     const saved = await this.devices.save(row);
     saved.node = node;
     return this.toDto(saved);
-  }
-
-  /** A constraint the database cannot express: the node must expose the pin. */
-  private assertPinAvailable(node: NodeEntity, pin: number): void {
-    const pins = node.capabilities?.gpio?.pins ?? [];
-    if (!pins.includes(pin)) {
-      throw new ConflictException({
-        code: ApiErrorCode.PinNotAvailable,
-        message: `Node "${node.slug}" does not expose GPIO pin ${pin}`,
-        details: { availablePins: pins },
-      });
-    }
   }
 
   async update(id: string, dto: UpdateDeviceDto): Promise<Device> {
@@ -228,8 +127,6 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     const row = await this.findOneEntity(id);
     row.rulesEnabled = rulesEnabled;
     const dto = this.toDto(await this.devices.save(row));
-    // Handing a device to or from the rules engine changes what the UI has to
-    // show about it, so it is a state change like any other.
     this.realtime.publishDeviceState(dto);
     return dto;
   }
@@ -241,110 +138,22 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
 
   async turnOn(id: string): Promise<Device> {
     const device = await this.findOneEntity(id);
-    if (isOn(device)) {
-      throw new ConflictException({
-        code: ApiErrorCode.DeviceAlreadyOn,
-        message: `${device.name} is already on`,
-      });
-    }
-    const now = this.clock.now();
-    if (!canTurnOn(device, now)) {
-      throw new ConflictException({
-        code: ApiErrorCode.DeviceCooldown,
-        message: `${device.name} is within its minimum-off time`,
-        details: { canTurnOnAt: canTurnOnAt(device)?.toISOString() ?? null },
-      });
-    }
+    assertIsOff(device);
+    assertCooldownOver(device, this.clock.now());
     return this.drive(device, device.onLevel, 'on');
   }
 
   /** Bypasses the cooldown, but NOT the already-on check. */
   async forceOn(id: string): Promise<Device> {
     const device = await this.findOneEntity(id);
-    if (isOn(device)) {
-      throw new ConflictException({
-        code: ApiErrorCode.DeviceAlreadyOn,
-        message: `${device.name} is already on`,
-      });
-    }
+    assertIsOff(device);
     return this.drive(device, device.onLevel, 'on');
   }
 
   async turnOff(id: string): Promise<Device> {
     const device = await this.findOneEntity(id);
-    if (!isOn(device)) {
-      throw new ConflictException({
-        code: ApiErrorCode.DeviceAlreadyOff,
-        message: `${device.name} is already off`,
-      });
-    }
-    return this.drive(device, (1 - device.onLevel) as GpioLevel, 'off');
-  }
-
-  /**
-   * Publish FIRST and await the acknowledgement, persist only on success.
-   *
-   * The old system did the reverse: a failed GPIO write was logged and the row
-   * updated anyway, so the database silently drifted from the hardware and the
-   * UI confidently showed a heater as running when it was not.
-   */
-  private async drive(
-    device: DeviceEntity,
-    level: GpioLevel,
-    direction: 'on' | 'off',
-  ): Promise<Device> {
-    // The admission gate, on the way out. A node nobody admitted receives no
-    // commands - the mirror of its readings being discarded on the way in.
-    // Reachability is the transport's problem and surfaces as a rejected
-    // setPin; this is about whether we are WILLING to drive it at all.
-    if (!acceptsCommands(device.node.status)) {
-      throw new ConflictException({
-        code: ApiErrorCode.NodeNotAdmitted,
-        message: `Node "${device.node.slug}" is ${device.node.status}; it receives no commands`,
-        details: { nodeStatus: device.node.status },
-      });
-    }
-
-    // Held across the write AND the save below. Releasing it any earlier
-    // reopens the race it exists to close.
-    const key = `${device.node.slug}:${device.gpio}`;
-    this.inFlight.add(key);
-    try {
-      await this.hardware.setPin(device.node.slug, {
-        pin: device.gpio,
-        level,
-        label: device.name,
-      });
-    } catch (err: unknown) {
-      this.inFlight.delete(key);
-      // A known hardware condition is not a 500. An offline node, an
-      // unacknowledged command and a readback mismatch are all expected states
-      // with distinct remedies, and the client - browser or rules engine - has
-      // to be able to tell them apart. Anything else is genuinely unexpected
-      // and is left to propagate.
-      throw err instanceof HardwareError ? toHttpError(err) : err;
-    }
-
-    const now = this.clock.now();
-    if (direction === 'on') {
-      device.onAt = now;
-    } else {
-      device.offAt = now;
-    }
-    try {
-      await this.devices.save(device);
-    } finally {
-      this.inFlight.delete(key);
-    }
-    this.logger.log(
-      `${device.name} -> ${direction} (node ${device.node.slug} pin ${device.gpio})`,
-    );
-
-    // Published only after the hardware acknowledged AND the row was saved, so
-    // the dashboard can never show a state the relay never reached.
-    const dto = this.toDto(device);
-    this.realtime.publishDeviceState(dto);
-    return dto;
+    assertIsOn(device);
+    return this.drive(device, offLevelOf(device), 'off');
   }
 
   toDto(row: DeviceEntity): Device {
@@ -368,19 +177,183 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       canTurnOnAt: earliest?.toISOString() ?? null,
     };
   }
+
+  private async reconcile(report: PinStateReport): Promise<void> {
+    if (this.pinsMidCommand.has(toPinKey(report.nodeId, report.pin))) return;
+
+    const device = await findDeviceOnPin(
+      this.devices,
+      report.nodeId,
+      report.pin,
+    );
+    if (!device) return;
+
+    const now = this.clock.now();
+    const verdict = reconcilePinState(device, report, now);
+    if (verdict.action !== 'correct') return;
+
+    Object.assign(device, correctionPatch(verdict));
+    await this.devices.save(device);
+
+    this.divergences.record({
+      deviceName: device.name,
+      nodeId: report.nodeId,
+      pin: report.pin,
+      hardwareOn: verdict.hardwareOn,
+      reason: verdict.reason,
+      at: now,
+    });
+    this.logger.error(
+      `DIVERGENCE on ${device.name} (${report.nodeId} pin ${report.pin}): ` +
+        `${verdict.reason}; corrected the row to ` +
+        `${describeOnOff(verdict.hardwareOn)} as of ${verdict.at.toISOString()}`,
+    );
+    this.realtime.publishDeviceState(this.toDto(device));
+  }
+
+  // `nodeId` on the wire is the node slug; the foreign key is the node's uuid.
+  private async findNodeBySlug(slug: string): Promise<NodeEntity> {
+    const node = await this.nodes.findOne({ where: { slug } });
+    if (!node) {
+      throw new NotFoundException({
+        code: ApiErrorCode.NotFound,
+        message: `Node "${slug}" not found`,
+      });
+    }
+    return node;
+  }
+
+  // The node may have reported this pin before the device existed; see docs/Pumphouse.md.
+  private seedFromLastReport(
+    row: DeviceEntity,
+    node: NodeEntity,
+    pin: number,
+  ): void {
+    const report = this.hardware.lastPinReport(node.slug, pin);
+    if (!report) return;
+
+    const verdict = reconcilePinState(row, report, this.clock.now());
+    if (verdict.action !== 'correct') return;
+
+    Object.assign(row, correctionPatch(verdict));
+    this.logger.log(
+      `${row.name} starts ${describeOnOff(verdict.hardwareOn)}: ` +
+        `${node.slug} pin ${pin} reported level ${String(report.level)}`,
+    );
+  }
+
+  // Publish first and persist only on success: docs/Safety.md rule 3.
+  private async drive(
+    device: DeviceEntity,
+    level: GpioLevel,
+    direction: Direction,
+  ): Promise<Device> {
+    assertNodeAcceptsCommands(device.node);
+
+    const pinKey = toPinKey(device.node.slug, device.gpio);
+    this.pinsMidCommand.add(pinKey);
+    try {
+      await this.hardware.setPin(device.node.slug, {
+        pin: device.gpio,
+        level,
+        label: device.name,
+      });
+    } catch (error: unknown) {
+      this.pinsMidCommand.delete(pinKey);
+      throw translateHardwareError(error);
+    }
+
+    stampTransition(device, direction, this.clock.now());
+    try {
+      await this.devices.save(device);
+    } finally {
+      this.pinsMidCommand.delete(pinKey);
+    }
+    this.logger.log(
+      `${device.name} -> ${direction} (node ${device.node.slug} pin ${device.gpio})`,
+    );
+
+    const dto = this.toDto(device);
+    this.realtime.publishDeviceState(dto);
+    return dto;
+  }
 }
 
-/**
- * `NodeOffline` and `ReadbackMismatch` are conflicts with the physical world -
- * the request is well-formed and the answer is no. An unreachable transport is
- * a 503, because it is the server that is unable to act rather than the request
- * that is wrong.
- */
+function assertPinAvailable(node: NodeEntity, pin: number): void {
+  const pins = node.capabilities?.gpio?.pins ?? [];
+  if (pins.includes(pin)) return;
+  throw new ConflictException({
+    code: ApiErrorCode.PinNotAvailable,
+    message: `Node "${node.slug}" does not expose GPIO pin ${pin}`,
+    details: { availablePins: pins },
+  });
+}
+
+function assertIsOff(device: DeviceEntity): void {
+  if (!isOn(device)) return;
+  throw new ConflictException({
+    code: ApiErrorCode.DeviceAlreadyOn,
+    message: `${device.name} is already on`,
+  });
+}
+
+function assertIsOn(device: DeviceEntity): void {
+  if (isOn(device)) return;
+  throw new ConflictException({
+    code: ApiErrorCode.DeviceAlreadyOff,
+    message: `${device.name} is already off`,
+  });
+}
+
+function assertCooldownOver(device: DeviceEntity, now: Date): void {
+  if (canTurnOn(device, now)) return;
+  throw new ConflictException({
+    code: ApiErrorCode.DeviceCooldown,
+    message: `${device.name} is within its minimum-off time`,
+    details: { canTurnOnAt: canTurnOnAt(device)?.toISOString() ?? null },
+  });
+}
+
+// Reachability is the transport's problem; this is whether we are willing to drive the node at all.
+function assertNodeAcceptsCommands(node: NodeEntity): void {
+  if (acceptsCommands(node.status)) return;
+  throw new ConflictException({
+    code: ApiErrorCode.NodeNotAdmitted,
+    message: `Node "${node.slug}" is ${node.status}; it receives no commands`,
+    details: { nodeStatus: node.status },
+  });
+}
+
+function offLevelOf(device: DeviceEntity): GpioLevel {
+  return (1 - device.onLevel) as GpioLevel;
+}
+
+function stampTransition(
+  device: DeviceEntity,
+  direction: Direction,
+  now: Date,
+): void {
+  if (direction === 'on') {
+    device.onAt = now;
+    return;
+  }
+  device.offAt = now;
+}
+
+function describeOnOff(isOnNow: boolean): string {
+  return isOnNow ? 'ON' : 'OFF';
+}
+
+function translateHardwareError(error: unknown): unknown {
+  return error instanceof HardwareError ? toHttpError(error) : error;
+}
+
+// A dead transport is a 503: the server cannot act. Anything else is the physical world saying no.
 function toHttpError(
-  err: HardwareError,
+  hardwareError: HardwareError,
 ): ConflictException | ServiceUnavailableException {
-  const body = { code: err.code, message: err.message };
-  return err.code === ApiErrorCode.HardwareUnreachable
+  const body = { code: hardwareError.code, message: hardwareError.message };
+  return hardwareError.code === ApiErrorCode.HardwareUnreachable
     ? new ServiceUnavailableException(body)
     : new ConflictException(body);
 }

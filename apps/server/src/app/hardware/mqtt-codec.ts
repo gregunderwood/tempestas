@@ -5,11 +5,13 @@ import {
   type AlarmPayload,
   type GpioLevel,
   type GpioLine,
+  type GpioResultLine,
   type GpioResultPayload,
   type GpioSetPayload,
   type GpioStatePayload,
   type GpioSyncPayload,
   type HelloPayload,
+  type Measurement,
   type NodeId,
   type SamplePayload,
   type StatusPayload,
@@ -21,21 +23,12 @@ import type {
   SensorSample,
 } from './hardware.service';
 
-/**
- * Everything about the MQTT wire that can be decided without a socket.
- *
- * Topic parsing, payload validation and readback verification live here as pure
- * functions so they can be asserted directly. The driver is then thin enough to
- * be read in one sitting, which matters for the one component that turns a
- * network message into a relay command.
- *
- * The rule this file enforces above all others: a message that cannot be fully
- * understood is DROPPED, never partially applied. Half-parsing a sample yields a
- * temperature the rules engine will act on.
- */
+// A message that cannot be fully understood is dropped, never partially applied.
 
 /** The contract major this build speaks. An unknown major is refused, not parsed. */
 export const SUPPORTED_MAJOR = 1;
+
+export const EMPTY_PAYLOAD_REASON = 'empty payload';
 
 export type NodeTopicKind =
   | 'hello'
@@ -56,60 +49,87 @@ export interface ParsedTopic {
   pin?: number;
 }
 
+export type DecodeFailure = { ok: false; reason: string };
+export type Decoded<T> = { ok: true; value: T } | DecodeFailure;
+
+export interface DecodedGpioState {
+  pin: number;
+  level: GpioLevel | null;
+  known: boolean;
+  observedAt: Date;
+}
+
+export interface EnvelopeSeed {
+  nodeId: NodeId;
+  now: Date;
+}
+
+const NODE_TOPIC_PREFIX = `${MQTT_ROOT}/node/`;
+
+const FIXED_SUBTOPIC_KINDS = new Map<string, NodeTopicKind>([
+  ['hello', 'hello'],
+  ['status', 'status'],
+  ['gpio/set', 'gpio-set'],
+  ['gpio/sync', 'gpio-sync'],
+  ['gpio/result', 'gpio-result'],
+  ['control/heartbeat', 'heartbeat'],
+  ['alarm', 'alarm'],
+]);
+
 /** `tempestas/v1/node/elantris/sensor/scd4x-0/sample` -> its parts, or null. */
 export function parseNodeTopic(topic: string): ParsedTopic | null {
-  const prefix = `${MQTT_ROOT}/node/`;
-  if (!topic.startsWith(prefix)) {
+  if (!topic.startsWith(NODE_TOPIC_PREFIX)) {
     return null;
   }
-  const [nodeId, ...rest] = topic.slice(prefix.length).split('/');
-  if (!nodeId || rest.length === 0) {
+  const [nodeId, ...subtopic] = topic
+    .slice(NODE_TOPIC_PREFIX.length)
+    .split('/');
+  if (!nodeId || subtopic.length === 0) {
     return null;
   }
 
-  const path = rest.join('/');
-  if (path === 'hello') return { nodeId, kind: 'hello' };
-  if (path === 'status') return { nodeId, kind: 'status' };
-  if (path === 'gpio/set') return { nodeId, kind: 'gpio-set' };
-  if (path === 'gpio/sync') return { nodeId, kind: 'gpio-sync' };
-  if (path === 'gpio/result') return { nodeId, kind: 'gpio-result' };
-  if (path === 'control/heartbeat') return { nodeId, kind: 'heartbeat' };
-  if (path === 'alarm') return { nodeId, kind: 'alarm' };
+  const fixedKind = FIXED_SUBTOPIC_KINDS.get(subtopic.join('/'));
+  if (fixedKind) return { nodeId, kind: fixedKind };
 
-  if (rest[0] === 'sensor' && rest[2] === 'sample' && rest.length === 3) {
-    return { nodeId, kind: 'sample', sensorId: rest[1] };
+  const [area, identifier, leaf] = subtopic;
+  const hasThreeSegments = subtopic.length === 3;
+  if (hasThreeSegments && area === 'sensor' && leaf === 'sample') {
+    return { nodeId, kind: 'sample', sensorId: identifier };
   }
-  if (rest[0] === 'gpio' && rest[1] === 'state' && rest.length === 3) {
-    const pin = Number(rest[2]);
+  if (hasThreeSegments && area === 'gpio' && identifier === 'state') {
+    const pin = Number(leaf);
     if (!Number.isInteger(pin)) return { nodeId, kind: 'unknown' };
     return { nodeId, kind: 'gpio-state', pin };
   }
   return { nodeId, kind: 'unknown' };
 }
 
-export type DecodeFailure = { ok: false; reason: string };
-export type Decoded<T> = { ok: true; value: T } | DecodeFailure;
+// A zero-length payload is how a retained message is cleared.
+export function isEmptyPayload(payload: Buffer | string): boolean {
+  return payload.toString('utf8').trim() === '';
+}
+
+export function isGpioLevel(value: unknown): value is GpioLevel {
+  return value === 0 || value === 1;
+}
 
 export function parseJson(
   payload: Buffer | string,
 ): Decoded<Record<string, unknown>> {
-  const text = payload.toString('utf8');
-  if (text.trim() === '') {
-    // A zero-length payload is how a retained message is CLEARED, not an error.
-    return { ok: false, reason: 'empty payload' };
+  if (isEmptyPayload(payload)) {
+    return { ok: false, reason: EMPTY_PAYLOAD_REASON };
   }
   try {
-    const value: unknown = JSON.parse(text);
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    const value: unknown = JSON.parse(payload.toString('utf8'));
+    if (!isJsonObject(value)) {
       return { ok: false, reason: 'payload is not a JSON object' };
     }
-    return { ok: true, value: value as Record<string, unknown> };
+    return { ok: true, value };
   } catch {
     return { ok: false, reason: 'payload is not valid JSON' };
   }
 }
 
-/** An unknown major is refused loudly; a matching one may still fail validation. */
 export function checkSchema(
   raw: Record<string, unknown>,
   expected: string,
@@ -135,8 +155,8 @@ export function decodeHello(
   nodeId: NodeId,
   receivedAt: Date,
 ): Decoded<NodeHello> {
-  const bad = checkSchema(raw, MQTT_SCHEMAS.hello);
-  if (bad) return bad;
+  const schemaFailure = checkSchema(raw, MQTT_SCHEMAS.hello);
+  if (schemaFailure) return schemaFailure;
 
   const payload = raw as unknown as HelloPayload;
   if (!payload.capabilities || typeof payload.capabilities !== 'object') {
@@ -149,8 +169,7 @@ export function decodeHello(
     };
   }
   if (typeof payload.bootId !== 'string' || payload.bootId === '') {
-    // Without a bootId a reboot is undetectable and the reading dedupe loses
-    // its scope, so this is not an optional field.
+    // Required: without it a reboot is undetectable and the reading dedupe loses its scope.
     return { ok: false, reason: 'hello without a bootId' };
   }
   if (!payload.kind) {
@@ -178,13 +197,12 @@ export function decodeStatus(
   nodeId: NodeId,
   receivedAt: Date,
 ): Decoded<NodeAvailability> {
-  const bad = checkSchema(raw, MQTT_SCHEMAS.status);
-  if (bad) return bad;
+  const schemaFailure = checkSchema(raw, MQTT_SCHEMAS.status);
+  if (schemaFailure) return schemaFailure;
 
   const state = (raw as unknown as StatusPayload).state;
   if (state !== 'online' && state !== 'offline') {
-    // Not defaulting to either: "stale is not off", and guessing online would
-    // be worse still.
+    // Never defaulted: stale is not off, and guessing online is worse still.
     return {
       ok: false,
       reason: `status with unknown state "${String(state)}"`,
@@ -196,31 +214,23 @@ export function decodeStatus(
   };
 }
 
-/**
- * A sample is dropped unless temperature is present and valid.
- *
- * Every rule reads temperature; a sample without it is not a partial reading,
- * it is nothing. CO2 and humidity are different - `valid: false` is a
- * legitimate state that maps to null. For CO2 it keeps the burner off by day;
- * for humidity it is simply what a temperature-only probe sends, and no rule
- * reads humidity, so its absence must not cost the temperature with it.
- */
+// Temperature is required; CO2 and humidity may be invalid, which maps to null.
 export function decodeSample(
   raw: Record<string, unknown>,
   nodeId: NodeId,
   sensorId: string,
   receivedAt: Date,
 ): Decoded<SensorSample> {
-  const bad = checkSchema(raw, MQTT_SCHEMAS.sample);
-  if (bad) return bad;
+  const schemaFailure = checkSchema(raw, MQTT_SCHEMAS.sample);
+  if (schemaFailure) return schemaFailure;
 
   const payload = raw as unknown as SamplePayload;
-  const m = payload.measurements;
-  if (!m || typeof m !== 'object') {
+  const measurements = payload.measurements;
+  if (!measurements || typeof measurements !== 'object') {
     return { ok: false, reason: 'sample without measurements' };
   }
 
-  const temperature = numeric(m.tempC);
+  const temperature = readValidMeasurement(measurements.tempC);
   if (temperature === null) {
     return { ok: false, reason: 'sample without a valid temperature' };
   }
@@ -232,28 +242,18 @@ export function decodeSample(
       // Server-stamped: a node's own clock is diagnostic data, never the axis.
       receivedAt,
       temperature,
-      humidity: numeric(m.humidityPct),
-      co2: numeric(m.co2Ppm),
+      humidity: readValidMeasurement(measurements.humidityPct),
+      co2: readValidMeasurement(measurements.co2Ppm),
       nodeSeq: Number.isInteger(payload.seq) ? (payload.seq as number) : null,
     },
   };
 }
 
-function numeric(
-  measurement: { value: number | null; valid: boolean } | undefined,
-): number | null {
-  if (!measurement || measurement.valid !== true) return null;
-  return typeof measurement.value === 'number' &&
-    Number.isFinite(measurement.value)
-    ? measurement.value
-    : null;
-}
-
 export function decodeResult(
   raw: Record<string, unknown>,
 ): Decoded<GpioResultPayload> {
-  const bad = checkSchema(raw, MQTT_SCHEMAS.gpioResult);
-  if (bad) return bad;
+  const schemaFailure = checkSchema(raw, MQTT_SCHEMAS.gpioResult);
+  if (schemaFailure) return schemaFailure;
 
   const payload = raw as unknown as GpioResultPayload;
   if (typeof payload.id !== 'string' || !Array.isArray(payload.lines)) {
@@ -262,36 +262,27 @@ export function decodeResult(
   return { ok: true, value: payload };
 }
 
-/**
- * Did the node actually do what it was told?
- *
- * A command resolves only on a matching readback. The old system logged a failed
- * GPIO write and updated the database anyway, so the UI showed a heater running
- * when it was not - the whole point of an ack is to make that unwriteable.
- */
 export function verifyResult(
   result: GpioResultPayload,
   requested: readonly PinCommand[],
 ): DecodeFailure | null {
   if (!result.ok) {
     const failed = result.lines
-      .filter((l) => !l.ok)
-      .map((l) => `pin ${l.pin}: ${l.error ?? 'failed'}`);
+      .filter((line) => !line.ok)
+      .map(describeLineFailure);
     return { ok: false, reason: failed.join('; ') || 'node reported failure' };
   }
   for (const command of requested) {
-    const line = result.lines.find((l) => l.pin === command.pin);
+    const line = result.lines.find(
+      (resultLine) => resultLine.pin === command.pin,
+    );
     if (!line) {
       return { ok: false, reason: `no result for pin ${command.pin}` };
     }
     if (!line.ok) {
-      return {
-        ok: false,
-        reason: `pin ${command.pin}: ${line.error ?? 'failed'}`,
-      };
+      return { ok: false, reason: describeLineFailure(line) };
     }
-    // A readback the node could not take is NOT a success. `null` means unknown,
-    // and unknown state on a burner relay is exactly what must not be believed.
+    // A `null` readback is unknown, and unknown on a burner relay is never success.
     if (line.readback !== command.level) {
       return {
         ok: false,
@@ -305,21 +296,12 @@ export function verifyResult(
 export function decodeGpioState(
   raw: Record<string, unknown>,
   pin: number,
-): Decoded<{
-  pin: number;
-  level: GpioLevel | null;
-  known: boolean;
-  observedAt: Date;
-}> {
-  const bad = checkSchema(raw, MQTT_SCHEMAS.gpioState);
-  if (bad) return bad;
+): Decoded<DecodedGpioState> {
+  const schemaFailure = checkSchema(raw, MQTT_SCHEMAS.gpioState);
+  if (schemaFailure) return schemaFailure;
 
   const payload = raw as unknown as GpioStatePayload;
-  // The node's own timestamp is carried through because it ends up in a
-  // device's `offAt`, which decides when the minimum-off window started. An
-  // unparseable one is refused rather than defaulted to now: silently
-  // substituting our clock would restart a burner's cooldown from the moment we
-  // happened to receive the message.
+  // Refused, not defaulted to now: our clock would restart a burner's cooldown.
   const observedAt = new Date(payload.ts);
   if (Number.isNaN(observedAt.getTime())) {
     return {
@@ -327,12 +309,10 @@ export function decodeGpioState(
       reason: `gpio/state has an unparseable ts "${String(payload.ts)}"`,
     };
   }
-  // `known: false` is a first-class state, not an error: it is what a node
-  // reports for a line it has not claimed or cannot read back. Stale is not off.
   if (payload.known !== true) {
     return { ok: true, value: { pin, level: null, known: false, observedAt } };
   }
-  if (payload.level !== 0 && payload.level !== 1) {
+  if (!isGpioLevel(payload.level)) {
     return {
       ok: false,
       reason: `gpio/state claims known with level "${String(payload.level)}"`,
@@ -347,19 +327,14 @@ export function decodeGpioState(
 export function decodeAlarm(
   raw: Record<string, unknown>,
 ): Decoded<AlarmPayload> {
-  const bad = checkSchema(raw, MQTT_SCHEMAS.alarm);
-  if (bad) return bad;
+  const schemaFailure = checkSchema(raw, MQTT_SCHEMAS.alarm);
+  if (schemaFailure) return schemaFailure;
 
   const payload = raw as unknown as AlarmPayload;
   if (typeof payload.code !== 'string' || typeof payload.message !== 'string') {
     return { ok: false, reason: 'alarm without a code and message' };
   }
   return { ok: true, value: payload };
-}
-
-export interface EnvelopeSeed {
-  nodeId: NodeId;
-  now: Date;
 }
 
 export function buildGpioSet(
@@ -375,8 +350,7 @@ export function buildGpioSet(
     ts: seed.now.toISOString(),
     id,
     issuedBy,
-    // Every command expires. A command delivered late - by a broker that queued
-    // it, or a node that reconnected - must be refused rather than obeyed.
+    // Every command expires, so one delivered late is refused rather than obeyed.
     expiresAt: new Date(seed.now.getTime() + ttlMs).toISOString(),
     lines: [...lines],
   };
@@ -401,10 +375,10 @@ export function buildGpioSync(
 }
 
 export function toGpioLines(commands: readonly PinCommand[]): GpioLine[] {
-  return commands.map((c) => ({
-    pin: c.pin,
-    level: c.level,
-    ...(c.label ? { label: c.label } : {}),
+  return commands.map((command) => ({
+    pin: command.pin,
+    level: command.level,
+    ...(command.label ? { label: command.label } : {}),
   }));
 }
 
@@ -414,4 +388,22 @@ export function buildStatus(
   now: Date,
 ): StatusPayload {
   return { schema: MQTT_SCHEMAS.status, node, ts: now.toISOString(), state };
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readValidMeasurement(
+  measurement: Pick<Measurement, 'value' | 'valid'> | undefined,
+): number | null {
+  if (!measurement || measurement.valid !== true) return null;
+  return typeof measurement.value === 'number' &&
+    Number.isFinite(measurement.value)
+    ? measurement.value
+    : null;
+}
+
+function describeLineFailure(line: GpioResultLine): string {
+  return `pin ${line.pin}: ${line.error ?? 'failed'}`;
 }
