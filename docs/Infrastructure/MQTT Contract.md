@@ -186,8 +186,8 @@ mosquitto_pub -r -t 'tempestas/v1/node/elantris/gpio/set' -m '{...}'   # MUST be
 ## Broker credentials and ACLs
 
 The broker refuses anonymous clients and scopes every credential to its own topics. The files are
-[../../apps/hardware/mosquitto/tempestas.conf](../../apps/hardware/mosquitto/tempestas.conf) and
-[../../apps/hardware/mosquitto/tempestas.acl](../../apps/hardware/mosquitto/tempestas.acl); the
+[../../apps/broker/mosquitto/tempestas.conf](../../apps/broker/mosquitto/tempestas.conf) and
+[../../apps/broker/mosquitto/tempestas.acl](../../apps/broker/mosquitto/tempestas.acl); the
 reasoning and the identity table are in
 [Safety](../Safety.md#authentication-is-an-interlock-not-security).
 

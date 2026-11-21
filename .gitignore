@@ -50,7 +50,7 @@ vitest.config.*.timestamp*
 # tempestas
 apps/server/.env
 
-# Python agent (apps/hardware). uv.lock IS committed - it is what makes the
+# Python agent (apps/agent-linux). uv.lock IS committed - it is what makes the
 # agent's dependencies reproducible on a Pi.
 .venv/
 __pycache__/

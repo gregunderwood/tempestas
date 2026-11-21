@@ -70,7 +70,7 @@ Raspbian ships.
    leaves `index.html` one deeper than it looks and every deep link 404s while
    `/` still works.
 
-4. **Agent environment**: `uv sync --extra gpio` in `apps/hardware`.
+4. **Agent environment**: `uv sync --extra gpio` in `apps/agent-linux`.
 
 5. **Secrets**, all `0600 root` under `/etc/tempestas/`: `db.env`,
    `server.env`, `agent.env`. Credentials never go in `agent.toml`; systemd
@@ -170,7 +170,7 @@ Any box running the broker gets the drop-in:
 ```bash
 sudo install -d -m 0755 /etc/systemd/system/mosquitto.service.d
 sudo install -m 0644 -o root -g root \
-  apps/hardware/systemd/mosquitto.service.d/10-tempestas-retry.conf \
+  apps/broker/systemd/mosquitto.service.d/10-tempestas-retry.conf \
   /etc/systemd/system/mosquitto.service.d/
 sudo systemctl daemon-reload
 systemctl show mosquitto -p StartLimitIntervalUSec -p RestartUSec   # 0 and 5s

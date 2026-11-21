@@ -44,7 +44,7 @@ say "Shipping to $HOST"
 rsync -a --delete "$HERE/dist/apps/server/" "$HOST:$REMOTE/dist/apps/server/"
 rsync -a --delete "$HERE/dist/apps/web/browser/" "$HOST:$REMOTE/dist/apps/web/"
 rsync -a "$HERE/apps/server/systemd/" "$HOST:$REMOTE/apps/server/systemd/"
-rsync -a "$HERE/apps/hardware/systemd/" "$HOST:$REMOTE/apps/hardware/systemd/"
+rsync -a "$HERE/apps/agent-linux/systemd/" "$HOST:$REMOTE/apps/agent-linux/systemd/"
 
 # The server bundle carries a generated manifest of runtime dependencies only,
 # so this installs no webpack and no Angular.

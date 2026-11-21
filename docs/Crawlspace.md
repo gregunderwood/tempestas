@@ -3,7 +3,7 @@
 ## What it is
 
 Freeze protection under the house: a heater and a heat tape, driven by `braize`, a Pico W running
-the [Pico Agent](Infrastructure/Pico%20Agent.md). It copies the [Pumphouse](Pumphouse.md)
+the [MicroPython Agent](Infrastructure/MicroPython%20Agent.md). It copies the [Pumphouse](Pumphouse.md)
 posture: a dead node, a lost link or a dead probe all end in heat.
 
 ⚠ Read [Safety](Safety.md) before wiring or energising anything.
@@ -64,16 +64,16 @@ while the server was down, as designed.
 the ACL and the zone script over from here first:
 
 ```bash
-scp apps/hardware/mosquitto/tempestas.acl elantris:tempestas/apps/hardware/mosquitto/
+scp apps/broker/mosquitto/tempestas.acl elantris:tempestas/apps/broker/mosquitto/
 scp tools/crawlspace-zone.sql elantris:tempestas/tools/
 ```
 
-The `braize` block is in [tempestas.acl](../apps/hardware/mosquitto/tempestas.acl). Install the
+The `braize` block is in [tempestas.acl](../apps/broker/mosquitto/tempestas.acl). Install the
 file and create the password on elantris, per
 [Provisioning](Infrastructure/Provisioning.md#-broker-credentials-generate-the-hash-on-the-broker):
 
 ```bash
-sudo cp ~/tempestas/apps/hardware/mosquitto/tempestas.acl /etc/mosquitto/tempestas.acl
+sudo cp ~/tempestas/apps/broker/mosquitto/tempestas.acl /etc/mosquitto/tempestas.acl
 sudo mosquitto_passwd -b /etc/mosquitto/tempestas.passwd braize '<password>'
 sudo chown mosquitto:mosquitto /etc/mosquitto/tempestas.passwd /etc/mosquitto/tempestas.acl
 sudo chmod 0600 /etc/mosquitto/tempestas.passwd /etc/mosquitto/tempestas.acl
@@ -94,9 +94,9 @@ mosquitto_pub -h 192.168.2.70 -V mqttv5 -u braize -P '...' -q 1 \
 
 ### 3. Flash and deploy the Pico
 
-Follow [Installing](Infrastructure/Pico%20Agent.md#installing): update MicroPython, remove the
+Follow [Installing](Infrastructure/MicroPython%20Agent.md#installing): update MicroPython, remove the
 old tutorial scripts, write `credentials.py` with the password from step 2, then
-`tools/deploy-pico.sh`. Expect Wi-Fi, the clock set, a broker connection, and `braize` in
+`tools/deploy-agent-micropython.sh`. Expect Wi-Fi, the clock set, a broker connection, and `braize` in
 `GET /api/nodes` as `pending`.
 
 ### 4. Zone, admission, devices

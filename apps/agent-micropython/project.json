@@ -1,0 +1,21 @@
+{
+  "name": "agent-micropython",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["type:app", "scope:agent"],
+  "implicitDependencies": ["domain", "agent-linux"],
+  "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": { "command": "uv run ruff check .", "cwd": "apps/agent-micropython" }
+    },
+    "format": {
+      "executor": "nx:run-commands",
+      "options": { "command": "uv run ruff format .", "cwd": "apps/agent-micropython" }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": { "command": "uv run pytest -q", "cwd": "apps/agent-micropython" }
+    }
+  }
+}
