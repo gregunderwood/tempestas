@@ -1,14 +1,7 @@
-import {
-  ConflictException,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Subject } from 'rxjs';
 import { DivergenceLog } from '../common/divergence-log';
-import type {
-  NodeHello,
-  PinStateReport,
-} from '../hardware/hardware.service';
+import type { NodeHello, PinStateReport } from '../hardware/hardware.service';
 import type { Repository } from 'typeorm';
 import { ApiErrorCode, DeviceRole, NodeStatus } from '@tempestas/domain';
 import { FixedClock } from '../common/clock';

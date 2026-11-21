@@ -29,6 +29,7 @@ function hello(overrides: Partial<NodeHello> = {}): NodeHello {
   return {
     nodeId: 'elantris',
     kind: NodeKind.RaspberryPi,
+    agentName: 'agent-linux',
     agentVersion: '1.0.0',
     capabilities: CAPABILITIES,
     bootId: 'boot-1',

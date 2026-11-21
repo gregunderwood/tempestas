@@ -26,6 +26,13 @@ def test_root_matches(source: str):
     assert f"tempestas/{version.group(1)}" == contract.MQTT_ROOT
 
 
+def test_contract_version_matches(source: str):
+    major = re.search(r"MQTT_CONTRACT_MAJOR = (\d+);", source)
+    minor = re.search(r"MQTT_CONTRACT_MINOR = (\d+);", source)
+    assert major and int(major.group(1)) == contract.SUPPORTED_MAJOR
+    assert minor and int(minor.group(1)) == contract.MQTT_CONTRACT_MINOR
+
+
 def test_every_schema_matches(source: str):
     block = re.search(r"MQTT_SCHEMAS = \{(.*?)\} as const;", source, re.S)
     assert block, "MQTT_SCHEMAS not found in the TypeScript contract"

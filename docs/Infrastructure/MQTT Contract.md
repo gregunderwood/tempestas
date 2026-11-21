@@ -56,6 +56,31 @@ These are protocol requirements, not implementation preferences, and every chang
    level**, which must live on the node — when the server is gone there is nobody to ask what
    "safe" means.
 
+## Versions
+
+The contract is versioned `major.minor`, declared once as `MQTT_CONTRACT_MAJOR` and
+`MQTT_CONTRACT_MINOR` in `mqtt-contract.ts` and mirrored by both agents' `contract.py`; the
+contract-match tests fail if they drift.
+
+| Bump      | Means                                          | A node on a different one                   |
+| --------- | ---------------------------------------------- | ------------------------------------------- |
+| **Major** | Something removed, renamed or reshaped         | Refused, as `contractVersion` always was    |
+| **Minor** | Additions only: an optional field, a new topic | Works; the newer side's additions go unused |
+| **Patch** | A fix inside one agent, no contract change     | Works                                       |
+
+**A minor bump never makes a field required.** The side that receives an addition must behave
+sensibly without it, because a node on the previous minor will not send it. That is the whole
+promise of a minor; break it and the bump was a major.
+
+Each agent reports `agentName` (`agent-linux`, `agent-micropython`) and an `agentVersion` of
+`<major>.<minor>.<patch>+<commit>`, and declares `contractMinor` in its capabilities. The Nodes page
+shows a node whose minor differs from the server's as behind or ahead; it does not degrade health.
+The patch counts that agent's commits since the contract version last changed, so it never needs
+bumping by hand. [tools/describe-agent-version.sh](../../tools/describe-agent-version.sh) builds it.
+
+An agent older than contract 1.0 sends neither field: it shows the bare version, and an absent
+`contractMinor` reads as 0.
+
 ## Payloads
 
 Every payload extends `MqttEnvelope`:
@@ -69,7 +94,7 @@ interface MqttEnvelope {
 }
 ```
 
-- **`hello`** — `kind`, `agentVersion`, `capabilities`, `bootId`. The only channel that carries
+- **`hello`** — `kind`, `agentName`, `agentVersion`, `capabilities`, `bootId`. The only channel that carries
   capabilities, which is why an unknown slug can register from a `hello` but not from a status
   message. See [Nodes](Nodes.md).
 - **`sample`** — per-measurement `{ value, valid, unit, reason? }` plus a `sensorStatus`. A node
@@ -153,10 +178,12 @@ being retyped wrongly at a call site.
 
 The whole application is buildable and testable without a broker because of that one rule.
 
-### ❌ Don't add a field without bumping `schema`
+### ❌ Don't change a field without bumping the version
 
-Consumers reject an unknown major loudly. A silently-extended payload is how a Python agent and a
-TypeScript server end up disagreeing at 2 a.m.
+An optional addition is a contract minor. Removing, renaming or reshaping a field, or making one
+required, is a major, and bumps the payload's `schema` with it: consumers reject an unknown major
+loudly. A silently-changed payload is how a Python agent and a TypeScript server end up disagreeing
+at 2 a.m.
 
 ## Verifying it by hand
 

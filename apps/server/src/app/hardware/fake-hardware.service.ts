@@ -35,6 +35,7 @@ const ON_LEVEL_ACTIVE_LOW = 0;
 
 const DEFAULT_TICK_MS = 10_000;
 const SIM_CONTRACT_VERSION = 1;
+const SIM_AGENT_NAME = 'simulator';
 const SIM_AGENT_VERSION = '0.0.0-sim';
 
 // Measured on the greenhouse on 2026-09-10: a shape model, not a fitted one.
@@ -256,6 +257,7 @@ export class FakeHardwareService
     return {
       nodeId: spec.nodeId,
       kind: isEsp32 ? NodeKind.Esp32 : NodeKind.RaspberryPi,
+      agentName: SIM_AGENT_NAME,
       agentVersion: SIM_AGENT_VERSION,
       capabilities,
       bootId: `sim-${Date.now()}`,

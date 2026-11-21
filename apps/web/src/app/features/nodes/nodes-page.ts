@@ -10,7 +10,21 @@ import { MatChipsModule } from '@angular/material/chips';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { refreshAfterSuccess } from '../../core/refresh-after-success';
-import { NodeStatus, type Node } from '@tempestas/domain';
+import {
+  describeAgent,
+  NodeStatus,
+  type ContractStanding,
+  type Node,
+} from '@tempestas/domain';
+
+const CONTRACT_STANDING_NOTES: Record<
+  Exclude<ContractStanding, 'current'>,
+  string
+> = {
+  behind: 'On an older contract minor: the server’s newer additions go unused.',
+  ahead:
+    'On a newer contract minor: its additions go unused until the server catches up.',
+};
 
 @Component({
   selector: 'temp-nodes-page',
@@ -42,9 +56,13 @@ import { NodeStatus, type Node } from '@tempestas/domain';
               </p>
             }
             <p class="temp-muted">
-              {{ node.deviceCount }} device(s) · agent
-              {{ node.agentVersion ?? 'unknown' }}
+              {{ node.deviceCount }} device(s) · {{ describeAgent(node) }}
             </p>
+            @if (node.contractStanding !== 'current') {
+              <p class="temp-muted">
+                {{ describeContractStanding(node.contractStanding) }}
+              </p>
+            }
           </mat-card-content>
           <mat-card-actions>
             @if (isPending(node)) {
@@ -83,6 +101,14 @@ export class NodesPage {
 
   constructor() {
     this.refresh();
+  }
+
+  protected readonly describeAgent = describeAgent;
+
+  protected describeContractStanding(
+    standing: Exclude<ContractStanding, 'current'>,
+  ): string {
+    return CONTRACT_STANDING_NOTES[standing];
   }
 
   protected isPending(node: Node): boolean {

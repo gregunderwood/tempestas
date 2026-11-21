@@ -35,6 +35,8 @@ export interface SensorCapability {
 
 export interface NodeCapabilities {
   contractVersion: 1;
+  /** Absent means 0. A different minor still works; only the additions go unused. */
+  contractMinor?: number;
   /** Absent on a sensor-only node. */
   gpio?: GpioCapability;
   /** Empty on an actuator-only node. */
@@ -42,6 +44,19 @@ export interface NodeCapabilities {
   maxCommandRateHz?: number;
   /** Without one, the node's timestamps are diagnostic only. */
   hasRtc: boolean;
+}
+
+/** How a node's contract minor compares with the server's. Any of them works; see the MQTT contract. */
+export type ContractStanding = 'current' | 'behind' | 'ahead';
+
+/** `agent-linux 1.0.3+abc1234`, or just the version from an agent that predates naming itself. */
+export function describeAgent(agent: {
+  agentName: string | null;
+  agentVersion: string | null;
+}): string {
+  return [agent.agentName, agent.agentVersion ?? 'unknown']
+    .filter(Boolean)
+    .join(' ');
 }
 
 export interface Node {
@@ -53,7 +68,9 @@ export interface Node {
   status: NodeStatus;
   online: boolean;
   lastSeenAt: string | null;
+  agentName: string | null;
   agentVersion: string | null;
+  contractStanding: ContractStanding;
   capabilities: NodeCapabilities;
   zoneId: string | null;
   deviceCount: number;
