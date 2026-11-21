@@ -324,8 +324,9 @@ correction; only an FRC undoes it.
 
 `tools/scd4x_check.py` runs the chip's self-test and samples for a while. Both tools refuse to run
 while the agent is active: the SCD4x answers one reader, and two pollers interleave into nonsense.
-If `systemctl` is missing or times out, they assume the agent is running and refuse; `--force`
-overrides that once you have checked by hand.
+Only a definite `inactive` or `failed` from `systemctl is-active` counts as stopped. If `systemctl`
+is missing, times out, cannot reach systemd, or reports the service mid-transition, they assume the
+agent is running and refuse; `--force` overrides that once you have checked by hand.
 
 ## DS18B20 probes
 

@@ -15,6 +15,11 @@ AGENT_SERVICE = "tempestas-agent"
 SYSTEMCTL_TIMEOUT_S = 5
 ABSTRACT_SOCKET_MARKER = "@"
 UNKNOWN_HOLDER = "unknown"
+# Only a definite stop frees the sensor; any other answer may mean the agent holds it.
+STOPPED_STATES = frozenset({"inactive", "failed"})
+RUNNING_STATES = frozenset(
+    {"active", "activating", "deactivating", "reloading", "refreshing", "maintenance"}
+)
 
 
 def sd_notify(state: str) -> bool:
@@ -36,6 +41,17 @@ def sd_notify(state: str) -> bool:
 
 
 def is_agent_service_active() -> bool:
+    state = read_agent_service_state()
+    if state is None:
+        return True
+    if state not in STOPPED_STATES | RUNNING_STATES:
+        log.warning(
+            "systemd gave no usable state for %s (%r), assuming it is running", AGENT_SERVICE, state
+        )
+    return state not in STOPPED_STATES
+
+
+def read_agent_service_state() -> str | None:
     try:
         completed = subprocess.run(
             ["systemctl", "is-active", AGENT_SERVICE],
@@ -44,12 +60,11 @@ def is_agent_service_active() -> bool:
             timeout=SYSTEMCTL_TIMEOUT_S,
         )
     except (OSError, subprocess.SubprocessError) as error:
-        # Guessing "not running" would let a tool open the I2C bus beside a live agent.
         log.warning(
             "could not ask systemd about %s, assuming it is running: %s", AGENT_SERVICE, error
         )
-        return True
-    return completed.stdout.strip() == "active"
+        return None
+    return completed.stdout.strip()
 
 
 class AlreadyRunning(RuntimeError):

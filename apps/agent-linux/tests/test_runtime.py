@@ -98,7 +98,20 @@ class TestIsAgentServiceActive:
         replace_systemctl(monkeypatch, systemctl_answering("inactive"))
         assert is_agent_service_active() is False
 
-    # The SCD4x tools must refuse rather than open the bus beside an agent they could not rule out.
+    def test_a_failed_service_reads_as_stopped(self, monkeypatch):
+        replace_systemctl(monkeypatch, systemctl_answering("failed"))
+        assert is_agent_service_active() is False
+
+    @pytest.mark.parametrize("state", ["activating", "deactivating", "reloading"])
+    def test_a_service_in_transition_reads_as_running(self, monkeypatch, state):
+        replace_systemctl(monkeypatch, systemctl_answering(state))
+        assert is_agent_service_active() is True
+
+    @pytest.mark.parametrize("answer", ["", "unknown"])
+    def test_a_systemctl_without_an_answer_reads_as_running(self, monkeypatch, answer):
+        replace_systemctl(monkeypatch, systemctl_answering(answer))
+        assert is_agent_service_active() is True
+
     def test_a_missing_systemctl_reads_as_running(self, monkeypatch):
         replace_systemctl(monkeypatch, systemctl_raising(FileNotFoundError("systemctl")))
         assert is_agent_service_active() is True
