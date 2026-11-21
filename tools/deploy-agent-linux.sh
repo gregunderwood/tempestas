@@ -15,6 +15,8 @@ SHIPPED=(src tools nodes systemd pyproject.toml uv.lock agent.example.toml)
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
+source "$HERE/tools/lib/remote-host.sh"
+
 say "Gate"
 (cd "$AGENT" && "$UV" run ruff check . && "$UV" run pytest -q)
 
@@ -22,6 +24,7 @@ AGENT_VERSION="$("$HERE/tools/describe-agent-version.sh" "$AGENT")"
 say "Deploying $AGENT_VERSION to ${HOSTS[*]}"
 
 for HOST in "${HOSTS[@]}"; do
+  require_passwordless_systemctl "$HOST" "restart tempestas-agent.service"
   say "$HOST: copying"
   CHANGES="$(cd "$AGENT" && rsync -a --checksum --itemize-changes \
     --exclude '__pycache__' --exclude '.venv' --exclude 'deployed_version.py' \
@@ -35,10 +38,7 @@ for HOST in "${HOSTS[@]}"; do
     ssh "$HOST" "cat > $REMOTE_AGENT/src/tempestas_agent/deployed_version.py"
 
   say "$HOST: restarting (relays fail safe until the server drives them again)"
-  if ! ssh "$HOST" "sudo -n systemctl restart tempestas-agent.service"; then
-    echo "$HOST would not restart the agent without a password: run tools/install-deploy-privileges.sh $HOST." >&2
-    exit 1
-  fi
+  ssh "$HOST" "sudo -n systemctl restart tempestas-agent.service"
   sleep "$SETTLE_SECONDS"
   ssh "$HOST" "systemctl is-active tempestas-agent && journalctl -u tempestas-agent -n 5 --no-pager"
 done
