@@ -155,7 +155,18 @@ Two mechanics worth knowing:
   the router reuses the component instead of building a new one.
 
 Every figure on it can legitimately be absent and renders as an em-dash. A window with no valid CO2
-has no CO2 average.
+has no CO2 average. A metric the node never measures, such as humidity on a pipe-probe node, gets
+no gauge and no block at all: a block of dashes would read as a broken sensor rather than one that
+was never there.
+
+Each relay on the node is listed with three things beyond its name and pin:
+
+- **Its state in words**, "ON" or "off", because colour is not readable on a phone in sunlight and
+  an energised relay here can mean a propane burner is alight.
+- **Whether anything is driving it**, "automatic" or "manual". An idle relay under manual control
+  and one the rules engine is deciding about look identical otherwise.
+- **The minimum-off hold while one is in force**, "held off until 14:05 (300s minimum off)". The
+  interlock is invisible otherwise, and "why is it not coming on?" is the question it produces.
 
 ## The dashboard
 
