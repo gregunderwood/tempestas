@@ -172,7 +172,7 @@ Three things in the server assume one sensor per node:
 
 | Where                                                                                       | Today                                                           | Change                                                                  |
 | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `latestSamplesForZone` in [rules.service.ts](../apps/server/src/app/rules/rules.service.ts) | `DISTINCT ON (node_id)`, so a second probe overwrites the first | `DISTINCT ON (node_id, sensor_id)`, and `NodeSample` carries `sensorId` |
+| `findLatestSamplesForZone` in [rules.service.ts](../apps/server/src/app/rules/rules.service.ts) | `DISTINCT ON (node_id)`, so a second probe overwrites the first | `DISTINCT ON (node_id, sensor_id)`, and `NodeSample` carries `sensorId` |
 | `sensor_readings.humidity`                                                                  | `NOT NULL`                                                      | Nullable, by migration                                                  |
 | `decodeSample` in [mqtt-codec.ts](../apps/server/src/app/hardware/mqtt-codec.ts)            | Rejects a sample without valid humidity                         | Requires humidity only if that sensor's capability lists `humidity`     |
 
