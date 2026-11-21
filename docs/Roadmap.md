@@ -187,11 +187,12 @@ MQTT. What is done and what is not:
 | 1. `scd4x_healthcheck.py`, record serial and self-test    | ✅ serial `5fd90b073b7a`, self-test PASS        |
 | 2. Agent in **sim mode**, whole topic tree verified       | ✅ against the Mac's broker and the real server |
 | 3. Real sensor with `gpio.lines` **empty**                | ✅ on elantris, sensor-only, no chip opened     |
-| 4. 48 h against greenhouse's live stream, tune the offset | 🔄 **running since 2026-09-09 20:06Z**          |
+| 4. 48 h against greenhouse's live stream, tune the offset | ✅ offset tuned 2026-09-10, logger removed      |
 
 Both run under systemd and survive a reboot — verified by rebooting the box, which also confirmed
-the `/etc/fstab` swap repair holds. `tempestas-stage-b-soak.service` writes one CSV row a minute to
+the `/etc/fstab` swap repair holds. A temporary logger wrote one CSV row a minute to
 `~/tempestas/soak/stage-b-soak.csv`, with elantris's own sample beside the greenhouse's live reading.
+It was removed once the offset was tuned; the CSV stays on elantris.
 
 **Baseline at the start of the soak** (elantris indoors, greenhouse in the sun):
 
