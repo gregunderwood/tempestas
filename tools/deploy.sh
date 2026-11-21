@@ -51,7 +51,7 @@ warn_new_build_not_running() {
 }
 
 say "Gate"
-(cd "$HERE" && npx nx run-many -t lint,test,build)
+(cd "$HERE" && npx nx run-many -t lint,test,build,migration-round-trip)
 
 say "Building the web bundle"
 (cd "$HERE" && npx nx build web)

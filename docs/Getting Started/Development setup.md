@@ -113,7 +113,7 @@ arrives — the command appears to succeed and inserts nothing.
 ## Running the checks
 
 ```bash
-npx nx run-many -t lint,test,build     # the gate, always, before declaring work done
+npx nx run-many -t lint,test,build,migration-round-trip     # the gate, always, before declaring work done
 npx nx test server                     # one project
 npx prettier --write .
 ```
