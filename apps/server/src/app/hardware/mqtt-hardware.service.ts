@@ -19,6 +19,7 @@ import {
   type NodeId,
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
+import { describeError } from '../common/describe-error';
 import {
   type ControllerRole,
   resolveControllerRole,
@@ -728,8 +729,4 @@ function readCommandIssuer(
   command: Record<string, unknown>,
 ): unknown {
   return kind === 'gpio-set' ? command['issuedBy'] : command['controller'];
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
