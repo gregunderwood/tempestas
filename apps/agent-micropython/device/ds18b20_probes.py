@@ -6,16 +6,20 @@ CONVERSION_MILLISECONDS = 750
 POWER_ON_RESET_CELSIUS = 85.0
 LOWEST_PLAUSIBLE_CELSIUS = -40.0
 HIGHEST_PLAUSIBLE_CELSIUS = 60.0
-DS18B20_FAMILY_CODE = 0x28
+ROM_FAMILY_CODE_INDEX = 0
+ROM_SERIAL_START = 1
+ROM_SERIAL_END = 7
+SCRATCHPAD_LOW_BYTE_INDEX = 0
+SCRATCHPAD_HIGH_BYTE_INDEX = 1
+BITS_PER_BYTE = 8
 SIGN_BIT = 0x8000
 TWO_BYTE_RANGE = 0x10000
 SIXTEENTHS_PER_DEGREE = 16
 
 
 def format_rom_as_linux_id(rom):
-    """`28-3ce1d4436ee8`: family, then the six serial bytes most significant first."""
-    serial_most_significant_first = bytes(reversed(rom[1:7]))
-    return "%02x-%s" % (rom[0], binascii.hexlify(serial_most_significant_first).decode())
+    serial_most_significant_first = bytes(reversed(rom[ROM_SERIAL_START:ROM_SERIAL_END]))
+    return "%02x-%s" % (rom[ROM_FAMILY_CODE_INDEX], binascii.hexlify(serial_most_significant_first).decode())
 
 
 class ProbeReading:
@@ -34,9 +38,15 @@ class Ds18b20Probes:
 
     def start(self):
         self.scan()
+        self.log_named_probes_missing_from_the_bus()
+        self.log_probes_nobody_named()
+
+    def log_named_probes_missing_from_the_bus(self):
         for linux_id, sensor_id in self.named_probes.items():
             if linux_id not in self.roms_by_linux_id:
                 self.log("probe %s (%s) is not on the bus" % (sensor_id, linux_id))
+
+    def log_probes_nobody_named(self):
         for linux_id in self.roms_by_linux_id:
             if linux_id not in self.named_probes:
                 self.log("probe %s is on the bus but not configured; ignoring it" % linux_id)
@@ -60,18 +70,23 @@ class Ds18b20Probes:
             self.scan()
         if not self.roms_by_linux_id:
             return []
-        try:
-            self.bus_sensors.convert_temp()
-        except Exception as error:
-            self.log("1-Wire conversion failed: %r" % error)
+        if not self.convert_all():
             return []
-        self.sleep_milliseconds(CONVERSION_MILLISECONDS)
         readings = []
         for linux_id, sensor_id in self.named_probes.items():
             temperature = self.read_probe(linux_id)
             if temperature is not None:
                 readings.append(ProbeReading(sensor_id, temperature))
         return readings
+
+    def convert_all(self):
+        try:
+            self.bus_sensors.convert_temp()
+        except Exception as error:
+            self.log("1-Wire conversion failed: %r" % error)
+            return False
+        self.sleep_milliseconds(CONVERSION_MILLISECONDS)
+        return True
 
     def read_probe(self, linux_id):
         rom = self.roms_by_linux_id.get(linux_id)
@@ -95,7 +110,9 @@ def is_all_zero(scratchpad):
 
 
 def decode_celsius(scratchpad):
-    sixteenths = scratchpad[1] << 8 | scratchpad[0]
+    sixteenths = (
+        scratchpad[SCRATCHPAD_HIGH_BYTE_INDEX] << BITS_PER_BYTE | scratchpad[SCRATCHPAD_LOW_BYTE_INDEX]
+    )
     if sixteenths & SIGN_BIT:
         sixteenths -= TWO_BYTE_RANGE
     return sixteenths / SIXTEENTHS_PER_DEGREE
