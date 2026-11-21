@@ -36,15 +36,18 @@ docker compose up -d                  # local Postgres 17 on :5433
 npm run migration:run                 # apply migrations
 npx nx serve server                   # API on :7000, HARDWARE_DRIVER=fake
 npx nx serve web                      # Angular dev server (on the Mac, never on the Pi)
-npx nx run-many -t lint,test,build    # the gate — every project, Python included
+npx nx run-many -t lint,test,build,migration-round-trip    # the gate — every project, Python included
 npx nx test server --coverage         # also the gate: thresholds are checked ONLY here
 npx nx test server                    # one project
 npx prettier --write .                # format
 ```
 
-- **`npx nx run-many -t lint,test,build` is the final step before declaring work done.** Not
+- **`npx nx run-many -t lint,test,build,migration-round-trip` is the final step before declaring work done.** Not
   `test` alone: Vitest transpiles without typechecking, so only the webpack/Angular builds
   catch a type error. Two real type errors in phase 4.5 were invisible to a green test run.
+- **`migration-round-trip` needs Docker running.** It takes every migration up, down and up again
+  in a throwaway `postgres:17` container and compares the schema each time. See
+  [docs/Infrastructure/Migrations.md](docs/Infrastructure/Migrations.md).
 - **And `npx nx test server --coverage`**, which is where the thresholds are actually checked.
   They went unrun for four phases and were failing when phase 5 first looked.
 - `npm run migration:generate -- apps/server/src/migrations/<Name>` needs the database up.

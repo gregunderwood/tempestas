@@ -89,14 +89,35 @@ public async up(queryRunner: QueryRunner): Promise<void> {
 One column, no surprises. A generated migration that also drops an index or rewrites an enum is
 telling you the entities and the database had drifted — understand it before you run it.
 
-### ✅ Prove the round trip
+### ✅ Let the gate prove the round trip
 
 ```bash
-npm run migration:run && npm run migration:revert && npm run migration:run
+npx nx run server:migration-round-trip     # part of the gate, and of tools/deploy.sh
 ```
 
-A migration whose `down` is wrong is discovered at the worst possible time. It costs ten seconds
-to check.
+A migration whose `down` is wrong is discovered at the worst possible time: during a rollback.
+[../../apps/server/src/migrations/round-trip/](../../apps/server/src/migrations/round-trip/) starts a
+throwaway `postgres:17` container, then for each migration in order runs it up, down and up again,
+with `transaction: 'each'` as `tempestas-migrate@` does. It compares `pg_dump --schema-only` before and
+after each step, so a `down` that leaves a column, an index or an enum value behind fails by name.
+It needs Docker, and is its own target because each migration builds on the one before.
+
+It checks the schema, not the data. A `down` that refuses to run on data it cannot express (a Pico
+node, a heating role, a rule kind the old shape lacks) still passes on the empty database; those
+guards have their own specs.
+
+### ✅ Mark a migration that cannot be undone
+
+```ts
+export class DropLegacyReadings1800000000000 implements IrreversibleMigration {
+  name = 'DropLegacyReadings1800000000000';
+  readonly irreversibleBecause = 'drops sensor_readings_legacy; only the backup has it';
+```
+
+Dropping data has no honest `down`. Implement
+[../../apps/server/src/migrations/irreversible-migration.ts](../../apps/server/src/migrations/irreversible-migration.ts)
+and say why: the round trip then checks only that it goes up, and an unmarked migration whose `down`
+does not restore the schema fails the gate.
 
 ### ✅ Add a doc comment when the column needs one
 
