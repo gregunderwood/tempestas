@@ -31,6 +31,7 @@ class ReleasedWhenHighLines:
             self.machine.Pin(pin, self.machine.Pin.IN, None)
 
     def read_level(self, pin):
+        # From the chip's registers, not from what was last asked for, so a report is never stale.
         if not self.board.is_pin_driven(pin):
             return RELEASED_LEVEL
         return DRIVEN_HIGH_LEVEL if self.board.is_pin_driven_high(pin) else DRIVEN_LOW_LEVEL
