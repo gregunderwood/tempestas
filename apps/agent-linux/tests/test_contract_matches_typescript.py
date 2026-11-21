@@ -56,6 +56,8 @@ def test_every_topic_builder_matches(source: str):
         "gpioResult": (contract.build_gpio_result_topic("n"), {"n": "n"}),
         "heartbeat": (contract.build_heartbeat_topic("n"), {"n": "n"}),
         "alarm": (contract.build_alarm_topic("n"), {"n": "n"}),
+        "update": (contract.build_update_topic("n"), {"n": "n"}),
+        "updateStatus": (contract.build_update_status_topic("n"), {"n": "n"}),
         "sample": (contract.build_sample_topic("n", "s"), {"n": "n", "s": "s"}),
         "gpioState": (contract.build_gpio_state_topic("n", 16), {"n": "n", "pin": "16"}),
     }
@@ -87,7 +89,19 @@ def test_qos_and_retain_match(source: str):
         assert contract.QOS[name] == expected, f"{name} QoS/retain drifted"
 
 
+def test_every_update_state_matches(source: str):
+    block = re.search(r"export enum UpdateState \{(.*?)\}", source, re.S)
+    assert block, "UpdateState not found in the TypeScript contract"
+    typescript_states = set(re.findall(r"=\s*'([^']+)'", block.group(1)))
+
+    assert typescript_states, "parsed no update states"
+    python_states = {
+        value for name, value in vars(contract.UpdateState).items() if not name.startswith("_")
+    }
+    assert python_states == typescript_states
+
+
 def test_commands_are_never_retained():
-    for command in ("gpioSet", "gpioSync"):
+    for command in ("gpioSet", "gpioSync", "update"):
         _, retain = contract.QOS[command]
         assert retain is False, f"{command} must never be retained"

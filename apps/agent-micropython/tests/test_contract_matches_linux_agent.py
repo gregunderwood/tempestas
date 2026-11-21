@@ -38,6 +38,8 @@ def test_every_topic_matches():
         "build_gpio_result_topic",
         "build_heartbeat_topic",
         "build_alarm_topic",
+        "build_update_topic",
+        "build_update_status_topic",
     ]
     for builder in single_node_topics:
         assert getattr(micropython_contract, builder)("node") == getattr(linux_contract, builder)("node")
@@ -50,11 +52,20 @@ def test_every_topic_matches():
     assert micropython_contract.SERVER_STATUS_TOPIC == linux_contract.SERVER_STATUS_TOPIC
 
 
-def test_every_alarm_code_matches():
-    def public_codes(alarm_class):
-        return {name: value for name, value in vars(alarm_class).items() if not name.startswith("_")}
+def read_public_constants(constant_class):
+    return {name: value for name, value in vars(constant_class).items() if not name.startswith("_")}
 
-    assert public_codes(micropython_contract.AlarmCode) == public_codes(linux_contract.AlarmCode)
+
+def test_every_alarm_code_matches():
+    assert read_public_constants(micropython_contract.AlarmCode) == read_public_constants(
+        linux_contract.AlarmCode
+    )
+
+
+def test_every_update_state_matches():
+    assert read_public_constants(micropython_contract.UpdateState) == read_public_constants(
+        linux_contract.UpdateState
+    )
 
 
 def test_schema_major_reads_like_the_linux_agent():

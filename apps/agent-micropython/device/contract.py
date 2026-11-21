@@ -13,10 +13,12 @@ SCHEMAS = {
     "gpioResult": "gpioResult/1",
     "heartbeat": "heartbeat/1",
     "alarm": "alarm/1",
+    "update": "update/1",
+    "updateStatus": "updateStatus/1",
 }
 
 SUPPORTED_MAJOR = 1
-MQTT_CONTRACT_MINOR = 0
+MQTT_CONTRACT_MINOR = 1
 
 
 def build_node_root(node_id):
@@ -59,6 +61,14 @@ def build_alarm_topic(node_id):
     return build_node_root(node_id) + "/alarm"
 
 
+def build_update_topic(node_id):
+    return build_node_root(node_id) + "/update"
+
+
+def build_update_status_topic(node_id):
+    return build_node_root(node_id) + "/update/status"
+
+
 SERVER_STATUS_TOPIC = MQTT_ROOT + "/server/status"
 
 QOS = {
@@ -71,6 +81,8 @@ QOS = {
     "gpioResult": (1, False),
     "heartbeat": (0, False),
     "alarm": (1, False),
+    "update": (1, False),
+    "updateStatus": (1, False),
     "serverStatus": (1, True),
 }
 
@@ -93,6 +105,16 @@ class AlarmCode:
     NO_PROGRESS = "NO_PROGRESS"
     MIN_DWELL_CLAMPED = "MIN_DWELL_CLAMPED"
     SAFE_STATE_ENTERED = "SAFE_STATE_ENTERED"
+
+
+class UpdateState:
+    DOWNLOADING = "downloading"
+    VERIFYING = "verifying"
+    INSTALLING = "installing"
+    RESTARTING = "restarting"
+    HEALTHY = "healthy"
+    ROLLED_BACK = "rolled-back"
+    FAILED = "failed"
 
 
 def read_schema_major(schema):

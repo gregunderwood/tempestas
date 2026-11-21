@@ -44,12 +44,15 @@ import {
   decodeResult,
   decodeSample,
   decodeStatus,
+  isCommandTopicKind,
   isEmptyPayload,
   isGpioLevel,
   parseJson,
   parseNodeTopic,
+  readCommandIssuer,
   toGpioLines,
   verifyResult,
+  type CommandTopicKind,
   type Decoded,
 } from './mqtt-codec';
 import { isPinKeyOfNode, toPinKey } from './pin-key';
@@ -68,8 +71,6 @@ const SUBSCRIBE_OPTIONS = { qos: 1 } as const;
 const CLEAR_RETAINED_OPTIONS = { qos: 1, retain: true } as const;
 const UNKNOWN_SENSOR_ID = 'unknown';
 const UNPARSED_PIN = -1;
-
-type CommandTopicKind = 'gpio-set' | 'gpio-sync';
 
 interface PendingCommand {
   nodeId: NodeId;
@@ -380,7 +381,7 @@ export class MqttHardwareService
     const parsed = parseNodeTopic(topic);
     if (!parsed) return;
 
-    if (parsed.kind === 'gpio-set' || parsed.kind === 'gpio-sync') {
+    if (isCommandTopicKind(parsed.kind)) {
       this.inspectCommand(
         topic,
         parsed.nodeId,
@@ -740,11 +741,4 @@ export class MqttHardwareService
     }
     return this.client;
   }
-}
-
-function readCommandIssuer(
-  kind: CommandTopicKind,
-  command: Record<string, unknown>,
-): unknown {
-  return kind === 'gpio-set' ? command['issuedBy'] : command['controller'];
 }

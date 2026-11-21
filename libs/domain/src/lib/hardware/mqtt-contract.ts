@@ -5,7 +5,7 @@ export const MQTT_CONTRACT_VERSION = 'v1' as const;
 
 /** Semver for the contract: a major changes it, a minor only adds to it. Agents version as major.minor.patch. */
 export const MQTT_CONTRACT_MAJOR = 1;
-export const MQTT_CONTRACT_MINOR = 0;
+export const MQTT_CONTRACT_MINOR = 1;
 export const MQTT_ROOT = `tempestas/${MQTT_CONTRACT_VERSION}` as const;
 
 export const mqttTopics = {
@@ -20,6 +20,8 @@ export const mqttTopics = {
   gpioResult: (n: NodeId) => `${MQTT_ROOT}/node/${n}/gpio/result`,
   heartbeat: (n: NodeId) => `${MQTT_ROOT}/node/${n}/control/heartbeat`,
   alarm: (n: NodeId) => `${MQTT_ROOT}/node/${n}/alarm`,
+  update: (n: NodeId) => `${MQTT_ROOT}/node/${n}/update`,
+  updateStatus: (n: NodeId) => `${MQTT_ROOT}/node/${n}/update/status`,
   allNodes: `${MQTT_ROOT}/node/+/#`,
   serverStatus: `${MQTT_ROOT}/server/status`,
 } as const;
@@ -35,6 +37,8 @@ export const MQTT_SCHEMAS = {
   gpioResult: 'gpioResult/1',
   heartbeat: 'heartbeat/1',
   alarm: 'alarm/1',
+  update: 'update/1',
+  updateStatus: 'updateStatus/1',
 } as const;
 
 /** `"sample/2"` -> `2`. Null when the value is not a schema string at all. */
@@ -136,6 +140,44 @@ export interface GpioResultPayload extends MqttEnvelope {
   lines: GpioResultLine[];
 }
 
+/** The programs a node can run, as each names itself in `hello` and an update names its target. */
+export enum AgentApp {
+  Linux = 'agent-linux',
+  MicroPython = 'agent-micropython',
+}
+
+/** Added in contract 1.1. Owned, expiring and never retained, exactly like `gpio/set`. */
+export interface UpdateCommandPayload extends MqttEnvelope {
+  id: string;
+  issuedBy: string;
+  /** Rejected as COMMAND_EXPIRED after this instant. */
+  expiresAt: string;
+  app: AgentApp;
+  /** `<contract major>.<contract minor>.<patch>`; a node refuses one for another major. */
+  version: string;
+  manifestUrl: string;
+  /** Lowercase hex of the manifest's bytes; the manifest carries each file's own sha256. */
+  manifestSha256: string;
+}
+
+export enum UpdateState {
+  Downloading = 'downloading',
+  Verifying = 'verifying',
+  Installing = 'installing',
+  Restarting = 'restarting',
+  Healthy = 'healthy',
+  RolledBack = 'rolled-back',
+  Failed = 'failed',
+}
+
+/** Added in contract 1.1: how one update command is going, keyed by the command's `id`. */
+export interface UpdateStatusPayload extends MqttEnvelope {
+  id: string;
+  state: UpdateState;
+  /** Why it failed or rolled back; optional on the states that are going well. */
+  reason?: string;
+}
+
 export enum AlarmCode {
   ReadbackMismatch = 'READBACK_MISMATCH',
   GpioChipLost = 'GPIO_CHIP_LOST',
@@ -173,5 +215,7 @@ export const mqttQos = {
   heartbeat: { qos: 0, retain: false },
   /** Never retained: a retained alarm resurrects a cleared fault. */
   alarm: { qos: 1, retain: false },
+  update: { qos: 1, retain: false },
+  updateStatus: { qos: 1, retain: false },
   serverStatus: { qos: 1, retain: true },
 } as const;

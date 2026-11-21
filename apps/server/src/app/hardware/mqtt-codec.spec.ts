@@ -13,8 +13,10 @@ import {
   decodeResult,
   decodeSample,
   decodeStatus,
+  isCommandTopicKind,
   parseJson,
   parseNodeTopic,
+  readCommandIssuer,
   verifyResult,
 } from './mqtt-codec';
 import type { PinCommand } from './hardware.service';
@@ -70,6 +72,7 @@ describe('parseNodeTopic', () => {
     ['tempestas/v1/node/elantris/gpio/result', 'gpio-result'],
     ['tempestas/v1/node/elantris/control/heartbeat', 'heartbeat'],
     ['tempestas/v1/node/elantris/alarm', 'alarm'],
+    ['tempestas/v1/node/elantris/update', 'update'],
   ])('parses %s as %s', (topic, kind) => {
     expect(parseNodeTopic(topic)).toEqual({ nodeId: 'elantris', kind });
   });
@@ -550,5 +553,23 @@ describe('decodeResult', () => {
     ).toMatchObject({
       ok: false,
     });
+  });
+});
+
+describe('the command topics', () => {
+  it('include the update command alongside gpio', () => {
+    expect(isCommandTopicKind('gpio-set')).toBe(true);
+    expect(isCommandTopicKind('gpio-sync')).toBe(true);
+    expect(isCommandTopicKind('update')).toBe(true);
+    expect(isCommandTopicKind('alarm')).toBe(false);
+    expect(isCommandTopicKind('unknown')).toBe(false);
+  });
+
+  it('read the issuer from the field each command names it in', () => {
+    const command = { issuedBy: 'laptop', controller: 'other-laptop' };
+
+    expect(readCommandIssuer('gpio-set', command)).toBe('laptop');
+    expect(readCommandIssuer('update', command)).toBe('laptop');
+    expect(readCommandIssuer('gpio-sync', command)).toBe('other-laptop');
   });
 });
