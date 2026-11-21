@@ -7,24 +7,7 @@ import type {
   NodeKind,
 } from '@tempestas/domain';
 
-/**
- * The single seam between the application and physical hardware.
- *
- * Nothing outside `app/hardware/` may import `mqtt`. Everything else injects
- * this abstract class, which is why the entire application - rules engine,
- * devices, scheduler, gateway - can be built and tested before any node or
- * sidecar exists, by binding it to the fake driver.
- */
-
-/**
- * A hardware failure with a machine-readable code.
- *
- * The driver stays free of HTTP concerns - it throws this, and `DevicesService`
- * translates it into a status code. Without it an offline node surfaced as a
- * bare 500 "Internal server error", which is precisely the class of response
- * this project exists to stop producing: the client cannot tell "the node is
- * gone" from "the server is broken", and neither can the rules engine.
- */
+// Keeps drivers free of HTTP; `DevicesService` maps the code to a status, never a bare 500.
 export class HardwareError extends Error {
   constructor(
     readonly code: ApiErrorCode,
@@ -43,11 +26,7 @@ export interface SensorSample {
   temperature: number;
   /** Null when the sensor has none: a DS18B20 measures temperature only. */
   humidity: number | null;
-  /**
-   * Null when the node reported an invalid reading. A node reports validity
-   * honestly and never substitutes a last-known-good value, so this really
-   * does mean "unknown", not "zero".
-   */
+  /** Null means unknown, never zero: a node never substitutes a last-known-good value. */
   co2: number | null;
   nodeSeq: number | null;
 }
@@ -69,20 +48,13 @@ export interface NodeAvailability {
   at: Date;
 }
 
-/**
- * A line's state as the node reports it, unsolicited.
- *
- * `observedAt` is the node's own timestamp, not our receive time, because it is
- * written into a device's `offAt` and so decides when the minimum-off window
- * started. A node that fails safe while the controller is dead reports the real
- * moment the relay opened.
- */
 export interface PinStateReport {
   nodeId: NodeId;
   pin: number;
   /** `null` with `known: false` means unknown. Unknown is NOT off. */
   level: GpioLevel | null;
   known: boolean;
+  /** The node's own timestamp: it becomes `offAt`, so it decides when the cooldown started. */
   observedAt: Date;
   /** Published while we were subscribed, not a retained replay. */
   live: boolean;
@@ -94,22 +66,12 @@ export interface PinCommand {
   label?: string;
 }
 
+// The single seam to physical hardware; see docs/Architecture.md, "The hardware seam".
 export abstract class HardwareService {
-  /**
-   * Whether this server is the one allowed to command.
-   *
-   * On the seam rather than only on the MQTT driver, because the rules engine
-   * asks it and must not know which driver is behind it. The fake driver is
-   * always the leader: it drives nothing real, so there is nothing to contend.
-   */
+  /** Whether this server is the one allowed to command. */
   abstract readonly isLeader: boolean;
 
-  /**
-   * Drive one pin on one node. Resolves only once the node acknowledges with a
-   * successful readback; rejects on readback mismatch, timeout, or a node that
-   * is offline. Callers MUST NOT persist a state change when this rejects -
-   * that was the old system's silent DB/hardware divergence.
-   */
+  /** Resolves only on a matching readback. Callers must not persist a change when it rejects. */
   abstract setPin(nodeId: NodeId, command: PinCommand): Promise<void>;
 
   /** Re-assert the full desired state of a node's pins. */
@@ -119,25 +81,9 @@ export abstract class HardwareService {
   abstract readonly availability$: Observable<NodeAvailability>;
   abstract readonly hello$: Observable<NodeHello>;
 
-  /**
-   * Every line-state report a node sends, including ones we did not ask for.
-   *
-   * A node changes lines on its own when its dead-man trips or when it sees the
-   * controller's last will, and it is the only party that knows. Without this
-   * the driver held the correct level in memory and nothing consumed it, so a
-   * device row stayed wrong until somebody noticed.
-   */
+  /** Every line-state report, including the dead-man and failsafe changes nobody asked for. */
   abstract readonly pinStates$: Observable<PinStateReport>;
 
-  /**
-   * The last line-state report for one pin, or `null` if there is none since
-   * the node last came online.
-   *
-   * `pinStates$` only reaches devices that exist when the report arrives. A
-   * device created after its node reported would otherwise start as "off"
-   * whatever the relay is doing - on a fail-to-on node, a load that is running
-   * while the server believes it is not, and every rule tick answered
-   * "already off" - until the node happened to report again.
-   */
+  /** The last report for one pin since the node came online, so a new device starts from it. */
   abstract lastPinReport(nodeId: NodeId, pin: number): PinStateReport | null;
 }
