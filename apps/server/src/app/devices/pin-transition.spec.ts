@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { PinStateReport } from '../hardware/hardware.service';
 import {
-  energisedBy,
   judgeTransition,
-  recordedAt,
+  resolveEnergised,
+  resolveRecordedAt,
   type LastKnown,
 } from './pin-transition';
 
 const AT = new Date('2026-09-10T18:03:00Z');
 
-function report(over: Partial<PinStateReport> = {}): PinStateReport {
+function report(overrides: Partial<PinStateReport> = {}): PinStateReport {
   return {
     nodeId: 'elantris',
     pin: 5,
@@ -17,16 +17,16 @@ function report(over: Partial<PinStateReport> = {}): PinStateReport {
     known: true,
     observedAt: AT,
     live: true,
-    ...over,
+    ...overrides,
   };
 }
 
-function last(over: Partial<LastKnown> = {}): LastKnown {
+function last(overrides: Partial<LastKnown> = {}): LastKnown {
   return {
     level: 1,
     known: true,
     observedAt: new Date(AT.getTime() - 60_000),
-    ...over,
+    ...overrides,
   };
 }
 
@@ -46,9 +46,7 @@ describe('judgeTransition', () => {
   });
 
   it('ignores a repeat of the level it already holds', () => {
-    // THE case this exists for: retained gpio/state is republished on every
-    // reconnect. Logging those would fill the record with transitions where no
-    // relay moved, and the whole point of the log is fitting against real ones.
+    // Retained gpio/state is republished on every reconnect; no relay moved.
     expect(judgeTransition(last({ level: 0 }), report({ level: 0 }))).toEqual({
       action: 'skip',
       reason: 'unchanged',
@@ -84,9 +82,7 @@ describe('judgeTransition', () => {
   });
 
   it('refuses an observation older than what is already recorded', () => {
-    // A reconnect replays retained state, and QoS 1 permits redelivery. An
-    // older observation overwriting a newer one would invent a transition that
-    // ran backwards in time.
+    // A replay overwriting a newer observation would invent a transition backwards in time.
     const older = report({
       level: 0,
       observedAt: new Date(AT.getTime() - 120_000),
@@ -98,9 +94,7 @@ describe('judgeTransition', () => {
     });
   });
 
-  // patji, 2026-11-18: rebooted with its clock 3.5 min slow, failed safe, and
-  // its live report was dated before the last commanded change. Skipping it
-  // erased the one transition that mattered.
+  // patji, 2026-11-18: a reboot left its clock behind, and skipping its failsafe report hid it.
   it('records a LIVE change even when the node dates it in the past', () => {
     const behind = report({
       level: 0,
@@ -121,43 +115,43 @@ describe('judgeTransition', () => {
   });
 });
 
-describe('energisedBy', () => {
+describe('resolveEnergised', () => {
   it('reads an active-LOW device', () => {
-    expect(energisedBy(0, true, 0)).toBe(true);
-    expect(energisedBy(1, true, 0)).toBe(false);
+    expect(resolveEnergised(0, true, 0)).toBe(true);
+    expect(resolveEnergised(1, true, 0)).toBe(false);
   });
 
   it('reads an active-HIGH device the other way round', () => {
     // BCM 26, the MH light, on the same box as four active-LOW channels.
-    expect(energisedBy(1, true, 1)).toBe(true);
-    expect(energisedBy(0, true, 1)).toBe(false);
+    expect(resolveEnergised(1, true, 1)).toBe(true);
+    expect(resolveEnergised(0, true, 1)).toBe(false);
   });
 
   it('is null when the level is unknown, never false', () => {
-    expect(energisedBy(null, false, 0)).toBeNull();
+    expect(resolveEnergised(null, false, 0)).toBeNull();
   });
 
   it('is null when no device claims the pin', () => {
-    expect(energisedBy(0, true, null)).toBeNull();
-    expect(energisedBy(0, true, undefined)).toBeNull();
+    expect(resolveEnergised(0, true, null)).toBeNull();
+    expect(resolveEnergised(0, true, undefined)).toBeNull();
   });
 });
 
-describe('recordedAt', () => {
+describe('resolveRecordedAt', () => {
   const RECEIVED = new Date(AT.getTime() + 5_000);
 
   it("files a report under the node's own timestamp", () => {
-    expect(recordedAt(last(), report(), RECEIVED)).toEqual(AT);
+    expect(resolveRecordedAt(last(), report(), RECEIVED)).toEqual(AT);
   });
 
   it('files a live report from a clock that is behind at receipt, keeping history in order', () => {
     const behind = report({ observedAt: new Date(AT.getTime() - 120_000) });
-    expect(recordedAt(last({ observedAt: AT }), behind, RECEIVED)).toEqual(
-      RECEIVED,
-    );
+    expect(
+      resolveRecordedAt(last({ observedAt: AT }), behind, RECEIVED),
+    ).toEqual(RECEIVED);
   });
 
   it('keeps the first sight of a pin at its own timestamp', () => {
-    expect(recordedAt(null, report(), RECEIVED)).toEqual(AT);
+    expect(resolveRecordedAt(null, report(), RECEIVED)).toEqual(AT);
   });
 });

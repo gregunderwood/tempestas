@@ -11,6 +11,7 @@ import {
   AlarmCode,
   ApiErrorCode,
   MQTT_ROOT,
+  MQTT_SCHEMAS,
   mqttQos,
   mqttTopics,
   type GpioLevel,
@@ -32,6 +33,7 @@ import {
   type SensorSample,
 } from './hardware.service';
 import {
+  EMPTY_PAYLOAD_REASON,
   buildGpioSet,
   buildGpioSync,
   buildStatus,
@@ -41,52 +43,51 @@ import {
   decodeResult,
   decodeSample,
   decodeStatus,
+  isEmptyPayload,
+  isGpioLevel,
   parseJson,
   parseNodeTopic,
   toGpioLines,
   verifyResult,
+  type Decoded,
 } from './mqtt-codec';
+import { isPinKeyOfNode, toPinKey } from './pin-key';
 
-/** How long a node has to acknowledge a pin write before it is a failure. */
 const COMMAND_TIMEOUT_MS = 5_000;
-/**
- * How long a command stays valid on the wire. Longer than the ack timeout so a
- * slow-but-successful node is not obeying something we already gave up on, and
- * short enough that a queued or replayed command is refused rather than acted on.
- */
+// Outlives the ack timeout, yet short enough that a queued or replayed command is refused.
 const COMMAND_TTL_MS = 15_000;
 /** The node's dead-man counts these. Missing them is what makes it fail safe. */
 const HEARTBEAT_INTERVAL_MS = 5_000;
-/** One log line per node per reason per window, so a broken node cannot spam. */
 const WARN_THROTTLE_MS = 5 * 60 * 1000;
+const CONFLICT_ALARM_WINDOW_MS = 10_000;
+const RECONNECT_PERIOD_MS = 2_000;
+const CONNECT_TIMEOUT_MS = 10_000;
+const DEFAULT_MQTT_URL = 'mqtt://127.0.0.1:1883';
+const SUBSCRIBE_OPTIONS = { qos: 1 } as const;
+const CLEAR_RETAINED_OPTIONS = { qos: 1, retain: true } as const;
+const UNKNOWN_SENSOR_ID = 'unknown';
+const UNPARSED_PIN = -1;
+
+type CommandTopicKind = 'gpio-set' | 'gpio-sync';
 
 interface PendingCommand {
   nodeId: NodeId;
   commands: readonly PinCommand[];
   resolve: () => void;
-  reject: (err: Error) => void;
+  reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 }
 
-/**
- * The real hardware driver: the only place in the application that imports
- * `mqtt`.
- *
- * Everything decidable without a socket lives in `mqtt-codec.ts` as pure
- * functions, so what remains here is connection lifecycle, subscription routing
- * and command correlation. That split is deliberate - this is the component
- * that turns a network message into a relay command on a propane burner, and it
- * should be short enough to read in one sitting.
- *
- * Three properties this class is responsible for holding:
- *
- *   1. Commands are NEVER retained, and every one carries `expiresAt`. A
- *      retained `gpio/set` would replay a burner-on command on every reconnect.
- *   2. `setPin` resolves only on a matching READBACK. The old system logged a
- *      failed GPIO write and updated the database anyway.
- *   3. The server publishes its own LWT, so every node fails safe when the
- *      brain dies - not just the one that noticed.
- */
+interface PinLevel {
+  level: GpioLevel | null;
+  known: boolean;
+}
+
+function unknownPinLevel(): PinLevel {
+  return { level: null, known: false };
+}
+
+// The only importer of `mqtt`. Its safety properties are in docs/Infrastructure/MQTT Contract.md.
 @Injectable()
 export class MqttHardwareService
   extends HardwareService
@@ -106,28 +107,18 @@ export class MqttHardwareService
   readonly hello$: Observable<NodeHello> = this.hello.asObservable();
 
   private client: MqttClient | null = null;
-  private readonly pending = new Map<string, PendingCommand>();
-  private readonly pins = new Map<
-    string,
-    { level: GpioLevel | null; known: boolean }
-  >();
-  /** The last `gpio/state` per pin, timestamp and all. See `lastPinReport`. */
-  private readonly reports = new Map<string, PinStateReport>();
-  private readonly online = new Map<NodeId, boolean>();
-  private readonly nodes = new Set<NodeId>();
-  private readonly warnedAt = new Map<string, number>();
-  private heartbeat: NodeJS.Timeout | null = null;
+  private readonly pendingCommands = new Map<string, PendingCommand>();
+  private readonly pinLevels = new Map<string, PinLevel>();
+  private readonly lastReports = new Map<string, PinStateReport>();
+  private readonly isOnlineByNode = new Map<NodeId, boolean>();
+  private readonly knownNodes = new Set<NodeId>();
+  private readonly lastActedAt = new Map<string, number>();
+  private heartbeatTimer: NodeJS.Timeout | null = null;
   private commandCount = 0;
 
-  /** Identifies this controller, so a second one taking over is detectable. */
   private readonly controllerId = `nestjs-${process.pid}`;
   private readonly epoch: number;
-
-  /**
-   * A follower ingests everything and commands nothing. It does not heartbeat,
-   * so no node ever binds to it, and it does not register a server LWT - a
-   * follower dying must not tell every node to fail safe.
-   */
+  // A follower ingests everything, commands nothing, and neither heartbeats nor registers a will.
   private readonly role: ControllerRole;
 
   constructor(
@@ -146,105 +137,29 @@ export class MqttHardwareService
     return this.role === 'leader';
   }
 
-  /**
-   * Connecting happens here rather than in the constructor for the same reason
-   * the fake driver announces here: Nest runs every `onModuleInit` first, so the
-   * node registry is already subscribed when the first retained `status` and the
-   * first `hello` arrive.
-   */
+  // Not in the constructor: every onModuleInit, the registry's included, must subscribe first.
   onApplicationBootstrap(): void {
-    const url = this.config.get<string>('MQTT_URL', 'mqtt://127.0.0.1:1883');
-    const username = this.config.get<string>('MQTT_USERNAME', '');
-    const password = this.config.get<string>('MQTT_PASSWORD', '');
-
-    const options: IClientOptions = {
-      clientId: `tempestas-server-${process.pid}`,
-      // A persistent session is precisely a queue of commands waiting to replay
-      // on reconnect. For a relay that may be holding a burner, that is a
-      // hazard rather than a convenience.
-      clean: true,
-      reconnectPeriod: 2_000,
-      connectTimeout: 10_000,
-      ...(username ? { username } : {}),
-      ...(password ? { password } : {}),
-      // The server's own dead-man. Every node fails safe when the brain dies.
-      //
-      // Only the LEADER registers it. A follower crashing is not a reason for
-      // the greenhouse to shut down, and its retained "offline" would sit on
-      // the topic telling nodes exactly that.
-      ...(this.isLeader
-        ? {
-            will: {
-              topic: mqttTopics.serverStatus,
-              payload: Buffer.from(
-                JSON.stringify(
-                  buildStatus('server', 'offline', this.clock.now()),
-                ),
-              ),
-              qos: mqttQos.serverStatus.qos,
-              retain: mqttQos.serverStatus.retain,
-            },
-          }
-        : {}),
-    };
-
+    const url = this.config.get<string>('MQTT_URL', DEFAULT_MQTT_URL);
+    const options = this.buildClientOptions();
     const client = connect(url, options);
     this.client = client;
-
-    client.on('connect', () => {
-      this.logger.log(`Connected to ${url} as ${options.clientId}`);
-      void this.announceServerOnline();
-      client.subscribe(mqttTopics.allNodes, { qos: 1 }, (err) => {
-        if (err) {
-          this.logger.error(
-            `Failed to subscribe to ${mqttTopics.allNodes}: ${err.message}`,
-          );
-          return;
-        }
-        this.logger.log(`Subscribed to ${mqttTopics.allNodes}`);
-      });
-      this.startHeartbeat();
-    });
-
-    client.on('message', (topic, payload, packet) => {
-      this.route(topic, payload, packet.retain === true);
-    });
-
-    client.on('error', (err) =>
-      this.logger.error(`MQTT error: ${err.message}`),
-    );
-    client.on('reconnect', () =>
-      this.logger.warn('Reconnecting to the broker'),
-    );
-    client.on('close', () => this.logger.warn('Broker connection closed'));
+    this.attachClientHandlers(client, url, options.clientId);
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.heartbeat) clearInterval(this.heartbeat);
-    this.heartbeat = null;
-
-    for (const [id, command] of this.pending) {
-      clearTimeout(command.timer);
-      command.reject(new Error('Server is shutting down'));
-      this.pending.delete(id);
-    }
+    this.stopHeartbeat();
+    this.rejectPendingCommands();
 
     const client = this.client;
     this.client = null;
     if (!client) return;
 
-    // Publish the offline status explicitly rather than relying on the will, so
-    // every node's dead-man fires deterministically on a clean shutdown instead
-    // of after a keepalive timeout.
+    // Explicit, because a graceful disconnect fires no will.
     try {
-      await client.publishAsync(
-        mqttTopics.serverStatus,
-        JSON.stringify(buildStatus('server', 'offline', this.clock.now())),
-        mqttQos.serverStatus,
-      );
-    } catch (err: unknown) {
+      await this.publishServerStatus(client, 'offline');
+    } catch (error: unknown) {
       this.logger.warn(
-        `Could not publish the offline status: ${describe(err)}`,
+        `Could not publish the offline status: ${describeError(error)}`,
       );
     }
     await client.endAsync();
@@ -255,30 +170,7 @@ export class MqttHardwareService
     return this.dispatch(nodeId, [command]);
   }
 
-  /**
-   * Refuse locally rather than publishing something the node will reject.
-   *
-   * A follower's command would be denied at the actuator anyway - its
-   * `issuedBy` is not the bound controller - but that arrives as a
-   * CONTROLLER_CONFLICT alarm, which is a real incident signal. Manual clicks
-   * on a follower's UI must not manufacture one.
-   */
-  private refuseIfFollower(action: string): void {
-    if (this.isLeader) return;
-    throw new HardwareError(
-      ApiErrorCode.ControllerIsFollower,
-      `This server is a follower and cannot ${action}. Promote it first.`,
-    );
-  }
-
-  /**
-   * Re-assert the full desired state of a node's pins.
-   *
-   * Level-triggered rather than edge-triggered: any missed message self-heals on
-   * the next assertion. There is no result topic for a sync, so this resolves
-   * once the broker has accepted the publish - the per-pin truth comes back on
-   * the retained `gpio/state` topics.
-   */
+  // No result topic for a sync: it resolves once the broker accepts the publish.
   async syncPins(nodeId: NodeId, commands: PinCommand[]): Promise<void> {
     this.refuseIfFollower('sync pins');
     const client = this.requireClient();
@@ -297,11 +189,96 @@ export class MqttHardwareService
   }
 
   /** Last known level per pin. `known: false` means unknown, NOT off. */
-  pinState(
-    nodeId: NodeId,
-    pin: number,
-  ): { level: GpioLevel | null; known: boolean } {
-    return this.pins.get(`${nodeId}:${pin}`) ?? { level: null, known: false };
+  pinState(nodeId: NodeId, pin: number): PinLevel {
+    return this.pinLevels.get(toPinKey(nodeId, pin)) ?? unknownPinLevel();
+  }
+
+  lastPinReport(nodeId: NodeId, pin: number): PinStateReport | null {
+    return this.lastReports.get(toPinKey(nodeId, pin)) ?? null;
+  }
+
+  private buildClientOptions(): IClientOptions & { clientId: string } {
+    const username = this.config.get<string>('MQTT_USERNAME', '');
+    const password = this.config.get<string>('MQTT_PASSWORD', '');
+    return {
+      clientId: `tempestas-server-${process.pid}`,
+      // A persistent session is a queue of commands waiting to replay on reconnect.
+      clean: true,
+      reconnectPeriod: RECONNECT_PERIOD_MS,
+      connectTimeout: CONNECT_TIMEOUT_MS,
+      ...(username ? { username } : {}),
+      ...(password ? { password } : {}),
+      // Leader only: a follower crashing must not tell every node to fail safe.
+      ...(this.isLeader ? { will: this.buildServerWill() } : {}),
+    };
+  }
+
+  private buildServerWill(): IClientOptions['will'] {
+    return {
+      topic: mqttTopics.serverStatus,
+      payload: Buffer.from(
+        JSON.stringify(buildStatus('server', 'offline', this.clock.now())),
+      ),
+      qos: mqttQos.serverStatus.qos,
+      retain: mqttQos.serverStatus.retain,
+    };
+  }
+
+  private attachClientHandlers(
+    client: MqttClient,
+    url: string,
+    clientId: string,
+  ): void {
+    client.on('connect', () => {
+      this.logger.log(`Connected to ${url} as ${clientId}`);
+      void this.announceServerOnline();
+      this.subscribeToAllNodes(client);
+      this.startHeartbeat();
+    });
+    client.on('message', (topic, payload, packet) => {
+      this.route(topic, payload, packet.retain === true);
+    });
+    client.on('error', (error) =>
+      this.logger.error(`MQTT error: ${error.message}`),
+    );
+    client.on('reconnect', () =>
+      this.logger.warn('Reconnecting to the broker'),
+    );
+    client.on('close', () => this.logger.warn('Broker connection closed'));
+  }
+
+  private subscribeToAllNodes(client: MqttClient): void {
+    client.subscribe(mqttTopics.allNodes, SUBSCRIBE_OPTIONS, (error) => {
+      if (error) {
+        this.logger.error(
+          `Failed to subscribe to ${mqttTopics.allNodes}: ${error.message}`,
+        );
+        return;
+      }
+      this.logger.log(`Subscribed to ${mqttTopics.allNodes}`);
+    });
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+  }
+
+  private rejectPendingCommands(): void {
+    for (const [id, command] of this.pendingCommands) {
+      clearTimeout(command.timer);
+      command.reject(new Error('Server is shutting down'));
+      this.pendingCommands.delete(id);
+    }
+  }
+
+  // Refused locally, so a click on a follower's UI cannot manufacture a CONTROLLER_CONFLICT alarm.
+  private refuseIfFollower(action: string): void {
+    if (this.isLeader) return;
+    throw new HardwareError(
+      ApiErrorCode.ControllerIsFollower,
+      `This server is a follower and cannot ${action}. Promote it first.`,
+    );
   }
 
   private async dispatch(
@@ -309,17 +286,7 @@ export class MqttHardwareService
     commands: readonly PinCommand[],
   ): Promise<void> {
     const client = this.requireClient();
-
-    // Only a POSITIVE offline is refused here. A node we have not heard from
-    // yet may simply not have published its retained status before the first
-    // command; the ack timeout is what catches a node that is really gone, and
-    // it fails without persisting any state.
-    if (this.online.get(nodeId) === false) {
-      throw new HardwareError(
-        ApiErrorCode.NodeOffline,
-        `Node "${nodeId}" is offline; its last will has fired`,
-      );
-    }
+    this.refuseIfKnownOffline(nodeId);
 
     const id = `${this.controllerId}-${++this.commandCount}`;
     const payload = buildGpioSet(
@@ -330,20 +297,8 @@ export class MqttHardwareService
       COMMAND_TTL_MS,
     );
 
-    // Registered BEFORE the publish: a fast node can answer before `publishAsync`
-    // resolves, and that result must not arrive to an empty table.
-    const ack = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(
-          new HardwareError(
-            ApiErrorCode.HardwareUnreachable,
-            `Node "${nodeId}" did not acknowledge command ${id} within ${COMMAND_TIMEOUT_MS}ms`,
-          ),
-        );
-      }, COMMAND_TIMEOUT_MS);
-      this.pending.set(id, { nodeId, commands, resolve, reject, timer });
-    });
+    // Registered before the publish: a fast node can answer before `publishAsync` resolves.
+    const acknowledgement = this.awaitAcknowledgement(id, nodeId, commands);
 
     try {
       await client.publishAsync(
@@ -351,29 +306,69 @@ export class MqttHardwareService
         JSON.stringify(payload),
         mqttQos.gpioSet,
       );
-    } catch (err: unknown) {
-      const entry = this.pending.get(id);
-      if (entry) {
-        clearTimeout(entry.timer);
-        this.pending.delete(id);
-      }
+    } catch (error: unknown) {
+      this.abandonPendingCommand(id);
       throw new HardwareError(
         ApiErrorCode.HardwareUnreachable,
-        `Could not publish to "${nodeId}": ${describe(err)}`,
+        `Could not publish to "${nodeId}": ${describeError(error)}`,
       );
     }
-    return ack;
+    return acknowledgement;
   }
 
-  private route(topic: string, payload: Buffer, retained: boolean): void {
+  // Only a positive offline: a node not yet heard from is left to the ack timeout.
+  private refuseIfKnownOffline(nodeId: NodeId): void {
+    if (this.isOnlineByNode.get(nodeId) !== false) return;
+    throw new HardwareError(
+      ApiErrorCode.NodeOffline,
+      `Node "${nodeId}" is offline; its last will has fired`,
+    );
+  }
+
+  private awaitAcknowledgement(
+    id: string,
+    nodeId: NodeId,
+    commands: readonly PinCommand[],
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingCommands.delete(id);
+        reject(
+          new HardwareError(
+            ApiErrorCode.HardwareUnreachable,
+            `Node "${nodeId}" did not acknowledge command ${id} within ${COMMAND_TIMEOUT_MS}ms`,
+          ),
+        );
+      }, COMMAND_TIMEOUT_MS);
+      this.pendingCommands.set(id, {
+        nodeId,
+        commands,
+        resolve,
+        reject,
+        timer,
+      });
+    });
+  }
+
+  private abandonPendingCommand(id: string): void {
+    const pending = this.pendingCommands.get(id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingCommands.delete(id);
+  }
+
+  private route(topic: string, payload: Buffer, isRetained: boolean): void {
     const parsed = parseNodeTopic(topic);
-    if (!parsed) {
-      // The server's own status topic, and anything else outside the node tree.
-      return;
-    }
+    if (!parsed) return;
 
     if (parsed.kind === 'gpio-set' || parsed.kind === 'gpio-sync') {
-      this.inspectCommand(topic, parsed.nodeId, parsed.kind, payload, retained);
+      this.inspectCommand(
+        topic,
+        parsed.nodeId,
+        parsed.kind,
+        payload,
+        isRetained,
+      );
       return;
     }
     if (parsed.kind === 'heartbeat' || parsed.kind === 'unknown') {
@@ -381,11 +376,11 @@ export class MqttHardwareService
     }
 
     const json = parseJson(payload);
-    // `=== false`, not `!`: an equality check against the literal is what
-    // narrows these result unions under this TS config.
+    // `=== false`, not `!`: only the literal comparison narrows these unions under this config.
     if (json.ok === false) {
-      // An empty payload on a retained topic is a CLEAR, which is normal.
-      if (!(retained && json.reason === 'empty payload')) {
+      const isRetainedClear =
+        isRetained && json.reason === EMPTY_PAYLOAD_REASON;
+      if (!isRetainedClear) {
         this.warnThrottled(
           `${parsed.nodeId}:${parsed.kind}:json`,
           `${topic}: ${json.reason}`,
@@ -395,184 +390,195 @@ export class MqttHardwareService
     }
 
     const now = this.clock.now();
-    this.nodes.add(parsed.nodeId);
+    const nodeId = parsed.nodeId;
+    this.knownNodes.add(nodeId);
 
     switch (parsed.kind) {
-      case 'hello': {
-        const decoded = decodeHello(json.value, parsed.nodeId, now);
-        if (decoded.ok === false) {
-          this.warnThrottled(
-            `${parsed.nodeId}:hello`,
-            `Rejected hello from "${parsed.nodeId}": ${decoded.reason}`,
-          );
-          return;
-        }
-        this.hello.next(decoded.value);
-        return;
-      }
-      case 'status': {
-        const decoded = decodeStatus(json.value, parsed.nodeId, now);
-        if (decoded.ok === false) {
-          this.warnThrottled(
-            `${parsed.nodeId}:status`,
-            `Rejected status from "${parsed.nodeId}": ${decoded.reason}`,
-          );
-          return;
-        }
-        this.online.set(parsed.nodeId, decoded.value.online);
-        // Stale is not off: when a node drops, every pin we thought we knew
-        // becomes unknown until a fresh retained state or a successful sync.
-        if (!decoded.value.online) this.forgetPins(parsed.nodeId);
-        this.availability.next(decoded.value);
-        return;
-      }
-      case 'sample': {
-        const decoded = decodeSample(
+      case 'hello':
+        return this.receiveHello(nodeId, json.value, now);
+      case 'status':
+        return this.receiveStatus(nodeId, json.value, now);
+      case 'sample':
+        return this.receiveSample(
+          nodeId,
+          parsed.sensorId ?? UNKNOWN_SENSOR_ID,
           json.value,
-          parsed.nodeId,
-          parsed.sensorId ?? 'unknown',
           now,
         );
-        if (decoded.ok === false) {
-          this.warnThrottled(
-            `${parsed.nodeId}:sample`,
-            `Dropped sample from "${parsed.nodeId}": ${decoded.reason}`,
-          );
-          return;
-        }
-        this.samples.next(decoded.value);
-        return;
-      }
-      case 'gpio-state': {
-        const decoded = decodeGpioState(json.value, parsed.pin ?? -1);
-        if (decoded.ok === false) {
-          this.warnThrottled(
-            `${parsed.nodeId}:state`,
-            `Rejected gpio/state from "${parsed.nodeId}": ${decoded.reason}`,
-          );
-          return;
-        }
-        this.pins.set(`${parsed.nodeId}:${decoded.value.pin}`, {
-          level: decoded.value.level,
-          known: decoded.value.known,
-        });
-        const report: PinStateReport = {
-          nodeId: parsed.nodeId,
-          pin: decoded.value.pin,
-          level: decoded.value.level,
-          known: decoded.value.known,
-          observedAt: decoded.value.observedAt,
-          live: !retained,
-        };
-        this.reports.set(`${parsed.nodeId}:${decoded.value.pin}`, report);
-        this.pinStates.next(report);
-        return;
-      }
-      case 'gpio-result': {
-        const decoded = decodeResult(json.value);
-        if (decoded.ok === false) {
-          this.warnThrottled(
-            `${parsed.nodeId}:result`,
-            `Rejected gpio/result from "${parsed.nodeId}": ${decoded.reason}`,
-          );
-          return;
-        }
-        this.settle(parsed.nodeId, decoded.value);
-        return;
-      }
-      case 'alarm': {
-        const decoded = decodeAlarm(json.value);
-        if (decoded.ok === false) {
-          this.warnThrottled(
-            `${parsed.nodeId}:alarm`,
-            `Rejected alarm from "${parsed.nodeId}": ${decoded.reason}`,
-          );
-          return;
-        }
-        this.logAlarm(
-          parsed.nodeId,
-          decoded.value.code,
-          decoded.value.severity,
-          decoded.value.message,
+      case 'gpio-state':
+        return this.receiveGpioState(
+          nodeId,
+          parsed.pin ?? UNPARSED_PIN,
+          json.value,
+          isRetained,
         );
-        return;
-      }
+      case 'gpio-result':
+        return this.receiveResult(nodeId, json.value);
+      case 'alarm':
+        return this.receiveAlarm(nodeId, json.value);
     }
   }
 
+  private receiveHello(
+    nodeId: NodeId,
+    raw: Record<string, unknown>,
+    now: Date,
+  ): void {
+    const hello = this.unwrapOrWarn(
+      decodeHello(raw, nodeId, now),
+      `${nodeId}:hello`,
+      `Rejected hello from "${nodeId}"`,
+    );
+    if (hello) this.hello.next(hello);
+  }
+
+  private receiveStatus(
+    nodeId: NodeId,
+    raw: Record<string, unknown>,
+    now: Date,
+  ): void {
+    const availability = this.unwrapOrWarn(
+      decodeStatus(raw, nodeId, now),
+      `${nodeId}:status`,
+      `Rejected status from "${nodeId}"`,
+    );
+    if (!availability) return;
+    this.isOnlineByNode.set(nodeId, availability.online);
+    // Stale is not off: a dropped node's pins become unknown.
+    if (!availability.online) this.forgetPins(nodeId);
+    this.availability.next(availability);
+  }
+
+  private receiveSample(
+    nodeId: NodeId,
+    sensorId: string,
+    raw: Record<string, unknown>,
+    now: Date,
+  ): void {
+    const sample = this.unwrapOrWarn(
+      decodeSample(raw, nodeId, sensorId, now),
+      `${nodeId}:sample`,
+      `Dropped sample from "${nodeId}"`,
+    );
+    if (sample) this.samples.next(sample);
+  }
+
+  private receiveGpioState(
+    nodeId: NodeId,
+    pin: number,
+    raw: Record<string, unknown>,
+    isRetained: boolean,
+  ): void {
+    const state = this.unwrapOrWarn(
+      decodeGpioState(raw, pin),
+      `${nodeId}:state`,
+      `Rejected gpio/state from "${nodeId}"`,
+    );
+    if (!state) return;
+    const pinKey = toPinKey(nodeId, state.pin);
+    this.pinLevels.set(pinKey, { level: state.level, known: state.known });
+    const report: PinStateReport = {
+      nodeId,
+      pin: state.pin,
+      level: state.level,
+      known: state.known,
+      observedAt: state.observedAt,
+      live: !isRetained,
+    };
+    this.lastReports.set(pinKey, report);
+    this.pinStates.next(report);
+  }
+
+  private receiveResult(nodeId: NodeId, raw: Record<string, unknown>): void {
+    const result = this.unwrapOrWarn(
+      decodeResult(raw),
+      `${nodeId}:result`,
+      `Rejected gpio/result from "${nodeId}"`,
+    );
+    if (result) this.settle(nodeId, result);
+  }
+
+  private receiveAlarm(nodeId: NodeId, raw: Record<string, unknown>): void {
+    const alarm = this.unwrapOrWarn(
+      decodeAlarm(raw),
+      `${nodeId}:alarm`,
+      `Rejected alarm from "${nodeId}"`,
+    );
+    if (alarm) {
+      this.logAlarm(nodeId, alarm.code, alarm.severity, alarm.message);
+    }
+  }
+
+  private unwrapOrWarn<T>(
+    decoded: Decoded<T>,
+    warnKey: string,
+    rejection: string,
+  ): T | undefined {
+    if (decoded.ok === false) {
+      this.warnThrottled(warnKey, `${rejection}: ${decoded.reason}`);
+      return undefined;
+    }
+    return decoded.value;
+  }
+
   private settle(nodeId: NodeId, result: GpioResultPayload): void {
-    const command = this.pending.get(result.id);
+    const command = this.pendingCommands.get(result.id);
     if (!command) {
-      // A result for a command we already timed out, or one issued by another
-      // controller. Worth knowing about, not worth acting on.
+      // Timed out already, or issued by another controller: worth knowing, not acting on.
       this.logger.debug(`Unmatched gpio/result ${result.id} from "${nodeId}"`);
       return;
     }
     clearTimeout(command.timer);
-    this.pending.delete(result.id);
+    this.pendingCommands.delete(result.id);
 
-    // Record what the node actually read back, whatever the verdict.
     for (const line of result.lines) {
-      this.pins.set(`${nodeId}:${line.pin}`, {
+      this.pinLevels.set(toPinKey(nodeId, line.pin), {
         level: line.readback,
-        known: line.readback === 0 || line.readback === 1,
+        known: isGpioLevel(line.readback),
       });
     }
 
-    const bad = verifyResult(result, command.commands);
-    if (bad) {
-      this.logAlarm(nodeId, AlarmCode.ReadbackMismatch, 'critical', bad.reason);
+    const mismatch = verifyResult(result, command.commands);
+    if (mismatch) {
+      this.logAlarm(
+        nodeId,
+        AlarmCode.ReadbackMismatch,
+        'critical',
+        mismatch.reason,
+      );
       command.reject(
-        new HardwareError(ApiErrorCode.ReadbackMismatch, bad.reason),
+        new HardwareError(ApiErrorCode.ReadbackMismatch, mismatch.reason),
       );
       return;
     }
     command.resolve();
   }
 
-  /**
-   * We are the ONLY legitimate publisher of commands, so anything on a command
-   * topic that we did not issue is a controller conflict.
-   *
-   * This checks ownership rather than the retain flag, and that distinction
-   * matters: MQTT sets the retain flag on a delivered PUBLISH only when it
-   * arrives BECAUSE OF a new subscription. A retained command published while
-   * everyone is already connected arrives with retain=0, looks exactly like a
-   * legitimate command, and then lurks retained to replay on every future
-   * reconnect. Verified against a real broker - the retain flag alone missed it.
-   *
-   * Either way the retained slot is cleared: a zero-length retained publish
-   * deletes it, and leaving a live burner command on the bus is strictly worse
-   * than removing something we did not create.
-   */
+  // Judged by ownership, never the retain flag: see the retained-command trap in docs.
   private inspectCommand(
     topic: string,
     nodeId: NodeId,
-    kind: 'gpio-set' | 'gpio-sync',
+    kind: CommandTopicKind,
     payload: Buffer,
-    retained: boolean,
+    isRetained: boolean,
   ): void {
-    // An empty payload IS the clear. Never react to one, or clearing a rogue
-    // command becomes a publish loop against ourselves.
-    if (payload.toString('utf8').trim() === '') {
+    // Reacting to the clear itself would become a publish loop against ourselves.
+    if (isEmptyPayload(payload)) {
       return;
     }
 
     const json = parseJson(payload);
     if (json.ok === false) {
-      if (retained)
+      if (isRetained) {
         this.clearRetainedCommand(topic, nodeId, `unparseable ${kind}`);
+      }
       return;
     }
 
-    const issuer =
-      kind === 'gpio-set' ? json.value['issuedBy'] : json.value['controller'];
-    if (issuer === this.controllerId) {
-      // Our own command, echoed back by our own subscription.
-      return;
-    }
+    const issuer = readCommandIssuer(kind, json.value);
+    if (issuer === this.controllerId) return;
 
-    if (!this.shouldAct(`conflict:${topic}`, 10_000)) {
+    if (!this.isFirstInWindow(`conflict:${topic}`, CONFLICT_ALARM_WINDOW_MS)) {
       return;
     }
     this.logAlarm(
@@ -580,7 +586,7 @@ export class MqttHardwareService
       AlarmCode.ControllerConflict,
       'critical',
       `Foreign ${kind} on ${topic} issued by "${String(issuer)}"` +
-        `${retained ? ' (delivered RETAINED)' : ''} - this server is the only legitimate publisher`,
+        `${isRetained ? ' (delivered RETAINED)' : ''} - this server is the only legitimate publisher`,
     );
     this.clearRetainedCommand(topic, nodeId, kind);
   }
@@ -588,94 +594,95 @@ export class MqttHardwareService
   private clearRetainedCommand(
     topic: string,
     nodeId: NodeId,
-    what: string,
+    description: string,
   ): void {
-    this.client?.publish(topic, '', { qos: 1, retain: true }, (err) => {
-      if (err)
+    this.client?.publish(topic, '', CLEAR_RETAINED_OPTIONS, (error) => {
+      if (error) {
         this.logger.error(
-          `Failed to clear the retained ${what} on ${topic}: ${err.message}`,
+          `Failed to clear the retained ${description} on ${topic}: ${error.message}`,
         );
-      else
-        this.logger.warn(
-          `Cleared the retained slot on ${topic} (${what}, node "${nodeId}")`,
-        );
+        return;
+      }
+      this.logger.warn(
+        `Cleared the retained slot on ${topic} (${description}, node "${nodeId}")`,
+      );
     });
   }
 
-  /** True at most once per window for a given key. Stops a remediation storm. */
-  private shouldAct(key: string, windowMs: number): boolean {
+  private isFirstInWindow(key: string, windowMs: number): boolean {
     const nowMs = this.clock.now().getTime();
-    const last = this.warnedAt.get(key);
+    const last = this.lastActedAt.get(key);
     if (last !== undefined && nowMs - last < windowMs) return false;
-    this.warnedAt.set(key, nowMs);
+    this.lastActedAt.set(key, nowMs);
     return true;
   }
 
   private forgetPins(nodeId: NodeId): void {
-    for (const key of this.pins.keys()) {
-      if (key.startsWith(`${nodeId}:`)) {
-        this.pins.set(key, { level: null, known: false });
+    for (const pinKey of this.pinLevels.keys()) {
+      if (isPinKeyOfNode(pinKey, nodeId)) {
+        this.pinLevels.set(pinKey, unknownPinLevel());
       }
     }
-    // An offline node's last report describes a relay that may since have
-    // failed safe. Seeding a new device from it would be a guess.
-    for (const key of this.reports.keys()) {
-      if (key.startsWith(`${nodeId}:`)) this.reports.delete(key);
+    // A relay may have failed safe since, so seeding a new device from it would be a guess.
+    for (const pinKey of this.lastReports.keys()) {
+      if (isPinKeyOfNode(pinKey, nodeId)) this.lastReports.delete(pinKey);
     }
-  }
-
-  lastPinReport(nodeId: NodeId, pin: number): PinStateReport | null {
-    return this.reports.get(`${nodeId}:${pin}`) ?? null;
   }
 
   private async announceServerOnline(): Promise<void> {
     const client = this.client;
     if (!client) return;
     try {
-      await client.publishAsync(
-        mqttTopics.serverStatus,
-        JSON.stringify(buildStatus('server', 'online', this.clock.now())),
-        mqttQos.serverStatus,
-      );
-    } catch (err: unknown) {
+      await this.publishServerStatus(client, 'online');
+    } catch (error: unknown) {
       this.logger.warn(
-        `Could not announce the server as online: ${describe(err)}`,
+        `Could not announce the server as online: ${describeError(error)}`,
       );
     }
   }
 
-  /**
-   * The input to every node's dead-man. QoS 0 deliberately: a missed heartbeat
-   * must LOOK missed rather than being redelivered late, because "late" is
-   * indistinguishable from "the controller is alive" to a node counting them.
-   */
+  private publishServerStatus(
+    client: MqttClient,
+    state: 'online' | 'offline',
+  ): Promise<unknown> {
+    return client.publishAsync(
+      mqttTopics.serverStatus,
+      JSON.stringify(buildStatus('server', state, this.clock.now())),
+      mqttQos.serverStatus,
+    );
+  }
+
   private startHeartbeat(): void {
-    if (this.heartbeat) return;
+    if (this.heartbeatTimer) return;
     if (!this.isLeader) {
-      // The binding a heartbeat creates is the right to command. A follower
-      // must never create one, or the node starts obeying two controllers.
+      // A heartbeat grants the right to command; from a follower, nodes would obey two controllers.
       this.logger.log(
         'Follower: not heartbeating, so no node will bind to this server',
       );
       return;
     }
-    this.heartbeat = setInterval(() => {
-      const client = this.client;
-      if (!client) return;
-      for (const nodeId of this.nodes) {
-        client.publish(
-          mqttTopics.heartbeat(nodeId),
-          JSON.stringify({
-            schema: 'heartbeat/1',
-            node: nodeId,
-            ts: this.clock.now().toISOString(),
-            controller: this.controllerId,
-            epoch: this.epoch,
-          }),
-          mqttQos.heartbeat,
-        );
-      }
-    }, HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer = setInterval(
+      () => this.publishHeartbeats(),
+      HEARTBEAT_INTERVAL_MS,
+    );
+  }
+
+  private publishHeartbeats(): void {
+    const client = this.client;
+    if (!client) return;
+    for (const nodeId of this.knownNodes) {
+      client.publish(
+        mqttTopics.heartbeat(nodeId),
+        JSON.stringify({
+          schema: MQTT_SCHEMAS.heartbeat,
+          node: nodeId,
+          ts: this.clock.now().toISOString(),
+          controller: this.controllerId,
+          epoch: this.epoch,
+        }),
+        mqttQos.heartbeat,
+      );
+    }
   }
 
   private logAlarm(
@@ -685,26 +692,28 @@ export class MqttHardwareService
     message: string,
   ): void {
     const line = `[${nodeId}] ${code}: ${message}`;
-    if (severity === 'critical') this.logger.error(line);
-    else if (severity === 'warning') this.logger.warn(line);
-    else this.logger.log(line);
-  }
-
-  /** A node stuck publishing malformed payloads must not bury everything else. */
-  private warnThrottled(key: string, message: string): void {
-    const nowMs = this.clock.now().getTime();
-    const last = this.warnedAt.get(key);
-    if (last !== undefined && nowMs - last < WARN_THROTTLE_MS) {
-      this.logger.debug(message);
+    if (severity === 'critical') {
+      this.logger.error(line);
       return;
     }
-    this.warnedAt.set(key, nowMs);
-    this.logger.warn(message);
+    if (severity === 'warning') {
+      this.logger.warn(line);
+      return;
+    }
+    this.logger.log(line);
+  }
+
+  private warnThrottled(key: string, message: string): void {
+    if (this.isFirstInWindow(key, WARN_THROTTLE_MS)) {
+      this.logger.warn(message);
+      return;
+    }
+    this.logger.debug(message);
   }
 
   private requireClient(): MqttClient {
     if (!this.client) {
-      // Failing loudly beats queueing a burner command for an unknown future.
+      // Never queue a burner command for an unknown future.
       throw new HardwareError(
         ApiErrorCode.HardwareUnreachable,
         `No MQTT connection (${MQTT_ROOT})`,
@@ -714,6 +723,13 @@ export class MqttHardwareService
   }
 }
 
-function describe(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+function readCommandIssuer(
+  kind: CommandTopicKind,
+  command: Record<string, unknown>,
+): unknown {
+  return kind === 'gpio-set' ? command['issuedBy'] : command['controller'];
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

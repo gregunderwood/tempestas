@@ -11,37 +11,35 @@ import {
   HardwareService,
   type PinStateReport,
 } from '../hardware/hardware.service';
+import { toPinKey } from '../hardware/pin-key';
 import { DeviceEntity, PinTransitionEntity } from './models';
 import { Clock } from '../common/clock';
 import {
-  energisedBy,
   judgeTransition,
-  recordedAt,
+  resolveEnergised,
+  resolveRecordedAt,
   type LastKnown,
+  type TransitionVerdict,
 } from './pin-transition';
+import { findDeviceOnPin } from './find-device-on-pin';
 
-/**
- * Writes the relay history that `devices` cannot keep.
- *
- * Subscribes to `pinStates$` directly rather than hanging off reconciliation,
- * and that is the point: `DevicesService.reconcile` returns early for pins it
- * is mid-command on, so a logger wired in there would miss every COMMANDED
- * change and record only the autonomous ones - the exact inverse of what is
- * wanted. This sees both.
- */
+const DEFAULT_QUERY_LIMIT = 1000;
+const MAX_QUERY_LIMIT = 10_000;
+
+export interface TransitionQuery {
+  from?: Date;
+  to?: Date;
+  nodeId?: string;
+  limit?: number;
+}
+
+// Its own subscription: reconciliation skips commanded changes. See docs/Infrastructure/Database.md
 @Injectable()
 export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PinTransitionLog.name);
   private subscription?: Subscription;
-
-  /**
-   * `node:pin` -> what was last written.
-   *
-   * A cache, never the source of truth: it is seeded from the table on first
-   * sight of each pin, so a server restart does not invent a transition out of
-   * the retained state every node republishes on connect.
-   */
-  private readonly lastWritten = new Map<string, LastKnown>();
+  // A cache seeded from the table, so a restart cannot invent a transition from retained state.
+  private readonly lastWrittenByPin = new Map<string, LastKnown>();
 
   constructor(
     @InjectRepository(PinTransitionEntity)
@@ -54,12 +52,10 @@ export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     this.subscription = this.hardware.pinStates$.subscribe((report) => {
-      void this.record(report).catch((err: unknown) => {
-        // Never allowed to kill the subscription. Losing the log quietly is
-        // worse than a noisy failure, because the gap only shows up months
-        // later when somebody tries to fit against it.
+      // Caught here so one failure cannot end the subscription and leave a silent gap.
+      void this.record(report).catch((error: unknown) => {
         this.logger.error(
-          `Logging ${report.nodeId} pin ${report.pin} failed: ${String(err)}`,
+          `Logging ${report.nodeId} pin ${report.pin} failed: ${String(error)}`,
         );
       });
     });
@@ -69,11 +65,69 @@ export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
     this.subscription?.unsubscribe();
   }
 
-  private async lastFor(
-    key: string,
+  // Oldest first: the consumer is a fitting script replaying a night in order.
+  async query(filters: TransitionQuery): Promise<PinTransitionEntity[]> {
+    const queryBuilder = this.transitions
+      .createQueryBuilder('pinTransition')
+      .orderBy('pinTransition.observedAt', 'ASC')
+      .limit(Math.min(filters.limit ?? DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT));
+    if (filters.from) {
+      queryBuilder.andWhere('pinTransition.observedAt >= :from', {
+        from: filters.from,
+      });
+    }
+    if (filters.to) {
+      queryBuilder.andWhere('pinTransition.observedAt <= :to', {
+        to: filters.to,
+      });
+    }
+    if (filters.nodeId) {
+      queryBuilder.andWhere('pinTransition.nodeId = :nodeId', {
+        nodeId: filters.nodeId,
+      });
+    }
+    return queryBuilder.getMany();
+  }
+
+  async record(report: PinStateReport): Promise<void> {
+    const pinKey = toPinKey(report.nodeId, report.pin);
+    const last = await this.readLastKnown(pinKey, report);
+    const verdict = judgeTransition(last, report);
+    if (verdict.action === 'skip') return;
+    const observedAt = resolveRecordedAt(last, report, this.clock.now());
+
+    const device = await findDeviceOnPin(
+      this.devices,
+      report.nodeId,
+      report.pin,
+    );
+
+    await this.transitions.insert({
+      nodeId: report.nodeId,
+      pin: report.pin,
+      level: report.level,
+      known: report.known,
+      energised: resolveEnergised(report.level, report.known, device?.onLevel),
+      deviceId: device?.id ?? null,
+      role: device?.role ?? null,
+      reason: verdict.reason,
+      observedAt,
+    });
+
+    this.lastWrittenByPin.set(pinKey, {
+      level: report.level,
+      known: report.known,
+      observedAt,
+    });
+
+    this.logger.log(describeTransition(report, device, verdict));
+  }
+
+  private async readLastKnown(
+    pinKey: string,
     report: PinStateReport,
   ): Promise<LastKnown | null> {
-    const cached = this.lastWritten.get(key);
+    const cached = this.lastWrittenByPin.get(pinKey);
     if (cached) return cached;
 
     const row = await this.transitions.findOne({
@@ -87,68 +141,17 @@ export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
       known: row.known,
       observedAt: row.observedAt,
     };
-    this.lastWritten.set(key, seeded);
+    this.lastWrittenByPin.set(pinKey, seeded);
     return seeded;
   }
+}
 
-  /**
-   * The history of every line in a window, oldest first.
-   *
-   * Oldest first because the consumer is a fitting script replaying a night in
-   * order, not a UI showing the most recent thing.
-   */
-  async query(opts: {
-    from?: Date;
-    to?: Date;
-    nodeId?: string;
-    limit?: number;
-  }): Promise<PinTransitionEntity[]> {
-    const qb = this.transitions
-      .createQueryBuilder('t')
-      .orderBy('t.observedAt', 'ASC')
-      .limit(Math.min(opts.limit ?? 1000, 10_000));
-    if (opts.from) qb.andWhere('t.observedAt >= :from', { from: opts.from });
-    if (opts.to) qb.andWhere('t.observedAt <= :to', { to: opts.to });
-    if (opts.nodeId) qb.andWhere('t.nodeId = :nodeId', { nodeId: opts.nodeId });
-    return qb.getMany();
-  }
-
-  async record(report: PinStateReport): Promise<void> {
-    const key = `${report.nodeId}:${report.pin}`;
-    const last = await this.lastFor(key, report);
-    const verdict = judgeTransition(last, report);
-    if (verdict.action === 'skip') return;
-    const observedAt = recordedAt(last, report, this.clock.now());
-
-    // The device is the INTERPRETATION, resolved now and then frozen into the
-    // row. The pin and the level are the fact.
-    const device = await this.devices.findOne({
-      where: { gpio: report.pin, node: { slug: report.nodeId } },
-      relations: { node: true },
-    });
-
-    await this.transitions.insert({
-      nodeId: report.nodeId,
-      pin: report.pin,
-      level: report.level,
-      known: report.known,
-      energised: energisedBy(report.level, report.known, device?.onLevel),
-      deviceId: device?.id ?? null,
-      role: device?.role ?? null,
-      reason: verdict.reason,
-      observedAt,
-    });
-
-    this.lastWritten.set(key, {
-      level: report.level,
-      known: report.known,
-      observedAt,
-    });
-
-    this.logger.log(
-      `${report.nodeId} pin ${report.pin} -> ` +
-        `${report.known ? report.level : 'UNKNOWN'}` +
-        `${device ? ` (${device.name})` : ''} [${verdict.reason}]`,
-    );
-  }
+function describeTransition(
+  report: PinStateReport,
+  device: DeviceEntity | null,
+  verdict: TransitionVerdict,
+): string {
+  const level = report.known ? report.level : 'UNKNOWN';
+  const deviceName = device ? ` (${device.name})` : '';
+  return `${report.nodeId} pin ${report.pin} -> ${level}${deviceName} [${verdict.reason}]`;
 }
