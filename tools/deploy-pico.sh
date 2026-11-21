@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# Copy the Pico agent onto the board over USB and restart it.
+#
+# The board is hard-reset and caught in main.py's boot grace, before the agent arms a
+# watchdog that would otherwise reset it halfway through the copy.
+#
+#   tools/deploy-pico.sh [serial-port]
+
+set -euo pipefail
+
+PORT="${1:-/dev/ttyACM0}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEVICE="$HERE/apps/pico/device"
+UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
+PORT_WAIT_SECONDS=10
+AGENT_FILES=(
+  main.py node_runtime.py node_agent.py command_guard.py contract.py
+  iso_time.py relay_lines.py ds18b20_probes.py settings.py credentials.py
+)
+
+say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+mpremote() { "$UV" tool run mpremote connect "$PORT" "$@"; }
+
+wait_for_port() {
+  for _ in $(seq "$PORT_WAIT_SECONDS"); do
+    [ -e "$PORT" ] && return 0
+    sleep 1
+  done
+  echo "$PORT did not come back after the reset." >&2
+  exit 1
+}
+
+if [ ! -f "$DEVICE/credentials.py" ]; then
+  echo "No apps/pico/device/credentials.py. Copy credentials.example.py and fill it in." >&2
+  exit 1
+fi
+
+say "Gate"
+(cd "$HERE/apps/pico" && "$UV" run ruff check . && "$UV" run pytest -q)
+
+say "Resetting the board"
+mpremote reset || true
+sleep 1
+wait_for_port
+
+say "Copying the agent"
+(cd "$DEVICE" && mpremote cp "${AGENT_FILES[@]}" : + cp -r lib : + reset)
+
+say "Done. Watch it with: uv tool run mpremote connect $PORT resume repl"

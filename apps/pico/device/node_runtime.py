@@ -1,0 +1,208 @@
+"""Boot and the main loop on the Pico: fail safe first, then connect, then serve.
+
+A hang anywhere ends in a watchdog reset, and a reset releases every pin, so the worst this
+loop can do is leave the loads in their failsafe state.
+"""
+
+import binascii
+import json
+import os
+import time
+
+import credentials
+import ds18x20
+import machine
+import network
+import ntptime
+import onewire
+from umqtt.simple import MQTTClient
+
+import contract
+import settings
+from ds18b20_probes import Ds18b20Probes
+from node_agent import NodeAgent
+from relay_lines import ReleasedWhenHighLines
+
+WATCHDOG_TIMEOUT_MILLISECONDS = 8000
+LOOP_PAUSE_MILLISECONDS = 100
+WIFI_JOIN_LIMIT_MILLISECONDS = 20000
+WIFI_POLL_MILLISECONDS = 250
+RECONNECT_AFTER_MILLISECONDS = 15000
+CLOCK_RESYNC_AFTER_MILLISECONDS = 3600000
+SOCKET_TIMEOUT_SECONDS = 5
+WIFI_POWER_SAVE_OFF = 0xA11140
+MILLISECONDS_PER_SECOND = 1000
+BOOT_ID_BYTES = 6
+
+
+def log(message):
+    print(message)
+
+
+class TicksClock:
+    def ticks(self):
+        return time.ticks_ms()
+
+    def elapsed_since(self, earlier_ticks):
+        return time.ticks_diff(time.ticks_ms(), earlier_ticks)
+
+    def epoch_seconds(self):
+        return time.time()
+
+
+class BrokerPublisher:
+    """Publishes while connected and drops while not; the dead-man and failsafe never wait on it."""
+
+    def __init__(self):
+        self.client = None
+
+    def publish(self, topic, text, is_retained, quality_of_service):
+        if self.client is None:
+            return
+        try:
+            self.client.publish(topic, text, is_retained, quality_of_service)
+        except OSError as error:
+            log("publish failed, dropping the connection: %s" % error)
+            self.client = None
+
+
+class Connection:
+    def __init__(self, watchdog, clock, agent, publisher):
+        self.watchdog = watchdog
+        self.clock = clock
+        self.agent = agent
+        self.publisher = publisher
+        self.wifi = network.WLAN(network.STA_IF)
+        self.last_attempt_ticks = None
+        self.last_clock_sync_ticks = None
+        self.last_ping_ticks = None
+
+    def keep_up(self):
+        if self.publisher.client is not None:
+            return
+        if (
+            self.last_attempt_ticks is not None
+            and self.clock.elapsed_since(self.last_attempt_ticks) < RECONNECT_AFTER_MILLISECONDS
+        ):
+            return
+        self.last_attempt_ticks = self.clock.ticks()
+        if not self.join_wifi():
+            return
+        self.sync_clock_when_due()
+        self.connect_to_broker()
+
+    def join_wifi(self):
+        if self.wifi.isconnected():
+            return True
+        self.wifi.active(True)
+        self.wifi.config(pm=WIFI_POWER_SAVE_OFF)
+        self.wifi.connect(credentials.WIFI_SSID, credentials.WIFI_PASSWORD)
+        started_ticks = self.clock.ticks()
+        while self.clock.elapsed_since(started_ticks) < WIFI_JOIN_LIMIT_MILLISECONDS:
+            self.watchdog.feed()
+            if self.wifi.isconnected():
+                log("wifi joined at %s" % self.wifi.ifconfig()[0])
+                return True
+            time.sleep_ms(WIFI_POLL_MILLISECONDS)
+        log("wifi did not join; will retry")
+        return False
+
+    def sync_clock_when_due(self):
+        is_due = (
+            self.last_clock_sync_ticks is None
+            or self.clock.elapsed_since(self.last_clock_sync_ticks) > CLOCK_RESYNC_AFTER_MILLISECONDS
+        )
+        if not is_due:
+            return
+        try:
+            ntptime.settime()
+            self.last_clock_sync_ticks = self.clock.ticks()
+            log("clock set from NTP")
+        except Exception as error:
+            log("NTP failed, commands stay refused until it works: %s" % error)
+
+    def connect_to_broker(self):
+        node_id = settings.NODE_ID
+        client = MQTTClient(
+            "tempestas-" + node_id,
+            settings.BROKER_HOST,
+            port=settings.BROKER_PORT,
+            user=credentials.MQTT_USERNAME,
+            password=credentials.MQTT_PASSWORD,
+            keepalive=settings.KEEPALIVE_SECONDS,
+        )
+        quality_of_service, is_retained = contract.QOS["status"]
+        offline = json.dumps(self.agent.status_payload("offline"))
+        client.set_last_will(contract.topic_status(node_id), offline, is_retained, quality_of_service)
+        client.set_callback(self.deliver)
+        try:
+            # A persistent session is a queue of commands waiting to replay, so always start clean.
+            client.connect(clean_session=True, timeout=SOCKET_TIMEOUT_SECONDS)
+            for topic, subscription_qos in self.agent.subscriptions():
+                client.subscribe(topic, subscription_qos)
+        except Exception as error:
+            log("broker connect failed: %s" % error)
+            return
+        log("connected to %s as %s" % (settings.BROKER_HOST, node_id))
+        self.publisher.client = client
+        self.last_ping_ticks = self.clock.ticks()
+        self.agent.announce()
+
+    def deliver(self, topic, payload, is_retained):
+        self.agent.on_message(topic.decode(), payload, is_retained)
+
+    def serve_pending_messages(self):
+        client = self.publisher.client
+        if client is None:
+            return
+        try:
+            while client.check_msg() is not None:
+                self.watchdog.feed()
+            self.ping_when_due(client)
+        except OSError as error:
+            log("broker connection lost: %s" % error)
+            self.publisher.client = None
+
+    def ping_when_due(self, client):
+        ping_interval_milliseconds = settings.KEEPALIVE_SECONDS * MILLISECONDS_PER_SECOND // 2
+        if self.clock.elapsed_since(self.last_ping_ticks) >= ping_interval_milliseconds:
+            client.ping()
+            self.last_ping_ticks = self.clock.ticks()
+
+
+def build_probes():
+    bus = onewire.OneWire(machine.Pin(settings.ONE_WIRE_PIN))
+    return Ds18b20Probes(ds18x20.DS18X20(bus), settings.PROBES, time.sleep_ms, log)
+
+
+def build_boot_id():
+    return "boot-" + binascii.hexlify(os.urandom(BOOT_ID_BYTES)).decode()
+
+
+def run():
+    watchdog = machine.WDT(timeout=WATCHDOG_TIMEOUT_MILLISECONDS)
+    relay_lines = ReleasedWhenHighLines(machine, settings.RELAY_LINES, settings.FAILSAFE_LEVELS)
+    relay_lines.claim_at_failsafe()
+
+    probes = build_probes()
+    probes.start()
+    clock = TicksClock()
+    publisher = BrokerPublisher()
+    agent = NodeAgent(settings, publisher, relay_lines, probes, clock, log, build_boot_id())
+    connection = Connection(watchdog, clock, agent, publisher)
+
+    sample_interval_milliseconds = settings.SAMPLE_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND
+    last_sample_ticks = None
+    while True:
+        watchdog.feed()
+        connection.keep_up()
+        connection.serve_pending_messages()
+        is_sample_due = (
+            last_sample_ticks is None
+            or clock.elapsed_since(last_sample_ticks) >= sample_interval_milliseconds
+        )
+        if is_sample_due:
+            last_sample_ticks = clock.ticks()
+            agent.publish_readings()
+        agent.check_deadman()
+        time.sleep_ms(LOOP_PAUSE_MILLISECONDS)
