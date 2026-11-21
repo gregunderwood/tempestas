@@ -11,7 +11,7 @@ PORT_WAIT_SECONDS=10
 BOARD="$(sed -n 's/^BOARD = "\(.*\)"$/\1/p' "$DEVICE/settings.py")"
 BOARD_FILE="boards/$BOARD.py"
 AGENT_FILES=(
-  main.py node_runtime.py node_agent.py tempestas_mqtt.py command_guard.py contract.py
+  main.py node_runtime.py node_agent.py tempestas_mqtt.py command_guard.py contract.py agent_version.py
   iso_time.py relay_lines.py ds18b20_probes.py settings.py credentials.py
 )
 
@@ -40,6 +40,13 @@ fi
 say "Gate"
 (cd "$HERE/apps/agent-micropython" && "$UV" run ruff check . && "$UV" run pytest -q)
 
+say "Stamping the version"
+AGENT_VERSION="$("$HERE/tools/describe-agent-version.sh" "$HERE/apps/agent-micropython")"
+STAMP_FILE="$(mktemp)"
+trap 'rm -f "$STAMP_FILE"' EXIT
+printf 'AGENT_VERSION = "%s"\n' "$AGENT_VERSION" > "$STAMP_FILE"
+echo "$AGENT_VERSION"
+
 say "Fetching mpremote"
 # Fetched before the reset, so none of the boot grace is spent downloading it.
 "$UV" tool run mpremote version
@@ -52,6 +59,6 @@ wait_for_port
 say "Copying the agent for the $BOARD board"
 REFUSE_IF_WATCHDOG_ARMED="$(cat "$DEVICE/$BOARD_FILE")
 refuse_if_watchdog_armed()"
-(cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + cp "${AGENT_FILES[@]}" : + cp "$BOARD_FILE" :board.py + reset)
+(cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + cp "${AGENT_FILES[@]}" : + cp "$BOARD_FILE" :board.py + cp "$STAMP_FILE" :deployed_version.py + reset)
 
 say "Done. Watch it with: uv tool run mpremote connect $PORT resume repl"
