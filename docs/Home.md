@@ -24,6 +24,7 @@ the greenhouse for eight years.
 - [[Testing]]
 - [[Rules and Climate]] — the control law, thresholds, DST
 - [[Hardware]] — pins, polarity, relays, the SCD4x
+- [[Crawlspace]] — braize, the Pico W keeping the pipes under the house from freezing
 - [[Roadmap]] — phases, what is done, open questions
 - [[Web App]] — the dashboard, error handling, the stale-sensor banner
 

@@ -60,6 +60,19 @@
           "buildTarget": "server:build:production"
         }
       }
+    },
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        {
+          "externalDependencies": ["vitest"]
+        },
+        {
+          "env": "CI"
+        },
+        "{workspaceRoot}/tools/*-zone.sql"
+      ]
     }
   }
 }
