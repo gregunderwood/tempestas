@@ -7,9 +7,14 @@ set -euo pipefail
 
 HOST="elantris"
 IS_IRREVERSIBLE_ALLOWED=false
+USAGE="Usage: tools/deploy.sh [--allow-irreversible] [host]"
 for argument in "$@"; do
   case "$argument" in
     --allow-irreversible) IS_IRREVERSIBLE_ALLOWED=true ;;
+    -*)
+      echo "Unknown option $argument. $USAGE" >&2
+      exit 2
+      ;;
     *) HOST="$argument" ;;
   esac
 done
@@ -33,6 +38,7 @@ migrate_or_back_up() {
     0)
       say "No migrations; backing up anyway"
       run_oneshot "$HOST" tempestas-backup.service || stop_before_switching "The backup failed."
+      record_backup_before_migrations "$HOST" "$RELEASE_ID"
       ;;
     "$EXIT_IRREVERSIBLE_MIGRATIONS_PENDING")
       "$IS_IRREVERSIBLE_ALLOWED" || stop_before_switching \
@@ -46,9 +52,16 @@ migrate_or_back_up() {
 
 # migrate@run takes its own backup first, and applies everything in one transaction.
 apply_pending_migrations() {
+  local run_status=0
   say "Backing up and migrating with $RELEASE_ID's code"
-  run_oneshot "$HOST" tempestas-migrate@run.service ||
-    stop_before_switching "The migrations failed, and ran as one transaction, so none of them were applied."
+  run_oneshot "$HOST" tempestas-migrate@run.service || run_status=$?
+  case "$run_status" in
+    0) record_backup_before_migrations "$HOST" "$RELEASE_ID" ;;
+    "$EXIT_MIGRATIONS_APPLIED_BUT_NOT_RECORDED")
+      stop_before_switching "The migrations were applied but not recorded, so no rollback could undo them; $PREVIOUS_RELEASE_ID now runs on the new schema."
+      ;;
+    *) stop_before_switching "The migrations failed, and ran as one transaction, so none of them were applied." ;;
+  esac
 }
 
 say "Gate"
@@ -83,10 +96,14 @@ point_link_at_release "$HOST" current "$RELEASE_ID"
 restart_server "$HOST"
 
 if ! wait_until_healthy "$HOST" "$RELEASE_ID"; then
-  roll_back_release "$HOST" "$RELEASE_ID" "$PREVIOUS_RELEASE_ID" || true
-  echo "$RELEASE_ID failed its health check and was rolled back. Its release stays in $REMOTE_ROOT/releases for a look." >&2
+  if roll_back_release "$HOST" "$RELEASE_ID" "$PREVIOUS_RELEASE_ID"; then
+    echo "$RELEASE_ID failed its health check and was rolled back to $PREVIOUS_RELEASE_ID. It stays in $REMOTE_ROOT/releases for a look until the next deploy prunes it." >&2
+  else
+    echo "$RELEASE_ID failed its health check, and the rollback did not finish: what $HOST runs now is above." >&2
+  fi
   exit 1
 fi
 
+mark_release_healthy "$HOST" "$RELEASE_ID"
 prune_releases "$HOST"
 say "$HOST runs $RELEASE_ID"

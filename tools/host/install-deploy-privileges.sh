@@ -55,6 +55,7 @@ move_to_release_layout() {
     cp -al dist/apps/server 'releases/$release_id/server'
     cp -al dist/apps/web 'releases/$release_id/web'
     echo '$release_id' >'releases/$release_id/release-id'
+    touch 'releases/$release_id/healthy'
     ln -sfn 'releases/$release_id' current
     ln -sfn 'releases/$release_id' migrator"
 }

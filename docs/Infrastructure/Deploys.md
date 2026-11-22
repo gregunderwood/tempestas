@@ -21,7 +21,7 @@ problem found after a deploy passed.
 ```
 ~/tempestas/
   releases/
-    20261121-101500-e95e066/   server/  web/  release-id  applied-migrations.json
+    20261121-101500-e95e066/   server/  web/  release-id  applied-migrations.json  backup-before-migrations  healthy
     20261121-143000-1a2b3c4/   …
   current  -> releases/20261121-143000-1a2b3c4    # tempestas-server.service runs this
   migrator -> releases/20261121-143000-1a2b3c4    # tempestas-migrate@ runs this
@@ -33,7 +33,7 @@ A release ID is `<UTC time>-<commit>`, with `-dev` when the commit is not `origi
 ```bash
 tools/deploy.sh                          # elantris
 tools/deploy.sh --allow-irreversible     # when a pending migration cannot be reverted
-tools/rollback.sh                        # back to the release before current
+tools/rollback.sh                        # back to the last healthy release before current
 ```
 
 The deploy, in order:
@@ -46,18 +46,26 @@ The deploy, in order:
    something is, 4 when something pending cannot be reverted.
    - 0: back up anyway.
    - 3: `migrate@run`, which backs up first and applies everything in **one transaction**.
+   - Either way the release records which backup was taken, in `backup-before-migrations`.
    - 4: refuse, unless `--allow-irreversible`.
    - Anything else, or a failure: point `migrator` back and stop. Nothing was switched.
+   - `run` exits 5 when it applied the migrations but could not record them. The deploy stops there
+     too, and says so: no rollback could undo them.
 4. **Point `current` at it and restart.**
 5. **Health check**, for 60 s: `"db":true`, and `releaseId` is the new one, so the old process
    answering is never mistaken for the new.
 6. **Roll back if it fails**: stop the server, run `migrate@revert-applied` **with the new
    release's code**, which knows its own migrations, point both links back, restart, check again.
-7. **Prune** to the newest 3 releases, never removing what a link points at.
+7. **Mark it `healthy`** once it passes, and **prune** to the newest 3 healthy releases, never
+   removing what a link points at. A release that failed, or stopped before switching, goes with
+   the next prune.
 
 `run` writes what it applied to the release's `applied-migrations.json`. `revert-applied` reverts
-exactly that list, in one transaction, and only if those are still the newest applied migrations:
-anything applied since would be undone with it, so it refuses and asks for a revert by hand.
+exactly that list, in one transaction, and only if those are still the newest applied migrations,
+by the order they were applied rather than their timestamps: anything applied since would be undone
+with it, so it refuses and asks for a revert by hand.
+
+`rollback.sh` goes back only to a release marked `healthy`, never to one that failed its check.
 
 ### When the revert itself fails
 
@@ -65,16 +73,20 @@ Some `down`s refuse once the new code has written rows the old schema cannot hol
 [Migrations](Migrations.md)). Then the schema is still the new release's, so the rollback
 **restarts the new release**, the code that matches it, rather than leave the server stopped: a
 stopped server lets every node's dead-man fire, and the pumphouse heater is not a thing to leave
-off. It prints the `pg_restore` command for the deploy's backup. Restoring is never automatic,
-because it also throws away everything written since.
+off. It prints the `pg_restore` command for the backup that release recorded before it migrated,
+not the newest in the journal: the revert takes a backup of its own, with the wrong schema. Restoring
+is never automatic, because it also throws away everything written since.
+
+Whenever the rollback does not finish, the deploy says so and says what is running; it never
+reports a rollback that did not happen.
 
 ## Pitfalls
 
 - **Run `tools/install-deploy-privileges.sh` once before the first release deploy.** It moves the
   old `~/tempestas/dist` into a release named `<date>-before-releases`, installs the units that run
   from `current` and `migrator`, and adds the sudoers lines for `stop` and `revert-applied`. Until
-  then the deploy stops and says so. That first release predates `releaseId`, so its health is known
-  only by `"db":true`.
+  then the deploy stops and says so. That first release is marked `healthy`, since it is the one
+  running, and predates `releaseId`, so its health is known only by `"db":true`.
 - **A release is never shipped over.** The ID has the second in it; a clash means a retry within the
   same second, and the deploy stops rather than mix two builds.
 - **`migrator` is not always `current`.** During a deploy it points at the new release; a deploy that

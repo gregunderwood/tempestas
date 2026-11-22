@@ -1,14 +1,15 @@
-# Sourced by tools/deploy.sh and tools/rollback.sh: releases on a host, and moving between them.
-# Layout: ~/tempestas/releases/<id>/{server,web,release-id}, with `current` (the server runs it) and
-# `migrator` (tempestas-migrate@ runs it) linking into it. See docs/Infrastructure/Deploys.md.
+# Sourced by tools/deploy.sh and tools/rollback.sh; the layout is in docs/Infrastructure/Deploys.md.
 
 # Overridable only so tests can stand a local directory in for the host.
 REMOTE_ROOT="${TEMPESTAS_REMOTE_ROOT:-/home/gunderwood/tempestas}"
 HEALTH_URL="http://127.0.0.1:7000/api/health"
 HEALTH_TIMEOUT_SECONDS=60
 KEPT_RELEASES=3
+HEALTHY_MARKER=healthy
+BACKUP_RECORD=backup-before-migrations
 EXIT_MIGRATIONS_PENDING=3
 EXIT_IRREVERSIBLE_MIGRATIONS_PENDING=4
+EXIT_MIGRATIONS_APPLIED_BUT_NOT_RECORDED=5
 RELEASE_SYSTEMCTL_LINES=(
   "start tempestas-migrate@show.service"
   "start tempestas-migrate@run.service"
@@ -23,6 +24,9 @@ RELEASE_SYSTEMCTL_LINES=(
 describe_release_id() {
   local repository="$1"
   local stamp commit released_commit
+  if ! git -C "$repository" fetch --quiet origin main 2>/dev/null; then
+    echo "Could not fetch origin/main, so the release ID compares against the last fetch." >&2
+  fi
   stamp="$(date -u +%Y%m%d-%H%M%S)"
   commit="$(git -C "$repository" rev-parse --short=7 HEAD)"
   released_commit="$(git -C "$repository" rev-parse --short=7 --verify --quiet origin/main || true)"
@@ -55,9 +59,16 @@ point_link_at_release() {
   ssh "$host" "cd $REMOTE_ROOT && ln -sfn releases/$release_id .$link.next && mv -T .$link.next $link"
 }
 
-list_releases_older_than() {
+# Only releases that passed a health check: a failed or half-shipped one is no place to go back to.
+list_healthy_releases_older_than() {
   local host="$1" release_id="$2"
-  ssh "$host" "ls -1 $REMOTE_ROOT/releases" | sort | awk -v newest="$release_id" '$0 < newest'
+  ssh "$host" "cd $REMOTE_ROOT/releases && ls -1d -- */$HEALTHY_MARKER 2>/dev/null" |
+    cut -d/ -f1 | sort | awk -v newest="$release_id" '$0 < newest'
+}
+
+mark_release_healthy() {
+  local host="$1" release_id="$2"
+  ssh "$host" "touch $REMOTE_ROOT/releases/$release_id/$HEALTHY_MARKER"
 }
 
 # Node modules are hard-linked from the previous release when the lockfile has not changed.
@@ -151,51 +162,72 @@ read_newest_backup() {
   ssh "$1" "journalctl -u tempestas-backup.service -n 50 -o cat" | sed -n 's/^Backup written: \([^ ]*\).*/\1/p' | tail -n 1
 }
 
-print_restore_instructions() {
-  local host="$1" release_id="$2" backup="${3:-<the newest dump in /var/backups/tempestas>}"
-  echo "Restoring is never automatic: it also discards everything written since the backup." >&2
-  echo "If you decide to, restore $backup, taken before the revert, and run $release_id, whose schema it has:" >&2
-  echo "  ssh -t $host 'sudo systemctl stop tempestas-server.service && sudo -u postgres pg_restore --clean --if-exists --dbname tempestas $backup && cd $REMOTE_ROOT && ln -sfn releases/$release_id current && ln -sfn releases/$release_id migrator && sudo systemctl start tempestas-server.service'" >&2
+# Kept in the release, because a later backup in the journal can already hold this release's schema.
+record_backup_before_migrations() {
+  local host="$1" release_id="$2"
+  local backup
+  backup="$(read_newest_backup "$host")"
+  ssh "$host" "printf '%s\n' $(printf '%q' "$backup") >$REMOTE_ROOT/releases/$release_id/$BACKUP_RECORD"
 }
 
-# Reverts with the failing release's code, which knows its migrations, and in one transaction.
+print_restore_instructions() {
+  local host="$1" failing_release_id="$2" target_release_id="$3"
+  local backup
+  backup="$(ssh "$host" "cat $REMOTE_ROOT/releases/$failing_release_id/$BACKUP_RECORD 2>/dev/null" || true)"
+  backup="${backup:-<the dump taken before $failing_release_id migrated, in /var/backups/tempestas>}"
+  echo "Restoring is never automatic: it also discards everything written since the backup." >&2
+  echo "If you decide to, restore $backup, taken before $failing_release_id migrated, and run $target_release_id, whose schema it has:" >&2
+  echo "  ssh -t $host 'sudo systemctl stop tempestas-server.service && sudo -u postgres pg_restore --clean --if-exists --dbname tempestas $backup && cd $REMOTE_ROOT && ln -sfn releases/$target_release_id current && ln -sfn releases/$target_release_id migrator && sudo systemctl start tempestas-server.service'" >&2
+}
+
+# A stopped server lets every node's dead-man fire; the pumphouse heater is not a thing to leave off.
+keep_failing_release_running() {
+  local host="$1" failing_release_id="$2" target_release_id="$3"
+  echo "The revert did not run, so the schema is still $failing_release_id's. Restarting $failing_release_id, the code that matches it." >&2
+  point_link_at_release "$host" migrator "$failing_release_id" || true
+  restart_server "$host" || true
+  wait_until_healthy "$host" "$failing_release_id" || true
+  print_restore_instructions "$host" "$failing_release_id" "$target_release_id"
+}
+
+# Reverts with the failing release's code; every step is checked, as a caller's `if` turns `set -e` off in here.
 roll_back_release() {
   local host="$1" failing_release_id="$2" target_release_id="$3"
-  local backup_with_target_schema
   say "Rolling back from $failing_release_id to $target_release_id"
-  # The revert takes a backup of its own, with the failing release's schema, so read this one first.
-  backup_with_target_schema="$(read_newest_backup "$host")"
-  stop_server "$host"
-  point_link_at_release "$host" migrator "$failing_release_id"
-  if ! run_oneshot "$host" tempestas-migrate@revert-applied.service; then
-    # A stopped server lets every node's dead-man fire; the pumphouse heater is not a thing to leave off.
-    echo "The revert did not run, so the schema is still $failing_release_id's. Restarting $failing_release_id, the code that matches it." >&2
-    restart_server "$host"
-    wait_until_healthy "$host" "$failing_release_id" || true
-    print_restore_instructions "$host" "$target_release_id" "$backup_with_target_schema"
+  if ! stop_server "$host"; then
+    echo "Could not stop the server, so nothing was reverted and $failing_release_id still runs." >&2
     return 1
   fi
-  point_link_at_release "$host" current "$target_release_id"
-  point_link_at_release "$host" migrator "$target_release_id"
-  restart_server "$host"
-  if ! wait_until_healthy "$host" "$target_release_id"; then
+  if ! point_link_at_release "$host" migrator "$failing_release_id" ||
+    ! run_oneshot "$host" tempestas-migrate@revert-applied.service; then
+    keep_failing_release_running "$host" "$failing_release_id" "$target_release_id"
+    return 1
+  fi
+  if ! point_link_at_release "$host" current "$target_release_id" ||
+    ! point_link_at_release "$host" migrator "$target_release_id"; then
+    echo "The revert ran, so the schema is $target_release_id's, but the links did not move and the server is stopped. Finish by hand:" >&2
+    echo "  ssh $host 'cd $REMOTE_ROOT && ln -sfn releases/$target_release_id current && ln -sfn releases/$target_release_id migrator && sudo systemctl restart tempestas-server.service'" >&2
+    return 1
+  fi
+  if ! restart_server "$host" || ! wait_until_healthy "$host" "$target_release_id"; then
     echo "$target_release_id did not come back healthy either. Check: ssh $host journalctl -u tempestas-server.service -n 50" >&2
     return 1
   fi
 }
 
-# The newest few, and never what `current` or `migrator` point at.
+# The newest few healthy releases, and whatever `current` or `migrator` point at.
 prune_releases() {
   local host="$1"
-  ssh "$host" bash -s -- "$REMOTE_ROOT" "$KEPT_RELEASES" <<'REMOTE'
+  ssh "$host" bash -s -- "$REMOTE_ROOT" "$KEPT_RELEASES" "$HEALTHY_MARKER" <<'REMOTE'
 set -euo pipefail
-root="$1" kept_releases="$2"
-in_use=" $(basename "$(readlink "$root/current")") $(basename "$(readlink "$root/migrator")") "
+root="$1" kept_releases="$2" healthy_marker="$3"
 cd "$root/releases"
-for release_id in $(ls -1 | sort | head -n "-$kept_releases"); do
-  case "$in_use" in
+newest_healthy="$(ls -1d -- */"$healthy_marker" 2>/dev/null | cut -d/ -f1 | sort | tail -n "$kept_releases" | tr '\n' ' ')"
+kept=" $(basename "$(readlink "$root/current")") $(basename "$(readlink "$root/migrator")") $newest_healthy "
+for release_id in *; do
+  case "$kept" in
     *" $release_id "*) ;;
-    *) rm -rf "$release_id" ;;
+    *) rm -rf -- "$release_id" ;;
   esac
 done
 REMOTE

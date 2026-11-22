@@ -18,6 +18,7 @@ const EXIT_UNKNOWN_COMMAND = 2;
 // tools/deploy.sh migrates before it switches on these statuses from `show`.
 export const EXIT_MIGRATIONS_PENDING = 3;
 export const EXIT_IRREVERSIBLE_MIGRATIONS_PENDING = 4;
+export const EXIT_MIGRATIONS_APPLIED_BUT_NOT_RECORDED = 5;
 const MIGRATIONS_TABLE = 'migrations';
 
 // Beside server/ in a release, so each release remembers what it applied and can undo exactly that.
@@ -103,17 +104,28 @@ async function runPendingMigrations(
   source: DataSource,
   appliedMigrationsFile: string,
 ): Promise<number> {
+  // Read before migrating, so an unreadable record stops the run before it changes anything.
+  const appliedBefore = readAppliedMigrations(appliedMigrationsFile);
   const applied = await source.runMigrations({ transaction: 'all' });
   if (applied.length === 0) {
     console.log('No migrations were pending.');
   }
-  for (const migration of applied) {
-    console.log(`Applied ${migration.name}`);
+  const appliedNames = applied.map((migration) => migration.name);
+  for (const name of appliedNames) {
+    console.log(`Applied ${name}`);
   }
-  writeAppliedMigrations(appliedMigrationsFile, [
-    ...readAppliedMigrations(appliedMigrationsFile),
-    ...applied.map((migration) => migration.name),
-  ]);
+  try {
+    writeAppliedMigrations(appliedMigrationsFile, [
+      ...appliedBefore,
+      ...appliedNames,
+    ]);
+  } catch (writeError) {
+    console.error(
+      `Applied ${appliedNames.join(', ')}, but could not record them in ${appliedMigrationsFile} ` +
+        `(${String(writeError)}), so revert-applied cannot undo them; revert by hand`,
+    );
+    return EXIT_MIGRATIONS_APPLIED_BUT_NOT_RECORDED;
+  }
   return EXIT_SUCCESS;
 }
 
@@ -142,13 +154,13 @@ async function revertAppliedMigrations(
   return EXIT_SUCCESS;
 }
 
-// Anything applied since this release ran would be undone with it, so refuse rather than guess.
+// By insertion order, not timestamp: a branch merged late can apply an older timestamp after a newer one.
 async function requireNewestExecuted(
   source: DataSource,
   newestFirst: string[],
 ) {
   const executed: { name: string }[] = await source.query(
-    `SELECT "name" FROM "${MIGRATIONS_TABLE}" ORDER BY "timestamp" DESC LIMIT $1`,
+    `SELECT "name" FROM "${MIGRATIONS_TABLE}" ORDER BY "id" DESC LIMIT $1`,
     [newestFirst.length],
   );
   const newestExecuted = executed.map((row) => row.name);

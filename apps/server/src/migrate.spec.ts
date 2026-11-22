@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   EXIT_IRREVERSIBLE_MIGRATIONS_PENDING,
+  EXIT_MIGRATIONS_APPLIED_BUT_NOT_RECORDED,
   EXIT_MIGRATIONS_PENDING,
   runMigrationCommand,
 } from './migrate';
@@ -22,6 +23,8 @@ const database = vi.hoisted(() => ({
   newestExecuted: [] as { name: string }[],
   revertedNames: [] as string[],
   wasCommitted: false,
+  wasRun: false,
+  newestExecutedQuery: '',
 }));
 
 vi.mock('typeorm', async (importOriginal) => {
@@ -35,9 +38,11 @@ vi.mock('typeorm', async (importOriginal) => {
       return undefined;
     }
     async runMigrations() {
+      database.wasRun = true;
       return database.appliedByRun;
     }
-    async query() {
+    async query(sql: string) {
+      database.newestExecutedQuery = sql;
       return database.newestExecuted;
     }
     createQueryRunner() {
@@ -83,6 +88,8 @@ beforeEach(() => {
   database.newestExecuted = [];
   database.revertedNames = [];
   database.wasCommitted = false;
+  database.wasRun = false;
+  database.newestExecutedQuery = '';
 });
 
 // tools/deploy.sh decides whether to migrate, and whether to ask for a flag, from these statuses alone.
@@ -128,6 +135,32 @@ describe('migrate:run', () => {
 
     expect(readNames(appliedMigrationsFile)).toEqual(['AddA1']);
   });
+
+  it('applies nothing when the record cannot be read', async () => {
+    const appliedMigrationsFile = makeAppliedMigrationsFile();
+    writeFileSync(appliedMigrationsFile, '{ not json');
+    database.appliedByRun = [{ name: 'AddB2' }];
+
+    await expect(
+      runMigrationCommand('run', { appliedMigrationsFile }),
+    ).rejects.toThrow();
+    expect(database.wasRun).toBe(false);
+  });
+
+  // tools/deploy.sh would otherwise say nothing was applied, and a rollback would not undo it.
+  it('says the migrations were applied when only the record failed', async () => {
+    const appliedMigrationsFile = join(
+      makeAppliedMigrationsFile(),
+      '..',
+      'missing-directory',
+      'applied.json',
+    );
+    database.appliedByRun = [{ name: 'AddB2' }];
+
+    expect(await runMigrationCommand('run', { appliedMigrationsFile })).toBe(
+      EXIT_MIGRATIONS_APPLIED_BUT_NOT_RECORDED,
+    );
+  });
 });
 
 describe('migrate:revert-applied', () => {
@@ -160,6 +193,15 @@ describe('migrate:revert-applied', () => {
     ).rejects.toThrow(/revert by hand/);
     expect(database.wasCommitted).toBe(false);
     expect(readNames(appliedMigrationsFile)).toEqual(['AddA1']);
+  });
+
+  it('finds the newest by the order they were applied, not by timestamp', async () => {
+    const appliedMigrationsFile = makeAppliedMigrationsFile(['AddA1']);
+    database.newestExecuted = [{ name: 'AddA1' }];
+
+    await runMigrationCommand('revert-applied', { appliedMigrationsFile });
+
+    expect(database.newestExecutedQuery).toMatch(/ORDER BY "id" DESC/);
   });
 });
 
