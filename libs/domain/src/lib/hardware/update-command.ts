@@ -94,6 +94,9 @@ export function isUpdateStatusPayload(
 ): value is UpdateStatusPayload {
   if (!isJsonObject(value)) return false;
   if (schemaMajor(value['schema']) !== MQTT_CONTRACT_MAJOR) return false;
+  if (!isNonEmptyString(value['node']) || !isNonEmptyString(value['ts'])) {
+    return false;
+  }
   if (!isNonEmptyString(value['id'])) return false;
   if (!UPDATE_STATES.has(value['state'])) return false;
   return value['reason'] === undefined || typeof value['reason'] === 'string';
@@ -128,8 +131,11 @@ function judgeExpiry(
   if (typeof expiresAt !== 'string') {
     return logOnly('update has no expiresAt');
   }
+  if (!ISO_8601_INSTANT.test(expiresAt)) {
+    return logOnly(`unparseable expiresAt "${expiresAt}"`);
+  }
   const deadline = new Date(expiresAt);
-  if (!ISO_8601_INSTANT.test(expiresAt) || Number.isNaN(deadline.getTime())) {
+  if (Number.isNaN(deadline.getTime())) {
     return logOnly(`unparseable expiresAt "${expiresAt}"`);
   }
   if (deadline < now) {

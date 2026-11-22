@@ -161,6 +161,7 @@ each agent's own judge must agree with its spec.
 | not JSON, or an unknown schema major           | logged only                             |
 | no controller bound yet                        | logged only                             |
 | `issuedBy` ≠ bound controller                  | alarm `CONTROLLER_CONFLICT`             |
+| clock not set yet (the Pico, before NTP)       | logged only                             |
 | past `expiresAt`                               | alarm `COMMAND_EXPIRED`                 |
 | missing or unparseable `expiresAt`, or no `id` | logged only                             |
 | `app` is not the agent this node runs          | `update/status` `failed`, with a reason |
@@ -170,8 +171,10 @@ each agent's own judge must agree with its spec.
 These are the `gpio/set` rules with one difference: a node with no bound controller yet takes
 `gpio/set` from any issuer, but refuses every `update`. Replacing code can wait the few seconds until
 the first heartbeat binds the node, and in that window the broker ACL would otherwise be the only
-guard. The last three come from the server, which needs to hear why its update went
-nowhere. A node never crosses a contract major on its own: that needs the server to move first.
+guard. The unset-clock row is the Pico's own guard, checked before expiry: the reference judge
+always has a time, so it has no such case. The last three come from the server, which needs to
+hear why its update went nowhere. A node never crosses a contract major on its own: that needs
+the server to move first.
 
 Integrity rests on two hashes: `manifestSha256` arrives in a command only the server can publish,
 and the manifest it pins carries a sha256 for every file. The bundles are not signed.

@@ -225,6 +225,8 @@ describe('isUpdateStatusPayload', () => {
   it.each([
     ['not an object', 'healthy'],
     ['another schema major', { ...status, schema: 'updateStatus/2' }],
+    ['no node', { ...status, node: undefined }],
+    ['no timestamp', { ...status, ts: '' }],
     ['no command id', { ...status, id: '' }],
     ['an unknown state', { ...status, state: 'done' }],
     ['a reason that is not text', { ...status, reason: 42 }],
