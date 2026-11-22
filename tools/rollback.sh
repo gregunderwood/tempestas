@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tools/rollback.sh [host]
-# For a problem found after a deploy passed its health check: back to the last healthy release before.
+# For a problem found after a deploy passed its health check: back to the release it replaced.
 
 set -euo pipefail
 
@@ -19,9 +19,9 @@ require_passwordless_systemctl "$HOST" "${RELEASE_SYSTEMCTL_LINES[@]}"
 require_release_layout "$HOST"
 
 CURRENT_RELEASE_ID="$(read_release_behind "$HOST" current)"
-TARGET_RELEASE_ID="$(list_healthy_releases_older_than "$HOST" "$CURRENT_RELEASE_ID" | tail -n 1)"
+TARGET_RELEASE_ID="$(read_previous_release "$HOST" "$CURRENT_RELEASE_ID")"
 if [ -z "$TARGET_RELEASE_ID" ]; then
-  echo "$HOST keeps no healthy release older than $CURRENT_RELEASE_ID to go back to." >&2
+  echo "$HOST no longer keeps the release $CURRENT_RELEASE_ID replaced, so there is nothing to go back to." >&2
   exit 1
 fi
 

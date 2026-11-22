@@ -21,7 +21,7 @@ problem found after a deploy passed.
 ```
 ~/tempestas/
   releases/
-    20261121-101500-e95e066/   server/  web/  release-id  applied-migrations.json  backup-before-migrations  healthy
+    20261121-101500-e95e066/   server/  web/  release-id  previous-release  applied-migrations.json  backup-before-migrations  healthy
     20261121-143000-1a2b3c4/   …
   current  -> releases/20261121-143000-1a2b3c4    # tempestas-server.service runs this
   migrator -> releases/20261121-143000-1a2b3c4    # tempestas-migrate@ runs this
@@ -33,15 +33,16 @@ A release ID is `<UTC time>-<commit>`, with `-dev` when the commit is not `origi
 ```bash
 tools/deploy.sh                          # elantris
 tools/deploy.sh --allow-irreversible     # when a pending migration cannot be reverted
-tools/rollback.sh                        # back to the last healthy release before current
+tools/rollback.sh                        # back to the release current replaced
 ```
 
 The deploy, in order:
 
 1. **The gate and the web build**, here. Never on the Pi: a build there puts the burner controller
    in reach of the OOM killer.
-2. **Ship** the new release beside the live one. `node_modules` is hard-linked from the live
-   release when the lockfile is unchanged, otherwise `npm ci` runs on the host.
+2. **Ship** the new release beside the live one, recording the live one's ID in
+   `previous-release`. `node_modules` is hard-linked from the live release when the lockfile is
+   unchanged, otherwise `npm ci` runs on the host.
 3. **Point `migrator` at it** and run `migrate:show`, which exits 0 when nothing is pending, 3 when
    something is, 4 when something pending cannot be reverted.
    - 0: back up anyway.
@@ -59,26 +60,28 @@ The deploy, in order:
    answering is never mistaken for the new. A failure to switch or restart counts as a failed check.
 6. **Roll back if it fails**: stop the server, run `migrate@revert-applied` **with the new
    release's code**, which knows its own migrations, point both links back, restart, check again.
-7. **Mark it `healthy`** once it passes, and **prune** to the newest 3 healthy releases, never
-   removing what a link points at. A release that failed, or stopped before switching, goes with
-   the next prune.
+7. **Mark it `healthy`** once it passes, and **prune** to `current` and the two releases a
+   rollback would go back through from it, following `previous-release`, plus whatever `migrator`
+   points at. A release that failed, or stopped before switching, goes with the next prune.
 
 `run` writes what it applied to the release's `applied-migrations.json`. `revert-applied` reverts
 exactly that list, in one transaction, and only if those are still the newest applied migrations,
 by the order they were applied rather than their timestamps: anything applied since would be undone
 with it, so it refuses and asks for a revert by hand.
 
-`rollback.sh` goes back only to a release marked `healthy`, never to one that failed its check. A
-rollback unmarks the release it leaves: its migrations are reverted, so a later deploy that applies
-them again would leave it behind the schema.
+`rollback.sh` goes back to the release in `previous-release`: the one that ran when current
+shipped, so the only one whose schema reverting current's migrations leaves. A rollback never
+skips a release, as one skipped could still have its migrations applied.
 
 ### When the revert itself fails
 
 Some `down`s refuse once the new code has written rows the old schema cannot hold (see
-[Migrations](Migrations.md)). Then the schema is still the new release's, so the rollback
-**restarts the new release**, the code that matches it, rather than leave the server stopped: a
-stopped server lets every node's dead-man fire, and the pumphouse heater is not a thing to leave
-off. It prints the `pg_restore` command for the backup that release recorded before it migrated,
+[Migrations](Migrations.md)), and a revert whose backup fails never runs. Then the schema is still
+the new release's. Expand-contract means both releases run on it, so rather than leave the server
+stopped, the rollback **restarts whichever of the two is marked `healthy`**: the release before,
+when a deploy's new release failed its check; the current one, for a `rollback.sh`. A stopped
+server lets every node's dead-man fire, and the pumphouse heater is not a thing to leave off.
+`migrator` stays on the new release, whose list still names what is applied. It prints the `pg_restore` command for the backup that release recorded before it migrated,
 not the newest in the journal: the revert takes a backup of its own, with the wrong schema. Restoring
 is never automatic, because it also throws away everything written since.
 
@@ -99,6 +102,8 @@ reports a rollback that did not happen.
   at.
 - **Each rollback reverts what the release it leaves applied**, and clears that release's list.
   Rolling back twice reverts two deploys' migrations, newest first.
+- **A unit change ships only with `tools/install-deploy-privileges.sh`.** The deploy ships
+  releases, not `apps/server/systemd/`; rerun the installer after changing a unit there.
 - **greenhouse** runs Postgres in Docker and has no backup unit, so the deploy stops there at the
   privilege check. It is for elantris.
 

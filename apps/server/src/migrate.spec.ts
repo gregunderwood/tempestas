@@ -136,6 +136,15 @@ describe('migrate:run', () => {
     expect(readNames(appliedMigrationsFile)).toEqual(['AddA1']);
   });
 
+  it('lists a migration once when a hand revert and a run apply it again', async () => {
+    const appliedMigrationsFile = makeAppliedMigrationsFile(['AddA1', 'AddB2']);
+    database.appliedByRun = [{ name: 'AddB2' }];
+
+    await runMigrationCommand('run', { appliedMigrationsFile });
+
+    expect(readNames(appliedMigrationsFile)).toEqual(['AddA1', 'AddB2']);
+  });
+
   it('applies nothing when the record cannot be read', async () => {
     const appliedMigrationsFile = makeAppliedMigrationsFile();
     writeFileSync(appliedMigrationsFile, '{ not json');

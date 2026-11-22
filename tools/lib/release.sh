@@ -11,6 +11,7 @@ COMMIT_ID_LENGTH=7
 KEPT_RELEASES=3
 HEALTHY_MARKER=healthy
 BACKUP_RECORD=backup-before-migrations
+PREVIOUS_RECORD=previous-release
 EXIT_MIGRATIONS_PENDING=3
 EXIT_IRREVERSIBLE_MIGRATIONS_PENDING=4
 EXIT_MIGRATIONS_APPLIED_BUT_NOT_RECORDED=5
@@ -63,11 +64,10 @@ point_link_at_release() {
   ssh "$host" "cd $REMOTE_ROOT && ln -sfn releases/$release_id .$link.next && mv -T .$link.next $link"
 }
 
-# Only releases that passed a health check: a failed or half-shipped one is no place to go back to.
-list_healthy_releases_older_than() {
+# The release that ran when this one shipped: the only one whose schema reverting this release's migrations leaves.
+read_previous_release() {
   local host="$1" release_id="$2"
-  ssh "$host" "cd $REMOTE_ROOT/releases && ls -1d -- */$HEALTHY_MARKER 2>/dev/null" |
-    cut -d/ -f1 | sort | awk -v newest="$release_id" '$0 < newest'
+  ssh "$host" "cd $REMOTE_ROOT/releases && previous_release_id=\"\$(cat $release_id/$PREVIOUS_RECORD 2>/dev/null)\" && test -d \"\$previous_release_id\" && echo \"\$previous_release_id\"" || true
 }
 
 mark_release_healthy() {
@@ -75,10 +75,9 @@ mark_release_healthy() {
   ssh "$host" "touch $REMOTE_ROOT/releases/$release_id/$HEALTHY_MARKER"
 }
 
-# A release left by a rollback has had its migrations reverted, so it no longer matches any schema to come.
-unmark_release_healthy() {
+is_release_healthy() {
   local host="$1" release_id="$2"
-  ssh "$host" "rm -f $REMOTE_ROOT/releases/$release_id/$HEALTHY_MARKER"
+  ssh "$host" "test -e $REMOTE_ROOT/releases/$release_id/$HEALTHY_MARKER"
 }
 
 # Node modules are hard-linked from the previous release when the lockfile has not changed.
@@ -92,10 +91,12 @@ ship_release() {
   ssh "$host" "mkdir -p $release_dir"
   rsync -a "$repository/dist/apps/server/" "$host:$release_dir/server/"
   rsync -a "$repository/dist/apps/web/browser/" "$host:$release_dir/web/"
-  ssh "$host" bash -s -- "$release_dir" "$release_id" "$REMOTE_ROOT/releases/$previous_release_id" <<'REMOTE'
+  ssh "$host" bash -s -- "$release_dir" "$release_id" "$previous_release_id" "$PREVIOUS_RECORD" <<'REMOTE'
 set -euo pipefail
-release_dir="$1" release_id="$2" previous_release_dir="$3"
+release_dir="$1" release_id="$2" previous_release_id="$3" previous_record="$4"
+previous_release_dir="$(dirname "$release_dir")/$previous_release_id"
 echo "$release_id" >"$release_dir/release-id"
+echo "$previous_release_id" >"$release_dir/$previous_record"
 cd "$release_dir/server"
 if [ -d "$previous_release_dir/server/node_modules" ] &&
   cmp -s package-lock.json "$previous_release_dir/server/package-lock.json"; then
@@ -208,12 +209,18 @@ print_restore_instructions() {
 }
 
 # A stopped server lets every node's dead-man fire; the pumphouse heater is not a thing to leave off.
-keep_failing_release_running() {
+# Expand-contract lets either release run on this schema, so the one that passed its health check runs.
+keep_a_release_running() {
   local host="$1" failing_release_id="$2" target_release_id="$3" why="$4"
-  echo "$why Restarting $failing_release_id, the code that matches its schema." >&2
+  local running_release_id="$target_release_id"
+  if is_release_healthy "$host" "$failing_release_id"; then
+    running_release_id="$failing_release_id"
+  fi
+  echo "$why Restarting $running_release_id, the one of the two that passed its health check." >&2
   point_link_at_release "$host" migrator "$failing_release_id" || true
+  point_link_at_release "$host" current "$running_release_id" || true
   restart_server "$host" || true
-  wait_until_healthy "$host" "$failing_release_id" || true
+  wait_until_healthy "$host" "$running_release_id" || true
   print_restore_instructions "$host" "$failing_release_id" "$target_release_id"
 }
 
@@ -226,7 +233,7 @@ roll_back_release() {
     return 1
   fi
   if ! point_link_at_release "$host" migrator "$failing_release_id"; then
-    keep_failing_release_running "$host" "$failing_release_id" "$target_release_id" \
+    keep_a_release_running "$host" "$failing_release_id" "$target_release_id" \
       "Could not point migrator at $failing_release_id, so nothing was reverted."
     return 1
   fi
@@ -236,12 +243,12 @@ roll_back_release() {
         echo "The revert reported a failure, but $failing_release_id's migrations are no longer applied, so the rollback goes on." >&2
         ;;
       applied)
-        keep_failing_release_running "$host" "$failing_release_id" "$target_release_id" \
+        keep_a_release_running "$host" "$failing_release_id" "$target_release_id" \
           "The revert did not run, so the schema is still $failing_release_id's."
         return 1
         ;;
       *)
-        keep_failing_release_running "$host" "$failing_release_id" "$target_release_id" \
+        keep_a_release_running "$host" "$failing_release_id" "$target_release_id" \
           "Could not tell whether the revert ran; check: ssh $host journalctl -u tempestas-migrate@revert-applied.service -n 50."
         return 1
         ;;
@@ -253,24 +260,27 @@ roll_back_release() {
     echo "  ssh $host 'cd $REMOTE_ROOT && ln -sfn releases/$target_release_id current && ln -sfn releases/$target_release_id migrator && sudo systemctl restart tempestas-server.service'" >&2
     return 1
   fi
-  if ! unmark_release_healthy "$host" "$failing_release_id"; then
-    echo "Remove $REMOTE_ROOT/releases/$failing_release_id/$HEALTHY_MARKER by hand, or a later rollback.sh may go back to it." >&2
-  fi
   if ! restart_server "$host" || ! wait_until_healthy "$host" "$target_release_id"; then
     echo "$target_release_id did not come back healthy either. Check: ssh $host journalctl -u tempestas-server.service -n 50" >&2
     return 1
   fi
 }
 
-# The newest few healthy releases, and whatever `current` or `migrator` point at.
+# `current` and the releases a rollback.sh would go back through from it, and whatever `migrator` points at.
 prune_releases() {
   local host="$1"
-  ssh "$host" bash -s -- "$REMOTE_ROOT" "$KEPT_RELEASES" "$HEALTHY_MARKER" <<'REMOTE'
+  ssh "$host" bash -s -- "$REMOTE_ROOT" "$KEPT_RELEASES" "$PREVIOUS_RECORD" <<'REMOTE'
 set -euo pipefail
-root="$1" kept_releases="$2" healthy_marker="$3"
+root="$1" kept_releases="$2" previous_record="$3"
 cd "$root/releases"
-newest_healthy="$(ls -1d -- */"$healthy_marker" 2>/dev/null | cut -d/ -f1 | sort | tail -n "$kept_releases" | tr '\n' ' ')"
-kept=" $(basename "$(readlink "$root/current")") $(basename "$(readlink "$root/migrator")") $newest_healthy "
+kept=" $(basename "$(readlink "$root/migrator")") "
+kept_count=0
+chained_release_id="$(basename "$(readlink "$root/current")")"
+while [ -n "$chained_release_id" ] && [ "$kept_count" -lt "$kept_releases" ]; do
+  kept="$kept$chained_release_id "
+  kept_count=$((kept_count + 1))
+  chained_release_id="$(cat "$chained_release_id/$previous_record" 2>/dev/null || true)"
+done
 for release_id in *; do
   case "$kept" in
     *" $release_id "*) ;;

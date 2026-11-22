@@ -107,19 +107,18 @@ async function runPendingMigrations(
   // Read before migrating, so an unreadable record stops the run before it changes anything.
   const appliedBefore = readAppliedMigrations(appliedMigrationsFile);
   const applied = await source.runMigrations({ transaction: 'all' });
-  if (applied.length === 0) {
-    console.log('No migrations were pending.');
-  }
   const appliedNames = applied.map((migration) => migration.name);
   if (appliedNames.length === 0) {
+    console.log('No migrations were pending.');
     return EXIT_SUCCESS;
   }
   for (const name of appliedNames) {
     console.log(`Applied ${name}`);
   }
+  // A hand revert and a run apply a name again; listed twice, revert-applied would never match the database.
   try {
     writeAppliedMigrations(appliedMigrationsFile, [
-      ...appliedBefore,
+      ...appliedBefore.filter((name) => !appliedNames.includes(name)),
       ...appliedNames,
     ]);
   } catch (writeError) {

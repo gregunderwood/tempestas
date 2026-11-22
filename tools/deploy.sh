@@ -118,7 +118,7 @@ if ! point_link_at_release "$HOST" current "$RELEASE_ID" ||
 fi
 
 if ! mark_release_healthy "$HOST" "$RELEASE_ID"; then
-  echo "$RELEASE_ID runs, but could not be marked healthy, so rollback.sh will not go back to it and prune skips it." >&2
+  echo "$RELEASE_ID runs, but could not be marked healthy, so a rollback whose revert fails restarts $PREVIOUS_RELEASE_ID rather than it." >&2
 fi
 prune_releases "$HOST" || echo "Could not prune old releases on $HOST; the next deploy tries again." >&2
 say "$HOST runs $RELEASE_ID"
