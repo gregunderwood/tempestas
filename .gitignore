@@ -60,3 +60,6 @@ __pycache__/
 
 # Sandbox runtime state: pids, logs, generated broker credentials.
 tools/sandbox/run/
+
+# Nested git worktrees; Nx project discovery also relies on this to skip their duplicate projects.
+.claude/worktrees/
