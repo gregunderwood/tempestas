@@ -32,7 +32,7 @@ green test run and only fails in the webpack/Angular builds. Phase 4.5 shipped t
 `Object.hasOwn` against a `lib: es2020` target, and a union that needed `=== false` to narrow —
 both invisible until `build` ran. The builds exclude specs, so a type error in a spec is caught
 only by `typecheck`, which checks each project's `tsconfig.spec.json` as well as its app or lib
-config.
+config, and checks the Cypress specs and `cypress.config.ts` in `apps/web-e2e`.
 
 ### TypeScript
 
