@@ -41,9 +41,13 @@ install_backup_unit() {
 
 run_as_deploy_user() { runuser -u "$DEPLOY_USER" -- bash -c "$1"; }
 
+has_release_layout_or_nothing_to_move() {
+  [ -e "$TEMPESTAS_ROOT/current" ] || [ ! -f "$TEMPESTAS_ROOT/dist/apps/server/main.js" ]
+}
+
 # Hard links, so the running server's files stay where they are and nothing is copied twice.
 move_to_release_layout() {
-  if [ -e "$TEMPESTAS_ROOT/current" ] || [ ! -f "$TEMPESTAS_ROOT/dist/apps/server/main.js" ]; then
+  if has_release_layout_or_nothing_to_move; then
     return
   fi
   local release_id

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -161,7 +161,20 @@ describe('migrate:run', () => {
       EXIT_MIGRATIONS_APPLIED_BUT_NOT_RECORDED,
     );
   });
+
+  it('succeeds when nothing was pending, even where the record cannot be written', async () => {
+    const appliedMigrationsFile = join(
+      makeAppliedMigrationsFile(),
+      '..',
+      'missing-directory',
+      'applied.json',
+    );
+
+    expect(await runMigrationCommand('run', { appliedMigrationsFile })).toBe(0);
+  });
 });
+
+const READ_ONLY = 0o444;
 
 describe('migrate:revert-applied', () => {
   it('does nothing when this release applied nothing', async () => {
@@ -193,6 +206,18 @@ describe('migrate:revert-applied', () => {
     ).rejects.toThrow(/revert by hand/);
     expect(database.wasCommitted).toBe(false);
     expect(readNames(appliedMigrationsFile)).toEqual(['AddA1']);
+  });
+
+  // tools/deploy.sh would otherwise restart the failing release on the schema the revert just changed.
+  it('succeeds once the revert is committed, even when the record cannot be cleared', async () => {
+    const appliedMigrationsFile = makeAppliedMigrationsFile(['AddA1']);
+    chmodSync(appliedMigrationsFile, READ_ONLY);
+    database.newestExecuted = [{ name: 'AddA1' }];
+
+    expect(
+      await runMigrationCommand('revert-applied', { appliedMigrationsFile }),
+    ).toBe(0);
+    expect(database.wasCommitted).toBe(true);
   });
 
   it('finds the newest by the order they were applied, not by timestamp', async () => {

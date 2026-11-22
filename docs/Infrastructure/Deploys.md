@@ -51,9 +51,12 @@ The deploy, in order:
    - Anything else, or a failure: point `migrator` back and stop. Nothing was switched.
    - `run` exits 5 when it applied the migrations but could not record them. The deploy stops there
      too, and says so: no rollback could undo them.
+   - When `run` or `revert-applied` fails, the deploy asks `show` what the database now holds
+     rather than trusting the status: a dropped ssh or a record that would not write can fail a
+     command whose transaction committed.
 4. **Point `current` at it and restart.**
 5. **Health check**, for 60 s: `"db":true`, and `releaseId` is the new one, so the old process
-   answering is never mistaken for the new.
+   answering is never mistaken for the new. A failure to switch or restart counts as a failed check.
 6. **Roll back if it fails**: stop the server, run `migrate@revert-applied` **with the new
    release's code**, which knows its own migrations, point both links back, restart, check again.
 7. **Mark it `healthy`** once it passes, and **prune** to the newest 3 healthy releases, never
@@ -65,7 +68,9 @@ exactly that list, in one transaction, and only if those are still the newest ap
 by the order they were applied rather than their timestamps: anything applied since would be undone
 with it, so it refuses and asks for a revert by hand.
 
-`rollback.sh` goes back only to a release marked `healthy`, never to one that failed its check.
+`rollback.sh` goes back only to a release marked `healthy`, never to one that failed its check. A
+rollback unmarks the release it leaves: its migrations are reverted, so a later deploy that applies
+them again would leave it behind the schema.
 
 ### When the revert itself fails
 

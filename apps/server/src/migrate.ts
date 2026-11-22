@@ -111,6 +111,9 @@ async function runPendingMigrations(
     console.log('No migrations were pending.');
   }
   const appliedNames = applied.map((migration) => migration.name);
+  if (appliedNames.length === 0) {
+    return EXIT_SUCCESS;
+  }
   for (const name of appliedNames) {
     console.log(`Applied ${name}`);
   }
@@ -150,7 +153,14 @@ async function revertAppliedMigrations(
   for (const name of newestFirst) {
     console.log(`Reverted ${name}`);
   }
-  writeAppliedMigrations(appliedMigrationsFile, []);
+  // The revert is committed either way, so a record that cannot be cleared is a warning, not a failure.
+  try {
+    writeAppliedMigrations(appliedMigrationsFile, []);
+  } catch (writeError) {
+    console.error(
+      `Could not clear ${appliedMigrationsFile} (${String(writeError)}); do not run revert-applied for this release again`,
+    );
+  }
   return EXIT_SUCCESS;
 }
 

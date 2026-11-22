@@ -60,7 +60,21 @@ apply_pending_migrations() {
     "$EXIT_MIGRATIONS_APPLIED_BUT_NOT_RECORDED")
       stop_before_switching "The migrations were applied but not recorded, so no rollback could undo them; $PREVIOUS_RELEASE_ID now runs on the new schema."
       ;;
-    *) stop_before_switching "The migrations failed, and ran as one transaction, so none of them were applied." ;;
+    *) stop_after_failed_run "$run_status" ;;
+  esac
+}
+
+stop_after_failed_run() {
+  local run_status="$1"
+  local journal="ssh $HOST journalctl -u tempestas-migrate@run.service -u tempestas-backup.service -n 50"
+  case "$(read_migration_state "$HOST")" in
+    pending)
+      stop_before_switching "The backup or the migrations failed (status $run_status). They run as one transaction, so none were applied."
+      ;;
+    applied)
+      stop_before_switching "The run reported status $run_status, but the migrations are applied, so $PREVIOUS_RELEASE_ID now runs on the new schema. Check: $journal"
+      ;;
+    *) stop_before_switching "Could not tell whether the migrations ran (status $run_status). Check: $journal" ;;
   esac
 }
 
@@ -92,18 +106,19 @@ say "Migrations"
 migrate_or_back_up
 
 say "Switching to $RELEASE_ID"
-point_link_at_release "$HOST" current "$RELEASE_ID"
-restart_server "$HOST"
-
-if ! wait_until_healthy "$HOST" "$RELEASE_ID"; then
+if ! point_link_at_release "$HOST" current "$RELEASE_ID" ||
+  ! restart_server "$HOST" ||
+  ! wait_until_healthy "$HOST" "$RELEASE_ID"; then
   if roll_back_release "$HOST" "$RELEASE_ID" "$PREVIOUS_RELEASE_ID"; then
-    echo "$RELEASE_ID failed its health check and was rolled back to $PREVIOUS_RELEASE_ID. It stays in $REMOTE_ROOT/releases for a look until the next deploy prunes it." >&2
+    echo "$RELEASE_ID did not come up healthy and was rolled back to $PREVIOUS_RELEASE_ID. It stays in $REMOTE_ROOT/releases for a look until the next deploy prunes it." >&2
   else
-    echo "$RELEASE_ID failed its health check, and the rollback did not finish: what $HOST runs now is above." >&2
+    echo "$RELEASE_ID did not come up healthy, and the rollback did not finish: what $HOST runs now is above." >&2
   fi
   exit 1
 fi
 
-mark_release_healthy "$HOST" "$RELEASE_ID"
-prune_releases "$HOST"
+if ! mark_release_healthy "$HOST" "$RELEASE_ID"; then
+  echo "$RELEASE_ID runs, but could not be marked healthy, so rollback.sh will not go back to it and prune skips it." >&2
+fi
+prune_releases "$HOST" || echo "Could not prune old releases on $HOST; the next deploy tries again." >&2
 say "$HOST runs $RELEASE_ID"

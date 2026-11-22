@@ -93,6 +93,9 @@ Raspbian ships.
    sudo systemd-analyze verify tempestas-server.service
    ```
 
+   The server and migrate units run from `~/tempestas/current` and `migrator`, which step 8
+   creates, so the server starts after step 8, not here.
+
    Install them as they are in the repo, and never edit one on the box: an edit there is
    invisible from here. Check a box with
    `diff /etc/systemd/system/tempestas-agent.service ~/tempestas/apps/agent-linux/systemd/tempestas-agent.service`.
@@ -122,8 +125,8 @@ Raspbian ships.
    It moves `~/tempestas/dist` into `~/tempestas/releases/<date>-before-releases`,
    links `current` and `migrator` to it, and installs the server and migrate units,
    which run from those links. It installs `tempestas-backup.service` where the server runs on
-   `postgresql.service`, and makes every migrate `run` and `revert` require
-   it, then writes `/etc/sudoers.d/tempestas-deploy`: the deploy user may run
+   `postgresql.service`, and makes every migrate `run`, `revert` and
+   `revert-applied` require it, then writes `/etc/sudoers.d/tempestas-deploy`: the deploy user may run
    exactly the `systemctl` lines a deploy uses (show migrations, restart or
    stop or reset the server, restart the agent, and where there is a backup unit,
    back up and run or revert migrations) without a password, and nothing
