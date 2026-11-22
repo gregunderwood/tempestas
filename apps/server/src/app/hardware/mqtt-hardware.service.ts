@@ -116,6 +116,7 @@ export class MqttHardwareService
   private readonly lastActedAt = new Map<string, number>();
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private commandCount = 0;
+  private connectCount = 0;
 
   private readonly controllerId = `nestjs-${process.pid}`;
   private readonly epoch: number;
@@ -205,6 +206,8 @@ export class MqttHardwareService
       clientId: `tempestas-server-${process.pid}`,
       // A persistent session is a queue of commands waiting to replay on reconnect.
       clean: true,
+      // Ours is the only subscribe, so its acknowledgement is a real SUBACK, not a library shortcut.
+      resubscribe: false,
       reconnectPeriod: RECONNECT_PERIOD_MS,
       connectTimeout: CONNECT_TIMEOUT_MS,
       ...(username ? { username } : {}),
@@ -232,8 +235,7 @@ export class MqttHardwareService
   ): void {
     client.on('connect', () => {
       this.logger.log(`Connected to ${url} as ${clientId}`);
-      void this.announceServerOnline();
-      this.subscribeToAllNodes(client);
+      void this.subscribeThenAnnounceOnline(client);
       this.startHeartbeat();
     });
     client.on('message', (topic, payload, packet) => {
@@ -248,16 +250,32 @@ export class MqttHardwareService
     client.on('close', () => this.logger.warn('Broker connection closed'));
   }
 
-  private subscribeToAllNodes(client: MqttClient): void {
-    client.subscribe(mqttTopics.allNodes, SUBSCRIBE_OPTIONS, (error) => {
-      if (error) {
-        this.logger.error(
-          `Failed to subscribe to ${mqttTopics.allNodes}: ${error.message}`,
-        );
-        return;
-      }
+  // Every node answers `online` with a hello, which is not retained and is lost without the SUBACK.
+  private async subscribeThenAnnounceOnline(client: MqttClient): Promise<void> {
+    const connectNumber = ++this.connectCount;
+    await this.subscribeToAllNodes(client);
+    // Queued while disconnected, it would replay ahead of the next connect's subscribe.
+    if (!this.isStillConnectedAs(client, connectNumber)) return;
+    // Even after a refused subscribe: the server is connected and heartbeating, and a retained `offline` says not.
+    await this.announceServerOnline();
+  }
+
+  private isStillConnectedAs(
+    client: MqttClient,
+    connectNumber: number,
+  ): boolean {
+    return client.connected && connectNumber === this.connectCount;
+  }
+
+  private async subscribeToAllNodes(client: MqttClient): Promise<void> {
+    try {
+      await client.subscribeAsync(mqttTopics.allNodes, SUBSCRIBE_OPTIONS);
       this.logger.log(`Subscribed to ${mqttTopics.allNodes}`);
-    });
+    } catch (error: unknown) {
+      this.logger.error(
+        `Failed to subscribe to ${mqttTopics.allNodes}, so no hello or reading will arrive: ${describeError(error)}`,
+      );
+    }
   }
 
   private stopHeartbeat(): void {
