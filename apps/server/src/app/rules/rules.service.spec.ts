@@ -683,6 +683,56 @@ describe('publishing each rules cycle', () => {
     }
   });
 
+  it('says it is following as soon as it boots, without waiting for a tick', async () => {
+    const { service, publishSystemStatus } = makeService({ isLeader: false });
+    await service.onApplicationBootstrap();
+    expect(publishSystemStatus).toHaveBeenCalledTimes(1);
+    expect(publishSystemStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ isLeading: false, lastEvaluationAt: null }),
+    );
+  });
+
+  it('boots as a follower even when the node counts cannot be read', async () => {
+    const { service, nodes, publishSystemStatus } = makeService({
+      isLeader: false,
+    });
+    vi.mocked(nodes.counts).mockRejectedValueOnce(new Error('db gone'));
+    await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+    expect(publishSystemStatus).not.toHaveBeenCalled();
+  });
+
+  // Before its first evaluation a leader cannot know whether a sensor is stale, so it must not claim none is.
+  it('leaves a leader to announce itself with its first evaluation', async () => {
+    const { service, publishSystemStatus } = makeService();
+    await service.onApplicationBootstrap();
+    expect(publishSystemStatus).not.toHaveBeenCalled();
+  });
+
+  it('tells browsers it is following on the same tick that it is demoted', async () => {
+    const { service, hardware, publishSystemStatus } = makeService({
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    await service.tick();
+    hardware.isLeader = false;
+    await service.tick();
+    expect(publishSystemStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({ isLeading: false }),
+    );
+  });
+
+  it('tells browsers it is leading on the first tick after promotion', async () => {
+    const { service, hardware, publishSystemStatus } = makeService({
+      isLeader: false,
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    await service.tick();
+    hardware.isLeader = true;
+    await service.tick();
+    expect(publishSystemStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({ isLeading: true }),
+    );
+  });
+
   it('publishes no cycle when a follower is asked to evaluate', async () => {
     const { service, publishRulesCycle } = makeService({ isLeader: false });
     await service.evaluateAll();

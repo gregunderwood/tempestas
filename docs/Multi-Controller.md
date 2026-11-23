@@ -228,6 +228,9 @@ What a follower's server does today, in `MqttHardwareService`:
 - **It refuses `setPin` and `syncPins` locally** with `CONTROLLER_IS_FOLLOWER`. The node would deny
   the command anyway, but as a `CONTROLLER_CONFLICT` alarm, and a click on a follower's UI must not
   manufacture a real incident signal.
+- **It says so to browsers**, from `RulesService`: `system:status` carries `isLeading: false`
+  from boot, and the zones page reads "This controller is a follower; rules run on the leader"
+  instead of a stall alert.
 
 That is enough for "take over if wanted", it cannot split-brain, and it needs no consensus library.
 Automatic failover can come later, and when it does the honest way to get it is a **third witness**
