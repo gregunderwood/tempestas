@@ -21,6 +21,8 @@ sometimes with wet hands. Angular 20 standalone components, Angular Material M3,
 - [../apps/web/src/app/features/dashboard/activity-log.ts](../apps/web/src/app/features/dashboard/activity-log.ts) — rules decisions and relay switches, newest first
 - [../apps/web/src/app/core/live-nodes.ts](../apps/web/src/app/core/live-nodes.ts) — the nodes, fetched and patched from `node:state`
 - [../apps/web/src/app/features/nodes/nodes-page.ts](../apps/web/src/app/features/nodes/nodes-page.ts) — every node, with admit and disable
+- [../apps/web/src/app/shared/pinboard/pinboard.ts](../apps/web/src/app/shared/pinboard/pinboard.ts) — the card board, with drag and drop and the move buttons
+- [../apps/web/src/app/shared/arrange/card-order.ts](../apps/web/src/app/shared/arrange/card-order.ts) — card order: a drop or a move, merging a saved order, browser storage
 - [../apps/web/src/app/features/nodes/node-detail.ts](../apps/web/src/app/features/nodes/node-detail.ts) — one node, with its 24-hour statistics
 - [../apps/web/src/app/features/reports/reports-page.ts](../apps/web/src/app/features/reports/reports-page.ts) — the reports screen, a placeholder naming the reports to come
 - [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme, the rail and hero tokens, and the gauge band colours
@@ -275,7 +277,32 @@ a removed card leaves its gap, so neither moves the others. The whole board repa
 is first being measured and when the column count changes. After a column change it measures
 every card once the new columns are drawn and packs again from those heights, because a card that
 did not change size reports nothing on its own. Moving a card rebuilds it, which would drop
-keyboard focus inside it.
+keyboard focus inside it. A change of card order also repacks the whole board, in the new order.
+
+### Arrange mode
+
+The order of the cards is a person's choice, not alphabetical. On the dashboard and the zones
+page the top bar has an **Arrange** button. Only while it is pressed does each card show a
+labelled **Drag** handle and **Move earlier** and **Move later** buttons, so a scroll on a phone is
+never taken as a drag. The board says it is arranging in words as well, and the pressed button
+carries a tick, so the mode is never shown by colour alone. Every handle and button is at least
+3rem tall. **Reset order** sits beside Arrange while it is on.
+
+- **Dragging** uses `@angular/cdk/drag-drop`, one drop list per pinboard column, joined by
+  `cdkDropListGroup`. A drop becomes a position in the card order: just before the card the dragged
+  one landed above, or just after the last card of the column it landed at the foot of.
+- **The move buttons** are the keyboard and screen reader route, since CDK dragging is pointer
+  only. Each step swaps a card with its neighbour in the order, and focus follows the card to the
+  same button even when it changes column.
+- **The order is kept in `localStorage`**, under `tempestas.card-order.dashboard` and
+  `tempestas.card-order.zones`, so each browser has its own arrangement and nothing is written to
+  the server. A card missing from the saved order, such as a newly admitted node, goes at the end.
+  A saved entry for a card that no longer exists is ignored. Storage that is blocked, full or holds
+  anything but a list of strings falls back to the default order without an error.
+
+The order logic is plain functions in `shared/arrange/card-order.ts`, specced there.
+`injectCardArrangement` binds a page's order to the top bar's buttons through the root
+`ArrangeMode` service, and leaving the page withdraws it and turns Arrange off.
 
 ### Each card still shows a reading's age
 

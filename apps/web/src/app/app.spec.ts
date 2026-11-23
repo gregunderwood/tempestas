@@ -7,6 +7,10 @@ import { ApiService } from './core/api.service';
 import { RealtimeService } from './core/realtime.service';
 import { PageHeading } from './core/page-heading';
 import { fakeRealtime } from './testing/fake-realtime';
+import {
+  ArrangeMode,
+  CardArrangement,
+} from './shared/arrange/card-arrangement';
 import type { SystemStatus } from '@tempestas/domain';
 
 function statusOf(overrides: Partial<SystemStatus> = {}): SystemStatus {
@@ -241,5 +245,43 @@ describe('App shell menu', () => {
     await navigateTo(fixture, '/reports');
     expect(nav?.classList.contains('temp-rail-open')).toBe(false);
     expect(menuButton?.getAttribute('aria-expanded')).toBe('false');
+  });
+});
+
+describe('App shell top bar arranging', () => {
+  function arrangeButtons(element: HTMLElement): string[] {
+    return Array.from(
+      element.querySelectorAll('.temp-top-bar .temp-top-bar-button'),
+    ).map((button) => button.textContent?.trim() ?? '');
+  }
+
+  it('offers Arrange only on a page with cards to arrange', () => {
+    const { fixture, element } = renderShell(statusOf());
+    expect(arrangeButtons(element)).toEqual([]);
+
+    const arrangeMode = TestBed.inject(ArrangeMode);
+    arrangeMode.offer(
+      new CardArrangement(null, 'test', arrangeMode.isArranging),
+    );
+    fixture.detectChanges();
+
+    expect(arrangeButtons(element)).toEqual(['Arrange']);
+  });
+
+  it('labels Arrange as pressed and adds Reset order while arranging', () => {
+    const { fixture, element } = renderShell(statusOf());
+    const arrangeMode = TestBed.inject(ArrangeMode);
+    arrangeMode.offer(
+      new CardArrangement(null, 'test', arrangeMode.isArranging),
+    );
+    fixture.detectChanges();
+
+    element.querySelector<HTMLButtonElement>('[aria-pressed]')?.click();
+    fixture.detectChanges();
+
+    expect(arrangeButtons(element)).toEqual(['Reset order', 'Arrange']);
+    expect(
+      element.querySelector('[aria-pressed]')?.getAttribute('aria-pressed'),
+    ).toBe('true');
   });
 });

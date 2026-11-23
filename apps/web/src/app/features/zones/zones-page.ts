@@ -15,6 +15,7 @@ import { injectLiveReadings } from '../../core/live-readings';
 import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
 import { RealtimeService } from '../../core/realtime.service';
 import { injectServerNow } from '../../core/server-now';
+import { injectCardArrangement } from '../../shared/arrange/card-arrangement';
 import { Pinboard } from '../../shared/pinboard/pinboard';
 import { buildZoneCards, type ZoneCard } from './zone-view';
 import { formatDuration } from './zone-words';
@@ -22,6 +23,15 @@ import { formatDuration } from './zone-words';
 const CLOCK_TICK_MILLISECONDS = 1_000;
 const ZONE_COLUMN_MINIMUM_REM = 24;
 const ZONE_COLUMN_MAXIMUM_REM = 36;
+export const ZONES_CARD_ORDER_KEY = 'tempestas.card-order.zones';
+
+function identifyZoneCard(zone: ZoneCard): string {
+  return zone.id;
+}
+
+function nameZoneCard(zone: ZoneCard): string {
+  return zone.name;
+}
 
 interface NamedSource {
   name: string;
@@ -58,8 +68,11 @@ interface NamedSource {
     <temp-pinboard
       [items]="cards()"
       [identify]="identifyZoneCard"
+      [nameOf]="nameZoneCard"
       [columnMinimumRem]="zoneColumnMinimumRem"
       [columnMaximumRem]="zoneColumnMaximumRem"
+      [isArranging]="cardArrangement.isArranging()"
+      (reordered)="cardArrangement.save($event)"
     >
       <ng-template let-zone>
         <mat-card
@@ -574,6 +587,8 @@ export class ZonesPage {
   private readonly readings = injectLiveReadings();
   private readonly devices = injectLiveDevices();
   private readonly now = injectServerNow(CLOCK_TICK_MILLISECONDS);
+  protected readonly cardArrangement =
+    injectCardArrangement(ZONES_CARD_ORDER_KEY);
 
   private readonly sources: NamedSource[] = [
     { name: 'zones', sourceState: this.zones.sourceState },
@@ -603,20 +618,24 @@ export class ZonesPage {
 
   protected readonly zoneColumnMinimumRem = ZONE_COLUMN_MINIMUM_REM;
   protected readonly zoneColumnMaximumRem = ZONE_COLUMN_MAXIMUM_REM;
-  protected readonly identifyZoneCard = (zone: ZoneCard) => zone.id;
+  protected readonly identifyZoneCard = identifyZoneCard;
+  protected readonly nameZoneCard = nameZoneCard;
 
   readonly cards = computed(() => {
     const hasEverySource =
       !this.isLoading() && this.failedSources().length === 0;
     if (!hasEverySource) return [];
-    return buildZoneCards({
-      zones: this.zones.latest()?.payload ?? [],
-      cycle: this.cycle.cycle(),
-      nodes: this.nodes.latest()?.payload ?? [],
-      readings: this.readings.readings(),
-      devices: this.devices.devices(),
-      now: this.now(),
-    });
+    return this.cardArrangement.arrange(
+      buildZoneCards({
+        zones: this.zones.latest()?.payload ?? [],
+        cycle: this.cycle.cycle(),
+        nodes: this.nodes.latest()?.payload ?? [],
+        readings: this.readings.readings(),
+        devices: this.devices.devices(),
+        now: this.now(),
+      }),
+      identifyZoneCard,
+    );
   });
 
   private nameSourcesIn(state: SourceState): string[] {

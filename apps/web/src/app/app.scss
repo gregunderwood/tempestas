@@ -162,6 +162,39 @@ $tap-target: 3rem;
   top: 6px;
 }
 
+.temp-arrange {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5rem;
+}
+
+.temp-top-bar-button {
+  min-height: $tap-target;
+  padding: 0 1rem;
+  border: 1px solid var(--mat-sys-outline);
+  border-radius: $tap-target;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.temp-top-bar-button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.temp-top-bar-button-active {
+  background: var(--mat-sys-secondary-container);
+  color: var(--mat-sys-on-secondary-container);
+  font-weight: 700;
+}
+
+.temp-top-bar-button-active::before {
+  content: '✓ ' / '';
+}
+
 .temp-visually-hidden {
   position: absolute;
   width: 1px;
@@ -199,7 +232,14 @@ $tap-target: 3rem;
   }
 
   .temp-top-bar {
+    flex-wrap: wrap;
     padding: 0.5rem 1rem 0.5rem 0.5rem;
+  }
+
+  .temp-arrange {
+    order: 1;
+    flex-basis: 100%;
+    justify-content: flex-end;
   }
 }
 

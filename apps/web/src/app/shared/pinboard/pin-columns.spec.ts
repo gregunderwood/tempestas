@@ -1,5 +1,6 @@
 import {
   countColumns,
+  hasReordered,
   keepColumnAssignment,
   packIntoColumns,
 } from './pin-columns';
@@ -113,5 +114,19 @@ describe('keepColumnAssignment', () => {
       measureHeight,
     );
     expect(namesOf(columns)).toEqual([['greenhouse'], ['pumphouse']]);
+  });
+});
+
+describe('hasReordered', () => {
+  it('is false for the same order', () => {
+    expect(hasReordered(['a', 'b', 'c'], ['a', 'b', 'c'])).toBe(false);
+  });
+
+  it('is false when cards only arrive or depart', () => {
+    expect(hasReordered(['a', 'b', 'c'], ['a', 'c', 'd'])).toBe(false);
+  });
+
+  it('is true when two cards that stayed swap places', () => {
+    expect(hasReordered(['a', 'b', 'c'], ['b', 'a', 'c'])).toBe(true);
   });
 });
