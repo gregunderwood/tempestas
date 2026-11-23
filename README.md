@@ -43,3 +43,15 @@ raises temperature and CO2, the fan lowers them — so the whole stack works wit
 Start at **[docs/Home.md](docs/Home.md)**. If you are an agent, start at **[AGENTS.md](AGENTS.md)**.
 
 ⚠ Before touching anything that can energise a relay, read **[docs/Safety.md](docs/Safety.md)**.
+
+## License
+
+Tempestas is free software under the **[GNU AGPL-3.0](LICENSE.txt)**. You can use, study, change
+and share it for any purpose. If you distribute it, or run a modified copy as a network service,
+you must release your changes under the same license.
+
+If that doesn't fit, for example in a closed-source product or a hosted service, a
+**[commercial license](COMMERCIAL-LICENSE.md)** is available. Contributions are welcome under the
+terms in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+
+Copyright © 2026 Greg Underwood.
