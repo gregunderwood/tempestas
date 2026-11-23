@@ -98,8 +98,10 @@ reports a rollback that did not happen.
 - **A release is never shipped over.** The ID has the second in it; a clash means a retry within the
   same second, and the deploy stops rather than mix two builds.
 - **`migrator` is not always `current`.** During a deploy it points at the new release; a deploy that
-  stops before switching points it back. A hand-run `tempestas-migrate@run` uses whatever it points
-  at.
+  stops before switching points it back. After a failed revert it stays on the release whose
+  migrations are still applied, and a deploy cut short leaves it on the new one. While the two
+  differ, `deploy.sh` and `rollback.sh` refuse to start and print how to put `migrator` back. A
+  hand-run `tempestas-migrate@run` uses whatever it points at.
 - **Each rollback reverts what the release it leaves applied**, and clears that release's list.
   Rolling back twice reverts two deploys' migrations, newest first.
 - **A unit change ships only with `tools/install-deploy-privileges.sh`.** The deploy ships

@@ -17,11 +17,12 @@ source "$HERE/tools/lib/release.sh"
 
 require_passwordless_systemctl "$HOST" "${RELEASE_SYSTEMCTL_LINES[@]}"
 require_release_layout "$HOST"
+require_migrator_on_current "$HOST"
 
 CURRENT_RELEASE_ID="$(read_release_behind "$HOST" current)"
 TARGET_RELEASE_ID="$(read_previous_release "$HOST" "$CURRENT_RELEASE_ID")"
 if [ -z "$TARGET_RELEASE_ID" ]; then
-  echo "$HOST no longer keeps the release $CURRENT_RELEASE_ID replaced, so there is nothing to go back to." >&2
+  echo "$HOST keeps no release before $CURRENT_RELEASE_ID to go back to." >&2
   exit 1
 fi
 

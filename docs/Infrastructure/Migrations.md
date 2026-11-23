@@ -39,7 +39,9 @@ pending: that is the answer, not an error.
 
 `run` applies everything pending in one transaction, and records what it applied in the release's
 `applied-migrations.json`; `revert-applied` reverts exactly that, in one transaction, which is how
-a rollback undoes a deploy.
+a rollback undoes a deploy. A hand `revert` and `run` record what they apply as the `migrator`
+release's own, so revert by hand only that release's migrations, or its rollback undoes the others
+too.
 
 ```bash
 ssh elantris journalctl -u tempestas-migrate@run.service -n 20 -o cat   # what it applied

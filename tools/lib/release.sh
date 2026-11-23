@@ -58,6 +58,20 @@ read_release_behind() {
   ssh "$host" "readlink $REMOTE_ROOT/$link" | xargs -r basename
 }
 
+# Apart only when a revert failed or a deploy was cut short; moving migrator then loses the record of what is applied.
+require_migrator_on_current() {
+  local host="$1" current_release_id migrator_release_id
+  current_release_id="$(read_release_behind "$host" current)"
+  migrator_release_id="$(read_release_behind "$host" migrator)"
+  if [ "$current_release_id" = "$migrator_release_id" ]; then
+    return
+  fi
+  echo "$host runs $current_release_id, but migrator is on $migrator_release_id: a revert failed or a deploy was cut short." >&2
+  echo "Once $migrator_release_id's migrations are reverted, or were never applied, point migrator back:" >&2
+  echo "  ssh $host 'sudo systemctl start tempestas-migrate@revert-applied.service && cd $REMOTE_ROOT && ln -sfn releases/$current_release_id migrator'" >&2
+  exit 1
+}
+
 # Renamed into place, so the link is never missing for an instant.
 point_link_at_release() {
   local host="$1" link="$2" release_id="$3"
@@ -221,7 +235,18 @@ keep_a_release_running() {
   point_link_at_release "$host" current "$running_release_id" || true
   restart_server "$host" || true
   wait_until_healthy "$host" "$running_release_id" || true
+  print_retry_instructions "$host" "$failing_release_id" "$target_release_id" "$running_release_id"
   print_restore_instructions "$host" "$failing_release_id" "$target_release_id"
+}
+
+print_retry_instructions() {
+  local host="$1" failing_release_id="$2" target_release_id="$3" running_release_id="$4"
+  if [ "$running_release_id" = "$failing_release_id" ]; then
+    echo "Once the revert can run, tools/rollback.sh $host tries again." >&2
+    return
+  fi
+  echo "Once the revert can run, retry it with $failing_release_id's code, which migrator still points at:" >&2
+  echo "  ssh $host 'sudo systemctl start tempestas-migrate@revert-applied.service && cd $REMOTE_ROOT && ln -sfn releases/$target_release_id migrator'" >&2
 }
 
 # Reverts with the failing release's code; every step is checked, as a caller's `if` turns `set -e` off in here.

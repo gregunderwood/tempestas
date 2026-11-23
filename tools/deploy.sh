@@ -94,6 +94,7 @@ fi
 say "Checking $HOST is ready for a release"
 require_passwordless_systemctl "$HOST" "${RELEASE_SYSTEMCTL_LINES[@]}"
 require_release_layout "$HOST"
+require_migrator_on_current "$HOST"
 
 RELEASE_ID="$(describe_release_id "$HERE")"
 PREVIOUS_RELEASE_ID="$(read_release_behind "$HOST" current)"
