@@ -18,8 +18,8 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
 // tools/deploy.sh ships a bundle under a dot-name and renames it into place once complete.
 const PARTIAL_BUNDLE_PREFIX = '.';
 const AGENT_APPS = new Set<unknown>(Object.values(AgentApp));
+const MISSING_FILE_CODE = 'ENOENT';
 
-/** A verified bundle: every file its manifest lists is there, with the hash the manifest gives. */
 export interface AgentReleaseBundle {
   release: AgentRelease;
   manifestFile: string;
@@ -38,8 +38,11 @@ export async function readVerifiedBundles(
   reportRejected: ReportRejectedBundle,
 ): Promise<AgentReleaseBundle[]> {
   const bundles: AgentReleaseBundle[] = [];
-  for (const app of await listDirectories(root)) {
-    for (const version of await listDirectories(join(root, app))) {
+  for (const app of await listDirectories(root, reportRejected)) {
+    for (const version of await listDirectories(
+      join(root, app),
+      reportRejected,
+    )) {
       const bundleDirectory = join(root, app, version);
       try {
         bundles.push(await readVerifiedBundle(bundleDirectory, app, version));
@@ -179,9 +182,18 @@ async function readListedFile(onDisk: string, path: string): Promise<Buffer> {
   }
 }
 
-async function listDirectories(directory: string): Promise<string[]> {
+// Only a missing directory is quietly empty: an unreadable one would otherwise look like no bundles at all.
+async function listDirectories(
+  directory: string,
+  reportRejected: ReportRejectedBundle,
+): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true }).catch(
-    () => [],
+    (failure: NodeJS.ErrnoException) => {
+      if (failure.code !== MISSING_FILE_CODE) {
+        reportRejected(directory, failure.message);
+      }
+      return [];
+    },
   );
   return entries
     .filter((entry) => entry.isDirectory())

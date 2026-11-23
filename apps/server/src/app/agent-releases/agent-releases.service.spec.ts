@@ -59,6 +59,24 @@ describe('AgentReleasesService.findAvailableUpdate', () => {
     expect(service.findAvailableUpdate(linuxAgent())).toBeNull();
   });
 
+  it('offers a later contract major an update from its first minor', async () => {
+    const service = await makeServiceOffering([AgentApp.Linux, '2.0.1']);
+
+    expect(
+      service.findAvailableUpdate(
+        linuxAgent({
+          agentVersion: '2.0.0',
+          // The type allows only contract 1 until a contract 2 exists.
+          capabilities: {
+            ...ON_CONTRACT_1_1,
+            contractVersion: 2,
+            contractMinor: 0,
+          } as unknown as NodeCapabilities,
+        }),
+      ),
+    ).toBe('2.0.1');
+  });
+
   it('offers nothing to a node before contract 1.1, which never subscribes to update', async () => {
     const service = await makeServiceOffering([AgentApp.Linux, '1.1.4']);
 

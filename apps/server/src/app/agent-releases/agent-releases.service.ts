@@ -4,7 +4,7 @@ import {
   compareAgentVersions,
   isNewerAgentVersion,
   parseAgentVersion,
-  UPDATE_COMMAND_CONTRACT_MINOR,
+  UPDATE_COMMAND_CONTRACT,
   type AgentRelease,
   type AgentVersionNumbers,
   type NodeCapabilities,
@@ -104,6 +104,15 @@ export class AgentReleasesService implements OnModuleInit {
 function canTakeUpdateCommand(agent: RunningAgent): boolean {
   return (
     AGENT_APPS.has(agent.agentName) &&
-    (agent.capabilities.contractMinor ?? 0) >= UPDATE_COMMAND_CONTRACT_MINOR
+    isOnContractWithUpdateCommand(agent.capabilities)
   );
+}
+
+function isOnContractWithUpdateCommand(capabilities: NodeCapabilities): boolean {
+  const major = capabilities.contractVersion;
+  const minor = capabilities.contractMinor ?? 0;
+  if (major !== UPDATE_COMMAND_CONTRACT.major) {
+    return major > UPDATE_COMMAND_CONTRACT.major;
+  }
+  return minor >= UPDATE_COMMAND_CONTRACT.minor;
 }

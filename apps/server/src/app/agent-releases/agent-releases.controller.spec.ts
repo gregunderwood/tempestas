@@ -2,7 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { AgentApp, type AgentRelease } from '@tempestas/domain';
+import { AgentApp, ApiErrorCode, type AgentRelease } from '@tempestas/domain';
 import { API_PREFIX } from '../common/api-prefix';
 import { BUNDLE_FILES_DIRECTORY, MANIFEST_FILE } from './agent-release-bundles';
 import { AgentReleasesController } from './agent-releases.controller';
@@ -103,5 +103,15 @@ describe('AgentReleasesController', () => {
 
     expect(response.status).toBe(404);
     expect(await response.text()).not.toContain(bundleDirectory);
+  });
+
+  it('carries a machine-readable code on a 404', async () => {
+    const response = await fetch(
+      `${baseUrl}/agent-linux/1.1.5/${MANIFEST_FILE}`,
+    );
+
+    expect(await response.json()).toMatchObject({
+      code: ApiErrorCode.NotFound,
+    });
   });
 });

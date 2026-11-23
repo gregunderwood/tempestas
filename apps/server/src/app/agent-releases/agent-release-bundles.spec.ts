@@ -1,4 +1,4 @@
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AgentApp, type AgentReleaseFile } from '@tempestas/domain';
 import {
@@ -11,6 +11,9 @@ import {
   sha256Of,
   writeBundle,
 } from './agent-release-bundles.fixtures';
+
+const UNREADABLE = 0o000;
+const READABLE = 0o700;
 
 async function readBundles(root: string) {
   const rejections: string[] = [];
@@ -129,6 +132,18 @@ describe('readVerifiedBundles', () => {
     writeBundle(root, AgentApp.Linux, '.1.1.4');
 
     expect(await readBundles(root)).toEqual({ bundles: [], rejections: [] });
+  });
+
+  it('reports a directory it cannot read, rather than offering nothing quietly', async () => {
+    const root = makeAgentReleasesRoot();
+    writeBundle(root, AgentApp.Linux, '1.1.4');
+    chmodSync(root, UNREADABLE);
+
+    const { bundles, rejections } = await readBundles(root);
+    chmodSync(root, READABLE);
+
+    expect(bundles).toEqual([]);
+    expect(rejections).toEqual([expect.stringContaining('EACCES')]);
   });
 
   it('offers nothing, quietly, when there is no directory yet', async () => {

@@ -82,8 +82,9 @@ An agent's minor says what it accepts, not what its mirror knows. It raises its 
 handles that minor's commands, so it may sit behind `MQTT_CONTRACT_MINOR` but never ahead, and the
 contract-match tests allow exactly that. A node on minor 1 or later takes `update`.
 
-The patch counts that agent's commits since the contract version last changed, so every change to
-an agent raises it, in order, without bumping it by hand. That only holds for released code, so
+The patch counts commits to that agent, or to the list of files it ships in
+[tools/lib/agent-files.sh](../../tools/lib/agent-files.sh), since the contract version last
+changed, so every change to what an agent runs raises it, in order, without bumping it by hand. That only holds for released code, so
 anything else is marked: [tools/describe-agent-version.sh](../../tools/describe-agent-version.sh)
 builds the version, and the deploy scripts stamp it.
 
@@ -190,6 +191,11 @@ downloading → verifying → installing → restarting → healthy
 
 `rolled-back` means the new version was installed and did not come up healthy, so the previous one
 is running again. `failed` means it never got that far and nothing changed. Both carry a `reason`.
+
+A node installs every file the manifest lists at its path, with one exception. A MicroPython bundle
+carries every board under `boards/`, and the node also installs `boards/<its board>.py` as
+`board.py`, which is what the code imports, as the hand deploy does. Without it, a fix to a board
+file would report the new version while the old pins still run.
 
 ## The retained-command trap
 

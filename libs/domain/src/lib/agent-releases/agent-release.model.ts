@@ -3,7 +3,6 @@ import type { AgentApp } from '../hardware/mqtt-contract';
 const AGENT_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.+-]+)?$/;
 const RELEASED_AGENT_VERSION = /^\d+\.\d+\.\d+$/;
 
-/** `<contract major>.<contract minor>.<patch>`, the numbers of an agent version. */
 export interface AgentVersionNumbers {
   major: number;
   minor: number;
@@ -25,7 +24,6 @@ export interface AgentReleaseManifest {
   files: AgentReleaseFile[];
 }
 
-/** A bundle the server offers, from `GET /api/agent-releases`. */
 export interface AgentRelease {
   app: AgentApp;
   version: string;

@@ -27,19 +27,22 @@ build_agent_bundles() {
 build_agent_bundle() {
   local repository="$1" app="$2" output_root="$3"
   local version bundle_dir
-  version="$("$repository/tools/describe-agent-version.sh" "$repository/apps/$app")"
+  if ! version="$("$repository/tools/describe-agent-version.sh" "$repository/apps/$app")"; then
+    echo "$app has no version to bundle under; the server deploy goes on without it." >&2
+    return
+  fi
   if ! [[ "$version" =~ $RELEASED_AGENT_VERSION ]]; then
     echo "$app $version is not a clean origin/main build, so it is not bundled." >&2
     return
   fi
   bundle_dir="$output_root/$app/$version"
   mkdir -p "$bundle_dir/$BUNDLE_FILES_DIRECTORY"
-  if ! copy_agent_files "$repository" "$app" "$bundle_dir/$BUNDLE_FILES_DIRECTORY" "$version"; then
+  if ! copy_agent_files "$repository" "$app" "$bundle_dir/$BUNDLE_FILES_DIRECTORY" "$version" ||
+    ! write_bundle_manifest "$bundle_dir" "$app" "$version"; then
     rm -rf "$bundle_dir"
     echo "$app $version is not bundled; the server deploy goes on without it." >&2
     return
   fi
-  write_bundle_manifest "$bundle_dir" "$app" "$version"
   echo "Bundled $app $version"
 }
 
@@ -102,7 +105,7 @@ write_bundle_manifest() {
     ' "$app" "$version" >"$bundle_dir/$BUNDLE_MANIFEST"
 }
 
-# A version already on the host is never shipped over; a new one lands under a dot-name the server skips, then is renamed.
+# A version already on the host is never shipped over. A failed ship leaves only a dot-name, which the server skips and prune clears.
 ship_agent_bundles() {
   local host="$1" output_root="$2"
   local bundle_dir app version remote_app_dir
@@ -113,13 +116,19 @@ ship_agent_bundles() {
     remote_app_dir="$REMOTE_ROOT/$AGENT_RELEASES_DIRECTORY/$app"
     if ssh "$host" "test -e $remote_app_dir/$version"; then
       report_bundle_already_shipped "$host" "$bundle_dir" "$remote_app_dir/$version" "$app" "$version"
-      continue
+    elif ship_agent_bundle "$host" "$bundle_dir" "$remote_app_dir" "$version"; then
+      echo "Shipped $app $version"
+    else
+      echo "Could not ship $app $version to $host; the server deploy goes on without it." >&2
     fi
-    ssh "$host" "mkdir -p $remote_app_dir && rm -rf $remote_app_dir/.$version"
-    rsync -a "$bundle_dir/" "$host:$remote_app_dir/.$version/"
-    ssh "$host" "mv -T $remote_app_dir/.$version $remote_app_dir/$version"
-    echo "Shipped $app $version"
   done
+}
+
+ship_agent_bundle() {
+  local host="$1" bundle_dir="$2" remote_app_dir="$3" version="$4"
+  ssh "$host" "mkdir -p $remote_app_dir && rm -rf $remote_app_dir/.$version" &&
+    rsync -a "$bundle_dir/" "$host:$remote_app_dir/.$version/" &&
+    ssh "$host" "mv -T $remote_app_dir/.$version $remote_app_dir/$version"
 }
 
 report_bundle_already_shipped() {
@@ -136,7 +145,7 @@ list_bundle_checksums() {
   (cd "$bundle_dir" && sha256sum "$BUNDLE_MANIFEST" && find "$BUNDLE_FILES_DIRECTORY" -type f | LC_ALL=C sort | xargs -d '\n' sha256sum)
 }
 
-# The newest few versions of each agent, and no unfinished ship; whatever else is in the directory stays.
+# The newest few versions of each agent on each contract major, as a node is offered only its own major; no unfinished ship.
 prune_agent_bundles() {
   local host="$1"
   ssh "$host" bash -s -- "$REMOTE_ROOT/$AGENT_RELEASES_DIRECTORY" "$KEPT_AGENT_RELEASES" "$RELEASED_AGENT_VERSION" <<'REMOTE'
@@ -147,8 +156,11 @@ for app_dir in "$root"/*/; do
   [ -d "$app_dir" ] || continue
   # Only a deploy ships, and this one already has, so a dot-name left now is an abandoned ship.
   find "$app_dir" -mindepth 1 -maxdepth 1 -name '.*' -exec rm -rf -- {} +
-  { ls -1 "$app_dir" | grep -E "$released_version" || true; } | sort -V | head -n "-$kept_releases" |
-    while read -r version; do rm -rf -- "$app_dir$version"; done
+  versions="$({ ls -1 "$app_dir" | grep -E "$released_version" || true; })"
+  for contract_major in $(cut -d. -f1 <<<"$versions" | sort -u); do
+    { grep "^$contract_major\." <<<"$versions" || true; } | sort -V | head -n "-$kept_releases" |
+      while read -r version; do rm -rf -- "$app_dir$version"; done
+  done
 done
 REMOTE
 }

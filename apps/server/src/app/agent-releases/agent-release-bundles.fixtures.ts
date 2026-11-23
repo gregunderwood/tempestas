@@ -5,8 +5,9 @@ import { dirname, join } from 'node:path';
 import type { AgentReleaseManifest } from '@tempestas/domain';
 import { BUNDLE_FILES_DIRECTORY, MANIFEST_FILE } from './agent-release-bundles';
 
-export const sha256Of = (text: string) =>
-  createHash('sha256').update(text).digest('hex');
+export function sha256Of(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
 
 export function makeAgentReleasesRoot(): string {
   return mkdtempSync(join(tmpdir(), 'agent-releases-'));

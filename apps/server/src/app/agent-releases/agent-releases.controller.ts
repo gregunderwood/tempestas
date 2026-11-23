@@ -8,8 +8,12 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { createReadStream, existsSync } from 'node:fs';
-import type { AgentRelease } from '@tempestas/domain';
-import { AGENT_RELEASES_ROUTE, MANIFEST_FILE } from './agent-release-bundles';
+import { ApiErrorCode, type AgentRelease } from '@tempestas/domain';
+import {
+  AGENT_RELEASES_ROUTE,
+  MANIFEST_FILE,
+  type AgentReleaseBundle,
+} from './agent-release-bundles';
 import { AgentReleasesService } from './agent-releases.service';
 
 const BINARY_CONTENT_TYPE = 'application/octet-stream';
@@ -48,15 +52,15 @@ export class AgentReleasesController {
     const path = pathSegments.join('/');
     const onDisk = this.requireBundle(app, version).filesByPath.get(path);
     if (!onDisk) {
-      throw new NotFoundException(`${app} ${version} has no file ${path}`);
+      throw bundleNotFound(`${app} ${version} has no file ${path}`);
     }
     return streamBundleFile(onDisk);
   }
 
-  private requireBundle(app: string, version: string) {
+  private requireBundle(app: string, version: string): AgentReleaseBundle {
     const bundle = this.agentReleases.findBundle(app, version);
     if (!bundle) {
-      throw new NotFoundException(`No release bundle for ${app} ${version}`);
+      throw bundleNotFound(`No release bundle for ${app} ${version}`);
     }
     return bundle;
   }
@@ -65,9 +69,13 @@ export class AgentReleasesController {
 // A file removed since startup would otherwise answer 400 with its absolute path in the body.
 function streamBundleFile(onDisk: string): StreamableFile {
   if (!existsSync(onDisk)) {
-    throw new NotFoundException(
+    throw bundleNotFound(
       'That bundle file is no longer on the server; it restarts on the next deploy',
     );
   }
   return new StreamableFile(createReadStream(onDisk));
+}
+
+function bundleNotFound(message: string): NotFoundException {
+  return new NotFoundException({ code: ApiErrorCode.NotFound, message });
 }
