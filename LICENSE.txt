@@ -19,11 +19,29 @@ Additional Use Grant: You may make production use of the Licensed Work,
 
                       (b) offer support, maintenance, installation or
                           consulting services for the Licensed Work to the
-                          public as a commercial offering; or
+                          public as a commercial offering, unless you are a
+                          Small Business; or
 
                       (c) sell, lease or otherwise distribute hardware with
                           the Licensed Work installed on it, bundled with it,
-                          or offered for installation on it.
+                          or offered for installation on it, unless you are a
+                          Small Business and the hardware's packaging, or
+                          where it has none, the documentation supplied with
+                          it, states that it runs Tempestas and gives the
+                          Licensed Work's published address, currently
+                          https://github.com/gregunderwood/tempestas.
+
+                      You are a "Small Business" if the total gross revenue
+                      of you and your Affiliates, from all business
+                      activities, was less than US$1,000,000 (or its
+                      equivalent in other currencies) in the 12 months
+                      before each sale, lease or distribution of hardware,
+                      or before each agreement to provide services.
+                      "Affiliates" are entities that control, are
+                      controlled by, or are under common control with you.
+                      Hardware distributed and services agreed while you
+                      were a Small Business remain permitted after you stop
+                      being one.
 
 Change Date:          Four years from the date the Licensed Work is
                       published.
