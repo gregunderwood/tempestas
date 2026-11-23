@@ -79,6 +79,10 @@ export class ReadingsIngestService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.publishPersisted(sample, persistedRow);
+    await this.nodes.noteReading(
+      resolution.node.id,
+      new Date(persistedRow.created_at),
+    );
     return 'persisted';
   }
 

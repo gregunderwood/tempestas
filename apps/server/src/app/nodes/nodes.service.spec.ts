@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { SystemClock } from '../common/clock';
+import { FixedClock, SystemClock, type Clock } from '../common/clock';
 import type { Repository } from 'typeorm';
 import {
   AgentApp,
@@ -12,7 +12,8 @@ import type { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { DeviceEntity } from '../devices/models';
 import type { SensorReadingEntity } from '../readings/models';
 import type { ZoneEntity } from '../zones/models';
-import { NodesService } from './nodes.service';
+import { NodesService, ONLINE_SWEEP_INTERVAL_MS } from './nodes.service';
+import { NODE_OFFLINE_AFTER_MS } from './node-registry';
 import type { NodeEntity } from './models';
 import { AgentReleasesService } from '../agent-releases/agent-releases.service';
 import {
@@ -69,12 +70,26 @@ function node(overrides: Partial<NodeEntity> = {}): NodeEntity {
   } as NodeEntity;
 }
 
+interface LatestReadingRow {
+  nodeId: string;
+  latest: Date;
+}
+
+interface ServiceCollaborators {
+  clock?: Clock;
+  agentReleases?: AgentReleasesService;
+}
+
 function makeService(
   initial: NodeEntity[] = [],
   zones: ZoneEntity[] = [],
-  agentReleases = new AgentReleasesService(NO_AGENT_RELEASES_DIRECTORY),
+  {
+    clock = new SystemClock(),
+    agentReleases = new AgentReleasesService(NO_AGENT_RELEASES_DIRECTORY),
+  }: ServiceCollaborators = {},
 ) {
   const rows = [...initial];
+  const latestReadingRows: LatestReadingRow[] = [];
   let nextId = 1;
 
   const nodeRepository = {
@@ -114,8 +129,16 @@ function makeService(
   const deviceRepository = {
     createQueryBuilder: () => aggregate,
   } as unknown as Repository<DeviceEntity>;
+  const latestReadingAggregate = {
+    ...aggregate,
+    select: () => latestReadingAggregate,
+    addSelect: () => latestReadingAggregate,
+    where: () => latestReadingAggregate,
+    groupBy: () => latestReadingAggregate,
+    getRawMany: async () => latestReadingRows,
+  };
   const readingRepository = {
-    createQueryBuilder: () => aggregate,
+    createQueryBuilder: () => latestReadingAggregate,
   } as unknown as Repository<SensorReadingEntity>;
   const zoneRepository = {
     findOne: vi.fn(
@@ -134,10 +157,16 @@ function makeService(
     zoneRepository,
     hardware,
     realtime,
-    new SystemClock(),
+    clock,
     agentReleases,
   );
-  return { service, rows, nodeRepository, publishNodeState };
+  return {
+    service,
+    rows,
+    nodeRepository,
+    publishNodeState,
+    latestReadingRows,
+  };
 }
 
 describe('NodesService hello ingest', () => {
@@ -209,7 +238,7 @@ describe('NodesService.findAll', () => {
         }),
       ],
       [],
-      agentReleases,
+      { agentReleases },
     );
 
     const [listed] = await service.findAll();
@@ -417,5 +446,91 @@ describe('NodesService node:state fan-out', () => {
       service.admit('node-uuid', { zoneId: 'no-such-zone' }),
     ).rejects.toMatchObject({ status: 404 });
     expect(publishNodeState).not.toHaveBeenCalled();
+  });
+});
+
+describe('NodesService online deadline', () => {
+  const HEARD_AT = new Date('2026-01-10T12:00:00Z');
+  const PAST_DEADLINE_SECONDS =
+    (NODE_OFFLINE_AFTER_MS + ONLINE_SWEEP_INTERVAL_MS) / 1000;
+  const BEFORE_DEADLINE_SECONDS = NODE_OFFLINE_AFTER_MS / 1000 - 60;
+
+  function makeHeardService() {
+    const clock = new FixedClock(HEARD_AT);
+    const made = makeService([node()], [], { clock });
+    return { ...made, clock };
+  }
+
+  async function hearNode(service: NodesService): Promise<void> {
+    await service.handleAvailability({
+      nodeId: 'elantris',
+      online: true,
+      at: HEARD_AT,
+    });
+  }
+
+  function publishedOnline(
+    publishNodeState: ReturnType<typeof vi.fn>,
+  ): boolean[] {
+    return publishNodeState.mock.calls.map(([published]) => published.online);
+  }
+
+  it('publishes a silent node as offline once the deadline passes', async () => {
+    const { service, clock, publishNodeState } = makeHeardService();
+    await hearNode(service);
+    clock.advanceSeconds(BEFORE_DEADLINE_SECONDS);
+    await service.publishLapsedNodes();
+    clock.advanceSeconds(PAST_DEADLINE_SECONDS - BEFORE_DEADLINE_SECONDS);
+    await service.publishLapsedNodes();
+    await service.publishLapsedNodes();
+    expect(publishedOnline(publishNodeState)).toEqual([true, false]);
+  });
+
+  it('keeps a node online while its readings keep coming', async () => {
+    const { service, clock, publishNodeState } = makeHeardService();
+    await hearNode(service);
+    clock.advanceSeconds(BEFORE_DEADLINE_SECONDS);
+    await service.noteReading('node-uuid', clock.now());
+    clock.advanceSeconds(PAST_DEADLINE_SECONDS - BEFORE_DEADLINE_SECONDS);
+    await service.publishLapsedNodes();
+    expect(publishedOnline(publishNodeState)).toEqual([true]);
+  });
+
+  it('publishes a stale node as online as soon as a reading brings it back', async () => {
+    const { service, clock, publishNodeState, latestReadingRows } =
+      makeHeardService();
+    await hearNode(service);
+    clock.advanceSeconds(PAST_DEADLINE_SECONDS);
+    await service.publishLapsedNodes();
+    latestReadingRows.push({ nodeId: 'node-uuid', latest: clock.now() });
+    await service.noteReading('node-uuid', clock.now());
+    expect(publishedOnline(publishNodeState)).toEqual([true, false, true]);
+  });
+
+  it('leaves a node that said it was offline alone', async () => {
+    const { service, clock, publishNodeState } = makeHeardService();
+    await service.handleAvailability({
+      nodeId: 'elantris',
+      online: false,
+      at: HEARD_AT,
+    });
+    clock.advanceSeconds(PAST_DEADLINE_SECONDS);
+    await service.publishLapsedNodes();
+    await service.noteReading('node-uuid', clock.now());
+    expect(publishedOnline(publishNodeState)).toEqual([false]);
+  });
+
+  it('forgets a deleted node', async () => {
+    const clock = new FixedClock(HEARD_AT);
+    const { service, publishNodeState } = makeService(
+      [node({ status: NodeStatus.Pending })],
+      [],
+      { clock },
+    );
+    await hearNode(service);
+    await service.remove('node-uuid');
+    clock.advanceSeconds(PAST_DEADLINE_SECONDS);
+    await service.publishLapsedNodes();
+    expect(publishNodeState).toHaveBeenCalledTimes(1);
   });
 });

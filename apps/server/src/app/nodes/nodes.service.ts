@@ -6,6 +6,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Subscription } from 'rxjs';
@@ -43,6 +44,7 @@ import {
   type HelloOutcome,
   isNodeOnline,
   NODE_OFFLINE_AFTER_MS,
+  type NodeOnlineEvidence,
 } from './node-registry';
 
 export type SampleRejection = 'unknown-node' | 'pending' | 'disabled';
@@ -65,6 +67,14 @@ interface HelloContext {
 
 type HelloOutcomeReporter = (context: HelloContext) => void | Promise<void>;
 
+interface PublishedLiveness {
+  evidence: NodeOnlineEvidence;
+  isPublishedOnline: boolean;
+}
+
+// Derived `online` lapses with the clock, not with a save, so something has to look.
+export const ONLINE_SWEEP_INTERVAL_MS = 30_000;
+
 const COUNT_ONLINE_NODES = `COUNT(*) FILTER (WHERE node.online AND (
            node.last_seen_at >= :cutoff
            OR EXISTS (
@@ -80,7 +90,8 @@ const COUNT_PENDING_NODES = `COUNT(*) FILTER (WHERE node.status = 'pending')`;
 export class NodesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NodesService.name);
   private readonly subscriptions = new Subscription();
-  private queue: Promise<unknown> = Promise.resolve();
+  private queue: Promise<void> = Promise.resolve();
+  private readonly publishedLiveness = new Map<string, PublishedLiveness>();
 
   private readonly helloOutcomeReporters: Record<
     HelloOutcome,
@@ -179,6 +190,29 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     this.logAvailabilityChange(node);
   }
 
+  noteReading(nodeId: string, createdAt: Date): Promise<void> {
+    const liveness = this.publishedLiveness.get(nodeId);
+    if (!liveness) return Promise.resolve();
+    liveness.evidence.latestReadingAt = newerOf(
+      liveness.evidence.latestReadingAt,
+      createdAt,
+    );
+    if (!hasOnlineChanged(liveness, this.clock.now())) return Promise.resolve();
+    return this.enqueue(() => this.republishNode(nodeId));
+  }
+
+  @Interval(ONLINE_SWEEP_INTERVAL_MS)
+  publishLapsedNodes(): Promise<void> {
+    const now = this.clock.now();
+    const changedIds = [...this.publishedLiveness]
+      .filter(([, liveness]) => hasOnlineChanged(liveness, now))
+      .map(([id]) => id);
+    for (const id of changedIds) {
+      this.enqueue(() => this.republishNode(id));
+    }
+    return this.queue;
+  }
+
   async resolveForSample(nodeId: NodeId): Promise<SampleResolution> {
     const node = await this.nodes.findOne({ where: { slug: nodeId } });
     if (!node) return { accepted: false, reason: 'unknown-node' };
@@ -265,15 +299,17 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       });
     }
     await this.nodes.remove(node);
+    this.publishedLiveness.delete(id);
     this.logger.warn(
       `Pending node "${node.slug}" deleted; it will return as pending if it says hello again`,
     );
   }
 
-  private enqueue(task: () => Promise<void>): void {
+  private enqueue(task: () => Promise<void>): Promise<void> {
     this.queue = this.queue.then(task).catch((error: unknown) => {
       this.logger.error(`Registry task failed: ${describeError(error)}`);
     });
+    return this.queue;
   }
 
   private async registerPendingNode(facts: HelloFacts): Promise<void> {
@@ -352,7 +388,24 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
   private async publishNodeState(entity: NodeEntity): Promise<Node> {
     const [node] = await this.decorate([entity]);
     this.realtime.publishNodeState(node);
+    this.publishedLiveness.set(node.id, {
+      evidence: {
+        online: entity.online,
+        lastSeenAt: entity.lastSeenAt,
+        latestReadingAt: parseInstant(node.latestReadingAt),
+      },
+      isPublishedOnline: node.online,
+    });
     return node;
+  }
+
+  private async republishNode(id: string): Promise<void> {
+    const node = await this.nodes.findOne({ where: { id } });
+    if (!node) {
+      this.publishedLiveness.delete(id);
+      return;
+    }
+    await this.publishNodeState(node);
   }
 
   private async applyOperatorFields(
@@ -440,6 +493,19 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       .getRawMany<{ nodeId: string; latest: Date | string }>();
     return new Map(rows.map((row) => [row.nodeId, new Date(row.latest)]));
   }
+}
+
+function hasOnlineChanged(liveness: PublishedLiveness, now: Date): boolean {
+  return isNodeOnline(liveness.evidence, now) !== liveness.isPublishedOnline;
+}
+
+function newerOf(known: Date | null, candidate: Date): Date {
+  if (known === null) return candidate;
+  return candidate > known ? candidate : known;
+}
+
+function parseInstant(isoInstant: string | null): Date | null {
+  return isoInstant === null ? null : new Date(isoInstant);
 }
 
 function rejectionFor(status: NodeStatus): SampleRejection {
