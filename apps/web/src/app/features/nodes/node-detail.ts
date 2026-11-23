@@ -10,7 +10,15 @@ import {
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { BehaviorSubject, combineLatest, switchMap } from 'rxjs';
+import {
+  asyncScheduler,
+  BehaviorSubject,
+  combineLatest,
+  filter,
+  switchMap,
+  tap,
+  throttleTime,
+} from 'rxjs';
 import { MatCardModule } from '@angular/material/card';
 import { RouterLink } from '@angular/router';
 import {
@@ -20,18 +28,23 @@ import {
   type DayNightStats,
   type Device,
   type Node,
+  type Reading,
   type SegmentStats,
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { PageHeading } from '../../core/page-heading';
 import { injectLiveDevices } from '../../core/live-devices';
+import { injectLiveNodes } from '../../core/live-nodes';
 import { injectLiveReadings } from '../../core/live-readings';
 import { Gauge } from '../../shared/gauge/gauge';
 import { metricsFor, nodeMetrics } from '../../shared/metrics';
 import { LONGEST_TIMEOUT_MILLISECONDS } from '../../shared/time';
 import { isHeldOffByInterlock } from '../devices/device-hold';
 
-const STATS_REFRESH_MILLISECONDS = 60_000;
+// Each refresh is three periods of aggregates on an SD card; a reading arrives every 10 s.
+export const STATS_REFRESH_THROTTLE_MILLISECONDS = 60_000;
+
+const TRAILING_THROTTLE = { leading: false, trailing: true };
 
 // A second past the boundary, so the server's own clock has certainly crossed it too.
 const BOUNDARY_SLACK_MILLISECONDS = 1_000;
@@ -401,10 +414,11 @@ export class NodeDetail {
   private readonly destroyRef = inject(DestroyRef);
   private readonly reload = new BehaviorSubject<void>(undefined);
   private boundaryTimer: ReturnType<typeof setTimeout> | undefined;
+  private newestReadingInStatsMilliseconds = Number.POSITIVE_INFINITY;
 
   private readonly liveReadings = injectLiveReadings().readings;
   private readonly allDevices = injectLiveDevices().devices;
-  private readonly nodes = signal<Node[]>([]);
+  private readonly nodes = injectLiveNodes().nodes;
   protected readonly stats = signal<DayNightStats | null>(null);
   protected readonly isHeldOffByInterlock = isHeldOffByInterlock;
 
@@ -424,6 +438,10 @@ export class NodeDetail {
       .sort((first, second) => first.key.localeCompare(second.key));
   });
 
+  private readonly newestReadingAt = computed(() =>
+    findNewestReadingAt(this.sensors().map((sensor) => sensor.reading)),
+  );
+
   protected readonly devices = computed<Device[]>(() =>
     this.allDevices().filter((device) => device.nodeId === this.slug()),
   );
@@ -439,10 +457,10 @@ export class NodeDetail {
   private readonly decimalPipe = new DecimalPipe('en-US');
 
   constructor() {
-    this.loadNodes();
     this.showNodeInHeading();
     this.followDayNightStats();
-    this.refreshStatsPeriodically();
+    this.refreshStatsOnNewReadings();
+    this.destroyRef.onDestroy(() => clearTimeout(this.boundaryTimer));
   }
 
   protected formatFigure(value: number | null, digitsInfo: string): string {
@@ -455,10 +473,6 @@ export class NodeDetail {
     return device.offAt;
   }
 
-  private loadNodes(): void {
-    this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
-  }
-
   private showNodeInHeading(): void {
     effect(() =>
       this.pageHeading.showPage(describeNodeHeading(this.slug(), this.node())),
@@ -468,6 +482,7 @@ export class NodeDetail {
   private followDayNightStats(): void {
     combineLatest([toObservable(this.slug), this.reload])
       .pipe(
+        tap(() => this.rememberNewestReadingInStats()),
         switchMap(([slug]) => this.api.dayNightStats({ nodeId: slug })),
         takeUntilDestroyed(),
       )
@@ -477,15 +492,32 @@ export class NodeDetail {
       });
   }
 
-  private refreshStatsPeriodically(): void {
-    const statsRefreshInterval = setInterval(
-      () => this.reload.next(),
-      STATS_REFRESH_MILLISECONDS,
-    );
-    this.destroyRef.onDestroy(() => {
-      clearInterval(statsRefreshInterval);
-      clearTimeout(this.boundaryTimer);
-    });
+  private refreshStatsOnNewReadings(): void {
+    toObservable(this.newestReadingAt)
+      .pipe(
+        filter((newestReadingAt) => this.isMissingFromStats(newestReadingAt)),
+        throttleTime(
+          STATS_REFRESH_THROTTLE_MILLISECONDS,
+          asyncScheduler,
+          TRAILING_THROTTLE,
+        ),
+        takeUntilDestroyed(),
+      )
+      .subscribe(() => this.reload.next());
+  }
+
+  // Compared with the server's own timestamps, so the browser's clock cannot skew the throttle.
+  private rememberNewestReadingInStats(): void {
+    const newestReadingAt = this.newestReadingAt();
+    this.newestReadingInStatsMilliseconds =
+      newestReadingAt === null
+        ? Number.NEGATIVE_INFINITY
+        : Date.parse(newestReadingAt);
+  }
+
+  private isMissingFromStats(readingCreatedAt: string | null): boolean {
+    if (readingCreatedAt === null) return false;
+    return Date.parse(readingCreatedAt) > this.newestReadingInStatsMilliseconds;
   }
 
   private armBoundaryRefresh(nextBoundary: string | null): void {
@@ -498,6 +530,11 @@ export class NodeDetail {
     if (isOutsideTimeoutRange(delay)) return;
     this.boundaryTimer = setTimeout(() => this.reload.next(), delay);
   }
+}
+
+function findNewestReadingAt(readings: readonly Reading[]): string | null {
+  const timestamps = readings.map((reading) => reading.createdAt).sort();
+  return timestamps[timestamps.length - 1] ?? null;
 }
 
 function isOutsideTimeoutRange(delay: number): boolean {

@@ -2,7 +2,7 @@
 
 ## What it is
 
-The socket.io contract to the browser: four named events on one connection, and nothing else. No
+The socket.io contract to the browser: five named events on one connection, and nothing else. No
 request/response, no rooms, no per-client subscriptions.
 
 The old feed was a bare `rxjs/webSocket` with no event envelope and no reconnect. A Pi on home WiFi
@@ -19,6 +19,7 @@ needs both, which is the whole reason for socket.io here.
 | ---------------- | -------------- | --------------------------------------------------------- |
 | `reading:latest` | `Reading`      | a sample is **persisted** — roughly every 10 s per node   |
 | `device:state`   | `Device`       | a relay write succeeded, or `rulesEnabled` changed        |
+| `node:state`     | `Node`         | a node is **saved**, or its derived `online` flips        |
 | `system:status`  | `SystemStatus` | once per rules evaluation cycle, and at a follower's boot |
 | `rules:cycle`    | `RulesCycle`   | once per rules evaluation cycle, on the leader only       |
 
@@ -38,6 +39,19 @@ The timing is the interesting part, and it is the same discipline as everywhere 
 - **`device:state` is published only after the hardware acknowledged AND the row saved.** An
   interlock refusal or a readback mismatch publishes nothing, so the dashboard cannot show a state
   the relay never reached. This is the same ordering `drive()` uses for the database.
+- **`node:state` carries the node as `GET /api/nodes` would return it**, decorated with its
+  device count, latest reading and derived `online`, after the row is saved. `NodesService`
+  publishes it for every `hello` (so a newly announced pending node, a reboot, an agent upgrade
+  and changed capabilities all arrive), every retained `status` (online and offline), and every
+  admit, disable and operator edit. A refused admit publishes nothing. Deleting a pending node
+  publishes nothing either: the browser that deleted it refetches, and others see it go on their
+  next reconnect or reload.
+- **Derived `online` also changes with no save**, because it lapses five minutes after the node
+  was last heard from (its last sighting or its newest reading). `NodesService` remembers what it
+  last published for each node and the evidence behind it, and every persisted reading updates
+  that evidence. A reading that brings a stale node back publishes it at once, and a sweep every
+  30 s publishes a node whose deadline has passed. The sweep reads only that memory, so a quiet
+  greenhouse costs no queries.
 - **`system:status` is one event per cycle, not per zone.** `staleRoles` is the union across zones,
   because a quiet sensor anywhere is worth surfacing everywhere.
 - **`rules:cycle` is the whole cycle in one message**: every zone's evaluation (inputs,
@@ -62,16 +76,16 @@ until then a reconnecting browser would keep the old leader's status. A leader d
 only its first evaluation can say whether a sensor is stale. On a follower the zones page says the
 rules run on the leader instead of flagging an old evaluation.
 
-`device:state` is deliberately **not** replayed. Device state is authoritative from
-`GET /api/devices`, and a cached copy replayed on connect could contradict it. A client renders
-devices from the API and patches them from the socket.
+`device:state` and `node:state` are deliberately **not** replayed. Device and node state are
+authoritative from `GET /api/devices` and `GET /api/nodes`, and a cached copy replayed on connect
+could contradict them. A client renders them from the API and patches them from the socket.
 
-Devices, readings, the rules cycle, and the zones page's zones and nodes are fetched through
-`injectLiveSource`. It times a request out after 15 s and **fetches again on every reconnect**, so a
-change made while the browser was offline is seen. A failed request is tried again after 10 s,
-doubling to at most a minute, and the wait resets on success. Retries and reconnect refetches are
-background requests: the error snackbar skips them, because the page already reports the failure
-and a retry every few seconds would keep the snackbar up for good.
+Devices, readings, the rules cycle, the zones page's zones and nodes, and the nodes screens' nodes
+are fetched through `injectLiveSource`. It times a request out after 15 s and **fetches again on
+every reconnect**, so a change made while the browser was offline is seen. A failed request is
+tried again after 10 s, doubling to at most a minute, and the wait resets on success. Retries and
+reconnect refetches are background requests: the error snackbar skips them, because the page
+already reports the failure and a retry every few seconds would keep the snackbar up for good.
 
 A response to an older request never overwrites a newer one, and a request still running when its
 page closes is cancelled. Each source is `loading`, `loaded`, `out-of-date` (the last refresh
@@ -83,6 +97,11 @@ The client keeps the newest push **per device**, with when it arrived (`Realtime
 back to back both show, and a response never overwrites a newer push. `injectLiveReadings` keeps
 whichever reading per sensor is newer by `createdAt`, so a push cached before the socket dropped
 never hides a fresher fetch.
+
+Nodes work the same way, through `RealtimeService.nodePushes` and `injectLiveNodes`, with one
+addition: a node pushed after the request was sent but missing from its response is added, which
+is how a node announcing itself as pending appears without a reload. A push from before the
+request that the response does not contain is dropped, because that node has since been deleted.
 
 ## `system:status` is a safety feature
 

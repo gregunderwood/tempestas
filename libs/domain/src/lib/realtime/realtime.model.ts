@@ -1,4 +1,5 @@
 import type { Device, DeviceRole } from '../devices/device.model';
+import type { Node } from '../nodes/node.model';
 import type { Reading } from '../readings/reading.model';
 import type { RulesCycle } from '../rules/rules.model';
 
@@ -7,6 +8,7 @@ export const REALTIME_EVENTS = {
   deviceState: 'device:state',
   systemStatus: 'system:status',
   rulesCycle: 'rules:cycle',
+  nodeState: 'node:state',
 } as const;
 
 export type RealtimeEvent =
@@ -35,4 +37,5 @@ export interface RealtimePayloads {
   [REALTIME_EVENTS.deviceState]: Device;
   [REALTIME_EVENTS.systemStatus]: SystemStatus;
   [REALTIME_EVENTS.rulesCycle]: RulesCycle;
+  [REALTIME_EVENTS.nodeState]: Node;
 }

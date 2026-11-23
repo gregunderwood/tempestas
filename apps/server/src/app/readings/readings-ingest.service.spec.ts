@@ -45,6 +45,7 @@ function makeService(
 
   const nodes = {
     resolveForSample: vi.fn().mockResolvedValue(resolution),
+    noteReading: vi.fn().mockResolvedValue(undefined),
   } as unknown as NodesService;
   const hardware = { samples$: NEVER } as unknown as HardwareService;
 
@@ -58,7 +59,7 @@ function makeService(
     new FixedClock(NOW),
     realtime,
   );
-  return { service, values, orIgnore, insert, publishReading };
+  return { service, values, orIgnore, insert, publishReading, nodes };
 }
 
 const ADMITTED = {
@@ -168,6 +169,27 @@ describe('realtime fan-out', () => {
       co2: 812,
       createdAt: '2026-01-10T12:00:00.000Z',
     });
+  });
+
+  it('tells the node registry when the node was last heard from', async () => {
+    const { service, nodes } = makeService(ADMITTED);
+    await service.ingest(sample());
+    expect(nodes.noteReading).toHaveBeenCalledWith(
+      'node-uuid',
+      new Date(PERSISTED_ROW.created_at),
+    );
+  });
+
+  it('persists without waiting for the node registry to catch up', async () => {
+    const { service, nodes } = makeService(ADMITTED);
+    vi.mocked(nodes.noteReading).mockReturnValue(new Promise(() => undefined));
+    await expect(service.ingest(sample())).resolves.toBe('persisted');
+  });
+
+  it('tells the node registry nothing about a duplicate', async () => {
+    const { service, nodes } = makeService(ADMITTED, []);
+    await service.ingest(sample());
+    expect(nodes.noteReading).not.toHaveBeenCalled();
   });
 
   it('publishes nothing for a duplicate', async () => {

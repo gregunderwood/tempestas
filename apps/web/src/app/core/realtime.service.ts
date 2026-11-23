@@ -4,6 +4,7 @@ import {
   REALTIME_EVENTS,
   sensorKey,
   type Device,
+  type Node,
   type Reading,
   type RulesCycle,
   type SystemStatus,
@@ -13,6 +14,7 @@ import {
   type NumberedPush,
   type PushedDevice,
 } from './device-pushes';
+import { recordNodePush, type PushedNode } from './node-pushes';
 
 const SOCKET_TRANSPORTS = ['websocket', 'polling'];
 
@@ -36,6 +38,7 @@ export class RealtimeService implements OnDestroy {
   readonly devicePushes = signal<ReadonlyMap<string, PushedDevice>>(new Map());
   // Every push in arrival order, so two switches of one relay between reads are both seen.
   readonly recentDevicePushes = signal<readonly NumberedPush[]>([]);
+  readonly nodePushes = signal<ReadonlyMap<string, PushedNode>>(new Map());
   readonly latestRulesCycle = signal<RulesCycle | null>(null);
   readonly serverClockOffsetMilliseconds = signal(0);
 
@@ -54,6 +57,11 @@ export class RealtimeService implements OnDestroy {
     );
     socket.on(REALTIME_EVENTS.deviceState, (device: Device) =>
       storeDevicePush(this, device, Date.now()),
+    );
+    socket.on(REALTIME_EVENTS.nodeState, (node: Node) =>
+      this.nodePushes.update((pushes) =>
+        recordNodePush(pushes, node, Date.now()),
+      ),
     );
     socket.on(REALTIME_EVENTS.systemStatus, (status: SystemStatus) =>
       this.recordStatus(status),

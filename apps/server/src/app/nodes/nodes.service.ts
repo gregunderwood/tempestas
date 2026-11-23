@@ -6,6 +6,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Subscription } from 'rxjs';
@@ -26,6 +27,7 @@ import { AgentReleasesService } from '../agent-releases/agent-releases.service';
 import { Clock } from '../common/clock';
 import { describeError } from '../common/describe-error';
 import { DeviceEntity } from '../devices/models';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';
 import { NodeEntity } from './models';
@@ -42,6 +44,7 @@ import {
   type HelloOutcome,
   isNodeOnline,
   NODE_OFFLINE_AFTER_MS,
+  type NodeOnlineEvidence,
 } from './node-registry';
 
 export type SampleRejection = 'unknown-node' | 'pending' | 'disabled';
@@ -64,6 +67,14 @@ interface HelloContext {
 
 type HelloOutcomeReporter = (context: HelloContext) => void | Promise<void>;
 
+interface PublishedLiveness {
+  evidence: NodeOnlineEvidence;
+  isPublishedOnline: boolean;
+}
+
+// Derived `online` lapses with the clock, not with a save, so something has to look.
+export const ONLINE_SWEEP_INTERVAL_MS = 30_000;
+
 const COUNT_ONLINE_NODES = `COUNT(*) FILTER (WHERE node.online AND (
            node.last_seen_at >= :cutoff
            OR EXISTS (
@@ -79,7 +90,8 @@ const COUNT_PENDING_NODES = `COUNT(*) FILTER (WHERE node.status = 'pending')`;
 export class NodesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NodesService.name);
   private readonly subscriptions = new Subscription();
-  private queue: Promise<unknown> = Promise.resolve();
+  private queue: Promise<void> = Promise.resolve();
+  private readonly publishedLiveness = new Map<string, PublishedLiveness>();
 
   private readonly helloOutcomeReporters: Record<
     HelloOutcome,
@@ -108,6 +120,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(ZoneEntity)
     private readonly zones: Repository<ZoneEntity>,
     private readonly hardware: HardwareService,
+    private readonly realtime: RealtimeGateway,
     private readonly clock: Clock,
     private readonly agentReleases: AgentReleasesService,
   ) {}
@@ -151,6 +164,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
         facts,
       });
     }
+    await this.publishNodeState(existing);
   }
 
   async handleAvailability(availability: NodeAvailability): Promise<void> {
@@ -170,9 +184,33 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     // Only an online transition is a sighting, which is what makes "offline since" answerable.
     if (availability.online) node.lastSeenAt = availability.at;
     await this.nodes.save(node);
+    await this.publishNodeState(node);
 
     if (!hasChanged) return;
     this.logAvailabilityChange(node);
+  }
+
+  noteReading(nodeId: string, createdAt: Date): Promise<void> {
+    const liveness = this.publishedLiveness.get(nodeId);
+    if (!liveness) return Promise.resolve();
+    liveness.evidence.latestReadingAt = newerOf(
+      liveness.evidence.latestReadingAt,
+      createdAt,
+    );
+    if (!hasOnlineChanged(liveness, this.clock.now())) return Promise.resolve();
+    return this.enqueue(() => this.republishNode(nodeId));
+  }
+
+  @Interval(ONLINE_SWEEP_INTERVAL_MS)
+  publishLapsedNodes(): Promise<void> {
+    const now = this.clock.now();
+    const changedIds = [...this.publishedLiveness]
+      .filter(([, liveness]) => hasOnlineChanged(liveness, now))
+      .map(([id]) => id);
+    for (const id of changedIds) {
+      this.enqueue(() => this.republishNode(id));
+    }
+    return this.queue;
   }
 
   async resolveForSample(nodeId: NodeId): Promise<SampleResolution> {
@@ -247,7 +285,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     const node = await this.findOneEntity(id);
     await this.applyOperatorFields(node, changes);
     await this.nodes.save(node);
-    return this.findOne(id);
+    return this.publishNodeState(node);
   }
 
   // Only a pending node: deleting cascades its readings, and `disable` is the reject that keeps them.
@@ -261,19 +299,24 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       });
     }
     await this.nodes.remove(node);
+    this.publishedLiveness.delete(id);
     this.logger.warn(
       `Pending node "${node.slug}" deleted; it will return as pending if it says hello again`,
     );
   }
 
-  private enqueue(task: () => Promise<void>): void {
+  private enqueue(task: () => Promise<void>): Promise<void> {
     this.queue = this.queue.then(task).catch((error: unknown) => {
       this.logger.error(`Registry task failed: ${describeError(error)}`);
     });
+    return this.queue;
   }
 
   private async registerPendingNode(facts: HelloFacts): Promise<void> {
-    await this.nodes.save(this.nodes.create(newNodeFromHello(facts)));
+    const node = await this.nodes.save(
+      this.nodes.create(newNodeFromHello(facts)),
+    );
+    await this.publishNodeState(node);
     this.logger.warn(
       `Node "${facts.nodeId}" announced itself and is PENDING - it receives no commands and ` +
         `its readings are DISCARDED until it is admitted.`,
@@ -339,7 +382,30 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     if (previousStatus !== targetStatus) {
       this.logger.warn(describeTransition(node, previousStatus));
     }
-    return this.findOne(id);
+    return this.publishNodeState(node);
+  }
+
+  private async publishNodeState(entity: NodeEntity): Promise<Node> {
+    const [node] = await this.decorate([entity]);
+    this.realtime.publishNodeState(node);
+    this.publishedLiveness.set(node.id, {
+      evidence: {
+        online: entity.online,
+        lastSeenAt: entity.lastSeenAt,
+        latestReadingAt: parseInstant(node.latestReadingAt),
+      },
+      isPublishedOnline: node.online,
+    });
+    return node;
+  }
+
+  private async republishNode(id: string): Promise<void> {
+    const node = await this.nodes.findOne({ where: { id } });
+    if (!node) {
+      this.publishedLiveness.delete(id);
+      return;
+    }
+    await this.publishNodeState(node);
   }
 
   private async applyOperatorFields(
@@ -427,6 +493,19 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       .getRawMany<{ nodeId: string; latest: Date | string }>();
     return new Map(rows.map((row) => [row.nodeId, new Date(row.latest)]));
   }
+}
+
+function hasOnlineChanged(liveness: PublishedLiveness, now: Date): boolean {
+  return isNodeOnline(liveness.evidence, now) !== liveness.isPublishedOnline;
+}
+
+function newerOf(known: Date | null, candidate: Date): Date {
+  if (known === null) return candidate;
+  return candidate > known ? candidate : known;
+}
+
+function parseInstant(isoInstant: string | null): Date | null {
+  return isoInstant === null ? null : new Date(isoInstant);
 }
 
 function rejectionFor(status: NodeStatus): SampleRejection {
