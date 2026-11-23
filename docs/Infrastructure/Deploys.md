@@ -38,29 +38,34 @@ tools/rollback.sh                        # back to the release current replaced
 
 The deploy, in order:
 
-1. **The gate and the web build**, here. Never on the Pi: a build there puts the burner controller
+1. **Check the host** is ready: the sudoers lines, the release layout, and `migrator` on `current`.
+   Before the build, so a host that would refuse says so in seconds.
+2. **The gate and the web build**, here. Never on the Pi: a build there puts the burner controller
    in reach of the OOM killer.
-2. **Ship** the new release beside the live one, recording the live one's ID in
+3. **Ship** the new release beside the live one, recording the live one's ID in
    `previous-release`. `node_modules` is hard-linked from the live release when the lockfile is
    unchanged, otherwise `npm ci` runs on the host.
-3. **Point `migrator` at it** and run `migrate:show`, which exits 0 when nothing is pending, 3 when
+4. **Point `migrator` at it** and run `migrate:show`, which exits 0 when nothing is pending, 3 when
    something is, 4 when something pending cannot be reverted.
    - 0: back up anyway.
    - 3: `migrate@run`, which backs up first and applies everything in **one transaction**.
    - Either way the release records which backup was taken, in `backup-before-migrations`.
    - 4: refuse, unless `--allow-irreversible`.
-   - Anything else, or a failure: point `migrator` back and stop. Nothing was switched.
+   - Anything else, or a failure that left nothing applied: point `migrator` back and stop. Nothing
+     was switched.
+   - A `run` that failed but whose migrations are applied, or may be: stop with `migrator` left on
+     the new release, whose record a revert needs. The next deploy refuses until it is resolved.
    - `run` exits 5 when it applied the migrations but could not record them. The deploy stops there
      too, and says so: no rollback could undo them.
    - When `run` or `revert-applied` fails, the deploy asks `show` what the database now holds
      rather than trusting the status: a dropped ssh or a record that would not write can fail a
      command whose transaction committed.
-4. **Point `current` at it and restart.**
-5. **Health check**, for 60 s: `"db":true`, and `releaseId` is the new one, so the old process
+5. **Point `current` at it and restart.**
+6. **Health check**, for 60 s: `"db":true`, and `releaseId` is the new one, so the old process
    answering is never mistaken for the new. A failure to switch or restart counts as a failed check.
-6. **Roll back if it fails**: stop the server, run `migrate@revert-applied` **with the new
+7. **Roll back if it fails**: stop the server, run `migrate@revert-applied` **with the new
    release's code**, which knows its own migrations, point both links back, restart, check again.
-7. **Mark it `healthy`** once it passes, and **prune** to `current` and the two releases a
+8. **Mark it `healthy`** once it passes, and **prune** to `current` and the two releases a
    rollback would go back through from it, following `previous-release`, plus whatever `migrator`
    points at. A release that failed, or stopped before switching, goes with the next prune.
 

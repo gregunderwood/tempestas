@@ -31,6 +31,12 @@ stop_before_switching() {
   exit 1
 }
 
+# migrator stays on the new release, whose record a revert needs, so the next deploy refuses until it is resolved.
+stop_leaving_migrator_on_release() {
+  echo "Nothing was switched: $HOST still runs $PREVIOUS_RELEASE_ID, and migrator stays on $RELEASE_ID. $*" >&2
+  exit 1
+}
+
 migrate_or_back_up() {
   local show_status=0
   run_oneshot "$HOST" tempestas-migrate@show.service || show_status=$?
@@ -72,11 +78,16 @@ stop_after_failed_run() {
       stop_before_switching "The backup or the migrations failed (status $run_status). They run as one transaction, so none were applied."
       ;;
     applied)
-      stop_before_switching "The run reported status $run_status, but the migrations are applied, so $PREVIOUS_RELEASE_ID now runs on the new schema. Check: $journal"
+      stop_leaving_migrator_on_release "The run reported status $run_status, but the migrations are applied, so $PREVIOUS_RELEASE_ID now runs on the new schema. Check: $journal"
       ;;
-    *) stop_before_switching "Could not tell whether the migrations ran (status $run_status). Check: $journal" ;;
+    *) stop_leaving_migrator_on_release "Could not tell whether the migrations ran (status $run_status). Check: $journal" ;;
   esac
 }
+
+say "Checking $HOST is ready for a release"
+require_passwordless_systemctl "$HOST" "${RELEASE_SYSTEMCTL_LINES[@]}"
+require_release_layout "$HOST"
+require_migrator_on_current "$HOST"
 
 say "Gate"
 (cd "$HERE" && npx nx run-many -t lint,typecheck,test,build,migration-round-trip)
@@ -90,11 +101,6 @@ if lsof -ti tcp:7000 -sTCP:LISTEN >/dev/null 2>&1; then
   echo "controller may hold the heartbeat. See docs/Safety.md." >&2
   exit 1
 fi
-
-say "Checking $HOST is ready for a release"
-require_passwordless_systemctl "$HOST" "${RELEASE_SYSTEMCTL_LINES[@]}"
-require_release_layout "$HOST"
-require_migrator_on_current "$HOST"
 
 RELEASE_ID="$(describe_release_id "$HERE")"
 PREVIOUS_RELEASE_ID="$(read_release_behind "$HOST" current)"
