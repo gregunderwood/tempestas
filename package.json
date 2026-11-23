@@ -1,7 +1,7 @@
 {
   "name": "@tempestas/source",
   "version": "0.0.0",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "typeorm": "ts-node -r tsconfig-paths/register --project apps/server/tsconfig.app.json ./node_modules/typeorm/cli.js -d apps/server/src/typeorm.config.ts",
     "migration:generate": "npm run typeorm -- migration:generate",
