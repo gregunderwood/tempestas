@@ -28,6 +28,7 @@ every list below, and why "it compiles and the tests pass" is not the bar here.
 - Tests (`*.spec.ts`) → Read [./docs/Testing.md](./docs/Testing.md)
 - Two controllers, failover, running on both greenhouse boxes → Read [./docs/Multi-Controller.md](./docs/Multi-Controller.md)
 - "What's next" / "where were we" → Read [./docs/Roadmap.md](./docs/Roadmap.md)
+- Planning a space, capture, the catalog, simulation, or hosted vs self-hosted → Read [./docs/Planner.md](./docs/Planner.md) and the records in [./docs/Decisions/](./docs/Decisions/Decisions.md)
 - First time in the repo, or nothing runs → Read [./docs/Getting Started/Development setup.md](./docs/Getting%20Started/Development%20setup.md)
 
 ## Build/Test/Lint Commands

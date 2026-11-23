@@ -26,6 +26,8 @@ the greenhouse for eight years.
 - [[Hardware]] — pins, polarity, relays, the SCD4x
 - [[Crawlspace]] — braize, the Pico W keeping the pipes under the house from freezing
 - [[Roadmap]] — phases, what is done, open questions
+- [[Planner]] — the vision: from a grower's idea to a running system, hosted or self-hosted
+- [[Decisions]] — architecture decisions that are expensive to reverse
 - [[Web App]] — the dashboard, error handling, the stale-sensor banner
 
 ### Infrastructure
