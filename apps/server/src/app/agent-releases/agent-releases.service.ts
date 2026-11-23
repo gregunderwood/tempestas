@@ -3,8 +3,8 @@ import {
   isAgentApp,
   type AgentApp,
   compareAgentVersions,
-  isNewerAgentVersion,
   parseAgentVersion,
+  shouldOfferAgentRelease,
   UPDATE_COMMAND_CONTRACT,
   type AgentRelease,
   type AgentVersionNumbers,
@@ -64,15 +64,14 @@ export class AgentReleasesService implements OnModuleInit {
     if (!canTakeUpdateCommand(agent)) {
       return null;
     }
-    const running = parseAgentVersion(agent.agentVersion ?? '');
     const newest = this.findNewestRelease(
       agent.agentName as AgentApp,
       agent.capabilities.contractVersion,
     );
-    if (!running || !newest) {
+    if (!newest) {
       return null;
     }
-    return isNewerAgentVersion(newest.numbers, running)
+    return shouldOfferAgentRelease(newest.numbers, agent.agentVersion ?? '')
       ? newest.release.version
       : null;
   }

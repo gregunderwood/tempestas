@@ -105,7 +105,7 @@ describe('AgentReleasesController', () => {
     expect((await fetch(`${baseUrl}/${path}`)).status).toBe(404);
   });
 
-  it('answers 404, not its path on disk, for a file removed since it started', async () => {
+  it('keeps serving a file removed from disk since it started', async () => {
     rmSync(
       join(
         bundleDirectory,
@@ -118,8 +118,8 @@ describe('AgentReleasesController', () => {
       `${baseUrl}/agent-linux/1.1.4/files/src/tempestas_agent/pruned.py`,
     );
 
-    expect(response.status).toBe(404);
-    expect(await response.text()).not.toContain(bundleDirectory);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(AGENT_SOURCE);
   });
 
   it('carries a machine-readable code on a 404', async () => {

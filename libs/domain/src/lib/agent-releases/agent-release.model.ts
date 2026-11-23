@@ -54,7 +54,22 @@ export function isReleasedAgentVersion(version: string): boolean {
   return RELEASED_AGENT_VERSION.test(version);
 }
 
-/** By number, so 1.0.10 is newer than 1.0.9. A `-dev` suffix is ignored: its numbers say where it branched. */
+// A -dev build's patch also counts its own branch's commits, so its numbers cannot say whether a release is newer.
+export function shouldOfferAgentRelease(
+  release: AgentVersionNumbers,
+  runningVersion: string,
+): boolean {
+  const running = parseAgentVersion(runningVersion);
+  if (!running) {
+    return false;
+  }
+  return (
+    !isReleasedAgentVersion(runningVersion) ||
+    isNewerAgentVersion(release, running)
+  );
+}
+
+/** By number, so 1.0.10 is newer than 1.0.9. */
 export function isNewerAgentVersion(
   candidate: AgentVersionNumbers,
   running: AgentVersionNumbers,

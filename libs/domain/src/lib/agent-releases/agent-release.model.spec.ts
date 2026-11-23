@@ -1,6 +1,7 @@
 import {
   compareAgentVersions,
   isNewerAgentVersion,
+  shouldOfferAgentRelease,
   isReleasedAgentVersion,
   parseAgentVersion,
   type AgentVersionNumbers,
@@ -44,11 +45,26 @@ describe('isNewerAgentVersion', () => {
     expect(isNewerAgentVersion(parse('1.0.9'), parse('1.0.10'))).toBe(false);
     expect(isNewerAgentVersion(parse('1.2.0'), parse('1.1.99'))).toBe(true);
   });
+});
 
-  it('does not offer a release with the same numbers as a -dev build', () => {
+describe('shouldOfferAgentRelease', () => {
+  it('offers a released build only a newer release', () => {
+    expect(shouldOfferAgentRelease(parse('1.1.5'), '1.1.4')).toBe(true);
+    expect(shouldOfferAgentRelease(parse('1.1.4'), '1.1.4')).toBe(false);
+    expect(shouldOfferAgentRelease(parse('1.1.3'), '1.1.4')).toBe(false);
+  });
+
+  it('offers a -dev build the release, whatever its branch has counted', () => {
+    expect(shouldOfferAgentRelease(parse('1.1.4'), '1.1.7-dev+ecdbbe7')).toBe(
+      true,
+    );
     expect(
-      isNewerAgentVersion(parse('1.1.4'), parse('1.1.4-dev+ecdbbe7')),
-    ).toBe(false);
+      shouldOfferAgentRelease(parse('1.1.4'), '1.1.4-dev+ecdbbe7.dirty'),
+    ).toBe(true);
+  });
+
+  it('offers nothing over a version it cannot read', () => {
+    expect(shouldOfferAgentRelease(parse('1.1.4'), '0.0.0+dev')).toBe(false);
   });
 });
 

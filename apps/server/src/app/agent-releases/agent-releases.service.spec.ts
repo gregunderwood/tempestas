@@ -106,6 +106,16 @@ describe('AgentReleasesService.findAvailableUpdate', () => {
     ).toBeNull();
   });
 
+  it('offers the release to a -dev build whose branch counted past it', async () => {
+    const service = await makeServiceOffering([AgentApp.Linux, '1.1.4']);
+
+    expect(
+      service.findAvailableUpdate(
+        linuxAgent({ agentVersion: '1.1.7-dev+ecdbbe7' }),
+      ),
+    ).toBe('1.1.4');
+  });
+
   it('offers a newer release to a -dev build behind it', async () => {
     const service = await makeServiceOffering([AgentApp.Linux, '1.1.4']);
 

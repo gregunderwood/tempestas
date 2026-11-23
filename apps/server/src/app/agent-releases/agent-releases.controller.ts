@@ -7,7 +7,6 @@ import {
   Param,
   StreamableFile,
 } from '@nestjs/common';
-import { createReadStream, existsSync } from 'node:fs';
 import { ApiErrorCode, type AgentRelease } from '@tempestas/domain';
 import {
   AGENT_RELEASES_ROUTE,
@@ -51,11 +50,11 @@ export class AgentReleasesController {
     @Param('path') pathSegments: string[],
   ): StreamableFile {
     const path = pathSegments.join('/');
-    const onDisk = this.requireBundle(app, version).filesByPath.get(path);
-    if (!onDisk) {
+    const bytes = this.requireBundle(app, version).filesByPath.get(path);
+    if (!bytes) {
       throw bundleNotFound(`${app} ${version} has no file ${path}`);
     }
-    return streamBundleFile(onDisk);
+    return new StreamableFile(bytes);
   }
 
   private requireBundle(app: string, version: string): AgentReleaseBundle {
@@ -65,16 +64,6 @@ export class AgentReleasesController {
     }
     return bundle;
   }
-}
-
-// A file removed since startup would otherwise answer 400 with its absolute path in the body.
-function streamBundleFile(onDisk: string): StreamableFile {
-  if (!existsSync(onDisk)) {
-    throw bundleNotFound(
-      'That bundle file is no longer on the server; it restarts on the next deploy',
-    );
-  }
-  return new StreamableFile(createReadStream(onDisk));
 }
 
 function bundleNotFound(message: string): NotFoundException {

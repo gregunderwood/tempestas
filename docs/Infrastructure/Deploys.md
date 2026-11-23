@@ -113,10 +113,13 @@ The deploy also bundles each agent, for the server to offer the nodes through th
   are pruned before the restart, as the server reads the bundles only when it starts.
 - **The server verifies them at startup.** One whose files disagree with its manifest is logged and
   not offered. `GET /api/agent-releases` lists the rest, and serves each manifest and the files it
-  lists under `/api/agent-releases/<app>/<version>/`, byte for byte: an `update` pins the
-  manifest's sha256.
+  lists under `/api/agent-releases/<app>/<version>/`, from the bytes it verified, held in memory:
+  an `update` pins the manifest's sha256, so what is served never changes under it until the next
+  restart, whatever a later deploy does on disk.
 - **A node is offered** the newest bundle for its agent on its contract major, when it is newer by
-  number (1.0.10 is newer than 1.0.9), as `availableUpdate` on the Nodes page. Only from contract
+  number (1.0.10 is newer than 1.0.9), as `availableUpdate` on the Nodes page. A node on a `-dev`
+  build is always offered it: a branch's own commits count toward its patch too, so its numbers
+  cannot say which is newer. Only from contract
   1.1, which added `update`: a node before it never subscribes, and one that has never sent
   `agentName` needs a deploy by hand first.
 

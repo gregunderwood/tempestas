@@ -21,10 +21,10 @@ const MISSING_FILE_CODE = 'ENOENT';
 
 export interface AgentReleaseBundle {
   release: AgentRelease;
-  // Served from memory, so the bytes always match the sha256 advertised for them, whatever lands on disk later.
+  // Served from memory, so the bytes always match the sha256s they were verified against, whatever lands on disk later.
   manifestBytes: Buffer;
-  /** Each listed path, to the file on disk; nothing else in the bundle is ever served. */
-  filesByPath: Map<string, string>;
+  /** Only the paths the manifest lists; nothing else in the bundle is ever served. */
+  filesByPath: Map<string, Buffer>;
 }
 
 export type ReportRejectedBundle = (
@@ -157,17 +157,17 @@ function isSafeRelativePath(path: unknown): path is string {
 async function verifyListedFiles(
   bundleDirectory: string,
   files: AgentReleaseFile[],
-): Promise<Map<string, string>> {
-  const filesByPath = new Map<string, string>();
+): Promise<Map<string, Buffer>> {
+  const filesByPath = new Map<string, Buffer>();
   for (const file of files) {
     const onDisk = join(bundleDirectory, BUNDLE_FILES_DIRECTORY, file.path);
-    const actualSha256 = sha256Hex(await readListedFile(onDisk, file.path));
-    if (actualSha256 !== file.sha256) {
+    const bytes = await readListedFile(onDisk, file.path);
+    if (sha256Hex(bytes) !== file.sha256) {
       throw new Error(
         `${file.path} does not have the sha256 the manifest gives`,
       );
     }
-    filesByPath.set(file.path, onDisk);
+    filesByPath.set(file.path, bytes);
   }
   return filesByPath;
 }

@@ -13,6 +13,8 @@ import {
 } from './agent-release-bundles.fixtures';
 
 const UNREADABLE = 0o000;
+// Root reads a directory whatever its mode, so it cannot make one unreadable.
+const IS_ROOT = process.getuid?.() === 0;
 const READABLE = 0o700;
 
 async function readBundles(root: string) {
@@ -134,17 +136,20 @@ describe('readVerifiedBundles', () => {
     expect(await readBundles(root)).toEqual({ bundles: [], rejections: [] });
   });
 
-  it('reports a directory it cannot read, rather than offering nothing quietly', async () => {
-    const root = makeAgentReleasesRoot();
-    writeBundle(root, AgentApp.Linux, '1.1.4');
-    chmodSync(root, UNREADABLE);
+  it.skipIf(IS_ROOT)(
+    'reports a directory it cannot read, rather than offering nothing quietly',
+    async () => {
+      const root = makeAgentReleasesRoot();
+      writeBundle(root, AgentApp.Linux, '1.1.4');
+      chmodSync(root, UNREADABLE);
 
-    const { bundles, rejections } = await readBundles(root);
-    chmodSync(root, READABLE);
+      const { bundles, rejections } = await readBundles(root);
+      chmodSync(root, READABLE);
 
-    expect(bundles).toEqual([]);
-    expect(rejections).toEqual([expect.stringContaining('EACCES')]);
-  });
+      expect(bundles).toEqual([]);
+      expect(rejections).toEqual([expect.stringContaining('EACCES')]);
+    },
+  );
 
   it('offers nothing, quietly, when there is no directory yet', async () => {
     expect(await readBundles(join(makeAgentReleasesRoot(), 'missing'))).toEqual(
