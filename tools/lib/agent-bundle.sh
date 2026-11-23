@@ -7,6 +7,21 @@ BUNDLE_FILES_DIRECTORY=files
 BUNDLE_MANIFEST=manifest.json
 KEPT_AGENT_RELEASES=2
 RELEASED_AGENT_VERSION='^[0-9]+\.[0-9]+\.[0-9]+$'
+DEVELOPMENT_RELEASE_SUFFIX='-dev(-dirty)?$'
+
+# The whole checkout must be clean, as the bundle also depends on files outside the agent's own directory.
+build_agent_bundles() {
+  local repository="$1" release_id="$2" output_root="$3"
+  local app
+  rm -rf "$output_root"
+  if [[ "$release_id" =~ $DEVELOPMENT_RELEASE_SUFFIX ]]; then
+    echo "$release_id is not a clean origin/main build, so no agent is bundled." >&2
+    return
+  fi
+  for app in "${AGENT_APPS[@]}"; do
+    build_agent_bundle "$repository" "$app" "$output_root"
+  done
+}
 
 # Only a clean origin/main build: a -dev one is never offered to a node.
 build_agent_bundle() {
@@ -97,7 +112,7 @@ ship_agent_bundles() {
     version="$(basename "$bundle_dir")"
     remote_app_dir="$REMOTE_ROOT/$AGENT_RELEASES_DIRECTORY/$app"
     if ssh "$host" "test -e $remote_app_dir/$version"; then
-      echo "$host already has $app $version"
+      report_bundle_already_shipped "$host" "$bundle_dir" "$remote_app_dir/$version" "$app" "$version"
       continue
     fi
     ssh "$host" "mkdir -p $remote_app_dir && rm -rf $remote_app_dir/.$version"
@@ -105,6 +120,20 @@ ship_agent_bundles() {
     ssh "$host" "mv -T $remote_app_dir/.$version $remote_app_dir/$version"
     echo "Shipped $app $version"
   done
+}
+
+report_bundle_already_shipped() {
+  local host="$1" bundle_dir="$2" remote_bundle_dir="$3" app="$4" version="$5"
+  if list_bundle_checksums "$bundle_dir" | ssh "$host" "cd $remote_bundle_dir && sha256sum --status --strict -c -"; then
+    echo "$host already has $app $version"
+    return
+  fi
+  echo "$host has an $app $version that differs from the one just built, and it is kept. To ship this one, run: ssh $host rm -rf $remote_bundle_dir, then deploy again." >&2
+}
+
+list_bundle_checksums() {
+  local bundle_dir="$1"
+  (cd "$bundle_dir" && sha256sum "$BUNDLE_MANIFEST" && find "$BUNDLE_FILES_DIRECTORY" -type f | LC_ALL=C sort | xargs -d '\n' sha256sum)
 }
 
 # The newest few versions of each agent, and no unfinished ship; whatever else is in the directory stays.

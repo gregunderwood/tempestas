@@ -93,15 +93,17 @@ The deploy also bundles each agent, for the server to offer the nodes through th
   agent-micropython/1.1.2/   manifest.json  files/main.py  files/boards/pico_w.py  …
 ```
 
-- **Only a clean `origin/main` build** of an agent is bundled; a `-dev` one is skipped, and says so.
+- **Only a clean `origin/main` deploy bundles the agents.** A `-dev` or `-dev-dirty` one skips them
+  and says so: what a bundle holds also depends on `tools/lib/`, outside the agent's own directory.
 - **The files are the ones the agent's own deploy ships**, tracked in git, plus its stamped
   `deployed_version.py`. A Pico's `settings.py` and `credentials.py` belong to that node and are
   never bundled; every board file is, under `boards/`.
 - **`manifest.json`** names the `app`, `version`, `contractMajor` and `contractMinor`, and a sha256
   for every file.
 - **Beside the releases, not in one**, so a server rollback keeps them. A version already on the host
-  is never shipped over; a new one lands under a dot-name, which the server skips, and is renamed
-  into place. The newest 2 versions of each agent are kept, pruned before the restart, as the
+  is never shipped over, but is checked against the one just built; when they differ the deploy
+  warns, and prints the command that removes it so the next deploy ships it fresh. A new version
+  lands under a dot-name, which the server skips, and is renamed into place. The newest 2 versions of each agent are kept, pruned before the restart, as the
   server reads the bundles only when it starts.
 - **The server verifies them at startup.** One whose files disagree with its manifest is logged and
   not offered. `GET /api/agent-releases` lists the rest, and serves each manifest and the files it

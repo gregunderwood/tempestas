@@ -109,10 +109,7 @@ RELEASE_ID="$(describe_release_id "$HERE")"
 PREVIOUS_RELEASE_ID="$(read_release_behind "$HOST" current)"
 
 say "Bundling the agents for the server to offer"
-rm -rf "$AGENT_BUNDLES_DIR"
-for app in "${AGENT_APPS[@]}"; do
-  build_agent_bundle "$HERE" "$app" "$AGENT_BUNDLES_DIR"
-done
+build_agent_bundles "$HERE" "$RELEASE_ID" "$AGENT_BUNDLES_DIR"
 
 say "Shipping $RELEASE_ID beside $PREVIOUS_RELEASE_ID"
 ship_release "$HOST" "$RELEASE_ID" "$PREVIOUS_RELEASE_ID" "$HERE"
