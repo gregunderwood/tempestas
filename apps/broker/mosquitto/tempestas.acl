@@ -7,14 +7,16 @@ topic write tempestas/v1/server/status
 topic write tempestas/v1/node/+/gpio/set
 topic write tempestas/v1/node/+/gpio/sync
 topic write tempestas/v1/node/+/control/heartbeat
+topic write tempestas/v1/node/+/update
 topic read tempestas/v1/node/+/hello
 topic read tempestas/v1/node/+/status
 topic read tempestas/v1/node/+/sensor/+/sample
 topic read tempestas/v1/node/+/gpio/result
 topic read tempestas/v1/node/+/gpio/state/+
 topic read tempestas/v1/node/+/alarm
+topic read tempestas/v1/node/+/update/status
 
-# Nodes write only their own subtree, never gpio/set; server/status lets them fail safe on its will.
+# Nodes write only their own subtree, never gpio/set or update; server/status lets them fail safe on its will.
 user elantris
 topic write tempestas/v1/node/elantris/hello
 topic write tempestas/v1/node/elantris/status
@@ -22,9 +24,11 @@ topic write tempestas/v1/node/elantris/sensor/+/sample
 topic write tempestas/v1/node/elantris/gpio/result
 topic write tempestas/v1/node/elantris/gpio/state/+
 topic write tempestas/v1/node/elantris/alarm
+topic write tempestas/v1/node/elantris/update/status
 topic read tempestas/v1/node/elantris/gpio/set
 topic read tempestas/v1/node/elantris/gpio/sync
 topic read tempestas/v1/node/elantris/control/heartbeat
+topic read tempestas/v1/node/elantris/update
 topic read tempestas/v1/server/status
 
 user greenhouse
@@ -34,16 +38,18 @@ topic write tempestas/v1/node/greenhouse/sensor/+/sample
 topic write tempestas/v1/node/greenhouse/gpio/result
 topic write tempestas/v1/node/greenhouse/gpio/state/+
 topic write tempestas/v1/node/greenhouse/alarm
+topic write tempestas/v1/node/greenhouse/update/status
 topic read tempestas/v1/node/greenhouse/gpio/set
 topic read tempestas/v1/node/greenhouse/gpio/sync
 topic read tempestas/v1/node/greenhouse/control/heartbeat
+topic read tempestas/v1/node/greenhouse/update
 topic read tempestas/v1/server/status
 
 # The follower's server reads only, so promoting it takes a credential change as well as config.
 user greenhouse-server
 topic read tempestas/v1/#
 
-# A sensor-only node copies this block and drops the four gpio lines.
+# A sensor-only node copies this block and drops the four gpio lines, keeping update.
 user patji
 topic write tempestas/v1/node/patji/hello
 topic write tempestas/v1/node/patji/status
@@ -51,9 +57,11 @@ topic write tempestas/v1/node/patji/sensor/+/sample
 topic write tempestas/v1/node/patji/gpio/result
 topic write tempestas/v1/node/patji/gpio/state/+
 topic write tempestas/v1/node/patji/alarm
+topic write tempestas/v1/node/patji/update/status
 topic read tempestas/v1/node/patji/gpio/set
 topic read tempestas/v1/node/patji/gpio/sync
 topic read tempestas/v1/node/patji/control/heartbeat
+topic read tempestas/v1/node/patji/update
 topic read tempestas/v1/server/status
 
 # Its password is in plain text on the board.
@@ -64,9 +72,11 @@ topic write tempestas/v1/node/braize/sensor/+/sample
 topic write tempestas/v1/node/braize/gpio/result
 topic write tempestas/v1/node/braize/gpio/state/+
 topic write tempestas/v1/node/braize/alarm
+topic write tempestas/v1/node/braize/update/status
 topic read tempestas/v1/node/braize/gpio/set
 topic read tempestas/v1/node/braize/gpio/sync
 topic read tempestas/v1/node/braize/control/heartbeat
+topic read tempestas/v1/node/braize/update
 topic read tempestas/v1/server/status
 
 # For loggers and watchers, which cannot borrow a node credential because nodes cannot read.

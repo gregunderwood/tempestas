@@ -1,4 +1,9 @@
-import { NodeKind, NodeStatus, type NodeCapabilities } from '@tempestas/domain';
+import {
+  MQTT_CONTRACT_MINOR,
+  NodeKind,
+  NodeStatus,
+  type NodeCapabilities,
+} from '@tempestas/domain';
 import {
   NODE_OFFLINE_AFTER_MS,
   acceptsCommands,
@@ -343,19 +348,31 @@ describe('isNodeOnline', () => {
 
 describe('findContractStanding', () => {
   it('calls a node on the same minor current', () => {
-    expect(findContractStanding(capabilities({ contractMinor: 0 }))).toBe(
-      'current',
-    );
+    expect(
+      findContractStanding(
+        capabilities({ contractMinor: MQTT_CONTRACT_MINOR }),
+      ),
+    ).toBe('current');
   });
 
   // Agents older than the minor field are on minor 0.
-  it('reads an absent minor as 0', () => {
-    expect(findContractStanding(capabilities())).toBe('current');
+  it('reads an absent minor as 0, which is behind contract 1.1', () => {
+    expect(findContractStanding(capabilities())).toBe('behind');
+  });
+
+  it('calls a node on an older minor behind', () => {
+    expect(
+      findContractStanding(
+        capabilities({ contractMinor: MQTT_CONTRACT_MINOR - 1 }),
+      ),
+    ).toBe('behind');
   });
 
   it('calls a node on a newer minor ahead', () => {
-    expect(findContractStanding(capabilities({ contractMinor: 1 }))).toBe(
-      'ahead',
-    );
+    expect(
+      findContractStanding(
+        capabilities({ contractMinor: MQTT_CONTRACT_MINOR + 1 }),
+      ),
+    ).toBe('ahead');
   });
 });
