@@ -15,12 +15,12 @@ needs both, which is the whole reason for socket.io here.
 
 ## The events
 
-| Event            | Payload        | Emitted when                                            |
-| ---------------- | -------------- | ------------------------------------------------------- |
-| `reading:latest` | `Reading`      | a sample is **persisted** — roughly every 10 s per node |
-| `device:state`   | `Device`       | a relay write succeeded, or `rulesEnabled` changed      |
-| `system:status`  | `SystemStatus` | once per rules evaluation cycle                         |
-| `rules:cycle`    | `RulesCycle`   | once per rules evaluation cycle, on the leader only     |
+| Event            | Payload        | Emitted when                                              |
+| ---------------- | -------------- | --------------------------------------------------------- |
+| `reading:latest` | `Reading`      | a sample is **persisted** — roughly every 10 s per node   |
+| `device:state`   | `Device`       | a relay write succeeded, or `rulesEnabled` changed        |
+| `system:status`  | `SystemStatus` | once per rules evaluation cycle, and at a follower's boot |
+| `rules:cycle`    | `RulesCycle`   | once per rules evaluation cycle, on the leader only       |
 
 `REALTIME_EVENTS` and `RealtimePayloads` in `@tempestas/domain` are the contract; a client that
 imports them cannot mis-type a handler.
@@ -55,6 +55,12 @@ away instead of showing an empty dashboard for ten seconds.
 The cached `rules:cycle` is **cleared when the server stops being the leader**: a follower
 does not evaluate, and replaying the last cycle it ran would present old decisions as current.
 The zones page also flags any evaluation more than a minute old.
+
+`SystemStatus.isLeading` is how a browser learns this controller is a follower. Demotion is a
+restart, so a follower publishes its status at boot rather than after its first ten-second tick:
+until then a reconnecting browser would keep the old leader's status. A leader does not, because
+only its first evaluation can say whether a sensor is stale. On a follower the zones page says the
+rules run on the leader instead of flagging an old evaluation.
 
 `device:state` is deliberately **not** replayed. Device state is authoritative from
 `GET /api/devices`, and a cached copy replayed on connect could contradict it. A client renders

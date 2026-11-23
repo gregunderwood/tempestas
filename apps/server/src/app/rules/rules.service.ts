@@ -88,6 +88,19 @@ export class RulesService implements OnApplicationBootstrap {
         this.logOwnership(zone, parsed.config.enabledRoles);
       }
     }
+    await this.announceFollowingAtBoot();
+  }
+
+  // Demotion is a restart, and browsers would otherwise keep the old leader's status for a whole interval.
+  private async announceFollowingAtBoot(): Promise<void> {
+    if (this.hardware.isLeader) return;
+    try {
+      await this.publishStatus([]);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Could not announce following at boot: ${describeError(error)}`,
+      );
+    }
   }
 
   @Interval(EVALUATION_INTERVAL_MS)

@@ -13,6 +13,7 @@ import { injectLiveSource, type SourceState } from '../../core/live-source';
 import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
 import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
+import { RealtimeService } from '../../core/realtime.service';
 import { injectServerNow } from '../../core/server-now';
 import { Pinboard } from '../../shared/pinboard/pinboard';
 import { buildZoneCards, type ZoneCard } from './zone-view';
@@ -33,6 +34,11 @@ interface NamedSource {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page-status" aria-live="polite">
+      @if (isFollower()) {
+        <p class="follower">
+          This controller is a follower; rules run on the leader.
+        </p>
+      }
       @if (failedSources().length > 0) {
         <p class="alert">
           Could not load the {{ failedSources().join(', ') }}.
@@ -287,6 +293,10 @@ interface NamedSource {
     </temp-pinboard>
   `,
   styles: `
+    .follower {
+      margin: 0 0 0.75rem;
+      font-weight: 500;
+    }
     .zone__name {
       margin: 0;
     }
@@ -552,6 +562,7 @@ interface NamedSource {
 })
 export class ZonesPage {
   private readonly api = inject(ApiService);
+  private readonly realtime = inject(RealtimeService);
 
   private readonly zones = injectLiveSource((options) =>
     this.api.fetchZones(options),
@@ -573,6 +584,10 @@ export class ZonesPage {
   ];
 
   protected readonly formatDuration = formatDuration;
+
+  protected readonly isFollower = computed(
+    () => this.realtime.status()?.isLeading === false,
+  );
 
   protected readonly failedSources = computed(() =>
     this.nameSourcesIn('failed'),

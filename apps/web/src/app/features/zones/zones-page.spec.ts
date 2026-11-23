@@ -2,7 +2,12 @@ import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { NEVER, of, throwError, type Observable } from 'rxjs';
-import { DeviceRole, type RulesCycle, type Zone } from '@tempestas/domain';
+import {
+  DeviceRole,
+  type RulesCycle,
+  type SystemStatus,
+  type Zone,
+} from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import {
@@ -105,6 +110,23 @@ function probeLabelsOf(page: HTMLElement): string[] {
   );
 }
 
+const FOLLOWER_NOTICE =
+  'This controller is a follower; rules run on the leader.';
+
+function statusWhile(isLeading: boolean): SystemStatus {
+  return {
+    at: NOW.toISOString(),
+    sensorStale: false,
+    staleRoles: [],
+    nodesOnline: 1,
+    nodesTotal: 1,
+    nodesPending: 0,
+    isLeading,
+    lastEvaluationAt: null,
+    sentAt: NOW.toISOString(),
+  };
+}
+
 function alertText(page: HTMLElement): string | undefined {
   return page.querySelector('[role="alert"]')?.textContent ?? undefined;
 }
@@ -196,6 +218,34 @@ describe('ZonesPage', () => {
     expect(page.textContent).toContain('rules ran 3 s ago');
     vi.advanceTimersByTime(61_000);
     render();
+    expect(alertText(page)).toContain('Rules have not run for over a minute.');
+  });
+
+  it('says a follower is following rather than that the rules have stopped', () => {
+    const { page, realtime, render } = renderZonesPage();
+    realtime.status.set(statusWhile(false));
+    vi.advanceTimersByTime(61_000);
+    render();
+    expect(page.textContent).toContain(FOLLOWER_NOTICE);
+    expect(alertText(page)).toBeUndefined();
+  });
+
+  it('says a follower is following from first paint, with no cycle to show', () => {
+    const { page, realtime, render } = renderZonesPage({ firstCycle: null });
+    realtime.status.set(statusWhile(false));
+    render();
+    expect(page.textContent).toContain(FOLLOWER_NOTICE);
+    expect(alertText(page)).toBeUndefined();
+  });
+
+  it('keeps the stall alert on the leader and drops the follower notice once promoted', () => {
+    const { page, realtime, render } = renderZonesPage();
+    realtime.status.set(statusWhile(false));
+    render();
+    realtime.status.set(statusWhile(true));
+    vi.advanceTimersByTime(61_000);
+    render();
+    expect(page.textContent).not.toContain(FOLLOWER_NOTICE);
     expect(alertText(page)).toContain('Rules have not run for over a minute.');
   });
 
