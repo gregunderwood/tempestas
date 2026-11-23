@@ -48,6 +48,23 @@ export function keepColumnAssignment<Item>(
   return columns.map((column) => column.items);
 }
 
+export function hasReordered(
+  previousKeys: readonly string[],
+  currentKeys: readonly string[],
+): boolean {
+  const previousKeySet = new Set(previousKeys);
+  const currentKeySet = new Set(currentKeys);
+  const keptInPreviousOrder = previousKeys.filter((key) =>
+    currentKeySet.has(key),
+  );
+  const keptInCurrentOrder = currentKeys.filter((key) =>
+    previousKeySet.has(key),
+  );
+  return keptInPreviousOrder.some(
+    (key, position) => key !== keptInCurrentOrder[position],
+  );
+}
+
 function addToShortestColumn<Item>(
   columns: FillingColumn<Item>[],
   item: Item,

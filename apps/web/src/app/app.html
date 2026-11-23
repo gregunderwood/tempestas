@@ -62,6 +62,29 @@
         }
       </div>
 
+      @if (arrangeMode.isOffered()) {
+      <div class="temp-arrange" role="group" aria-label="Card order">
+        @if (arrangeMode.isArranging()) {
+        <button
+          type="button"
+          class="temp-top-bar-button"
+          (click)="arrangeMode.resetOrder()"
+        >
+          Reset order
+        </button>
+        }
+        <button
+          type="button"
+          class="temp-top-bar-button"
+          [class.temp-top-bar-button-active]="arrangeMode.isArranging()"
+          [attr.aria-pressed]="arrangeMode.isArranging()"
+          (click)="arrangeMode.toggleArranging()"
+        >
+          Arrange
+        </button>
+      </div>
+      }
+
       <span class="temp-top-bar-live">
         <ng-container *ngTemplateOutlet="liveIndicator" />
       </span>

@@ -20,6 +20,7 @@ import { listAttentionItems } from './attention';
 import { DashboardHero } from './dashboard-hero';
 import { NodeStatCardView } from './node-stat-card';
 import { buildNodeStatCards, type NodeStatCard } from './node-stats';
+import { injectCardArrangement } from '../../shared/arrange/card-arrangement';
 import { Pinboard } from '../../shared/pinboard/pinboard';
 import { injectPeriodStarts } from './period-start';
 import { ActivityPanel, AttentionPanel } from './side-panels';
@@ -31,6 +32,15 @@ import {
 
 const AGE_TICK_MILLISECONDS = 10_000;
 const CARD_COLUMN_MINIMUM_REM = 22;
+export const DASHBOARD_CARD_ORDER_KEY = 'tempestas.card-order.dashboard';
+
+function identifyNodeCard(card: NodeStatCard): string {
+  return card.nodeId;
+}
+
+function nameNodeCard(card: NodeStatCard): string {
+  return card.title;
+}
 
 @Component({
   selector: 'temp-dashboard',
@@ -59,7 +69,10 @@ const CARD_COLUMN_MINIMUM_REM = 22;
           <temp-pinboard
             [items]="nodeCards()"
             [identify]="identifyNodeCard"
+            [nameOf]="nameNodeCard"
             [columnMinimumRem]="cardColumnMinimumRem"
+            [isArranging]="cardArrangement.isArranging()"
+            (reordered)="cardArrangement.save($event)"
           >
             <ng-template let-card>
               <temp-node-stat-card [card]="card" />
@@ -131,6 +144,9 @@ export class Dashboard {
   private readonly devices = injectLiveDevices().devices;
   protected readonly cycle = injectLiveRulesCycle().cycle;
   private readonly periodStarts = injectPeriodStarts(this.readings);
+  protected readonly cardArrangement = injectCardArrangement(
+    DASHBOARD_CARD_ORDER_KEY,
+  );
 
   protected readonly systemState = computed(() =>
     describeSystemState({
@@ -159,18 +175,22 @@ export class Dashboard {
   );
 
   protected readonly nodeCards = computed(() =>
-    buildNodeStatCards({
-      readings: this.readings(),
-      nodes: this.nodes(),
-      devices: this.devices(),
-      periodStarts: this.periodStarts(),
-      now: this.now(),
-    }),
+    this.cardArrangement.arrange(
+      buildNodeStatCards({
+        readings: this.readings(),
+        nodes: this.nodes(),
+        devices: this.devices(),
+        periodStarts: this.periodStarts(),
+        now: this.now(),
+      }),
+      identifyNodeCard,
+    ),
   );
 
   protected readonly activity = this.activityLog.entries;
   protected readonly cardColumnMinimumRem = CARD_COLUMN_MINIMUM_REM;
-  protected readonly identifyNodeCard = (card: NodeStatCard) => card.nodeId;
+  protected readonly identifyNodeCard = identifyNodeCard;
+  protected readonly nameNodeCard = nameNodeCard;
 
   constructor() {
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));

@@ -21,6 +21,7 @@ import {
 import { filter } from 'rxjs';
 import { RealtimeService } from './core/realtime.service';
 import { PageHeading } from './core/page-heading';
+import { ArrangeMode } from './shared/arrange/card-arrangement';
 import { ActivityLog } from './features/dashboard/activity-log';
 
 interface NavLink {
@@ -62,6 +63,7 @@ export class App implements OnInit {
   private readonly realtime = inject(RealtimeService);
   private readonly router = inject(Router);
   private readonly pageHeading = inject(PageHeading);
+  readonly arrangeMode = inject(ArrangeMode);
 
   readonly navLinks = NAV_LINKS;
   readonly heading = this.pageHeading.text;
