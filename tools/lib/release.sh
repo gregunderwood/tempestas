@@ -46,7 +46,7 @@ describe_release_id() {
 
 require_release_layout() {
   local host="$1"
-  if ! ssh "$host" "test -L $REMOTE_ROOT/current && systemctl cat tempestas-server.service | grep -q '$REMOTE_ROOT/current/server/main.js'"; then
+  if ! ssh "$host" "test -L $REMOTE_ROOT/current && test -L $REMOTE_ROOT/migrator && systemctl cat tempestas-server.service | grep -q '$REMOTE_ROOT/current/server/main.js'"; then
     echo "$host does not run its server from $REMOTE_ROOT/current yet." >&2
     echo "Run tools/install-deploy-privileges.sh $host once: it moves dist/ into a release and points the units at it." >&2
     exit 1
@@ -69,6 +69,8 @@ require_migrator_on_current() {
   echo "$host runs $current_release_id, but migrator is on $migrator_release_id: a revert failed or a deploy was cut short." >&2
   echo "Once $migrator_release_id's migrations are reverted, or were never applied, point migrator back:" >&2
   echo "  ssh $host 'sudo systemctl start tempestas-migrate@revert-applied.service && cd $REMOTE_ROOT && ln -sfn releases/$current_release_id migrator'" >&2
+  echo "Or keep them applied, as expand-contract allows and an irreversible one needs, and give up undoing them:" >&2
+  echo "  ssh $host 'cd $REMOTE_ROOT && ln -sfn releases/$current_release_id migrator'" >&2
   exit 1
 }
 
