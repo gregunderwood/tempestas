@@ -26,6 +26,7 @@ import { AgentReleasesService } from '../agent-releases/agent-releases.service';
 import { Clock } from '../common/clock';
 import { describeError } from '../common/describe-error';
 import { DeviceEntity } from '../devices/models';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';
 import { NodeEntity } from './models';
@@ -108,6 +109,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(ZoneEntity)
     private readonly zones: Repository<ZoneEntity>,
     private readonly hardware: HardwareService,
+    private readonly realtime: RealtimeGateway,
     private readonly clock: Clock,
     private readonly agentReleases: AgentReleasesService,
   ) {}
@@ -151,6 +153,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
         facts,
       });
     }
+    await this.publishNodeState(existing);
   }
 
   async handleAvailability(availability: NodeAvailability): Promise<void> {
@@ -170,6 +173,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     // Only an online transition is a sighting, which is what makes "offline since" answerable.
     if (availability.online) node.lastSeenAt = availability.at;
     await this.nodes.save(node);
+    await this.publishNodeState(node);
 
     if (!hasChanged) return;
     this.logAvailabilityChange(node);
@@ -247,7 +251,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     const node = await this.findOneEntity(id);
     await this.applyOperatorFields(node, changes);
     await this.nodes.save(node);
-    return this.findOne(id);
+    return this.publishNodeState(node);
   }
 
   // Only a pending node: deleting cascades its readings, and `disable` is the reject that keeps them.
@@ -273,7 +277,10 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async registerPendingNode(facts: HelloFacts): Promise<void> {
-    await this.nodes.save(this.nodes.create(newNodeFromHello(facts)));
+    const node = await this.nodes.save(
+      this.nodes.create(newNodeFromHello(facts)),
+    );
+    await this.publishNodeState(node);
     this.logger.warn(
       `Node "${facts.nodeId}" announced itself and is PENDING - it receives no commands and ` +
         `its readings are DISCARDED until it is admitted.`,
@@ -339,7 +346,13 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     if (previousStatus !== targetStatus) {
       this.logger.warn(describeTransition(node, previousStatus));
     }
-    return this.findOne(id);
+    return this.publishNodeState(node);
+  }
+
+  private async publishNodeState(entity: NodeEntity): Promise<Node> {
+    const [node] = await this.decorate([entity]);
+    this.realtime.publishNodeState(node);
+    return node;
   }
 
   private async applyOperatorFields(

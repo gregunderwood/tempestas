@@ -8,6 +8,7 @@ import {
   type NodeCapabilities,
 } from '@tempestas/domain';
 import type { HardwareService, NodeHello } from '../hardware/hardware.service';
+import type { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { DeviceEntity } from '../devices/models';
 import type { SensorReadingEntity } from '../readings/models';
 import type { ZoneEntity } from '../zones/models';
@@ -123,6 +124,8 @@ function makeService(
     ),
   } as unknown as Repository<ZoneEntity>;
   const hardware = {} as unknown as HardwareService;
+  const publishNodeState = vi.fn();
+  const realtime = { publishNodeState } as unknown as RealtimeGateway;
 
   const service = new NodesService(
     nodeRepository,
@@ -130,10 +133,11 @@ function makeService(
     readingRepository,
     zoneRepository,
     hardware,
+    realtime,
     new SystemClock(),
     agentReleases,
   );
-  return { service, rows, nodeRepository };
+  return { service, rows, nodeRepository, publishNodeState };
 }
 
 describe('NodesService hello ingest', () => {
@@ -342,5 +346,76 @@ describe('NodesService admission lifecycle', () => {
       ConflictException,
     );
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe('NodesService node:state fan-out', () => {
+  it('publishes a newly announced node as pending', async () => {
+    const { service, publishNodeState } = makeService();
+    await service.handleHello(hello({ nodeId: 'ghost' }));
+    expect(publishNodeState).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: 'ghost', status: NodeStatus.Pending }),
+    );
+  });
+
+  it('publishes a re-announce with its new agent version', async () => {
+    const { service, publishNodeState } = makeService([
+      node({ agentVersion: '0.9.0' }),
+    ]);
+    await service.handleHello(hello({ agentVersion: '1.0.0' }));
+    expect(publishNodeState).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: 'elantris', agentVersion: '1.0.0' }),
+    );
+  });
+
+  it('publishes a node coming online, and going offline again', async () => {
+    const { service, publishNodeState } = makeService([node()]);
+    await service.handleAvailability({
+      nodeId: 'elantris',
+      online: true,
+      at: new Date(),
+    });
+    await service.handleAvailability({
+      nodeId: 'elantris',
+      online: false,
+      at: new Date(),
+    });
+    expect(
+      publishNodeState.mock.calls.map(([published]) => published.online),
+    ).toEqual([true, false]);
+  });
+
+  it('publishes nothing for a node that has never said hello', async () => {
+    const { service, publishNodeState } = makeService();
+    await service.handleAvailability({ nodeId: 'ghost', online: true, at: AT });
+    expect(publishNodeState).not.toHaveBeenCalled();
+  });
+
+  it('publishes an admission and a disable, and returns what it published', async () => {
+    const { service, publishNodeState } = makeService([
+      node({ status: NodeStatus.Pending }),
+    ]);
+    const admitted = await service.admit('node-uuid', {});
+    const disabled = await service.disable('node-uuid');
+    expect(publishNodeState.mock.calls).toEqual([[admitted], [disabled]]);
+    expect(disabled.status).toBe(NodeStatus.Disabled);
+  });
+
+  it('publishes an operator edit', async () => {
+    const { service, publishNodeState } = makeService([node()]);
+    await service.update('node-uuid', { displayName: 'North End' });
+    expect(publishNodeState).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: 'North End' }),
+    );
+  });
+
+  it('publishes nothing when an admit is refused', async () => {
+    const { service, publishNodeState } = makeService([
+      node({ status: NodeStatus.Pending }),
+    ]);
+    await expect(
+      service.admit('node-uuid', { zoneId: 'no-such-zone' }),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(publishNodeState).not.toHaveBeenCalled();
   });
 });
