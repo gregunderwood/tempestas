@@ -63,8 +63,10 @@ Raspbian ships.
    Bound to **127.0.0.1**, and on 5433 because the legacy stack still holds 5432. `--env-file` is read by the docker _client_, so a 0600-root secret
    needs `sudo docker`, not just membership of the `docker` group.
 
-3. **Ship the code.** Built on the Mac, never on the Pi - an Angular production
-   build peaks well beyond what these boxes have spare.
+3. **Ship the code**, the first time only: step 8 moves it into a release, and
+   `tools/deploy.sh` ships every one after (see [Deploys](Deploys.md)). Built on the
+   Mac, never on the Pi - an Angular production build peaks well beyond what these
+   boxes have spare.
 
    ```bash
    rsync -a --delete dist/apps/server/      HOST:~/tempestas/dist/apps/server/
@@ -91,6 +93,9 @@ Raspbian ships.
    sudo systemd-analyze verify tempestas-server.service
    ```
 
+   The server and migrate units run from `~/tempestas/current` and `migrator`, which step 8
+   creates, so the server starts after step 8, not here.
+
    Install them as they are in the repo, and never edit one on the box: an edit there is
    invisible from here. Check a box with
    `diff /etc/systemd/system/tempestas-agent.service ~/tempestas/apps/agent-linux/systemd/tempestas-agent.service`.
@@ -102,8 +107,9 @@ Raspbian ships.
    `systemctl cat`, which then fails with a bare "Permission denied" that looks
    like something else entirely.
 
-7. **Migrations**, through the unit rather than by hand, so the password is
-   never an argument:
+7. **Migrations**, after step 8, which creates the `migrator` link the unit runs
+   from, and through the unit rather than by hand, so the password is never an
+   argument:
 
    ```bash
    sudo systemctl start tempestas-migrate@show.service   # read it first
@@ -116,11 +122,13 @@ Raspbian ships.
    tools/install-deploy-privileges.sh elantris patji
    ```
 
-   It installs `tempestas-backup.service` where the server runs on
-   `postgresql.service`, and makes every migrate `run` and `revert` require
-   it, then writes `/etc/sudoers.d/tempestas-deploy`: the deploy user may run
+   It moves `~/tempestas/dist` into `~/tempestas/releases/<date>-before-releases`,
+   links `current` and `migrator` to it, and installs the server and migrate units,
+   which run from those links. It installs `tempestas-backup.service` where the server runs on
+   `postgresql.service`, and makes every migrate `run`, `revert` and
+   `revert-applied` require it, then writes `/etc/sudoers.d/tempestas-deploy`: the deploy user may run
    exactly the `systemctl` lines a deploy uses (show migrations, restart or
-   reset the server, restart the agent, and where there is a backup unit,
+   stop or reset the server, restart the agent, and where there is a backup unit,
    back up and run or revert migrations) without a password, and nothing
    else. Exact lines only, because a wildcard in sudoers is a root shell. The
    file is checked with `visudo -c` before it lands. Rerun it when a unit is

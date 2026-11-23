@@ -11,6 +11,8 @@ PAYLOAD_FILES=(
   "$HERE/tools/host/install-deploy-privileges.sh"
   "$HERE/tools/host/backup-database.sh"
   "$HERE/apps/server/systemd/tempestas-backup.service"
+  "$HERE/apps/server/systemd/tempestas-server.service"
+  "$HERE/apps/server/systemd/tempestas-migrate@.service"
 )
 
 source "$HERE/tools/lib/console.sh"

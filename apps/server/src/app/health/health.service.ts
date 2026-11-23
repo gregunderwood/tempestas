@@ -11,6 +11,7 @@ import { Clock } from '../common/clock';
 import { DivergenceLog } from '../common/divergence-log';
 import { MILLISECONDS_PER_SECOND, SECONDS_PER_DAY } from '../common/time-units';
 import { NodesService } from '../nodes/nodes.service';
+import { readReleaseId } from '../common/release-id';
 import { SensorReadingEntity } from '../readings/models';
 import { rememberSensorsSince } from '../readings/sensor-memory';
 import { RulesService } from '../rules/rules.service';
@@ -21,6 +22,9 @@ import { TimezoneCheckService } from './timezone-check.service';
 // "Up" is not the question: no fresh readings, or no fresh evaluation, is a greenhouse running open-loop.
 export const READINGS_STALE_AFTER_SECONDS = 120;
 export const EVALUATION_STALE_AFTER_SECONDS = 60;
+
+// Read once: a release's code never changes under a running server.
+const RELEASE_ID = readReleaseId();
 
 // A day, so an overnight failsafe is still reported in the morning and then clears on its own.
 const DIVERGENCE_WINDOW_SECONDS = SECONDS_PER_DAY;
@@ -94,6 +98,7 @@ export class HealthService {
     return {
       status: problems.some(isDegrading) ? 'degraded' : 'ok',
       db: true,
+      releaseId: RELEASE_ID,
       uptimeSeconds: Math.round(process.uptime()),
       nodes: counts,
       readings: {
@@ -172,6 +177,7 @@ function unreachableDatabaseReport(): HealthReport {
   return {
     status: 'degraded',
     db: false,
+    releaseId: RELEASE_ID,
     uptimeSeconds: Math.round(process.uptime()),
     nodes: { total: 0, online: 0, pending: 0 },
     readings: { latestAt: null, ageSeconds: null },

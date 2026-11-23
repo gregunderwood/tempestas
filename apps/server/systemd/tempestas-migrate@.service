@@ -1,7 +1,8 @@
 # Install to /etc/systemd/system/tempestas-migrate@.service
 #
-#   sudo systemctl start tempestas-migrate@show.service   # read this first
-#   sudo systemctl start tempestas-migrate@run.service    # backs up first
+#   sudo systemctl start tempestas-migrate@show.service            # exits 3 when pending, 4 when irreversible
+#   sudo systemctl start tempestas-migrate@run.service             # backs up first
+#   sudo systemctl start tempestas-migrate@revert-applied.service  # backs up, then undoes what that release's run applied
 #   journalctl -u tempestas-migrate@run.service -n 50
 #
 # A unit rather than a shell command so it reuses the SAME environment file the
@@ -10,7 +11,7 @@
 # hand-typed command cannot do without putting a password in the shell history
 # or in `ps`.
 #
-# `show` exits 3 when anything is pending, so tools/deploy.sh can refuse to restart into it.
+# Runs the `migrator` release, so a release migrates and reverts with the code that knows its migrations.
 
 [Unit]
 Description=tempestas migrations (%i)
@@ -24,6 +25,6 @@ Group=gunderwood
 WorkingDirectory=/home/gunderwood/tempestas
 EnvironmentFile=/etc/tempestas/server.env
 Environment=NODE_ENV=production
-ExecStart=/usr/local/bin/node /home/gunderwood/tempestas/dist/apps/server/main.js migrate:%i
+ExecStart=/usr/local/bin/node /home/gunderwood/tempestas/migrator/server/main.js migrate:%i
 StandardOutput=journal
 StandardError=journal
