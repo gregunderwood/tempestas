@@ -26,8 +26,8 @@ function statusOf(overrides: Partial<SystemStatus> = {}): SystemStatus {
 
 const ROUTES: Route[] = [
   {
-    path: 'readings',
-    data: { heading: 'Readings', subtitle: 'Every sensor' },
+    path: 'reports',
+    data: { heading: 'Reports', subtitle: 'How the nights went' },
     children: [],
   },
   { path: 'zones', children: [] },
@@ -75,7 +75,7 @@ describe('App shell', () => {
     );
     expect(labels).toEqual([
       'Dashboard',
-      'Readings',
+      'Reports',
       'Zones',
       'Devices',
       'Nodes',
@@ -84,25 +84,23 @@ describe('App shell', () => {
 
   it('marks the current screen for a screen reader', async () => {
     const { fixture, nav } = renderShell(statusOf());
-    await navigateTo(fixture, '/readings');
+    await navigateTo(fixture, '/reports');
     const current = nav?.querySelector('[aria-current="page"]');
-    expect(current?.textContent).toContain('Readings');
+    expect(current?.textContent).toContain('Reports');
   });
 
   it('titles the top bar from the route', async () => {
     const { fixture, element } = renderShell(statusOf());
-    await navigateTo(fixture, '/readings');
-    expect(element.querySelector('.temp-heading')?.textContent).toBe(
-      'Readings',
-    );
+    await navigateTo(fixture, '/reports');
+    expect(element.querySelector('.temp-heading')?.textContent).toBe('Reports');
     expect(element.querySelector('.temp-subtitle')?.textContent).toBe(
-      'Every sensor',
+      'How the nights went',
     );
   });
 
   it('lets a page name itself, until the next navigation', async () => {
     const { fixture, element } = renderShell(statusOf());
-    await navigateTo(fixture, '/readings');
+    await navigateTo(fixture, '/reports');
     TestBed.inject(PageHeading).showPage({
       heading: 'greenhouse',
       subtitle: 'linux node',
@@ -120,12 +118,12 @@ describe('App shell', () => {
 
   it('keeps a page name through a navigation that stays on the page', async () => {
     const { fixture, element } = renderShell(statusOf());
-    await navigateTo(fixture, '/readings');
+    await navigateTo(fixture, '/reports');
     TestBed.inject(PageHeading).showPage({
       heading: 'greenhouse',
       subtitle: 'linux node',
     });
-    await navigateTo(fixture, '/readings?days=7');
+    await navigateTo(fixture, '/reports?days=7');
     expect(element.querySelector('.temp-heading')?.textContent).toBe(
       'greenhouse',
     );
@@ -240,7 +238,7 @@ describe('App shell menu', () => {
     const { fixture, menuButton, nav } = renderShell(statusOf());
     menuButton?.click();
     fixture.detectChanges();
-    await navigateTo(fixture, '/readings');
+    await navigateTo(fixture, '/reports');
     expect(nav?.classList.contains('temp-rail-open')).toBe(false);
     expect(menuButton?.getAttribute('aria-expanded')).toBe('false');
   });

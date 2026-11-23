@@ -107,7 +107,7 @@ Each section is one or more commits that leave the greenhouse working. The gate 
 ### A. Rule kinds per role (domain + engine) — ✅ built
 
 Built as planned, with two additions found on the way: `daylight` moved up to the zone (lights,
-burner and the readings screens all read one window), and roles are always evaluated in a fixed
+burner and the node screen all read one window), and roles are always evaluated in a fixed
 `ROLE_ORDER` because Postgres hands jsonb keys back reordered. The migration was run forward and
 back against Postgres 17 with the live greenhouse row: revert restored it byte for byte, and refused
 (and rolled back) with a pumphouse zone present. What follows is the plan as written.

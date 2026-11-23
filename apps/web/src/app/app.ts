@@ -35,7 +35,7 @@ const NAV_LINKS: readonly NavLink[] = [
     label: 'Dashboard',
     glyph: 'M4 4h7v7H4z M13 4h7v4h-7z M13 10h7v10h-7z M4 13h7v7H4z',
   },
-  { path: '/readings', label: 'Readings', glyph: 'M3 20h18 M5 16l4-5 4 3 6-8' },
+  { path: '/reports', label: 'Reports', glyph: 'M3 20h18 M5 16l4-5 4 3 6-8' },
   { path: '/zones', label: 'Zones', glyph: 'M12 3l9 5-9 5-9-5z M3 13l9 5 9-5' },
   {
     path: '/devices',
