@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AgentReleasesModule } from './agent-releases/agent-releases.module';
 import { CommonModule } from './common/common.module';
 import { postgresConnectionOptions } from './common/postgres-connection';
 import { DevicesModule } from './devices/devices.module';
@@ -62,6 +63,7 @@ const ENTITIES = [
     RulesModule,
     ZonesModule,
     HealthModule,
+    AgentReleasesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

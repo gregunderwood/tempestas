@@ -15,6 +15,9 @@ problem found after a deploy passed.
 - [../../apps/server/src/migrate.ts](../../apps/server/src/migrate.ts) — `migrate:show|run|revert|revert-applied`
 - [../../apps/server/systemd/](../../apps/server/systemd/) — the server and migrate units, which run from the links
 - [../../tools/host/install-deploy-privileges.sh](../../tools/host/install-deploy-privileges.sh) — the one-time move to releases, the units, the sudoers lines
+- [../../tools/lib/agent-bundle.sh](../../tools/lib/agent-bundle.sh) — the agents' release bundles: build, ship, prune
+- [../../apps/agent-linux/agent-files.sh](../../apps/agent-linux/agent-files.sh) and [../../apps/agent-micropython/agent-files.sh](../../apps/agent-micropython/agent-files.sh) — what each agent is made of, for its own deploy and for a bundle
+- [../../apps/server/src/app/agent-releases/](../../apps/server/src/app/agent-releases/) — the server verifies and offers them
 
 ## How it works
 
@@ -44,7 +47,8 @@ The deploy, in order:
    in reach of the OOM killer.
 3. **Ship** the new release beside the live one, recording the live one's ID in
    `previous-release`. `node_modules` is hard-linked from the live release when the lockfile is
-   unchanged, otherwise `npm ci` runs on the host.
+   unchanged, otherwise `npm ci` runs on the host. Ship each agent's
+   [release bundle](#agent-release-bundles) too.
 4. **Point `migrator` at it** and run `migrate:show`, which exits 0 when nothing is pending, 3 when
    something is, 4 when something pending cannot be reverted.
    - 0: back up anyway.
@@ -77,6 +81,47 @@ with it, so it refuses and asks for a revert by hand.
 `rollback.sh` goes back to the release in `previous-release`: the one that ran when current
 shipped, so the only one whose schema reverting current's migrations leaves. A rollback never
 skips a release, as one skipped could still have its migrations applied.
+
+### Agent release bundles
+
+The deploy also bundles each agent, for the server to offer the nodes through the
+[update command](MQTT%20Contract.md#the-update-command):
+
+```
+~/tempestas/agent-releases/
+  agent-linux/1.1.4/         manifest.json  files/src/tempestas_agent/…
+  agent-micropython/1.1.2/   manifest.json  files/main.py  files/boards/pico_w.py  …
+```
+
+- **Only a clean `origin/main` deploy bundles the agents.** A `-dev` or `-dev-dirty` one skips them
+  and says so: what a bundle holds also depends on `tools/lib/`, outside the agent's own directory.
+- **The files are the ones the agent's own deploy ships**, tracked in git, plus its stamped
+  `deployed_version.py`. A Pico's `settings.py` and `credentials.py` belong to that node and are
+  never bundled. Where the hand deploy copies one board file to `board.py`, a bundle carries every
+  board under `boards/`, and the node installs its own as `board.py`
+  ([the update command](MQTT%20Contract.md#the-update-command)).
+- **A bundle never stops the server deploy.** An agent that cannot be versioned, copied or shipped
+  is named and skipped; a ship that fails partway leaves only a dot-name, which the next prune
+  clears.
+- **`manifest.json`** names the `app`, `version`, `contractMajor` and `contractMinor`, and a sha256
+  for every file.
+- **Beside the releases, not in one**, so a server rollback keeps them. A version already on the host
+  is never shipped over, but is checked against the one just built; when they differ the deploy
+  warns, and prints the command that removes it so the next deploy ships it fresh. A new version
+  lands under a dot-name, which the server skips, and is renamed into place. The newest 2 versions
+  of each agent on each contract major are kept, since a node is offered only its own major. They
+  are pruned before the restart, as the server reads the bundles only when it starts.
+- **The server verifies them at startup.** One whose files disagree with its manifest is logged and
+  not offered. `GET /api/agent-releases` lists the rest, and serves each manifest and the files it
+  lists under `/api/agent-releases/<app>/<version>/`, from the bytes it verified, held in memory:
+  an `update` pins the manifest's sha256, so what is served never changes under it until the next
+  restart, whatever a later deploy does on disk.
+- **A node is offered** the newest bundle for its agent on its contract major, when it is newer by
+  number (1.0.10 is newer than 1.0.9), as `availableUpdate` on the Nodes page. A node on a `-dev`
+  build is offered it whenever it is on the same contract minor or later: a branch's own commits
+  count toward its patch too, so its patch cannot say which is newer. Only from contract
+  1.1, which added `update`: a node before it never subscribes, and one that has never sent
+  `agentName` needs a deploy by hand first.
 
 ### When the revert itself fails
 
@@ -118,4 +163,5 @@ reports a rollback that did not happen.
 
 - The release layout, the links, or the order of the deploy changes
 - A `show` exit status is added
+- What goes in an agent's bundle, or the manifest's fields, changes
 - A deploy or rollback goes wrong in a way the next person should be warned about

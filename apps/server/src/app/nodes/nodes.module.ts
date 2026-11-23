@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AgentReleasesModule } from '../agent-releases/agent-releases.module';
 import { Clock, SystemClock } from '../common/clock';
 import { DeviceEntity } from '../devices/models';
 import { SensorReadingEntity } from '../readings/models';
@@ -10,6 +11,7 @@ import { NodeEntity } from './models';
 
 @Module({
   imports: [
+    AgentReleasesModule,
     TypeOrmModule.forFeature([
       NodeEntity,
       DeviceEntity,

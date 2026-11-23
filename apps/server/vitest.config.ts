@@ -17,13 +17,18 @@ export default defineConfig({
       reportsDirectory: '../../coverage/apps/server',
       provider: 'v8',
       // By directory, so a new decision module is measured the day it lands.
-      include: ['src/app/devices/**', 'src/app/rules/**'],
+      include: [
+        'src/app/devices/**',
+        'src/app/rules/**',
+        'src/app/agent-releases/**',
+      ],
       // Wiring, not decisions; see docs/Testing.md.
       exclude: [
         '**/*.module.ts',
         '**/*.controller.ts',
         '**/dto/**',
         '**/models.ts',
+        '**/*.fixtures.ts',
       ],
       thresholds: { lines: 90, functions: 90, branches: 85, statements: 90 },
     },

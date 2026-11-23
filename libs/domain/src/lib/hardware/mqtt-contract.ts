@@ -6,6 +6,8 @@ export const MQTT_CONTRACT_VERSION = 'v1' as const;
 /** Semver for the contract: a major changes it, a minor only adds to it. Agents version as major.minor.patch. */
 export const MQTT_CONTRACT_MAJOR = 1;
 export const MQTT_CONTRACT_MINOR = 1;
+/** The contract that added `update`: a node on an older one never subscribes to it. */
+export const UPDATE_COMMAND_CONTRACT = { major: 1, minor: 1 } as const;
 export const MQTT_ROOT = `tempestas/${MQTT_CONTRACT_VERSION}` as const;
 
 export const mqttTopics = {
@@ -144,6 +146,12 @@ export interface GpioResultPayload extends MqttEnvelope {
 export enum AgentApp {
   Linux = 'agent-linux',
   MicroPython = 'agent-micropython',
+}
+
+const AGENT_APPS = new Set<unknown>(Object.values(AgentApp));
+
+export function isAgentApp(value: unknown): value is AgentApp {
+  return AGENT_APPS.has(value);
 }
 
 /** Added in contract 1.1. Owned, expiring and never retained, exactly like `gpio/set`. */

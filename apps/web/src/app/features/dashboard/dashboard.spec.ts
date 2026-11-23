@@ -81,6 +81,7 @@ function node(slug: string, sensors: Record<string, MetricKey[]>): Node {
     agentName: null,
     agentVersion: null,
     contractStanding: 'current',
+    availableUpdate: null,
     capabilities: {
       contractVersion: 1,
       hasRtc: true,

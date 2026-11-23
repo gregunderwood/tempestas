@@ -107,13 +107,17 @@ file (ESPHome has native MQTT and built-in SCD4x support) rather than a code cha
 ## The API
 
 ```
-GET    /api/nodes                # includes deviceCount and latestReadingAt
+GET    /api/nodes                # includes deviceCount, latestReadingAt and availableUpdate
 GET    /api/nodes/:id
 PUT    /api/nodes/:id            # displayName, location, zoneId — nothing else
 POST   /api/nodes/:id/admit      # optional { zoneId, displayName, location }
 POST   /api/nodes/:id/disable
 DELETE /api/nodes/:id            # pending only
 ```
+
+`availableUpdate` is the newer agent version the server could send the node, or `null`. The
+bundles it comes from are listed at `GET /api/agent-releases`; see
+[Agent release bundles](Deploys.md#agent-release-bundles).
 
 **There is no `POST /api/nodes`.** A node comes into existence by announcing itself; the only thing a
 human does is admit it. That asymmetry keeps the registry a record of what is actually on the

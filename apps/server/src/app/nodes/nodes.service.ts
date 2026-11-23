@@ -22,6 +22,7 @@ import {
   type NodeAvailability,
   type NodeHello,
 } from '../hardware/hardware.service';
+import { AgentReleasesService } from '../agent-releases/agent-releases.service';
 import { Clock } from '../common/clock';
 import { describeError } from '../common/describe-error';
 import { DeviceEntity } from '../devices/models';
@@ -108,6 +109,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     private readonly zones: Repository<ZoneEntity>,
     private readonly hardware: HardwareService,
     private readonly clock: Clock,
+    private readonly agentReleases: AgentReleasesService,
   ) {}
 
   onModuleInit(): void {
@@ -391,6 +393,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
         agentName: node.agentName,
         agentVersion: node.agentVersion,
         contractStanding: findContractStanding(node.capabilities),
+        availableUpdate: this.agentReleases.findAvailableUpdate(node),
         capabilities: node.capabilities,
         zoneId: node.zoneId,
         deviceCount: deviceCounts.get(node.id) ?? 0,

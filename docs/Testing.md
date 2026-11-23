@@ -16,9 +16,10 @@ Coverage only runs when asked — `npx nx test server --coverage` — and it is 
 because a threshold nobody runs is decoration. It went unrun through phases 1-4 and was failing when
 phase 5 first checked it.
 
-An `exclude` list keeps modules, controllers, DTOs and entities out of the measurement. A controller
-here is one line of delegation and a DTO is a declaration; counting them makes the number describe
-how much boilerplate exists rather than whether the interlocks are tested.
+An `exclude` list keeps modules, controllers, DTOs, entities and `*.fixtures.ts` test helpers out of
+the measurement. A controller here is one line of delegation and a DTO is a declaration; counting
+them makes the number describe how much boilerplate exists rather than whether the interlocks are
+tested. A fixture runs in full whenever a test uses it, so counting it only inflates the number.
 
 ## Key files
 

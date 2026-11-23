@@ -1,13 +1,25 @@
 import { ConflictException } from '@nestjs/common';
 import { SystemClock } from '../common/clock';
 import type { Repository } from 'typeorm';
-import { NodeKind, NodeStatus, type NodeCapabilities } from '@tempestas/domain';
+import {
+  AgentApp,
+  NodeKind,
+  NodeStatus,
+  type NodeCapabilities,
+} from '@tempestas/domain';
 import type { HardwareService, NodeHello } from '../hardware/hardware.service';
 import type { DeviceEntity } from '../devices/models';
 import type { SensorReadingEntity } from '../readings/models';
 import type { ZoneEntity } from '../zones/models';
 import { NodesService } from './nodes.service';
 import type { NodeEntity } from './models';
+import { AgentReleasesService } from '../agent-releases/agent-releases.service';
+import {
+  makeAgentReleasesRoot,
+  writeBundle,
+} from '../agent-releases/agent-release-bundles.fixtures';
+
+const NO_AGENT_RELEASES_DIRECTORY = '/nonexistent/agent-releases';
 
 const AT = new Date('2026-01-10T12:00:00Z');
 
@@ -56,7 +68,11 @@ function node(overrides: Partial<NodeEntity> = {}): NodeEntity {
   } as NodeEntity;
 }
 
-function makeService(initial: NodeEntity[] = [], zones: ZoneEntity[] = []) {
+function makeService(
+  initial: NodeEntity[] = [],
+  zones: ZoneEntity[] = [],
+  agentReleases = new AgentReleasesService(NO_AGENT_RELEASES_DIRECTORY),
+) {
   const rows = [...initial];
   let nextId = 1;
 
@@ -115,6 +131,7 @@ function makeService(initial: NodeEntity[] = [], zones: ZoneEntity[] = []) {
     zoneRepository,
     hardware,
     new SystemClock(),
+    agentReleases,
   );
   return { service, rows, nodeRepository };
 }
@@ -170,6 +187,30 @@ describe('NodesService hello ingest', () => {
       displayName: 'The Brain',
       location: 'north end',
     });
+  });
+});
+
+describe('NodesService.findAll', () => {
+  it('tells each node the newer release it could be updated to', async () => {
+    const root = makeAgentReleasesRoot();
+    writeBundle(root, AgentApp.Linux, '1.1.4');
+    const agentReleases = new AgentReleasesService(root);
+    await agentReleases.onModuleInit();
+    const { service } = makeService(
+      [
+        node({
+          agentName: AgentApp.Linux,
+          agentVersion: '1.1.3',
+          capabilities: { ...CAPABILITIES, contractMinor: 1 },
+        }),
+      ],
+      [],
+      agentReleases,
+    );
+
+    const [listed] = await service.findAll();
+
+    expect(listed.availableUpdate).toBe('1.1.4');
   });
 });
 
