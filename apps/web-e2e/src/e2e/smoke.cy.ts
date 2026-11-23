@@ -60,7 +60,7 @@ describe('smoke', () => {
     it('moves to Zones and Nodes from the rail', () => {
       findNavLink('Zones').click();
       shouldShowPage('Zones');
-      cy.contains(ZONE_DISPLAY_NAME).should('be.visible');
+      cy.contains('.zone__name', ZONE_DISPLAY_NAME).should('be.visible');
 
       findNavLink('Nodes').click();
       shouldShowPage('Nodes');
@@ -87,7 +87,7 @@ describe('smoke', () => {
       findNavLink('Zones').click();
       shouldShowPage('Zones');
       findMenuButton().should('have.attr', 'aria-expanded', 'false');
-      cy.contains(ZONE_DISPLAY_NAME).should('be.visible');
+      cy.contains('.zone__name', ZONE_DISPLAY_NAME).should('be.visible');
 
       findMenuButton().click();
       findNavLink('Nodes').click();

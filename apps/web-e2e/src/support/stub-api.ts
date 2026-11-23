@@ -16,7 +16,7 @@ export function stubApi(): void {
   cy.intercept('GET', '/api/devices', []);
   cy.intercept('GET', '/api/zones', [buildZone()]);
   cy.intercept('GET', '/api/readings/latest', []);
-  cy.intercept('GET', '/api/readings?*', []);
+  cy.intercept({ method: 'GET', pathname: '/api/readings' }, []);
   cy.intercept(
     'GET',
     '/api/readings/stats/day-night?*',
