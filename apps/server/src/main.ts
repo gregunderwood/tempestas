@@ -1,6 +1,7 @@
 import { INestApplication, Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app/app.module';
+import { API_PREFIX } from './app/common/api-prefix';
 import { LAN_ORIGINS } from './app/common/lan-origins';
 import { runMigrationCommand } from './migrate';
 
@@ -11,7 +12,7 @@ const EXIT_FAILURE = 1;
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix(API_PREFIX);
   enforceDtoValidation(app);
   // On SIGTERM the server publishes its offline status and disconnects, so every node's dead-man fires at once.
   app.enableShutdownHooks();
@@ -19,7 +20,9 @@ async function bootstrap() {
 
   const port = process.env.PORT || DEFAULT_PORT;
   await app.listen(port);
-  Logger.log(`tempestas API listening on http://localhost:${port}/api`);
+  Logger.log(
+    `tempestas API listening on http://localhost:${port}/${API_PREFIX}`,
+  );
 }
 
 function enforceDtoValidation(app: INestApplication): void {

@@ -101,7 +101,8 @@ The deploy also bundles each agent, for the server to offer the nodes through th
   for every file.
 - **Beside the releases, not in one**, so a server rollback keeps them. A version already on the host
   is never shipped over; a new one lands under a dot-name, which the server skips, and is renamed
-  into place. The newest 2 versions of each agent are kept.
+  into place. The newest 2 versions of each agent are kept, pruned before the restart, as the
+  server reads the bundles only when it starts.
 - **The server verifies them at startup.** One whose files disagree with its manifest is logged and
   not offered. `GET /api/agent-releases` lists the rest, and serves each manifest and the files it
   lists under `/api/agent-releases/<app>/<version>/`, byte for byte: an `update` pins the

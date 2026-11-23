@@ -9,7 +9,9 @@ import {
   type AgentReleaseFile,
   type AgentReleaseManifest,
 } from '@tempestas/domain';
+import { API_PREFIX } from '../common/api-prefix';
 
+export const AGENT_RELEASES_ROUTE = 'agent-releases';
 export const MANIFEST_FILE = 'manifest.json';
 export const BUNDLE_FILES_DIRECTORY = 'files';
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -68,7 +70,7 @@ async function readVerifiedBundle(
       version: manifest.version,
       contractMajor: manifest.contractMajor,
       contractMinor: manifest.contractMinor,
-      manifestPath: `/api/agent-releases/${manifest.app}/${manifest.version}/${MANIFEST_FILE}`,
+      manifestPath: `/${API_PREFIX}/${AGENT_RELEASES_ROUTE}/${manifest.app}/${manifest.version}/${MANIFEST_FILE}`,
       manifestSha256: hashBytes(manifestBytes),
     },
     manifestFile,
@@ -109,11 +111,10 @@ export function describeManifestProblem(
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) {
     return 'manifest lists no files';
   }
-  const unsafeFile = manifest.files.find(
-    (file) => !isListedFileWellFormed(file),
-  );
-  if (unsafeFile) {
-    return `manifest lists ${JSON.stringify(unsafeFile)}, which is not a safe path with a sha256`;
+  for (const file of manifest.files) {
+    if (!isListedFileWellFormed(file)) {
+      return `manifest lists ${JSON.stringify(file)}, which is not a safe path with a sha256`;
+    }
   }
   if (
     new Set(manifest.files.map((file) => file.path)).size !==

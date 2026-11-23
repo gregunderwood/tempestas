@@ -117,6 +117,8 @@ done
 say "Shipping $RELEASE_ID beside $PREVIOUS_RELEASE_ID"
 ship_release "$HOST" "$RELEASE_ID" "$PREVIOUS_RELEASE_ID" "$HERE"
 ship_agent_bundles "$HOST" "$AGENT_BUNDLES_DIR"
+# Before the restart, as the server reads the bundles once when it starts.
+prune_agent_bundles "$HOST" || echo "Could not prune old agent bundles on $HOST; the next deploy tries again." >&2
 point_link_at_release "$HOST" migrator "$RELEASE_ID"
 
 say "Migrations"
@@ -138,5 +140,4 @@ if ! mark_release_healthy "$HOST" "$RELEASE_ID"; then
   echo "$RELEASE_ID runs, but could not be marked healthy, so a rollback whose revert fails restarts $PREVIOUS_RELEASE_ID rather than it." >&2
 fi
 prune_releases "$HOST" || echo "Could not prune old releases on $HOST; the next deploy tries again." >&2
-prune_agent_bundles "$HOST" || echo "Could not prune old agent bundles on $HOST; the next deploy tries again." >&2
 say "$HOST runs $RELEASE_ID"

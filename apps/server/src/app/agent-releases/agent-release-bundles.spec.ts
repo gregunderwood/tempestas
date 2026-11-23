@@ -1,6 +1,6 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AgentApp } from '@tempestas/domain';
+import { AgentApp, type AgentReleaseFile } from '@tempestas/domain';
 import {
   BUNDLE_FILES_DIRECTORY,
   MANIFEST_FILE,
@@ -98,6 +98,17 @@ describe('readVerifiedBundles', () => {
 
     expect(bundles).toEqual([]);
     expect(rejections).toHaveLength(1);
+  });
+
+  it('names a missing entry in the file list as the problem', async () => {
+    const root = makeAgentReleasesRoot();
+    writeBundle(root, AgentApp.Linux, '1.1.4', undefined, {
+      files: [null as unknown as AgentReleaseFile],
+    });
+
+    expect((await readBundles(root)).rejections).toEqual([
+      'manifest lists null, which is not a safe path with a sha256',
+    ]);
   });
 
   it('skips a bundle still being shipped, under its dot-name', async () => {
