@@ -46,12 +46,17 @@ Start at **[docs/Home.md](docs/Home.md)**. If you are an agent, start at **[AGEN
 
 ## License
 
-Tempestas is free software under the **[GNU AGPL-3.0](LICENSE.txt)**. You can use, study, change
-and share it for any purpose. If you distribute it, or run a modified copy as a network service,
-you must release your changes under the same license.
+Tempestas is **source available** under the **[Business Source License 1.1](LICENSE.txt)**. You can
+read, change and share it, and use it in production at no charge, including to run your own
+business's greenhouses on your own hardware or in your own cloud account.
 
-If that doesn't fit, for example in a closed-source product or a hosted service, a
-**[commercial license](COMMERCIAL-LICENSE.md)** is available. Contributions are welcome under the
-terms in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+A **[commercial license](COMMERCIAL-LICENSE.md)** is needed to make money from tempestas itself:
+running it as a cloud service for other people's sites, selling support or installation for it,
+or selling hardware with it. A business with under US$1M in annual revenue may sell hardware,
+installation and support without one, as long as the hardware's packaging credits tempestas
+with a link to this repository. Four years after each version is published, that version becomes
+available under the GNU AGPL-3.0.
+
+Contributions are welcome under the terms in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 Copyright © 2026 Greg Underwood.
