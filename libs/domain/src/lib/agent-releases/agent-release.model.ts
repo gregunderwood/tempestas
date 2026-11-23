@@ -1,0 +1,75 @@
+import type { AgentApp } from '../hardware/mqtt-contract';
+
+const AGENT_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.+-]+)?$/;
+const RELEASED_AGENT_VERSION = /^\d+\.\d+\.\d+$/;
+
+/** `<contract major>.<contract minor>.<patch>`, the numbers of an agent version. */
+export interface AgentVersionNumbers {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+export interface AgentReleaseFile {
+  /** Relative to the agent's install root, with `/` separators. */
+  path: string;
+  sha256: string;
+}
+
+/** `manifest.json` in a release bundle, written by tools/deploy.sh. */
+export interface AgentReleaseManifest {
+  app: AgentApp;
+  version: string;
+  contractMajor: number;
+  contractMinor: number;
+  files: AgentReleaseFile[];
+}
+
+/** A bundle the server offers, from `GET /api/agent-releases`. */
+export interface AgentRelease {
+  app: AgentApp;
+  version: string;
+  contractMajor: number;
+  contractMinor: number;
+  /** Under the server's origin, so a node needs only the server's address. */
+  manifestPath: string;
+  /** Of the manifest's bytes, as an `update` command pins it. */
+  manifestSha256: string;
+}
+
+/** Null for anything but `major.minor.patch`, with or without a `-dev` suffix. */
+export function parseAgentVersion(version: string): AgentVersionNumbers | null {
+  const match = AGENT_VERSION.exec(version);
+  if (!match) {
+    return null;
+  }
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+/** Only a clean origin/main build is released; a `-dev` one is never bundled. */
+export function isReleasedAgentVersion(version: string): boolean {
+  return RELEASED_AGENT_VERSION.test(version);
+}
+
+/** By number, so 1.0.10 is newer than 1.0.9. A `-dev` suffix is ignored: its numbers say where it branched. */
+export function isNewerAgentVersion(
+  candidate: AgentVersionNumbers,
+  running: AgentVersionNumbers,
+): boolean {
+  return compareAgentVersions(candidate, running) > 0;
+}
+
+export function compareAgentVersions(
+  first: AgentVersionNumbers,
+  second: AgentVersionNumbers,
+): number {
+  return (
+    first.major - second.major ||
+    first.minor - second.minor ||
+    first.patch - second.patch
+  );
+}

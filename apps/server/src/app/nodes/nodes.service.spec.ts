@@ -8,6 +8,9 @@ import type { SensorReadingEntity } from '../readings/models';
 import type { ZoneEntity } from '../zones/models';
 import { NodesService } from './nodes.service';
 import type { NodeEntity } from './models';
+import { AgentReleasesService } from '../agent-releases/agent-releases.service';
+
+const NO_AGENT_RELEASES_DIRECTORY = '/nonexistent/agent-releases';
 
 const AT = new Date('2026-01-10T12:00:00Z');
 
@@ -115,6 +118,7 @@ function makeService(initial: NodeEntity[] = [], zones: ZoneEntity[] = []) {
     zoneRepository,
     hardware,
     new SystemClock(),
+    new AgentReleasesService(NO_AGENT_RELEASES_DIRECTORY),
   );
   return { service, rows, nodeRepository };
 }

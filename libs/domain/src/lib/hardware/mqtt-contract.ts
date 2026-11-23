@@ -6,6 +6,8 @@ export const MQTT_CONTRACT_VERSION = 'v1' as const;
 /** Semver for the contract: a major changes it, a minor only adds to it. Agents version as major.minor.patch. */
 export const MQTT_CONTRACT_MAJOR = 1;
 export const MQTT_CONTRACT_MINOR = 1;
+/** The minor that added `update`: a node on an older one never subscribes to it. */
+export const UPDATE_COMMAND_CONTRACT_MINOR = 1;
 export const MQTT_ROOT = `tempestas/${MQTT_CONTRACT_VERSION}` as const;
 
 export const mqttTopics = {

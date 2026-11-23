@@ -177,7 +177,8 @@ hear why its update went nowhere. A node never crosses a contract major on its o
 the server to move first.
 
 Integrity rests on two hashes: `manifestSha256` arrives in a command only the server can publish,
-and the manifest it pins carries a sha256 for every file. The bundles are not signed.
+and the manifest it pins carries a sha256 for every file. The bundles are not signed. How the server
+builds and serves them is in [Deploys](Deploys.md#agent-release-bundles).
 
 Once accepted, the node reports its progress on `update/status`, keyed by the command's `id`:
 

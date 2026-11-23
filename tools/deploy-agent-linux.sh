@@ -8,10 +8,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENT="$HERE/apps/agent-linux"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 SETTLE_SECONDS=5
-SHIPPED=(src tools nodes systemd pyproject.toml uv.lock agent.example.toml)
 
 source "$HERE/tools/lib/console.sh"
-
+source "$HERE/tools/lib/agent-files.sh"
 source "$HERE/tools/lib/remote-host.sh"
 
 HOSTS=("$@")
@@ -32,14 +31,14 @@ for HOST in "${HOSTS[@]}"; do
   say "$HOST: copying"
   CHANGES="$(cd "$AGENT" && rsync -a --checksum --itemize-changes \
     --exclude '__pycache__' --exclude '.venv' --exclude 'deployed_version.py' \
-    "${SHIPPED[@]}" "$HOST:$REMOTE_AGENT/")"
+    "${LINUX_AGENT_PATHS[@]}" "$HOST:$REMOTE_AGENT/")"
   echo "$(echo "$CHANGES" | grep -c '^<f' || true) files updated"
   # The venv is an editable install, so new code needs no reinstall; new dependencies do.
   if echo "$CHANGES" | grep -qE ' (pyproject\.toml|uv\.lock)$'; then
     echo "Dependencies may have changed: run 'uv sync --extra gpio' in $REMOTE_AGENT on $HOST." >&2
   fi
   printf 'AGENT_VERSION = "%s"\n' "$AGENT_VERSION" |
-    ssh "$HOST" "cat > $REMOTE_AGENT/src/tempestas_agent/deployed_version.py"
+    ssh "$HOST" "cat > $REMOTE_AGENT/$LINUX_AGENT_VERSION_STAMP"
 
   say "$HOST: restarting (relays fail safe until the server drives them again)"
   ssh "$HOST" "sudo -n systemctl restart tempestas-agent.service"

@@ -23,6 +23,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$HERE/tools/lib/console.sh"
 source "$HERE/tools/lib/remote-host.sh"
 source "$HERE/tools/lib/release.sh"
+source "$HERE/tools/lib/agent-files.sh"
+source "$HERE/tools/lib/agent-bundle.sh"
+AGENT_BUNDLES_DIR="$HERE/dist/$AGENT_RELEASES_DIRECTORY"
 
 # The release stays on disk for a retry; only `migrator` goes back, so a hand-run migration uses live code.
 stop_before_switching() {
@@ -105,8 +108,15 @@ fi
 RELEASE_ID="$(describe_release_id "$HERE")"
 PREVIOUS_RELEASE_ID="$(read_release_behind "$HOST" current)"
 
+say "Bundling the agents for the server to offer"
+rm -rf "$AGENT_BUNDLES_DIR"
+for app in "${AGENT_APPS[@]}"; do
+  build_agent_bundle "$HERE" "$app" "$AGENT_BUNDLES_DIR"
+done
+
 say "Shipping $RELEASE_ID beside $PREVIOUS_RELEASE_ID"
 ship_release "$HOST" "$RELEASE_ID" "$PREVIOUS_RELEASE_ID" "$HERE"
+ship_agent_bundles "$HOST" "$AGENT_BUNDLES_DIR"
 point_link_at_release "$HOST" migrator "$RELEASE_ID"
 
 say "Migrations"
@@ -128,4 +138,5 @@ if ! mark_release_healthy "$HOST" "$RELEASE_ID"; then
   echo "$RELEASE_ID runs, but could not be marked healthy, so a rollback whose revert fails restarts $PREVIOUS_RELEASE_ID rather than it." >&2
 fi
 prune_releases "$HOST" || echo "Could not prune old releases on $HOST; the next deploy tries again." >&2
+prune_agent_bundles "$HOST" || echo "Could not prune old agent bundles on $HOST; the next deploy tries again." >&2
 say "$HOST runs $RELEASE_ID"
