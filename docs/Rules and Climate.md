@@ -60,7 +60,7 @@ Every thermostat comparison is **strict**, so the setpoints themselves sit insid
 ```
 
 - **The daylight window belongs to the zone**, not to a rule. Lights and burner share it, so they
-  cannot disagree about when night is, and the readings screens split day from night at it.
+  cannot disagree about when night is, and the node screen splits day from night at it.
   `daylight-thermostat` and `co2-burner` require one.
 - **A zone may carry a rule for a role it does not own.** The greenhouse keeps its lights and fan
   settings across the transition; `enabledRoles` alone says what is controlled.

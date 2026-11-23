@@ -15,17 +15,18 @@ export const appRoutes: Route[] = [
       ),
   },
   {
-    path: 'readings',
-    title: 'Readings - tempestas',
+    path: 'reports',
+    title: 'Reports - tempestas',
     data: {
-      heading: 'Readings',
-      subtitle: 'The latest samples from every sensor',
+      heading: 'Reports',
+      subtitle: 'How the nights went, and how hard the equipment worked',
     },
     loadComponent: () =>
-      import('./features/readings/readings-page').then(
-        (module) => module.ReadingsPage,
+      import('./features/reports/reports-page').then(
+        (module) => module.ReportsPage,
       ),
   },
+  { path: 'readings', redirectTo: 'reports' },
   {
     path: 'zones',
     title: 'Zones - tempestas',

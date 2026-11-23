@@ -20,6 +20,7 @@ sometimes with wet hands. Angular 20 standalone components, Angular Material M3,
 - [../apps/web/src/app/features/dashboard/dashboard.ts](../apps/web/src/app/features/dashboard/dashboard.ts) — the dashboard, composing its four panels
 - [../apps/web/src/app/features/dashboard/activity-log.ts](../apps/web/src/app/features/dashboard/activity-log.ts) — rules decisions and relay switches, newest first
 - [../apps/web/src/app/features/nodes/node-detail.ts](../apps/web/src/app/features/nodes/node-detail.ts) — one node, with its 24-hour statistics
+- [../apps/web/src/app/features/reports/reports-page.ts](../apps/web/src/app/features/reports/reports-page.ts) — the reports screen, a placeholder naming the reports to come
 - [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme, the rail and hero tokens, and the gauge band colours
 - [../apps/web/proxy.conf.json](../apps/web/proxy.conf.json) — `/api` and `/socket.io` to `:7000` in dev
 
@@ -260,6 +261,17 @@ keyboard focus inside it.
 The shell banner fires only when an **owned role** goes stale. A node can go quiet without that, so
 each card carries its own age and marks itself after two minutes. A confident number with nothing
 saying how old it is is how somebody trusts a reading from an hour ago.
+
+## The reports screen
+
+`/reports` answers the questions a list of raw rows never did: was it a good night, is the heater
+working harder, did the pumphouse get close to freezing. For now it is a placeholder naming the
+reports to come — time in range, equipment runtime, freeze margin, CO2 enrichment and node health —
+so its nav slot does not move again when they land.
+
+It replaced a Readings screen that listed the latest hundred rows, newest first. `/readings` still
+redirects here so an old bookmark does not land on the dashboard by way of the catch-all. The
+`/api/readings` endpoints stay: the dashboard and the node screen read them.
 
 ## Realtime is a patch, never the source
 
