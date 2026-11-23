@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { MatCardModule } from '@angular/material/card';
 
-export const UPCOMING_REPORTS: readonly string[] = [
+const UPCOMING_REPORTS: readonly string[] = [
   'Time in range',
   'Equipment runtime',
   'Freeze margin',
