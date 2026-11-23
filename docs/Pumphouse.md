@@ -420,7 +420,12 @@ coming on:
 > its timestamp, dated at receipt. Rebooted again afterwards: back under rule control 10 s after
 > it reconnected.
 
-- [ ] Every probe reports, with distinct sensor ids, and the node is admitted (two of three so far)
+> [!note] Soldered board, 2026-11-22: three probes replace the breadboard pair
+> `pipes` = `28-3ce1d4439bb6`, `air-1` = `28-3ce1d443c82f`, `air-2` = `28-3ce1d443d7f5`, each
+> identified by warming it in a hand while the others held steady. All three report under those
+> ids. The breadboard's `air` sensor stopped reporting at the swap.
+
+- [x] Every probe reports, with distinct sensor ids, and the node is admitted
 - [x] Each relay switches from the API, and the cooldown refuses an early restart
 - [ ] Each relay switches from the rule, using a probe in ice water
 - [ ] Unpower the Pi: both lamps on
@@ -468,7 +473,7 @@ None blocking. To revisit after the first week outside:
 
 1. **Dead-man length.** 600 s is a guess at "longer than a WiFi blip". If the logs show
    `DEADMAN_TRIPPED` often, the link is the problem, not the number.
-2. **Probe placement.** Coldest pipe and the air to start, a third wherever it turns up. If one
+2. **Probe placement.** One on the coldest pipe and two in the air. If one
    spot is always the minimum, the others are only backups, which is still worth having.
 
 ## When to update this file
