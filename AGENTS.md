@@ -40,6 +40,7 @@ npx nx serve web                      # Angular dev server (on the Mac, never on
 npx nx run-many -t lint,typecheck,test,build,migration-round-trip    # the gate — every project, Python included
 npx nx test server --coverage         # also the gate: thresholds are checked ONLY here
 npx nx test server                    # one project
+npx nx e2e web-e2e                    # Cypress smoke test, stubbed API and socket; not in the gate
 npx prettier --write .                # format
 ```
 
