@@ -12,6 +12,7 @@ import { DivergenceLog } from '../common/divergence-log';
 import { MILLISECONDS_PER_SECOND, SECONDS_PER_DAY } from '../common/time-units';
 import { NodesService } from '../nodes/nodes.service';
 import { SensorReadingEntity } from '../readings/models';
+import { rememberSensorsSince } from '../readings/sensor-memory';
 import { RulesService } from '../rules/rules.service';
 import { collectStaleRoles } from '../rules/stale-roles';
 import { describeTimezoneDisagreement } from './timezone-agreement';
@@ -23,9 +24,6 @@ export const EVALUATION_STALE_AFTER_SECONDS = 60;
 
 // A day, so an overnight failsafe is still reported in the morning and then clears on its own.
 const DIVERGENCE_WINDOW_SECONDS = SECONDS_PER_DAY;
-
-// A day, so a probe removed on purpose stops being named while one that died overnight still is.
-const SENSOR_MEMORY_SECONDS = SECONDS_PER_DAY;
 
 // A pending node is the admission gate working, so it is told but does not degrade the verdict.
 const AWAITING_ADMISSION = 'awaiting admission';
@@ -137,7 +135,7 @@ export class HealthService {
       .addSelect('reading.sensorId', 'sensorId')
       .addSelect('MAX(reading.createdAt)', 'latest')
       .where('reading.createdAt > :since', {
-        since: secondsBefore(now, SENSOR_MEMORY_SECONDS),
+        since: rememberSensorsSince(now),
       })
       .andWhere('node.status = :status', { status: NodeStatus.Admitted })
       .groupBy('node.slug')
