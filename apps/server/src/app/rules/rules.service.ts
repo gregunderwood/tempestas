@@ -92,7 +92,6 @@ export class RulesService implements OnApplicationBootstrap {
   }
 
   // Demotion is a restart, and browsers would otherwise keep the old leader's status for a whole interval.
-  // A leader waits for its first evaluation instead, which is what decides whether a sensor is stale.
   private async announceFollowingAtBoot(): Promise<void> {
     if (this.hardware.isLeader) return;
     try {

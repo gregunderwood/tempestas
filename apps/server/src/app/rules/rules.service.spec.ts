@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, Logger } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import {
   ApiErrorCode,
@@ -692,13 +692,18 @@ describe('publishing each rules cycle', () => {
     );
   });
 
-  it('boots as a follower even when the node counts cannot be read', async () => {
+  it('boots as a follower, with a warning, even when the node counts cannot be read', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
     const { service, nodes, publishSystemStatus } = makeService({
       isLeader: false,
     });
     vi.mocked(nodes.counts).mockRejectedValueOnce(new Error('db gone'));
     await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
     expect(publishSystemStatus).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Could not announce following at boot'),
+    );
+    warn.mockRestore();
   });
 
   // Before its first evaluation a leader cannot know whether a sensor is stale, so it must not claim none is.
@@ -708,7 +713,7 @@ describe('publishing each rules cycle', () => {
     expect(publishSystemStatus).not.toHaveBeenCalled();
   });
 
-  it('tells browsers it is following on the same tick that it is demoted', async () => {
+  it('reports following on the first tick that runs as a follower', async () => {
     const { service, hardware, publishSystemStatus } = makeService({
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
     });
@@ -720,7 +725,7 @@ describe('publishing each rules cycle', () => {
     );
   });
 
-  it('tells browsers it is leading on the first tick after promotion', async () => {
+  it('reports leading on the first tick that runs as the leader', async () => {
     const { service, hardware, publishSystemStatus } = makeService({
       isLeader: false,
       devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
