@@ -414,6 +414,32 @@ describe('NodesService node:state fan-out', () => {
     ).toEqual([true, false]);
   });
 
+  it('publishes the release a node could be updated to, as the list does', async () => {
+    const root = makeAgentReleasesRoot();
+    writeBundle(root, AgentApp.Linux, '1.1.4');
+    const agentReleases = new AgentReleasesService(root);
+    await agentReleases.onModuleInit();
+    const { service, publishNodeState } = makeService(
+      [
+        node({
+          agentName: AgentApp.Linux,
+          agentVersion: '1.1.3',
+          capabilities: { ...CAPABILITIES, contractMinor: 1 },
+        }),
+      ],
+      [],
+      { agentReleases },
+    );
+    await service.handleAvailability({
+      nodeId: 'elantris',
+      online: true,
+      at: new Date(),
+    });
+    expect(publishNodeState).toHaveBeenCalledWith(
+      expect.objectContaining({ availableUpdate: '1.1.4' }),
+    );
+  });
+
   it('publishes nothing for a node that has never said hello', async () => {
     const { service, publishNodeState } = makeService();
     await service.handleAvailability({ nodeId: 'ghost', online: true, at: AT });
