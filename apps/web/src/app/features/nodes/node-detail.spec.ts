@@ -23,6 +23,7 @@ import { PageHeading } from '../../core/page-heading';
 
 const PAST_BOUNDARY_AND_SLACK_MILLISECONDS = 61_500;
 const THROTTLE_WINDOW_AND_BOUNDARY_TIMEOUT = 2;
+const SCREEN_OPENED_AT = new Date('2026-09-10T22:39:50.000Z');
 const TEN_SECONDS_MILLISECONDS = 10_000;
 
 let statsRequestCount = 0;
@@ -328,7 +329,10 @@ describe('NodeDetail', () => {
   });
 
   describe('keeping the figures current', () => {
-    beforeEach(() => vi.useFakeTimers());
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(SCREEN_OPENED_AT);
+    });
     afterEach(() => vi.useRealTimers());
 
     function pushReading(createdAt: string, nodeId = 'elantris'): void {
@@ -344,7 +348,7 @@ describe('NodeDetail', () => {
     }
 
     it('re-queries once for a burst of new readings, a minute after the first', () => {
-      renderNodeDetail({ latest: [] });
+      renderNodeDetail();
       expect(statsRequestCount).toBe(1);
       pushReading('2026-09-10T22:40:00.000Z');
       vi.advanceTimersByTime(TEN_SECONDS_MILLISECONDS);
@@ -354,15 +358,15 @@ describe('NodeDetail', () => {
       expect(statsRequestCount).toBe(2);
     });
 
-    it('does not re-query while the node sends nothing new', () => {
-      renderNodeDetail({ latest: [] });
+    it('does not re-query for the readings it opened with', () => {
+      renderNodeDetail();
       waitOutThrottle();
       waitOutThrottle();
       expect(statsRequestCount).toBe(1);
     });
 
     it('ignores new readings from other nodes', () => {
-      renderNodeDetail({ latest: [] });
+      renderNodeDetail();
       pushReading('2026-09-10T22:40:00.000Z', 'braize');
       waitOutThrottle();
       expect(statsRequestCount).toBe(1);
@@ -381,6 +385,7 @@ describe('NodeDetail', () => {
       // Before the fixture's boundary; on the real clock it is past and no timeout is armed.
       vi.setSystemTime(new Date('2026-09-10T23:00:00.000Z'));
       renderNodeDetail();
+      pushReading('2026-09-10T23:00:10.000Z');
       expect(vi.getTimerCount()).toBe(THROTTLE_WINDOW_AND_BOUNDARY_TIMEOUT);
       TestBed.resetTestingModule();
       expect(vi.getTimerCount()).toBe(0);

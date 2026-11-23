@@ -16,6 +16,7 @@ import {
   combineLatest,
   filter,
   switchMap,
+  tap,
   throttleTime,
 } from 'rxjs';
 import { MatCardModule } from '@angular/material/card';
@@ -413,6 +414,7 @@ export class NodeDetail {
   private readonly destroyRef = inject(DestroyRef);
   private readonly reload = new BehaviorSubject<void>(undefined);
   private boundaryTimer: ReturnType<typeof setTimeout> | undefined;
+  private statsRequestedAtMilliseconds = Number.POSITIVE_INFINITY;
 
   private readonly liveReadings = injectLiveReadings().readings;
   private readonly allDevices = injectLiveDevices().devices;
@@ -480,6 +482,7 @@ export class NodeDetail {
   private followDayNightStats(): void {
     combineLatest([toObservable(this.slug), this.reload])
       .pipe(
+        tap(() => (this.statsRequestedAtMilliseconds = Date.now())),
         switchMap(([slug]) => this.api.dayNightStats({ nodeId: slug })),
         takeUntilDestroyed(),
       )
@@ -492,7 +495,7 @@ export class NodeDetail {
   private refreshStatsOnNewReadings(): void {
     toObservable(this.newestReadingAt)
       .pipe(
-        filter((newestReadingAt) => newestReadingAt !== null),
+        filter((newestReadingAt) => this.isMissingFromStats(newestReadingAt)),
         throttleTime(
           STATS_REFRESH_THROTTLE_MILLISECONDS,
           asyncScheduler,
@@ -501,6 +504,12 @@ export class NodeDetail {
         takeUntilDestroyed(),
       )
       .subscribe(() => this.reload.next());
+  }
+
+  // A reading created before the statistics were requested is already counted in them.
+  private isMissingFromStats(readingCreatedAt: string | null): boolean {
+    if (readingCreatedAt === null) return false;
+    return Date.parse(readingCreatedAt) > this.statsRequestedAtMilliseconds;
   }
 
   private armBoundaryRefresh(nextBoundary: string | null): void {

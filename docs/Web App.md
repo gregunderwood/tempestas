@@ -145,7 +145,8 @@ The gauges arrive over the socket; the statistics do not. Left alone the table f
 gauges keep moving — and the running period is by definition still accumulating, so it drifts
 further the longer the page is open. So a new `reading:latest` from **this node** re-queries
 them, **throttled to once a minute**: the first new reading opens a 60 s window and the query runs
-at its end. It also re-queries **the moment the running period ends**, when every row shifts.
+at its end. A reading created before the statistics were requested is already in them, so the
+readings the page opens with, and the one the socket replays on connect, start no window. It also re-queries **the moment the running period ends**, when every row shifts.
 
 There is no timer. A node that has gone quiet adds nothing to its statistics, so they are not
 re-queried until it speaks again.
@@ -155,7 +156,8 @@ aggregate queries against the readings table on an SD card. Refreshing on every 
 would be a round trip every 10 s per open browser.
 
 The node itself, which feeds the top bar's "online" or "offline", comes from `injectLiveNodes`
-and follows `node:state`, so a reboot shows offline and then online without a reload.
+and follows `node:state`, so a reboot shows offline and then online without a reload, and so does
+a node that stays connected but stops sending readings.
 
 **The boundary instant comes from the server** as `nextBoundary`. A client that worked it out
 itself would be a second definition of night, free to disagree with the one driving the relay.
@@ -301,8 +303,9 @@ this.devices.update((all) => all.map((d) => (d.id === pushed.id ? pushed : d)));
 ```
 
 Nodes follow the same rule: `GET /api/nodes` is authoritative and `node:state` patches it.
-Device and node state are deliberately **not** cached or replayed by the server for the same reason. Readings
-and system status are, because for those a stale-but-present value beats an empty screen.
+Device and node state are deliberately **not** cached or replayed by the server for the same
+reason. Readings and system status are, because for those a stale-but-present value beats an empty
+screen.
 
 ## Patterns to follow
 
