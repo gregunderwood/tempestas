@@ -140,14 +140,13 @@ export function pinsWithdrawn(
 }
 
 // The stored flag misses a node that vanished while the controller was down, so it needs recent evidence too.
-export function isNodeOnline(
-  node: {
-    online: boolean;
-    lastSeenAt: Date | null;
-    latestReadingAt: Date | null;
-  },
-  now: Date,
-): boolean {
+export interface NodeOnlineEvidence {
+  online: boolean;
+  lastSeenAt: Date | null;
+  latestReadingAt: Date | null;
+}
+
+export function isNodeOnline(node: NodeOnlineEvidence, now: Date): boolean {
   if (!node.online) {
     return false;
   }

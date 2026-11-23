@@ -10,6 +10,7 @@ import {
   REALTIME_EVENTS,
   sensorKey,
   type Device,
+  type Node,
   type Reading,
   type RulesCycle,
   type SystemStatus,
@@ -57,6 +58,11 @@ export class RealtimeGateway
   // Not cached: GET /api/devices is authoritative, and a replayed copy could contradict it.
   publishDeviceState(device: Device): void {
     this.emit(REALTIME_EVENTS.deviceState, device);
+  }
+
+  // Not cached either: GET /api/nodes is authoritative, as for devices.
+  publishNodeState(node: Node): void {
+    this.emit(REALTIME_EVENTS.nodeState, node);
   }
 
   publishSystemStatus(status: UnsentSystemStatus): void {

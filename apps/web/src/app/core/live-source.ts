@@ -63,6 +63,14 @@ interface SourceFacts {
   hasNewestRequestFailed: boolean;
 }
 
+// A push received after the request was sent is at least as new as what it returned.
+export function isNewerThanFetch(
+  push: { receivedAt: number },
+  fetched: FetchedPayload<unknown>,
+): boolean {
+  return push.receivedAt >= fetched.requestedAt;
+}
+
 export function waitBeforeRetry(consecutiveFailures: number): number {
   const doubledWait =
     FIRST_RETRY_AFTER_MILLISECONDS * 2 ** (consecutiveFailures - 1);

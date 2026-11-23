@@ -1,6 +1,7 @@
 import {
   REALTIME_EVENTS,
   type Device,
+  type Node,
   type Reading,
   type RulesCycle,
   type UnsentSystemStatus,
@@ -61,11 +62,13 @@ describe('RealtimeGateway', () => {
 
     gateway.publishReading(reading('elantris'));
     gateway.publishDeviceState({ id: 'dev-1' } as Device);
+    gateway.publishNodeState({ id: 'node-1' } as Node);
     gateway.publishSystemStatus(STATUS);
 
     expect(emit.mock.calls.map((call) => call[0])).toEqual([
       REALTIME_EVENTS.readingLatest,
       REALTIME_EVENTS.deviceState,
+      REALTIME_EVENTS.nodeState,
       REALTIME_EVENTS.systemStatus,
     ]);
   });
@@ -107,10 +110,11 @@ describe('RealtimeGateway', () => {
     ]);
   });
 
-  it('does not replay device state', () => {
+  it('does not replay device or node state', () => {
     const gateway = createGateway();
     attach(gateway);
     gateway.publishDeviceState({ id: 'dev-1' } as Device);
+    gateway.publishNodeState({ id: 'node-1' } as Node);
 
     const client = fakeClient();
     gateway.handleConnection(client);
