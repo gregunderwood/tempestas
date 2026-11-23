@@ -47,6 +47,32 @@ Vitest globals are on: `describe`, `it`, `expect` and `vi` need no import.
 **A green `test` run does not mean it compiles.** Vitest transpiles without typechecking. Only
 `build` will catch a type error. This has already bitten twice.
 
+### The e2e smoke test
+
+`apps/web-e2e` holds one Cypress spec, [../apps/web-e2e/src/e2e/smoke.cy.ts](../apps/web-e2e/src/e2e/smoke.cy.ts).
+It checks that the shell loads, that the dashboard shows a node card, and that the rail and the
+phone menu both reach Zones and Nodes. It needs no server, broker or database:
+
+```bash
+npx nx e2e web-e2e     # starts nx serve web itself, runs headless, 15 to 40 s
+```
+
+- **The API is stubbed with `cy.intercept`** in
+  [../apps/web-e2e/src/support/stub-api.ts](../apps/web-e2e/src/support/stub-api.ts). Any `/api`
+  call it does not know gets a 501 instead of reaching the dev proxy, which has no server behind
+  it.
+- **The socket is a fake `WebSocket`**, installed before the app loads, in
+  [../apps/web-e2e/src/support/fake-realtime-server.ts](../apps/web-e2e/src/support/fake-realtime-server.ts).
+  `cy.intercept` cannot answer a websocket, and Socket.IO tries the websocket transport first.
+  The fake speaks just enough Engine.IO and Socket.IO to connect and push the events it is given.
+  Readings reach the dashboard only over it, so the node card proves the socket path works.
+- **Fixtures are typed against `@tempestas/domain`**, so a contract change breaks
+  `web-e2e:typecheck` in the gate even though the spec itself is not run there.
+- **It is not in the gate.** Cypress has no arm64 Linux binary (see Pitfalls), so the gate would
+  fail on the Pi, and a dev server start makes it the slowest target by far.
+- **From a VS Code terminal, unset `ELECTRON_RUN_AS_NODE`.** VS Code exports it, and Cypress then
+  fails to start with `bad option: --no-sandbox`. Use `env -u ELECTRON_RUN_AS_NODE npx nx e2e web-e2e`.
+
 ### The rule that makes the important tests possible
 
 **No code in `rules/` or `device-state.ts` may call `new Date()`.** Time enters as an argument, and
