@@ -46,7 +46,6 @@ export class CardArrangement {
   }
 }
 
-// The top bar's Arrange and Reset order buttons act on whichever page currently offers an arrangement.
 @Injectable({ providedIn: 'root' })
 export class ArrangeMode {
   private readonly offered = signal<CardArrangement | null>(null);

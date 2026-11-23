@@ -1,4 +1,6 @@
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { CdkDropList, type CdkDragDrop } from '@angular/cdk/drag-drop';
 import {
   Component,
   computed,
@@ -9,10 +11,12 @@ import {
   ArrangeMode,
   injectCardArrangement,
 } from '../arrange/card-arrangement';
-import type { OrderStorage } from '../arrange/card-order';
+import type { CardOrder, OrderStorage } from '../arrange/card-order';
 import { Pinboard } from './pinboard';
 
 const STORAGE_KEY = 'tempestas.card-order.test';
+const TWO_COLUMN_AREA_WIDTH = 700;
+const PIN_HEIGHT = 100;
 
 interface Zone {
   id: string;
@@ -217,5 +221,154 @@ describe('Pinboard arranging', () => {
 
     expect(board.arrangeMode.isOffered()).toBe(false);
     expect(board.arrangeMode.isArranging()).toBe(false);
+  });
+});
+
+type PinDrop = CdkDragDrop<number, number, string>;
+
+class ControlledResizeObserver {
+  static latest: ControlledResizeObserver | null = null;
+  private readonly observed = new Set<Element>();
+
+  constructor(private readonly callback: ResizeObserverCallback) {
+    ControlledResizeObserver.latest = this;
+  }
+
+  observe(element: Element): void {
+    this.observed.add(element);
+  }
+
+  unobserve(element: Element): void {
+    this.observed.delete(element);
+  }
+
+  disconnect(): void {
+    this.observed.clear();
+  }
+
+  resize(sizes: ReadonlyMap<Element, { width: number; height: number }>): void {
+    const entries = Array.from(sizes, ([target, size]) => ({
+      target,
+      contentRect: size,
+    })) as unknown as ResizeObserverEntry[];
+    this.callback(entries, this as unknown as ResizeObserver);
+  }
+}
+
+async function renderTwoColumnBoard(): Promise<RenderedBoard> {
+  const board = renderBoard();
+  await startArranging(board);
+  const area = board.element.querySelector('.pinboard');
+  if (area !== null) {
+    ControlledResizeObserver.latest?.resize(
+      new Map([[area, { width: TWO_COLUMN_AREA_WIDTH, height: 0 }]]),
+    );
+  }
+  board.fixture.detectChanges();
+  await board.fixture.whenStable();
+  return board;
+}
+
+function readColumns(element: HTMLElement): string[][] {
+  return Array.from(element.querySelectorAll('.pinboard__column')).map(
+    (column) =>
+      Array.from(column.querySelectorAll('.pinboard__pin')).map(
+        (pin) => pin.getAttribute('data-pin-key') ?? '',
+      ),
+  );
+}
+
+function collectReorders(board: RenderedBoard): CardOrder[] {
+  const reorders: CardOrder[] = [];
+  const pinboard = board.fixture.debugElement.query(By.directive(Pinboard))
+    .componentInstance as Pinboard<Zone>;
+  pinboard.reordered.subscribe((order) => reorders.push(order));
+  return reorders;
+}
+
+function dropOnto(
+  board: RenderedBoard,
+  movedKey: string,
+  from: { column: number; index: number },
+  to: { column: number; index: number },
+): void {
+  const dropLists = board.fixture.debugElement
+    .queryAll(By.directive(CdkDropList))
+    .map((column) => column.injector.get(CdkDropList));
+  const landingList = dropLists[to.column];
+  const drop = {
+    item: { data: movedKey },
+    previousContainer: dropLists[from.column],
+    container: landingList,
+    previousIndex: from.index,
+    currentIndex: to.index,
+    isPointerOverContainer: true,
+  } as unknown as PinDrop;
+  landingList.dropped.emit(drop);
+}
+
+describe('Pinboard dropping a dragged card', () => {
+  beforeEach(() => {
+    sharedStorage = memoryStorage();
+    vi.stubGlobal('ResizeObserver', ControlledResizeObserver);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      height: PIN_HEIGHT,
+    } as DOMRect);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    ControlledResizeObserver.latest = null;
+  });
+
+  it('lays the three zones out in two columns', async () => {
+    const board = await renderTwoColumnBoard();
+    expect(readColumns(board.element)).toEqual([
+      ['crawlspace', 'pumphouse'],
+      ['greenhouse'],
+    ]);
+  });
+
+  it('moves a card up within its own column', async () => {
+    const board = await renderTwoColumnBoard();
+    const reorders = collectReorders(board);
+
+    dropOnto(
+      board,
+      'pumphouse',
+      { column: 0, index: 1 },
+      { column: 0, index: 0 },
+    );
+
+    expect(reorders).toEqual([['pumphouse', 'crawlspace', 'greenhouse']]);
+  });
+
+  it('moves a card into another column below the card already there', async () => {
+    const board = await renderTwoColumnBoard();
+    const reorders = collectReorders(board);
+
+    dropOnto(
+      board,
+      'crawlspace',
+      { column: 0, index: 0 },
+      { column: 1, index: 1 },
+    );
+
+    expect(reorders).toEqual([['greenhouse', 'crawlspace', 'pumphouse']]);
+  });
+
+  it('emits nothing when a card is dropped where it started', async () => {
+    const board = await renderTwoColumnBoard();
+    const reorders = collectReorders(board);
+
+    dropOnto(
+      board,
+      'greenhouse',
+      { column: 1, index: 0 },
+      { column: 1, index: 0 },
+    );
+
+    expect(reorders).toEqual([]);
   });
 });

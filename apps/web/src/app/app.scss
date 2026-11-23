@@ -185,7 +185,6 @@ $tap-target: 3rem;
   outline-offset: 2px;
 }
 
-// Not colour alone: a pressed Arrange also carries a tick.
 .temp-top-bar-button-active {
   background: var(--mat-sys-secondary-container);
   color: var(--mat-sys-on-secondary-container);
@@ -233,7 +232,14 @@ $tap-target: 3rem;
   }
 
   .temp-top-bar {
+    flex-wrap: wrap;
     padding: 0.5rem 1rem 0.5rem 0.5rem;
+  }
+
+  .temp-arrange {
+    order: 1;
+    flex-basis: 100%;
+    justify-content: flex-end;
   }
 }
 
