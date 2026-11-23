@@ -22,6 +22,7 @@ import {
   type Segment,
 } from './daylight-segments';
 import { resolveReadingWindow, type ReadingWindow } from './reading-window';
+import { rememberSensorsSince } from './sensor-memory';
 import { parseZoneRulesConfig } from '../rules/rules-config';
 
 const DEFAULT_LIMIT = 500;
@@ -78,6 +79,9 @@ export class ReadingsService {
     const rows = await this.readings
       .createQueryBuilder('reading')
       .innerJoinAndSelect('reading.node', 'node')
+      .where('reading.createdAt > :since', {
+        since: rememberSensorsSince(this.clock.now()),
+      })
       .distinctOn(['reading.nodeId', 'reading.sensorId'])
       .orderBy('reading.nodeId')
       .addOrderBy('reading.sensorId')
