@@ -11,14 +11,29 @@ business. For example, at no charge:
 - a commercial grower running it for their own greenhouses, on their own hardware or in their own
   cloud account;
 - a contractor or employee installing and hosting it for one organisation's own sites;
+- a small business selling hardware with tempestas on it, or selling installation and support
+  for it (see below);
 - a hobbyist, a school or a researcher.
+
+### Small businesses
+
+A business whose total gross revenue, together with any company that owns it, that it owns, or
+that shares an owner with it, was under **US$1,000,000 over the last 12 months** may sell hardware
+with tempestas on it and sell installation, support and consulting for it, at no charge. The test
+applies at each sale or new service agreement. Hardware sold and services agreed while under the
+cap stay covered after the business grows past it.
+
+Hardware sold this way must credit tempestas: its packaging, or the documentation supplied with it
+if it has no packaging, must say that it runs tempestas and link to
+[github.com/gregunderwood/tempestas](https://github.com/gregunderwood/tempestas).
 
 Four years after each version is published, that version becomes available under the GNU
 AGPL-3.0-or-later as well.
 
 ## 2. Commercial license (paid)
 
-The [Additional Use Grant](LICENSE.txt) excludes three uses. Each needs a commercial license:
+The [Additional Use Grant](LICENSE.txt) excludes three uses. Each needs a commercial license,
+except that a small business (above) needs one only for the first:
 
 - **A cloud service for others.** Offering tempestas, or a work based on it, as a hosted, cloud
   or managed service through which other people monitor or control their own sites.

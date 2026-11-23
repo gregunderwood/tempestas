@@ -52,7 +52,9 @@ business's greenhouses on your own hardware or in your own cloud account.
 
 A **[commercial license](COMMERCIAL-LICENSE.md)** is needed to make money from tempestas itself:
 running it as a cloud service for other people's sites, selling support or installation for it,
-or selling hardware with it. Four years after each version is published, that version becomes
+or selling hardware with it. A business with under US$1M in annual revenue may sell hardware,
+installation and support without one, as long as the hardware's packaging credits tempestas
+with a link to this repository. Four years after each version is published, that version becomes
 available under the GNU AGPL-3.0.
 
 Contributions are welcome under the terms in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
