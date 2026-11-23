@@ -118,8 +118,8 @@ The deploy also bundles each agent, for the server to offer the nodes through th
   restart, whatever a later deploy does on disk.
 - **A node is offered** the newest bundle for its agent on its contract major, when it is newer by
   number (1.0.10 is newer than 1.0.9), as `availableUpdate` on the Nodes page. A node on a `-dev`
-  build is always offered it: a branch's own commits count toward its patch too, so its numbers
-  cannot say which is newer. Only from contract
+  build is offered it whenever it is on the same contract minor or later: a branch's own commits
+  count toward its patch too, so its patch cannot say which is newer. Only from contract
   1.1, which added `update`: a node before it never subscribes, and one that has never sent
   `agentName` needs a deploy by hand first.
 

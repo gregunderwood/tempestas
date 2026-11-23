@@ -63,10 +63,21 @@ export function shouldOfferAgentRelease(
   if (!running) {
     return false;
   }
-  return (
-    !isReleasedAgentVersion(runningVersion) ||
-    isNewerAgentVersion(release, running)
-  );
+  if (isReleasedAgentVersion(runningVersion)) {
+    return isNewerAgentVersion(release, running);
+  }
+  return isOnContractAtLeast(release, running);
+}
+
+// Going back a contract minor would take away commands the node's own build answers.
+function isOnContractAtLeast(
+  release: AgentVersionNumbers,
+  running: AgentVersionNumbers,
+): boolean {
+  if (release.major !== running.major) {
+    return release.major > running.major;
+  }
+  return release.minor >= running.minor;
 }
 
 /** By number, so 1.0.10 is newer than 1.0.9. */

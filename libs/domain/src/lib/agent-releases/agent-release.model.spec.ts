@@ -63,6 +63,12 @@ describe('shouldOfferAgentRelease', () => {
     ).toBe(true);
   });
 
+  it('never offers a -dev build a release on an older contract', () => {
+    expect(shouldOfferAgentRelease(parse('1.1.4'), '1.2.0-dev+ecdbbe7')).toBe(
+      false,
+    );
+  });
+
   it('offers nothing over a version it cannot read', () => {
     expect(shouldOfferAgentRelease(parse('1.1.4'), '0.0.0+dev')).toBe(false);
   });
