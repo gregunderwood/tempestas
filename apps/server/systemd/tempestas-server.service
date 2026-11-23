@@ -31,7 +31,8 @@ WorkingDirectory=/home/gunderwood/tempestas
 # Repoint both on upgrade:
 #   sudo ln -sfn "$(nvm which 22)" /usr/local/bin/node
 #   sudo ln -sfn "$(dirname "$(nvm which 22)")/npm" /usr/local/bin/npm
-ExecStart=/usr/local/bin/node /home/gunderwood/tempestas/dist/apps/server/main.js
+# `current` is the release tools/deploy.sh switched to; see docs/Infrastructure/Deploys.md.
+ExecStart=/usr/local/bin/node /home/gunderwood/tempestas/current/server/main.js
 EnvironmentFile=/etc/tempestas/server.env
 Environment=NODE_ENV=production
 

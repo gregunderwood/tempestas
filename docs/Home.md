@@ -31,6 +31,7 @@ the greenhouse for eight years.
 ### Infrastructure
 
 - [[Database]]
+- [[Deploys]] — releases, backup, migrate, health check, rollback
 - [[Home Assistant]] — the observer/controller boundary, and why the rules stay here
 - [[Migrations]]
 - [[MQTT Contract]]

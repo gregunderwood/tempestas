@@ -1,54 +1,93 @@
 #!/usr/bin/env bash
-# tools/deploy.sh [host]
+# tools/deploy.sh [--allow-irreversible] [host]
 # Builds here because a build on the Pi puts the burner controller in reach of the OOM killer.
+# Ships a release beside the live one, backs up, migrates, switches, and rolls back if it is not healthy.
 
 set -euo pipefail
 
-HOST="${1:-elantris}"
-REMOTE="/home/gunderwood/tempestas"
+HOST="elantris"
+IS_IRREVERSIBLE_ALLOWED=false
+USAGE="Usage: tools/deploy.sh [--allow-irreversible] [host]"
+for argument in "$@"; do
+  case "$argument" in
+    --allow-irreversible) IS_IRREVERSIBLE_ALLOWED=true ;;
+    -*)
+      echo "Unknown option $argument. $USAGE" >&2
+      exit 2
+      ;;
+    *) HOST="$argument" ;;
+  esac
+done
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-EXIT_MIGRATIONS_PENDING=3
-REQUIRED_SYSTEMCTL_LINES=(
-  "start tempestas-migrate@show.service"
-  "reset-failed tempestas-server.service"
-  "restart tempestas-server.service"
-)
-
-source "$HERE/tools/lib/remote-host.sh"
-
 source "$HERE/tools/lib/console.sh"
+source "$HERE/tools/lib/remote-host.sh"
+source "$HERE/tools/lib/release.sh"
 
-# A stale status from an earlier run, or a signal number, must never read as "pending" or "nothing pending".
-show_migrations_and_exit_with_their_status() {
-  ssh "$HOST" bash -s <<'REMOTE'
-unit=tempestas-migrate@show.service
-read_property() { systemctl show -p "$1" --value "$unit"; }
-EXITED_NORMALLY=1
-COULD_NOT_CHECK=1
-started_before="$(read_property ExecMainStartTimestampMonotonic)"
-checked_since="$(date +%s)"
-ran_this_time_and_exited_normally() {
-  [ "$(read_property ExecMainStartTimestampMonotonic)" != "$started_before" ] &&
-    [ "$(read_property ExecMainCode)" = "$EXITED_NORMALLY" ]
-}
-if sudo -n systemctl start "$unit"; then
-  status=0
-elif ran_this_time_and_exited_normally; then
-  status="$(read_property ExecMainStatus)"
-  [ "$status" != 0 ] || status="$COULD_NOT_CHECK"
-else
-  status="$COULD_NOT_CHECK"
-fi
-journalctl -u "$unit" --since "@$checked_since" -o cat
-exit "$status"
-REMOTE
+# The release stays on disk for a retry; only `migrator` goes back, so a hand-run migration uses live code.
+stop_before_switching() {
+  point_link_at_release "$HOST" migrator "$PREVIOUS_RELEASE_ID"
+  echo "Nothing was switched: $HOST still runs $PREVIOUS_RELEASE_ID. $*" >&2
+  exit 1
 }
 
-warn_new_build_not_running() {
-  echo "The new build is on $HOST but the old server is still running it from memory." >&2
-  echo "If that server restarts before this is resolved, it starts the new code and may crash-loop." >&2
+# migrator stays on the new release, whose record a revert needs, so the next deploy refuses until it is resolved.
+stop_leaving_migrator_on_release() {
+  echo "Nothing was switched: $HOST still runs $PREVIOUS_RELEASE_ID, and migrator stays on $RELEASE_ID. $*" >&2
+  exit 1
 }
+
+migrate_or_back_up() {
+  local show_status=0
+  run_oneshot "$HOST" tempestas-migrate@show.service || show_status=$?
+  case "$show_status" in
+    0)
+      say "No migrations; backing up anyway"
+      run_oneshot "$HOST" tempestas-backup.service || stop_before_switching "The backup failed."
+      record_backup_before_migrations "$HOST" "$RELEASE_ID"
+      ;;
+    "$EXIT_IRREVERSIBLE_MIGRATIONS_PENDING")
+      "$IS_IRREVERSIBLE_ALLOWED" || stop_before_switching \
+        "A pending migration cannot be reverted (named above). Deploy with --allow-irreversible once you mean it."
+      apply_pending_migrations
+      ;;
+    "$EXIT_MIGRATIONS_PENDING") apply_pending_migrations ;;
+    *) stop_before_switching "Could not check the migrations (status $show_status)." ;;
+  esac
+}
+
+# migrate@run takes its own backup first, and applies everything in one transaction.
+apply_pending_migrations() {
+  local run_status=0
+  say "Backing up and migrating with $RELEASE_ID's code"
+  run_oneshot "$HOST" tempestas-migrate@run.service || run_status=$?
+  case "$run_status" in
+    0) record_backup_before_migrations "$HOST" "$RELEASE_ID" ;;
+    "$EXIT_MIGRATIONS_APPLIED_BUT_NOT_RECORDED")
+      stop_before_switching "The migrations were applied but not recorded, so no rollback could undo them; $PREVIOUS_RELEASE_ID now runs on the new schema."
+      ;;
+    *) stop_after_failed_run "$run_status" ;;
+  esac
+}
+
+stop_after_failed_run() {
+  local run_status="$1"
+  local journal="ssh $HOST journalctl -u tempestas-migrate@run.service -u tempestas-backup.service -n 50"
+  case "$(read_migration_state "$HOST")" in
+    pending)
+      stop_before_switching "The backup or the migrations failed (status $run_status). They run as one transaction, so none were applied."
+      ;;
+    applied)
+      stop_leaving_migrator_on_release "The run reported status $run_status, but the migrations are applied, so $PREVIOUS_RELEASE_ID now runs on the new schema. Check: $journal"
+      ;;
+    *) stop_leaving_migrator_on_release "Could not tell whether the migrations ran (status $run_status). Check: $journal" ;;
+  esac
+}
+
+say "Checking $HOST is ready for a release"
+require_passwordless_systemctl "$HOST" "${RELEASE_SYSTEMCTL_LINES[@]}"
+require_release_layout "$HOST"
+require_migrator_on_current "$HOST"
 
 say "Gate"
 (cd "$HERE" && npx nx run-many -t lint,typecheck,test,build,migration-round-trip)
@@ -63,43 +102,30 @@ if lsof -ti tcp:7000 -sTCP:LISTEN >/dev/null 2>&1; then
   exit 1
 fi
 
-say "Checking $HOST lets this deploy run without a password"
-require_passwordless_systemctl "$HOST" "${REQUIRED_SYSTEMCTL_LINES[@]}"
+RELEASE_ID="$(describe_release_id "$HERE")"
+PREVIOUS_RELEASE_ID="$(read_release_behind "$HOST" current)"
 
-say "Shipping to $HOST"
-rsync -a --delete "$HERE/dist/apps/server/" "$HOST:$REMOTE/dist/apps/server/"
-rsync -a "$HERE/apps/server/systemd/" "$HOST:$REMOTE/apps/server/systemd/"
-rsync -a "$HERE/apps/agent-linux/systemd/" "$HOST:$REMOTE/apps/agent-linux/systemd/"
+say "Shipping $RELEASE_ID beside $PREVIOUS_RELEASE_ID"
+ship_release "$HOST" "$RELEASE_ID" "$PREVIOUS_RELEASE_ID" "$HERE"
+point_link_at_release "$HOST" migrator "$RELEASE_ID"
 
-say "Installing runtime dependencies"
-ssh "$HOST" "cd $REMOTE/dist/apps/server && /usr/local/bin/npm ci --omit=dev --no-audit --no-fund"
-
-# Checked before the restart: the new code on an unmigrated schema crash-loops the server.
 say "Migrations"
-if show_migrations_and_exit_with_their_status; then
-  migration_status=0
-else
-  migration_status=$?
-fi
+migrate_or_back_up
 
-if [ "$migration_status" -eq "$EXIT_MIGRATIONS_PENDING" ]; then
-  echo "Migrations are pending, so the server was NOT restarted and the web bundle was not shipped." >&2
-  echo "Run them, then deploy again. migrate@run backs up first where tempestas-backup.service exists;" >&2
-  echo "anywhere else it asks for a password: back up by hand first (docs/Infrastructure/Migrations.md)." >&2
-  echo "  ssh $HOST sudo -n systemctl start tempestas-migrate@run.service && tools/deploy.sh $HOST" >&2
-  warn_new_build_not_running
-  exit 1
-fi
-if [ "$migration_status" -ne 0 ]; then
-  echo "Could not check the migrations (status $migration_status), so the server was NOT restarted." >&2
-  echo "  ssh $HOST journalctl -u tempestas-migrate@show.service -n 30 -o cat" >&2
-  warn_new_build_not_running
+say "Switching to $RELEASE_ID"
+if ! point_link_at_release "$HOST" current "$RELEASE_ID" ||
+  ! restart_server "$HOST" ||
+  ! wait_until_healthy "$HOST" "$RELEASE_ID"; then
+  if roll_back_release "$HOST" "$RELEASE_ID" "$PREVIOUS_RELEASE_ID"; then
+    echo "$RELEASE_ID did not come up healthy and was rolled back to $PREVIOUS_RELEASE_ID. It stays in $REMOTE_ROOT/releases for a look until the next deploy prunes it." >&2
+  else
+    echo "$RELEASE_ID did not come up healthy, and the rollback did not finish: what $HOST runs now is above." >&2
+  fi
   exit 1
 fi
 
-say "Shipping the web bundle"
-rsync -a --delete "$HERE/dist/apps/web/browser/" "$HOST:$REMOTE/dist/apps/web/"
-
-say "Restarting"
-# A server that crash-looped into its start limit refuses a plain restart.
-ssh "$HOST" "sudo -n systemctl reset-failed tempestas-server.service; sudo -n systemctl restart tempestas-server.service && sleep 3 && systemctl is-active tempestas-server"
+if ! mark_release_healthy "$HOST" "$RELEASE_ID"; then
+  echo "$RELEASE_ID runs, but could not be marked healthy, so a rollback whose revert fails restarts $PREVIOUS_RELEASE_ID rather than it." >&2
+fi
+prune_releases "$HOST" || echo "Could not prune old releases on $HOST; the next deploy tries again." >&2
+say "$HOST runs $RELEASE_ID"
