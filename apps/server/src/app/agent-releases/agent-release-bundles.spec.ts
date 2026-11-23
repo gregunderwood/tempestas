@@ -1,0 +1,183 @@
+import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { AgentApp, type AgentReleaseFile } from '@tempestas/domain';
+import {
+  BUNDLE_FILES_DIRECTORY,
+  MANIFEST_FILE,
+  readVerifiedBundles,
+  hashSha256,
+} from './agent-release-bundles';
+import {
+  makeAgentReleasesRoot,
+  writeBundle,
+} from './agent-release-bundles.fixtures';
+
+const UNREADABLE = 0o000;
+// Root reads a directory whatever its mode, so it cannot make one unreadable.
+const IS_ROOT = process.getuid?.() === 0;
+const READABLE = 0o700;
+
+async function readBundles(root: string) {
+  const rejections: string[] = [];
+  const bundles = await readVerifiedBundles(root, (_directory, reason) =>
+    rejections.push(reason),
+  );
+  return { bundles, rejections };
+}
+
+describe('readVerifiedBundles', () => {
+  it('offers a bundle whose files match its manifest, pinned by the manifest bytes', async () => {
+    const root = makeAgentReleasesRoot();
+    const bundleDirectory = writeBundle(root, AgentApp.Linux, '1.1.4', {
+      'src/tempestas_agent/agent.py': 'agent\n',
+    });
+
+    const { bundles, rejections } = await readBundles(root);
+
+    expect(rejections).toEqual([]);
+    expect(bundles.map((bundle) => bundle.release)).toEqual([
+      {
+        app: AgentApp.Linux,
+        version: '1.1.4',
+        contractMajor: 1,
+        contractMinor: 1,
+        manifestPath: '/api/agent-releases/agent-linux/1.1.4/manifest.json',
+        manifestSha256: hashSha256(
+          readFileSync(join(bundleDirectory, MANIFEST_FILE), 'utf8'),
+        ),
+      },
+    ]);
+    expect([...bundles[0].filesByPath.keys()]).toEqual([
+      'src/tempestas_agent/agent.py',
+    ]);
+  });
+
+  it('leaves out a bundle whose file was changed after the manifest', async () => {
+    const root = makeAgentReleasesRoot();
+    const bundleDirectory = writeBundle(root, AgentApp.Linux, '1.1.4');
+    writeFileSync(
+      join(bundleDirectory, BUNDLE_FILES_DIRECTORY, 'main.py'),
+      'tampered\n',
+    );
+
+    const { bundles, rejections } = await readBundles(root);
+
+    expect(bundles).toEqual([]);
+    expect(rejections).toEqual([
+      'main.py does not have the sha256 the manifest gives',
+    ]);
+  });
+
+  it('leaves out a bundle missing a listed file', async () => {
+    const root = makeAgentReleasesRoot();
+    const bundleDirectory = writeBundle(root, AgentApp.Linux, '1.1.4');
+    renameSync(
+      join(bundleDirectory, BUNDLE_FILES_DIRECTORY, 'main.py'),
+      join(bundleDirectory, 'elsewhere.py'),
+    );
+
+    expect((await readBundles(root)).rejections).toEqual([
+      'main.py is listed but missing',
+    ]);
+  });
+
+  it.each([
+    [
+      'a path out of the bundle',
+      { files: [{ path: '../etc/passwd', sha256: 'a'.repeat(64) }] },
+    ],
+    [
+      'an absolute path',
+      { files: [{ path: '/etc/passwd', sha256: 'a'.repeat(64) }] },
+    ],
+    ['another app', { app: AgentApp.MicroPython }],
+    ['another version', { version: '1.1.5' }],
+    ['a -dev version', { version: '1.1.4-dev+ecdbbe7' }],
+    ['a contract that disagrees with the version', { contractMinor: 0 }],
+    ['no files', { files: [] }],
+  ])('leaves out a manifest with %s', async (_case, manifestChanges) => {
+    const root = makeAgentReleasesRoot();
+    writeBundle(root, AgentApp.Linux, '1.1.4', undefined, manifestChanges);
+
+    const { bundles, rejections } = await readBundles(root);
+
+    expect(bundles).toEqual([]);
+    expect(rejections).toHaveLength(1);
+  });
+
+  it('names a missing entry in the file list as the problem', async () => {
+    const root = makeAgentReleasesRoot();
+    writeBundle(root, AgentApp.Linux, '1.1.4', undefined, {
+      files: [null as unknown as AgentReleaseFile],
+    });
+
+    expect((await readBundles(root)).rejections).toEqual([
+      'manifest lists null, which is not a safe path with a sha256',
+    ]);
+  });
+
+  it.each([['null'], ['"a string"'], ['[]']])(
+    'leaves out a manifest that is %s rather than an object',
+    async (manifestText) => {
+      const root = makeAgentReleasesRoot();
+      const bundleDirectory = writeBundle(root, AgentApp.Linux, '1.1.4');
+      writeFileSync(join(bundleDirectory, MANIFEST_FILE), manifestText);
+
+      expect((await readBundles(root)).rejections).toEqual([
+        'manifest.json is not a JSON object',
+      ]);
+    },
+  );
+
+  it('skips a bundle still being shipped, under its dot-name', async () => {
+    const root = makeAgentReleasesRoot();
+    writeBundle(root, AgentApp.Linux, '.1.1.4');
+
+    expect(await readBundles(root)).toEqual({ bundles: [], rejections: [] });
+  });
+
+  it.skipIf(IS_ROOT)(
+    'reports a directory it cannot read, rather than offering nothing quietly',
+    async () => {
+      const root = makeAgentReleasesRoot();
+      writeBundle(root, AgentApp.Linux, '1.1.4');
+      chmodSync(root, UNREADABLE);
+
+      const { bundles, rejections } = await readBundles(root);
+      chmodSync(root, READABLE);
+
+      expect(bundles).toEqual([]);
+      expect(rejections).toEqual([expect.stringContaining('EACCES')]);
+    },
+  );
+
+  it.skipIf(IS_ROOT)(
+    'names a listed file it cannot read, rather than calling it missing',
+    async () => {
+      const root = makeAgentReleasesRoot();
+      const bundleDirectory = writeBundle(root, AgentApp.Linux, '1.1.4');
+      const listedFile = join(
+        bundleDirectory,
+        BUNDLE_FILES_DIRECTORY,
+        'main.py',
+      );
+      chmodSync(listedFile, UNREADABLE);
+
+      const { rejections } = await readBundles(root);
+      chmodSync(listedFile, READABLE);
+
+      expect(rejections).toEqual([
+        expect.stringContaining('main.py could not be read: EACCES'),
+      ]);
+    },
+  );
+
+  it('offers nothing, quietly, when there is no directory yet', async () => {
+    expect(await readBundles(join(makeAgentReleasesRoot(), 'missing'))).toEqual(
+      {
+        bundles: [],
+        rejections: [],
+      },
+    );
+  });
+});

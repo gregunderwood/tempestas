@@ -71,6 +71,8 @@ export interface Node {
   agentName: string | null;
   agentVersion: string | null;
   contractStanding: ContractStanding;
+  /** The newest released version this node could be updated to from the web, or null. */
+  availableUpdate: string | null;
   capabilities: NodeCapabilities;
   zoneId: string | null;
   deviceCount: number;

@@ -57,6 +57,12 @@ const CONTRACT_STANDING_NOTES: Record<
             }
             <p class="temp-muted">
               {{ node.deviceCount }} device(s) · {{ describeAgent(node) }}
+              @if (node.availableUpdate) {
+                ·
+                <span class="temp-update-available"
+                  >{{ node.availableUpdate }} available</span
+                >
+              }
             </p>
             @if (node.contractStanding !== 'current') {
               <p class="temp-muted">
@@ -92,6 +98,10 @@ const CONTRACT_STANDING_NOTES: Record<
     }
     .temp-warn {
       color: var(--mat-sys-error);
+    }
+    .temp-update-available {
+      color: var(--mat-sys-primary);
+      font-weight: 500;
     }
   `,
 })

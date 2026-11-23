@@ -25,6 +25,7 @@ export function buildNode(): Node {
     lastSeenAt: null,
     agentName: 'agent-linux',
     agentVersion: '1.0.0',
+    availableUpdate: null,
     contractStanding: 'current',
     capabilities: {
       contractVersion: 1,

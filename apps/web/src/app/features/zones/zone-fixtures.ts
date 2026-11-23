@@ -98,6 +98,7 @@ export function node(slug: string, zoneId: string | null): Node {
     agentName: null,
     agentVersion: null,
     contractStanding: 'current',
+    availableUpdate: null,
     capabilities: {
       contractVersion: 1,
       hasRtc: true,

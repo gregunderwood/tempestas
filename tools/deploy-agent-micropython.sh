@@ -5,17 +5,15 @@ set -euo pipefail
 
 PORT="${1:-/dev/ttyACM0}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$HERE/tools/lib/console.sh"
+source "$HERE/apps/agent-micropython/agent-files.sh"
 DEVICE="$HERE/apps/agent-micropython/device"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 PORT_WAIT_SECONDS=10
 BOARD="$(sed -n 's/^BOARD = "\(.*\)"$/\1/p' "$DEVICE/settings.py")"
-BOARD_FILE="boards/$BOARD.py"
-AGENT_FILES=(
-  main.py node_runtime.py node_agent.py tempestas_mqtt.py command_guard.py contract.py agent_version.py
-  iso_time.py relay_lines.py ds18b20_probes.py settings.py credentials.py
-)
+BOARD_FILE="$MICROPYTHON_BOARDS_DIRECTORY/$BOARD.py"
+AGENT_FILES=("${MICROPYTHON_AGENT_CODE[@]}" "${MICROPYTHON_NODE_CONFIG[@]}")
 
-source "$HERE/tools/lib/console.sh"
 mpremote() { "$UV" tool run mpremote connect "$PORT" "$@"; }
 
 wait_for_port() {
@@ -59,6 +57,6 @@ wait_for_port
 say "Copying the agent for the $BOARD board"
 REFUSE_IF_WATCHDOG_ARMED="$(cat "$DEVICE/$BOARD_FILE")
 refuse_if_watchdog_armed()"
-(cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + cp "${AGENT_FILES[@]}" : + cp "$BOARD_FILE" :board.py + cp "$STAMP_FILE" :deployed_version.py + reset)
+(cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + cp "${AGENT_FILES[@]}" : + cp "$BOARD_FILE" :board.py + cp "$STAMP_FILE" :"$MICROPYTHON_AGENT_VERSION_STAMP" + reset)
 
 say "Done. Watch it with: uv tool run mpremote connect $PORT resume repl"
