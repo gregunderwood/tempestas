@@ -41,7 +41,21 @@ export type NodeTopicKind =
   | 'gpio-result'
   | 'heartbeat'
   | 'alarm'
+  | 'update'
   | 'unknown';
+
+/** Topics only this server may publish; anything else on them is a controller conflict. */
+export type CommandTopicKind = 'gpio-set' | 'gpio-sync' | 'update';
+
+const COMMAND_ISSUER_FIELDS: Record<CommandTopicKind, string> = {
+  'gpio-set': 'issuedBy',
+  'gpio-sync': 'controller',
+  update: 'issuedBy',
+};
+
+const COMMAND_TOPIC_KINDS: ReadonlySet<NodeTopicKind> = new Set(
+  Object.keys(COMMAND_ISSUER_FIELDS) as CommandTopicKind[],
+);
 
 export interface ParsedTopic {
   nodeId: NodeId;
@@ -75,6 +89,7 @@ const FIXED_SUBTOPIC_KINDS = new Map<string, NodeTopicKind>([
   ['gpio/result', 'gpio-result'],
   ['control/heartbeat', 'heartbeat'],
   ['alarm', 'alarm'],
+  ['update', 'update'],
 ]);
 
 /** `tempestas/v1/node/elantris/sensor/scd4x-0/sample` -> its parts, or null. */
@@ -103,6 +118,19 @@ export function parseNodeTopic(topic: string): ParsedTopic | null {
     return { nodeId, kind: 'gpio-state', pin };
   }
   return { nodeId, kind: 'unknown' };
+}
+
+export function isCommandTopicKind(
+  kind: NodeTopicKind,
+): kind is CommandTopicKind {
+  return COMMAND_TOPIC_KINDS.has(kind);
+}
+
+export function readCommandIssuer(
+  kind: CommandTopicKind,
+  command: Record<string, unknown>,
+): unknown {
+  return command[COMMAND_ISSUER_FIELDS[kind]];
 }
 
 // A zero-length payload is how a retained message is cleared.

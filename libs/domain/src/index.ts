@@ -6,6 +6,7 @@ export * from './lib/readings/reading.model';
 export * from './lib/rules/rules.model';
 export * from './lib/errors/api-error.model';
 export * from './lib/hardware/mqtt-contract';
+export * from './lib/hardware/update-command';
 export * from './lib/realtime/realtime.model';
 export * from './lib/health/health.model';
 export * from './lib/ui/gauge-metrics';
