@@ -16,17 +16,16 @@ sample_interval_s = 10.0
 
 # Pinned by ROM id, never by bus order; label each cable end with its sensor_id.
 [[sensor.probes]]
-rom = "28-3ce1d443663c"
+rom = "28-3ce1d4439bb6"
 sensor_id = "pipes"
 
 [[sensor.probes]]
-rom = "28-3ce1d4436bd1"
-sensor_id = "air"
+rom = "28-3ce1d443c82f"
+sensor_id = "air-1"
 
-# The third probe, not soldered yet. Uncomment with its real ROM.
-# [[sensor.probes]]
-# rom = "28-zzzzzzzzzzzz"
-# sensor_id = "floor"
+[[sensor.probes]]
+rom = "28-3ce1d443d7f5"
+sensor_id = "air-2"
 
 [gpio]
 # BCM5 -> IN1 -> heater (through the JQX-62F 110VAC contactor); BCM6 -> IN2 -> heat tape.
