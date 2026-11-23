@@ -1,10 +1,14 @@
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AgentApp, ApiErrorCode, type AgentRelease } from '@tempestas/domain';
 import { API_PREFIX } from '../common/api-prefix';
-import { BUNDLE_FILES_DIRECTORY, MANIFEST_FILE } from './agent-release-bundles';
+import {
+  BUNDLE_FILES_DIRECTORY,
+  MANIFEST_FILE,
+  sha256Hex,
+} from './agent-release-bundles';
 import { AgentReleasesController } from './agent-releases.controller';
 import {
   AGENT_RELEASES_DIRECTORY,
@@ -12,7 +16,6 @@ import {
 } from './agent-releases.service';
 import {
   makeAgentReleasesRoot,
-  sha256Of,
   writeBundle,
 } from './agent-release-bundles.fixtures';
 
@@ -62,7 +65,21 @@ describe('AgentReleasesController', () => {
     expect(served).toBe(
       readFileSync(join(bundleDirectory, MANIFEST_FILE), 'utf8'),
     );
-    expect(sha256Of(served)).toBe(release.manifestSha256);
+    expect(sha256Hex(served)).toBe(release.manifestSha256);
+  });
+
+  it('keeps serving the manifest it verified, though another lands on disk under the same version', async () => {
+    const [release]: AgentRelease[] = await (await fetch(baseUrl)).json();
+    const manifestOnDisk = join(bundleDirectory, MANIFEST_FILE);
+    const verifiedManifest = readFileSync(manifestOnDisk, 'utf8');
+    writeFileSync(manifestOnDisk, '{"replaced": true}\n');
+
+    const served = await (
+      await fetch(`${serverOrigin}${release.manifestPath}`)
+    ).text();
+    writeFileSync(manifestOnDisk, verifiedManifest);
+
+    expect(sha256Hex(served)).toBe(release.manifestSha256);
   });
 
   it('serves a file the manifest lists, at its nested path', async () => {

@@ -16,7 +16,7 @@ problem found after a deploy passed.
 - [../../apps/server/systemd/](../../apps/server/systemd/) — the server and migrate units, which run from the links
 - [../../tools/host/install-deploy-privileges.sh](../../tools/host/install-deploy-privileges.sh) — the one-time move to releases, the units, the sudoers lines
 - [../../tools/lib/agent-bundle.sh](../../tools/lib/agent-bundle.sh) — the agents' release bundles: build, ship, prune
-- [../../tools/lib/agent-files.sh](../../tools/lib/agent-files.sh) — what each agent is made of, for its own deploy and for a bundle
+- [../../apps/agent-linux/agent-files.sh](../../apps/agent-linux/agent-files.sh) and [../../apps/agent-micropython/agent-files.sh](../../apps/agent-micropython/agent-files.sh) — what each agent is made of, for its own deploy and for a bundle
 - [../../apps/server/src/app/agent-releases/](../../apps/server/src/app/agent-releases/) — the server verifies and offers them
 
 ## How it works

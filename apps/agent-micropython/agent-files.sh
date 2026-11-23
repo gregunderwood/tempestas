@@ -1,7 +1,5 @@
-# Sourced by each agent's deploy script and by tools/lib/agent-bundle.sh, so a bundle holds what a deploy ships.
-
-LINUX_AGENT_PATHS=(src tools nodes systemd pyproject.toml uv.lock agent.example.toml)
-LINUX_AGENT_VERSION_STAMP=src/tempestas_agent/deployed_version.py
+# Sourced by tools/deploy-agent-micropython.sh and tools/lib/agent-bundle.sh, so a bundle holds what a deploy ships.
+# Inside the agent, so a change to the list raises this agent's version and no other's.
 
 MICROPYTHON_AGENT_CODE=(
   main.py node_runtime.py node_agent.py tempestas_mqtt.py command_guard.py contract.py agent_version.py

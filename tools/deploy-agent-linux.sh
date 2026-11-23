@@ -10,7 +10,7 @@ UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 SETTLE_SECONDS=5
 
 source "$HERE/tools/lib/console.sh"
-source "$HERE/tools/lib/agent-files.sh"
+source "$HERE/apps/agent-linux/agent-files.sh"
 source "$HERE/tools/lib/remote-host.sh"
 
 HOSTS=("$@")

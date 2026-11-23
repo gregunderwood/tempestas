@@ -133,7 +133,7 @@ copies anything. Watch it with
 `uv tool run mpremote connect /dev/ttyACM0 resume repl` — `resume` stops mpremote from
 interrupting the agent.
 
-A new file on the board goes in [`tools/lib/agent-files.sh`](../../tools/lib/agent-files.sh), which
+A new file on the board goes in [`apps/agent-micropython/agent-files.sh`](../../apps/agent-micropython/agent-files.sh), which
 this deploy and the server's [release bundles](Deploys.md#agent-release-bundles) both read; one that
 holds a node's own settings goes in `MICROPYTHON_NODE_CONFIG`, so it is never bundled.
 

@@ -115,8 +115,7 @@ restart drives the relays to their fail-safe levels until the server commands th
 `<contract major>.<contract minor>.<patch>`, for example `1.0.3`; a deploy from anything but a clean
 `origin/main` is marked `-dev+<commit>`. The deploy script writes it to
 `tempestas_agent/deployed_version.py` on the host, and
-[tools/describe-agent-version.sh](../../tools/describe-agent-version.sh) builds it for both agents,
-counting commits to the agent and to the file list in `tools/lib/agent-files.sh`. A
+[tools/describe-agent-version.sh](../../tools/describe-agent-version.sh) builds it for both agents. A
 checkout that was never deployed by the script reports `0.0.0+dev`. What each number promises is in
 [MQTT Contract](MQTT%20Contract.md#versions); the version in `pyproject.toml` is not used.
 

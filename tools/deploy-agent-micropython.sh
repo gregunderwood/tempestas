@@ -6,7 +6,7 @@ set -euo pipefail
 PORT="${1:-/dev/ttyACM0}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$HERE/tools/lib/console.sh"
-source "$HERE/tools/lib/agent-files.sh"
+source "$HERE/apps/agent-micropython/agent-files.sh"
 DEVICE="$HERE/apps/agent-micropython/device"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 PORT_WAIT_SECONDS=10

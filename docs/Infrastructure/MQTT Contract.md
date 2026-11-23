@@ -82,9 +82,9 @@ An agent's minor says what it accepts, not what its mirror knows. It raises its 
 handles that minor's commands, so it may sit behind `MQTT_CONTRACT_MINOR` but never ahead, and the
 contract-match tests allow exactly that. A node on minor 1 or later takes `update`.
 
-The patch counts commits to that agent, or to the list of files it ships in
-[tools/lib/agent-files.sh](../../tools/lib/agent-files.sh), since the contract version last
-changed, so every change to what an agent runs raises it, in order, without bumping it by hand. That only holds for released code, so
+The patch counts that agent's commits since the contract version last changed, including its list
+of files to ship, `agent-files.sh`, so every change to what an agent runs raises it, in order,
+without bumping it by hand. That only holds for released code, so
 anything else is marked: [tools/describe-agent-version.sh](../../tools/describe-agent-version.sh)
 builds the version, and the deploy scripts stamp it.
 

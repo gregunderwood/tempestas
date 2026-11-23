@@ -1,7 +1,11 @@
-import { parseAgentVersion } from '../agent-releases/agent-release.model';
 import {
-  AgentApp,
+  parseAgentVersion,
+  SHA256_HEX,
+} from '../agent-releases/agent-release.model';
+import {
   AlarmCode,
+  isAgentApp,
+  type AgentApp,
   MQTT_CONTRACT_MAJOR,
   schemaMajor,
   UpdateState,
@@ -30,12 +34,10 @@ export type UpdateCommandVerdict =
       commandId: string;
     };
 
-const SHA256_HEX = /^[0-9a-f]{64}$/;
 // Stricter than `new Date`, so an agent's ISO parser and this judge refuse the same strings.
 const ISO_8601_INSTANT =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const MANIFEST_URL_SCHEMES = new Set(['http:', 'https:']);
-const AGENT_APPS = new Set<unknown>(Object.values(AgentApp));
 const UPDATE_STATES = new Set<unknown>(Object.values(UpdateState));
 
 /** The node's half of the update command, in the same order as `gpio/set`: retain, ownership, expiry. */
@@ -148,7 +150,7 @@ function describeTargetProblem(
   runningApp: AgentApp,
 ): string | null {
   const { app, version, manifestUrl, manifestSha256 } = body;
-  if (!AGENT_APPS.has(app)) {
+  if (!isAgentApp(app)) {
     return `unknown app ${JSON.stringify(app)}`;
   }
   if (app !== runningApp) {

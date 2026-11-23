@@ -148,6 +148,12 @@ export enum AgentApp {
   MicroPython = 'agent-micropython',
 }
 
+const AGENT_APPS = new Set<unknown>(Object.values(AgentApp));
+
+export function isAgentApp(value: unknown): value is AgentApp {
+  return AGENT_APPS.has(value);
+}
+
 /** Added in contract 1.1. Owned, expiring and never retained, exactly like `gpio/set`. */
 export interface UpdateCommandPayload extends MqttEnvelope {
   id: string;

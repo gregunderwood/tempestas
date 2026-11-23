@@ -5,10 +5,10 @@ import {
   BUNDLE_FILES_DIRECTORY,
   MANIFEST_FILE,
   readVerifiedBundles,
+  sha256Hex,
 } from './agent-release-bundles';
 import {
   makeAgentReleasesRoot,
-  sha256Of,
   writeBundle,
 } from './agent-release-bundles.fixtures';
 
@@ -40,7 +40,7 @@ describe('readVerifiedBundles', () => {
         contractMajor: 1,
         contractMinor: 1,
         manifestPath: '/api/agent-releases/agent-linux/1.1.4/manifest.json',
-        manifestSha256: sha256Of(
+        manifestSha256: sha256Hex(
           readFileSync(join(bundleDirectory, MANIFEST_FILE), 'utf8'),
         ),
       },

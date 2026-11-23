@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import {
-  AgentApp,
+  isAgentApp,
+  type AgentApp,
   compareAgentVersions,
   isNewerAgentVersion,
   parseAgentVersion,
@@ -15,9 +16,7 @@ import {
 } from './agent-release-bundles';
 
 export const AGENT_RELEASES_DIRECTORY = Symbol('AGENT_RELEASES_DIRECTORY');
-const AGENT_APPS = new Set<unknown>(Object.values(AgentApp));
 
-/** What a node says about itself in its hello, which is all an update offer needs. */
 export interface RunningAgent {
   agentName: string | null;
   agentVersion: string | null;
@@ -61,7 +60,6 @@ export class AgentReleasesService implements OnModuleInit {
     );
   }
 
-  /** The newest bundle for this agent on its contract major, when newer than what it runs. */
   findAvailableUpdate(agent: RunningAgent): string | null {
     if (!canTakeUpdateCommand(agent)) {
       return null;
@@ -103,12 +101,14 @@ export class AgentReleasesService implements OnModuleInit {
 // An agent older than contract 1.0 sends no name, and one before 1.1 never subscribes to `update`.
 function canTakeUpdateCommand(agent: RunningAgent): boolean {
   return (
-    AGENT_APPS.has(agent.agentName) &&
+    isAgentApp(agent.agentName) &&
     isOnContractWithUpdateCommand(agent.capabilities)
   );
 }
 
-function isOnContractWithUpdateCommand(capabilities: NodeCapabilities): boolean {
+function isOnContractWithUpdateCommand(
+  capabilities: NodeCapabilities,
+): boolean {
   const major = capabilities.contractVersion;
   const minor = capabilities.contractMinor ?? 0;
   if (major !== UPDATE_COMMAND_CONTRACT.major) {

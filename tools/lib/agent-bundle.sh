@@ -1,5 +1,5 @@
 # Sourced by tools/deploy.sh: a release bundle per agent for the server to offer; see docs/Infrastructure/Deploys.md.
-# Needs tools/lib/agent-files.sh, and REMOTE_ROOT from tools/lib/release.sh.
+# Needs each agent's agent-files.sh, and REMOTE_ROOT from tools/lib/release.sh.
 
 AGENT_APPS=(agent-linux agent-micropython)
 AGENT_RELEASES_DIRECTORY=agent-releases
@@ -13,7 +13,10 @@ DEVELOPMENT_RELEASE_SUFFIX='-dev(-dirty)?$'
 build_agent_bundles() {
   local repository="$1" release_id="$2" output_root="$3"
   local app
-  rm -rf "$output_root"
+  if ! rm -rf "$output_root"; then
+    echo "Could not clear $output_root, so no agent is bundled; the server deploy goes on without them." >&2
+    return
+  fi
   if [[ "$release_id" =~ $DEVELOPMENT_RELEASE_SUFFIX ]]; then
     echo "$release_id is not a clean origin/main build, so no agent is bundled." >&2
     return
@@ -36,8 +39,8 @@ build_agent_bundle() {
     return
   fi
   bundle_dir="$output_root/$app/$version"
-  mkdir -p "$bundle_dir/$BUNDLE_FILES_DIRECTORY"
-  if ! copy_agent_files "$repository" "$app" "$bundle_dir/$BUNDLE_FILES_DIRECTORY" "$version" ||
+  if ! mkdir -p "$bundle_dir/$BUNDLE_FILES_DIRECTORY" ||
+    ! copy_agent_files "$repository" "$app" "$bundle_dir/$BUNDLE_FILES_DIRECTORY" "$version" ||
     ! write_bundle_manifest "$bundle_dir" "$app" "$version"; then
     rm -rf "$bundle_dir"
     echo "$app $version is not bundled; the server deploy goes on without it." >&2
@@ -74,7 +77,7 @@ copy_agent_files() {
   return "$copy_status"
 }
 
-# git ls-files skips a name it does not know, so a file renamed without updating agent-files.sh would vanish unnoticed.
+# git ls-files skips a name it does not know, so a file renamed without updating its agent-files.sh would vanish unnoticed.
 require_every_path_tracked() {
   local app="$1" file_list="$2"
   shift 2
@@ -86,23 +89,26 @@ require_every_path_tracked() {
     fi
   done
   if [ "${#missing_paths[@]}" -gt 0 ]; then
-    echo "tools/lib/agent-files.sh lists ${missing_paths[*]} for $app, but git tracks no such file." >&2
+    echo "apps/$app/agent-files.sh lists ${missing_paths[*]}, but git tracks no such file." >&2
     return 1
   fi
 }
 
+# Hashed in node rather than parsed from sha256sum, which escapes a file name holding a backslash.
 write_bundle_manifest() {
   local bundle_dir="$1" app="$2" version="$3"
-  (cd "$bundle_dir/$BUNDLE_FILES_DIRECTORY" && find . -type f | sed 's#^\./##' | LC_ALL=C sort | xargs -d '\n' sha256sum) |
-    node -e '
-      const [app, version] = process.argv.slice(1);
-      const [contractMajor, contractMinor] = version.split(".").map(Number);
-      const files = require("node:fs").readFileSync(0, "utf8").trim().split("\n").map((line) => {
-        const separator = line.indexOf("  ");
-        return { path: line.slice(separator + 2), sha256: line.slice(0, separator) };
-      });
-      process.stdout.write(JSON.stringify({ app, version, contractMajor, contractMinor, files }, null, 2) + "\n");
-    ' "$app" "$version" >"$bundle_dir/$BUNDLE_MANIFEST"
+  node -e '
+    const { createHash } = require("node:crypto");
+    const { readdirSync, readFileSync, statSync } = require("node:fs");
+    const { join } = require("node:path");
+    const [filesDirectory, app, version] = process.argv.slice(1);
+    const [contractMajor, contractMinor] = version.split(".").map(Number);
+    const files = readdirSync(filesDirectory, { recursive: true })
+      .filter((path) => statSync(join(filesDirectory, path)).isFile())
+      .sort()
+      .map((path) => ({ path, sha256: createHash("sha256").update(readFileSync(join(filesDirectory, path))).digest("hex") }));
+    process.stdout.write(JSON.stringify({ app, version, contractMajor, contractMinor, files }, null, 2) + "\n");
+  ' "$bundle_dir/$BUNDLE_FILES_DIRECTORY" "$app" "$version" >"$bundle_dir/$BUNDLE_MANIFEST"
 }
 
 # A version already on the host is never shipped over. A failed ship leaves only a dot-name, which the server skips and prune clears.

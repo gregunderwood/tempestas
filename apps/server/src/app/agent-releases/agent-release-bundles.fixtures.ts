@@ -1,13 +1,12 @@
-import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { AgentReleaseManifest } from '@tempestas/domain';
-import { BUNDLE_FILES_DIRECTORY, MANIFEST_FILE } from './agent-release-bundles';
-
-export function sha256Of(text: string): string {
-  return createHash('sha256').update(text).digest('hex');
-}
+import {
+  BUNDLE_FILES_DIRECTORY,
+  MANIFEST_FILE,
+  sha256Hex,
+} from './agent-release-bundles';
 
 export function makeAgentReleasesRoot(): string {
   return mkdtempSync(join(tmpdir(), 'agent-releases-'));
@@ -35,7 +34,7 @@ export function writeBundle(
     contractMinor,
     files: Object.entries(files).map(([path, contents]) => ({
       path,
-      sha256: sha256Of(contents),
+      sha256: sha256Hex(contents),
     })),
     ...manifestChanges,
   };

@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  AgentApp,
+  isAgentApp,
   isReleasedAgentVersion,
   parseAgentVersion,
+  SHA256_HEX,
   type AgentRelease,
   type AgentReleaseFile,
   type AgentReleaseManifest,
@@ -14,15 +15,14 @@ import { API_PREFIX } from '../common/api-prefix';
 export const AGENT_RELEASES_ROUTE = 'agent-releases';
 export const MANIFEST_FILE = 'manifest.json';
 export const BUNDLE_FILES_DIRECTORY = 'files';
-const SHA256_HEX = /^[0-9a-f]{64}$/;
 // tools/deploy.sh ships a bundle under a dot-name and renames it into place once complete.
 const PARTIAL_BUNDLE_PREFIX = '.';
-const AGENT_APPS = new Set<unknown>(Object.values(AgentApp));
 const MISSING_FILE_CODE = 'ENOENT';
 
 export interface AgentReleaseBundle {
   release: AgentRelease;
-  manifestFile: string;
+  // Served from memory, so the bytes always match the sha256 advertised for them, whatever lands on disk later.
+  manifestBytes: Buffer;
   /** Each listed path, to the file on disk; nothing else in the bundle is ever served. */
   filesByPath: Map<string, string>;
 }
@@ -59,8 +59,7 @@ async function readVerifiedBundle(
   app: string,
   version: string,
 ): Promise<AgentReleaseBundle> {
-  const manifestFile = join(bundleDirectory, MANIFEST_FILE);
-  const manifestBytes = await readFile(manifestFile);
+  const manifestBytes = await readFile(join(bundleDirectory, MANIFEST_FILE));
   const manifest = parseManifest(manifestBytes.toString('utf8'));
   const problem = describeManifestProblem(manifest, app, version);
   if (problem) {
@@ -74,9 +73,9 @@ async function readVerifiedBundle(
       contractMajor: manifest.contractMajor,
       contractMinor: manifest.contractMinor,
       manifestPath: `/${API_PREFIX}/${AGENT_RELEASES_ROUTE}/${manifest.app}/${manifest.version}/${MANIFEST_FILE}`,
-      manifestSha256: hashBytes(manifestBytes),
+      manifestSha256: sha256Hex(manifestBytes),
     },
-    manifestFile,
+    manifestBytes,
     filesByPath,
   };
 }
@@ -98,13 +97,12 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Null when the manifest is whole and agrees with the directory it sits in. */
 export function describeManifestProblem(
   manifest: AgentReleaseManifest,
   app: string,
   version: string,
 ): string | null {
-  if (!AGENT_APPS.has(manifest.app) || manifest.app !== app) {
+  if (!isAgentApp(manifest.app) || manifest.app !== app) {
     return `manifest app ${JSON.stringify(manifest.app)} is not the directory's ${app}`;
   }
   if (
@@ -163,7 +161,7 @@ async function verifyListedFiles(
   const filesByPath = new Map<string, string>();
   for (const file of files) {
     const onDisk = join(bundleDirectory, BUNDLE_FILES_DIRECTORY, file.path);
-    const actualSha256 = hashBytes(await readListedFile(onDisk, file.path));
+    const actualSha256 = sha256Hex(await readListedFile(onDisk, file.path));
     if (actualSha256 !== file.sha256) {
       throw new Error(
         `${file.path} does not have the sha256 the manifest gives`,
@@ -201,6 +199,6 @@ async function listDirectories(
     .filter((name) => !name.startsWith(PARTIAL_BUNDLE_PREFIX));
 }
 
-function hashBytes(bytes: Buffer): string {
+export function sha256Hex(bytes: Buffer | string): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
