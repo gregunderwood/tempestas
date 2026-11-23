@@ -10,6 +10,7 @@ import {
 import {
   arrangeInSavedOrder,
   forgetSavedOrder,
+  keepHiddenCardsInPlace,
   openBrowserStorage,
   readSavedOrder,
   writeSavedOrder,
@@ -35,7 +36,8 @@ export class CardArrangement {
     return arrangeInSavedOrder(items, this.savedOrder(), identify);
   }
 
-  save(order: CardOrder): void {
+  save(visibleOrder: CardOrder): void {
+    const order = keepHiddenCardsInPlace(this.savedOrder(), visibleOrder);
     this.savedOrder.set(order);
     writeSavedOrder(this.storage, this.storageKey, order);
   }

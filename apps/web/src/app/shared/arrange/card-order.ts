@@ -61,6 +61,26 @@ export function applyDrop(
   return [...withoutMoved, movedKey];
 }
 
+// A card off screen while saving, such as a node still loading, keeps its place behind the card it followed.
+export function keepHiddenCardsInPlace(
+  savedOrder: CardOrder | null,
+  visibleOrder: CardOrder,
+): string[] {
+  if (savedOrder === null) return [...visibleOrder];
+  const visibleKeys = new Set(visibleOrder);
+  let merged = [...visibleOrder];
+  let precedingKey: string | null = null;
+  for (const key of savedOrder) {
+    if (!visibleKeys.has(key) && !merged.includes(key)) {
+      const insertIndex =
+        precedingKey === null ? 0 : merged.indexOf(precedingKey) + 1;
+      merged = insertAt(merged, insertIndex, key);
+    }
+    precedingKey = key;
+  }
+  return merged;
+}
+
 export function openBrowserStorage(): OrderStorage | null {
   try {
     return globalThis.localStorage ?? null;

@@ -2,6 +2,7 @@ import {
   applyDrop,
   arrangeInSavedOrder,
   forgetSavedOrder,
+  keepHiddenCardsInPlace,
   moveOneStep,
   readSavedOrder,
   writeSavedOrder,
@@ -148,6 +149,27 @@ describe('applyDrop', () => {
 
   it('leaves the order alone when the card is not in the landing column', () => {
     expect(applyDrop(order, 'b', ['a', 'c'])).toEqual(order);
+  });
+});
+
+describe('keepHiddenCardsInPlace', () => {
+  it('saves what is on screen when nothing was saved before', () => {
+    expect(keepHiddenCardsInPlace(null, ['b', 'a'])).toEqual(['b', 'a']);
+  });
+
+  it('keeps a card that was off screen behind the card it followed', () => {
+    expect(
+      keepHiddenCardsInPlace(['a', 'quiet', 'b', 'c'], ['c', 'a', 'b']),
+    ).toEqual(['c', 'a', 'quiet', 'b']);
+  });
+
+  it('keeps a card that was first, and a run of hidden cards, in order', () => {
+    expect(
+      keepHiddenCardsInPlace(
+        ['first', 'a', 'gone', 'loading', 'b'],
+        ['b', 'a'],
+      ),
+    ).toEqual(['first', 'b', 'a', 'gone', 'loading']);
   });
 });
 
