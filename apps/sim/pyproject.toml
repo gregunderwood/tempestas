@@ -3,7 +3,7 @@ name = "tempestas-sim"
 version = "0.1.0"
 description = "One greenhouse, shared by every agent in the sandbox."
 requires-python = ">=3.11"
-license = "AGPL-3.0-only"
+license = "BUSL-1.1"
 # Dependency-free so the sandbox runs anywhere the agent does, without a wheel to build.
 dependencies = []
 
