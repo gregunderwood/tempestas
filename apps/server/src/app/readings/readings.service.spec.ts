@@ -1,17 +1,25 @@
 import type { ConfigService } from '@nestjs/config';
 import type { Repository } from 'typeorm';
 import { ReadingOrder } from '@tempestas/domain';
-import { SystemClock } from '../common/clock';
+import { FixedClock, SystemClock, type Clock } from '../common/clock';
 import type { NodeEntity } from '../nodes/models';
 import type { SensorReadingEntity } from './models';
 import { ReadingsService } from './readings.service';
+import { SENSOR_MEMORY_SECONDS } from './sensor-memory';
 
-function makeServiceRecordingQueries() {
+function makeServiceRecordingQueries(clock: Clock = new SystemClock()) {
   const orderings: [string, string][] = [];
   const conditions: string[] = [];
+  const parameters: Record<string, unknown> = {};
   const builder = {
     innerJoinAndSelect: () => builder,
-    where: () => builder,
+    where: (condition: string, conditionParameters = {}) => {
+      conditions.push(condition);
+      Object.assign(parameters, conditionParameters);
+      return builder;
+    },
+    distinctOn: () => builder,
+    addOrderBy: () => builder,
     andWhere: (condition: string) => {
       conditions.push(condition);
       return builder;
@@ -32,10 +40,10 @@ function makeServiceRecordingQueries() {
   const service = new ReadingsService(
     readings,
     {} as Repository<NodeEntity>,
-    new SystemClock(),
+    clock,
     config,
   );
-  return { service, orderings, conditions };
+  return { service, orderings, conditions, parameters };
 }
 
 describe('ReadingsService.findAll', () => {
@@ -61,5 +69,19 @@ describe('ReadingsService.findAll', () => {
     const { service, conditions } = makeServiceRecordingQueries();
     await service.findAll({ days: 1, nodeId: 'patji' });
     expect(conditions).not.toContain('reading.sensorId = :sensorId');
+  });
+});
+
+describe('ReadingsService.findLatestPerSensor', () => {
+  it('forgets a sensor that has been silent for longer than the sensor memory', async () => {
+    const now = new Date('2026-11-22T18:00:00Z');
+    const { service, conditions, parameters } = makeServiceRecordingQueries(
+      new FixedClock(now),
+    );
+    await service.findLatestPerSensor();
+    expect(conditions).toContain('reading.createdAt > :since');
+    expect(parameters['since']).toEqual(
+      new Date(now.getTime() - SENSOR_MEMORY_SECONDS * 1000),
+    );
   });
 });
