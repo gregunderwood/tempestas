@@ -79,7 +79,8 @@ export class ReadingsIngestService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.publishPersisted(sample, persistedRow);
-    await this.nodes.noteReading(
+    // Not awaited: ingest must not wait behind hello or status work in the node registry's queue.
+    void this.nodes.noteReading(
       resolution.node.id,
       new Date(persistedRow.created_at),
     );

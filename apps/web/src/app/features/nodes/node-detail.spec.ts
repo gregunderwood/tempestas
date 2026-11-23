@@ -24,6 +24,7 @@ import { PageHeading } from '../../core/page-heading';
 const PAST_BOUNDARY_AND_SLACK_MILLISECONDS = 61_500;
 const THROTTLE_WINDOW_AND_BOUNDARY_TIMEOUT = 2;
 const SCREEN_OPENED_AT = new Date('2026-09-10T22:39:50.000Z');
+const BROWSER_CLOCK_AHEAD_MILLISECONDS = 60 * 60 * 1000;
 const TEN_SECONDS_MILLISECONDS = 10_000;
 
 let statsRequestCount = 0;
@@ -363,6 +364,16 @@ describe('NodeDetail', () => {
       waitOutThrottle();
       waitOutThrottle();
       expect(statsRequestCount).toBe(1);
+    });
+
+    it('re-queries for a new reading even when the browser clock runs ahead of the server', () => {
+      vi.setSystemTime(
+        SCREEN_OPENED_AT.getTime() + BROWSER_CLOCK_AHEAD_MILLISECONDS,
+      );
+      renderNodeDetail();
+      pushReading('2026-09-10T22:40:00.000Z');
+      waitOutThrottle();
+      expect(statsRequestCount).toBe(2);
     });
 
     it('ignores new readings from other nodes', () => {

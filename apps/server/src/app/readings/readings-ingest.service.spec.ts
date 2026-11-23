@@ -180,6 +180,12 @@ describe('realtime fan-out', () => {
     );
   });
 
+  it('persists without waiting for the node registry to catch up', async () => {
+    const { service, nodes } = makeService(ADMITTED);
+    vi.mocked(nodes.noteReading).mockReturnValue(new Promise(() => undefined));
+    await expect(service.ingest(sample())).resolves.toBe('persisted');
+  });
+
   it('tells the node registry nothing about a duplicate', async () => {
     const { service, nodes } = makeService(ADMITTED, []);
     await service.ingest(sample());

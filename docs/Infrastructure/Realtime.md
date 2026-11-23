@@ -85,8 +85,7 @@ are fetched through `injectLiveSource`. It times a request out after 15 s and **
 every reconnect**, so a change made while the browser was offline is seen. A failed request is
 tried again after 10 s, doubling to at most a minute, and the wait resets on success. Retries and
 reconnect refetches are background requests: the error snackbar skips them, because the page
-already reports the failure
-and a retry every few seconds would keep the snackbar up for good.
+already reports the failure and a retry every few seconds would keep the snackbar up for good.
 
 A response to an older request never overwrites a newer one, and a request still running when its
 page closes is cancelled. Each source is `loading`, `loaded`, `out-of-date` (the last refresh

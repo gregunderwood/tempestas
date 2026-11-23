@@ -414,7 +414,7 @@ export class NodeDetail {
   private readonly destroyRef = inject(DestroyRef);
   private readonly reload = new BehaviorSubject<void>(undefined);
   private boundaryTimer: ReturnType<typeof setTimeout> | undefined;
-  private statsRequestedAtMilliseconds = Number.POSITIVE_INFINITY;
+  private newestReadingInStatsMilliseconds = Number.POSITIVE_INFINITY;
 
   private readonly liveReadings = injectLiveReadings().readings;
   private readonly allDevices = injectLiveDevices().devices;
@@ -482,7 +482,7 @@ export class NodeDetail {
   private followDayNightStats(): void {
     combineLatest([toObservable(this.slug), this.reload])
       .pipe(
-        tap(() => (this.statsRequestedAtMilliseconds = Date.now())),
+        tap(() => this.rememberNewestReadingInStats()),
         switchMap(([slug]) => this.api.dayNightStats({ nodeId: slug })),
         takeUntilDestroyed(),
       )
@@ -506,10 +506,18 @@ export class NodeDetail {
       .subscribe(() => this.reload.next());
   }
 
-  // A reading created before the statistics were requested is already counted in them.
+  // Compared with the server's own timestamps, so the browser's clock cannot skew the throttle.
+  private rememberNewestReadingInStats(): void {
+    const newestReadingAt = this.newestReadingAt();
+    this.newestReadingInStatsMilliseconds =
+      newestReadingAt === null
+        ? Number.NEGATIVE_INFINITY
+        : Date.parse(newestReadingAt);
+  }
+
   private isMissingFromStats(readingCreatedAt: string | null): boolean {
     if (readingCreatedAt === null) return false;
-    return Date.parse(readingCreatedAt) > this.statsRequestedAtMilliseconds;
+    return Date.parse(readingCreatedAt) > this.newestReadingInStatsMilliseconds;
   }
 
   private armBoundaryRefresh(nextBoundary: string | null): void {

@@ -145,8 +145,9 @@ The gauges arrive over the socket; the statistics do not. Left alone the table f
 gauges keep moving — and the running period is by definition still accumulating, so it drifts
 further the longer the page is open. So a new `reading:latest` from **this node** re-queries
 them, **throttled to once a minute**: the first new reading opens a 60 s window and the query runs
-at its end. A reading created before the statistics were requested is already in them, so the
-readings the page opens with, and the one the socket replays on connect, start no window. It also re-queries **the moment the running period ends**, when every row shifts.
+at its end. A reading no newer than the newest one the page held when it asked is already in
+them, so the readings the page opens with, and the one the socket replays on connect, start no
+window. It also re-queries **the moment the running period ends**, when every row shifts.
 
 There is no timer. A node that has gone quiet adds nothing to its statistics, so they are not
 re-queried until it speaks again.
