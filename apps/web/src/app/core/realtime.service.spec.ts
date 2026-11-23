@@ -1,4 +1,8 @@
-import { REALTIME_EVENTS, type SystemStatus } from '@tempestas/domain';
+import {
+  REALTIME_EVENTS,
+  type Node,
+  type SystemStatus,
+} from '@tempestas/domain';
 import { measureServerClockOffset, RealtimeService } from './realtime.service';
 
 const fakeSocket = vi.hoisted(() => {
@@ -90,5 +94,16 @@ describe('RealtimeService', () => {
     expect(realtime.serverClockOffsetMilliseconds()).toBe(
       FIVE_MINUTES_MILLISECONDS,
     );
+  });
+
+  it('keeps the newest pushed state of each node, with when it arrived', () => {
+    const patji = { id: 'patji-id', slug: 'patji', online: false } as Node;
+
+    fakeSocket.emitFromServer(REALTIME_EVENTS.nodeState, patji);
+
+    expect(realtime.nodePushes().get('patji-id')).toEqual({
+      node: patji,
+      receivedAt: Date.now(),
+    });
   });
 });

@@ -19,6 +19,8 @@ sometimes with wet hands. Angular 20 standalone components, Angular Material M3,
 - [../apps/web/src/app/shared/gauge/gauge.ts](../apps/web/src/app/shared/gauge/gauge.ts) — one reading, as an arc
 - [../apps/web/src/app/features/dashboard/dashboard.ts](../apps/web/src/app/features/dashboard/dashboard.ts) — the dashboard, composing its four panels
 - [../apps/web/src/app/features/dashboard/activity-log.ts](../apps/web/src/app/features/dashboard/activity-log.ts) — rules decisions and relay switches, newest first
+- [../apps/web/src/app/core/live-nodes.ts](../apps/web/src/app/core/live-nodes.ts) — the nodes, fetched and patched from `node:state`
+- [../apps/web/src/app/features/nodes/nodes-page.ts](../apps/web/src/app/features/nodes/nodes-page.ts) — every node, with admit and disable
 - [../apps/web/src/app/features/nodes/node-detail.ts](../apps/web/src/app/features/nodes/node-detail.ts) — one node, with its 24-hour statistics
 - [../apps/web/src/app/features/reports/reports-page.ts](../apps/web/src/app/features/reports/reports-page.ts) — the reports screen, a placeholder naming the reports to come
 - [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme, the rail and hero tokens, and the gauge band colours
@@ -117,6 +119,14 @@ Three properties are load-bearing rather than cosmetic:
 `:host` sets `display: block; min-width: 0` because the grid item is the host element, not the
 figure inside it, and an inline host will not shrink below its content.
 
+## The nodes screen
+
+`/nodes` lists every node with its status, whether it is online, its device count and agent. It
+follows `node:state` over the socket: a node going offline, coming back, announcing itself as
+pending, being admitted elsewhere or upgrading its agent shows without a reload. Admit and disable
+also refetch the list after they succeed, so the button still works with the socket down. See
+[Realtime](Infrastructure/Realtime.md).
+
 ## The node screen
 
 `/nodes/:slug` is the drill-in: live gauges, then min, max and average per metric across the last
@@ -133,12 +143,19 @@ so a figure spanning both describes neither. See
 
 The gauges arrive over the socket; the statistics do not. Left alone the table freezes while the
 gauges keep moving — and the running period is by definition still accumulating, so it drifts
-further the longer the page is open. So it re-queries **every 60 s**, and again **the moment the
-running period ends**, when every row shifts.
+further the longer the page is open. So a new `reading:latest` from **this node** re-queries
+them, **throttled to once a minute**: the first new reading opens a 60 s window and the query runs
+at its end. It also re-queries **the moment the running period ends**, when every row shifts.
+
+There is no timer. A node that has gone quiet adds nothing to its statistics, so they are not
+re-queried until it speaks again.
 
 Slow on purpose: a min or max a minute old is not misleading, and each refresh is three periods of
 aggregate queries against the readings table on an SD card. Refreshing on every `reading:latest`
 would be a round trip every 10 s per open browser.
+
+The node itself, which feeds the top bar's "online" or "offline", comes from `injectLiveNodes`
+and follows `node:state`, so a reboot shows offline and then online without a reload.
 
 **The boundary instant comes from the server** as `nextBoundary`. A client that worked it out
 itself would be a second definition of night, free to disagree with the one driving the relay.
@@ -283,7 +300,8 @@ message can always be missed. So the socket feed _patches_ what the API establis
 this.devices.update((all) => all.map((d) => (d.id === pushed.id ? pushed : d)));
 ```
 
-Device state is deliberately **not** cached or replayed by the server for the same reason. Readings
+Nodes follow the same rule: `GET /api/nodes` is authoritative and `node:state` patches it.
+Device and node state are deliberately **not** cached or replayed by the server for the same reason. Readings
 and system status are, because for those a stale-but-present value beats an empty screen.
 
 ## Patterns to follow

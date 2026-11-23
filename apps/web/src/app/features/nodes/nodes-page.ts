@@ -1,14 +1,10 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
+import { injectLiveNodes } from '../../core/live-nodes';
 import { refreshAfterSuccess } from '../../core/refresh-after-success';
 import {
   describeAgent,
@@ -107,11 +103,8 @@ const CONTRACT_STANDING_NOTES: Record<
 })
 export class NodesPage {
   private readonly api = inject(ApiService);
-  readonly nodes = signal<Node[]>([]);
-
-  constructor() {
-    this.refresh();
-  }
+  private readonly liveNodes = injectLiveNodes();
+  readonly nodes = this.liveNodes.nodes;
 
   protected readonly describeAgent = describeAgent;
 
@@ -126,14 +119,10 @@ export class NodesPage {
   }
 
   admit(node: Node): void {
-    refreshAfterSuccess(this.api.admitNode(node.id), () => this.refresh());
+    refreshAfterSuccess(this.api.admitNode(node.id), this.liveNodes.refresh);
   }
 
   disable(node: Node): void {
-    refreshAfterSuccess(this.api.disableNode(node.id), () => this.refresh());
-  }
-
-  private refresh(): void {
-    this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
+    refreshAfterSuccess(this.api.disableNode(node.id), this.liveNodes.refresh);
   }
 }

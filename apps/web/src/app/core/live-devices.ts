@@ -4,6 +4,7 @@ import { ApiService } from './api.service';
 import type { PushedDevice } from './device-pushes';
 import {
   injectLiveSource,
+  isNewerThanFetch,
   type FetchedPayload,
   type SourceState,
 } from './live-source';
@@ -22,8 +23,7 @@ export function applyNewerPushes(
   if (!fetched) return [];
   return fetched.payload.map((fetchedDevice) => {
     const pushed = pushes.get(fetchedDevice.id);
-    // A push received after the request was sent is at least as new as what it returned.
-    if (pushed !== undefined && pushed.receivedAt >= fetched.requestedAt) {
+    if (pushed !== undefined && isNewerThanFetch(pushed, fetched)) {
       return pushed.device;
     }
     return fetchedDevice;

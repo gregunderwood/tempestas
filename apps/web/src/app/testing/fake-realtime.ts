@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import type {
   Device,
+  Node,
   Reading,
   RulesCycle,
   SystemStatus,
@@ -10,6 +11,7 @@ import {
   type NumberedPush,
   type PushedDevice,
 } from '../core/device-pushes';
+import { recordNodePush, type PushedNode } from '../core/node-pushes';
 import type { RealtimeService } from '../core/realtime.service';
 
 export type FakeRealtime = Pick<
@@ -20,6 +22,7 @@ export type FakeRealtime = Pick<
   | 'reconnectCount'
   | 'devicePushes'
   | 'recentDevicePushes'
+  | 'nodePushes'
   | 'latestRulesCycle'
   | 'serverClockOffsetMilliseconds'
 >;
@@ -34,6 +37,7 @@ export function fakeRealtime(
     reconnectCount: signal(0),
     devicePushes: signal<ReadonlyMap<string, PushedDevice>>(new Map()),
     recentDevicePushes: signal<readonly NumberedPush[]>([]),
+    nodePushes: signal<ReadonlyMap<string, PushedNode>>(new Map()),
     latestRulesCycle: signal<RulesCycle | null>(null),
     serverClockOffsetMilliseconds: signal(0),
     ...overrides,
@@ -42,4 +46,10 @@ export function fakeRealtime(
 
 export function pushDevice(realtime: FakeRealtime, device: Device): void {
   storeDevicePush(realtime, device, Date.now());
+}
+
+export function pushNode(realtime: FakeRealtime, node: Node): void {
+  realtime.nodePushes.update((pushes) =>
+    recordNodePush(pushes, node, Date.now()),
+  );
 }

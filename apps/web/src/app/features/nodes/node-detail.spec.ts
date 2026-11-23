@@ -13,15 +13,20 @@ import type {
 import { NodeStatus } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
-import { fakeRealtime } from '../../testing/fake-realtime';
-import { NodeDetail } from './node-detail';
+import {
+  fakeRealtime,
+  pushNode,
+  type FakeRealtime,
+} from '../../testing/fake-realtime';
+import { NodeDetail, STATS_REFRESH_THROTTLE_MILLISECONDS } from './node-detail';
 import { PageHeading } from '../../core/page-heading';
 
-const STATS_REFRESH_MILLISECONDS = 60_000;
 const PAST_BOUNDARY_AND_SLACK_MILLISECONDS = 61_500;
-const REFRESH_INTERVAL_AND_BOUNDARY_TIMEOUT = 2;
+const THROTTLE_WINDOW_AND_BOUNDARY_TIMEOUT = 2;
+const TEN_SECONDS_MILLISECONDS = 10_000;
 
 let statsRequestCount = 0;
+let realtime: FakeRealtime;
 
 function reading(overrides: Partial<Reading> = {}): Reading {
   return {
@@ -140,6 +145,7 @@ function renderNodeDetail(
   } = {},
 ): HTMLElement {
   statsRequestCount = 0;
+  realtime = fakeRealtime({ readings: signal(options.live ?? {}) });
   // Some tests render twice, and TestBed refuses to be reconfigured once instantiated.
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
@@ -161,7 +167,7 @@ function renderNodeDetail(
       },
       {
         provide: RealtimeService,
-        useValue: fakeRealtime({ readings: signal(options.live ?? {}) }),
+        useValue: realtime,
       },
     ],
   });
@@ -185,6 +191,15 @@ describe('NodeDetail', () => {
       heading: 'Greenhouse Pi',
       subtitle: 'elantris · rpi · offline',
     });
+  });
+
+  it('shows the node going offline in the top bar without a reload', () => {
+    renderNodeDetail({ node: node({ displayName: 'Greenhouse Pi' }) });
+    pushNode(realtime, node({ displayName: 'Greenhouse Pi', online: false }));
+    TestBed.tick();
+    expect(TestBed.inject(PageHeading).text().subtitle).toBe(
+      'elantris · rpi · offline',
+    );
   });
 
   it('falls back to its slug in the top bar while the node is unknown', () => {
@@ -316,13 +331,41 @@ describe('NodeDetail', () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
 
-    it('re-queries on a slow timer', () => {
-      renderNodeDetail();
+    function pushReading(createdAt: string, nodeId = 'elantris'): void {
+      realtime.readings.update((readings) => ({
+        ...readings,
+        [`${nodeId}/scd4x-0`]: reading({ nodeId, createdAt }),
+      }));
+      TestBed.tick();
+    }
+
+    function waitOutThrottle(): void {
+      vi.advanceTimersByTime(STATS_REFRESH_THROTTLE_MILLISECONDS);
+    }
+
+    it('re-queries once for a burst of new readings, a minute after the first', () => {
+      renderNodeDetail({ latest: [] });
       expect(statsRequestCount).toBe(1);
-      vi.advanceTimersByTime(STATS_REFRESH_MILLISECONDS);
+      pushReading('2026-09-10T22:40:00.000Z');
+      vi.advanceTimersByTime(TEN_SECONDS_MILLISECONDS);
+      pushReading('2026-09-10T22:40:10.000Z');
+      expect(statsRequestCount).toBe(1);
+      waitOutThrottle();
       expect(statsRequestCount).toBe(2);
-      vi.advanceTimersByTime(STATS_REFRESH_MILLISECONDS);
-      expect(statsRequestCount).toBe(3);
+    });
+
+    it('does not re-query while the node sends nothing new', () => {
+      renderNodeDetail({ latest: [] });
+      waitOutThrottle();
+      waitOutThrottle();
+      expect(statsRequestCount).toBe(1);
+    });
+
+    it('ignores new readings from other nodes', () => {
+      renderNodeDetail({ latest: [] });
+      pushReading('2026-09-10T22:40:00.000Z', 'braize');
+      waitOutThrottle();
+      expect(statsRequestCount).toBe(1);
     });
 
     it('re-queries when the period boundary passes', () => {
@@ -338,7 +381,7 @@ describe('NodeDetail', () => {
       // Before the fixture's boundary; on the real clock it is past and no timeout is armed.
       vi.setSystemTime(new Date('2026-09-10T23:00:00.000Z'));
       renderNodeDetail();
-      expect(vi.getTimerCount()).toBe(REFRESH_INTERVAL_AND_BOUNDARY_TIMEOUT);
+      expect(vi.getTimerCount()).toBe(THROTTLE_WINDOW_AND_BOUNDARY_TIMEOUT);
       TestBed.resetTestingModule();
       expect(vi.getTimerCount()).toBe(0);
     });
