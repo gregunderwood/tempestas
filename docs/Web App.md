@@ -203,7 +203,8 @@ anything: there are no relay buttons here, and never `force-on`.
 A server that stops leading forgets its rules cycle without saying so on the socket, so the
 client drops its cycle as soon as a status says `isLeading: false`. The tiles, the warnings and
 "Rules ran" then show nothing rather than a follower's stale decisions, and the activity log treats
-the next cycle as its first.
+the next cycle as its first. The zones page says "This controller is a follower; rules run on the
+leader" above its cards instead, so an ageing cycle never reads as stalled rules there.
 
 Every figure that can be unknown renders an **em-dash**: a tile's reading, a stat's value, its
 trend and its range bar, and the count of nodes online before the first status arrives.

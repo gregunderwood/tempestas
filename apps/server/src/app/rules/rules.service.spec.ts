@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, Logger } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import {
   ApiErrorCode,
@@ -681,6 +681,61 @@ describe('publishing each rules cycle', () => {
       vi.mocked(nodes.counts).mockRejectedValueOnce(new Error('db gone'));
       await expect(service.tick()).resolves.toBeUndefined();
     }
+  });
+
+  it('says it is following as soon as it boots, without waiting for a tick', async () => {
+    const { service, publishSystemStatus } = makeService({ isLeader: false });
+    await service.onApplicationBootstrap();
+    expect(publishSystemStatus).toHaveBeenCalledTimes(1);
+    expect(publishSystemStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ isLeading: false, lastEvaluationAt: null }),
+    );
+  });
+
+  it('boots as a follower, with a warning, even when the node counts cannot be read', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    const { service, nodes, publishSystemStatus } = makeService({
+      isLeader: false,
+    });
+    vi.mocked(nodes.counts).mockRejectedValueOnce(new Error('db gone'));
+    await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+    expect(publishSystemStatus).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Could not announce following at boot'),
+    );
+    warn.mockRestore();
+  });
+
+  // Before its first evaluation a leader cannot know whether a sensor is stale, so it must not claim none is.
+  it('leaves a leader to announce itself with its first evaluation', async () => {
+    const { service, publishSystemStatus } = makeService();
+    await service.onApplicationBootstrap();
+    expect(publishSystemStatus).not.toHaveBeenCalled();
+  });
+
+  it('reports following on the first tick that runs as a follower', async () => {
+    const { service, hardware, publishSystemStatus } = makeService({
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    await service.tick();
+    hardware.isLeader = false;
+    await service.tick();
+    expect(publishSystemStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({ isLeading: false }),
+    );
+  });
+
+  it('reports leading on the first tick that runs as the leader', async () => {
+    const { service, hardware, publishSystemStatus } = makeService({
+      isLeader: false,
+      devicesByRole: { [DeviceRole.Co2Generator]: [device()] },
+    });
+    await service.tick();
+    hardware.isLeader = true;
+    await service.tick();
+    expect(publishSystemStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({ isLeading: true }),
+    );
   });
 
   it('publishes no cycle when a follower is asked to evaluate', async () => {
