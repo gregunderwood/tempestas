@@ -10,7 +10,7 @@ import {
   makeAgentReleasesRoot,
   sha256Of,
   writeBundle,
-} from './agent-release-test-bundles';
+} from './agent-release-bundles.fixtures';
 
 async function readBundles(root: string) {
   const rejections: string[] = [];
@@ -110,6 +110,19 @@ describe('readVerifiedBundles', () => {
       'manifest lists null, which is not a safe path with a sha256',
     ]);
   });
+
+  it.each([['null'], ['"a string"'], ['[]']])(
+    'leaves out a manifest that is %s rather than an object',
+    async (manifestText) => {
+      const root = makeAgentReleasesRoot();
+      const bundleDirectory = writeBundle(root, AgentApp.Linux, '1.1.4');
+      writeFileSync(join(bundleDirectory, MANIFEST_FILE), manifestText);
+
+      expect((await readBundles(root)).rejections).toEqual([
+        'manifest.json is not a JSON object',
+      ]);
+    },
+  );
 
   it('skips a bundle still being shipped, under its dot-name', async () => {
     const root = makeAgentReleasesRoot();

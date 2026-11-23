@@ -6,7 +6,7 @@ import {
 import {
   makeAgentReleasesRoot,
   writeBundle,
-} from './agent-release-test-bundles';
+} from './agent-release-bundles.fixtures';
 
 const ON_CONTRACT_1_1: NodeCapabilities = {
   contractVersion: 1,

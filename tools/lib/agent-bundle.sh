@@ -19,32 +19,58 @@ build_agent_bundle() {
   fi
   bundle_dir="$output_root/$app/$version"
   mkdir -p "$bundle_dir/$BUNDLE_FILES_DIRECTORY"
-  copy_agent_files "$repository" "$app" "$bundle_dir/$BUNDLE_FILES_DIRECTORY" "$version"
+  if ! copy_agent_files "$repository" "$app" "$bundle_dir/$BUNDLE_FILES_DIRECTORY" "$version"; then
+    rm -rf "$bundle_dir"
+    echo "$app $version is not bundled; the server deploy goes on without it." >&2
+    return
+  fi
   write_bundle_manifest "$bundle_dir" "$app" "$version"
   echo "Bundled $app $version"
 }
 
-# Tracked files only, so a stray __pycache__ or a credentials.py never ships.
+# Tracked files only, so a stray __pycache__ or a credentials.py never ships. Every step is checked: callers test it with `if`.
 copy_agent_files() {
   local repository="$1" app="$2" files_dir="$3" version="$4"
-  local source_dir stamp file_list
-  file_list="$(mktemp)"
+  local source_dir stamp file_list copy_status
+  local wanted_paths=()
   case "$app" in
     agent-linux)
       source_dir="$repository/apps/agent-linux"
       stamp="$LINUX_AGENT_VERSION_STAMP"
-      git -C "$source_dir" ls-files -- "${LINUX_AGENT_PATHS[@]}" >"$file_list"
+      wanted_paths=("${LINUX_AGENT_PATHS[@]}")
       ;;
     agent-micropython)
       source_dir="$repository/apps/agent-micropython/device"
       stamp="$MICROPYTHON_AGENT_VERSION_STAMP"
-      git -C "$source_dir" ls-files -- "${MICROPYTHON_AGENT_CODE[@]}" "$MICROPYTHON_BOARDS_DIRECTORY" >"$file_list"
+      wanted_paths=("${MICROPYTHON_AGENT_CODE[@]}" "$MICROPYTHON_BOARDS_DIRECTORY")
       ;;
   esac
-  rsync -a --files-from="$file_list" "$source_dir/" "$files_dir/"
-  rm "$file_list"
-  mkdir -p "$(dirname "$files_dir/$stamp")"
-  printf 'AGENT_VERSION = "%s"\n' "$version" >"$files_dir/$stamp"
+  file_list="$(mktemp)"
+  git -C "$source_dir" ls-files -- "${wanted_paths[@]}" >"$file_list" &&
+    require_every_path_tracked "$app" "$file_list" "${wanted_paths[@]}" &&
+    rsync -a --files-from="$file_list" "$source_dir/" "$files_dir/" &&
+    mkdir -p "$(dirname "$files_dir/$stamp")" &&
+    printf 'AGENT_VERSION = "%s"\n' "$version" >"$files_dir/$stamp"
+  copy_status=$?
+  rm -f "$file_list"
+  return "$copy_status"
+}
+
+# git ls-files skips a name it does not know, so a file renamed without updating agent-files.sh would vanish unnoticed.
+require_every_path_tracked() {
+  local app="$1" file_list="$2"
+  shift 2
+  local wanted_path
+  local missing_paths=()
+  for wanted_path in "$@"; do
+    if ! awk -v wanted="$wanted_path" '$0 == wanted || index($0, wanted "/") == 1 { found = 1 } END { exit !found }' "$file_list"; then
+      missing_paths+=("$wanted_path")
+    fi
+  done
+  if [ "${#missing_paths[@]}" -gt 0 ]; then
+    echo "tools/lib/agent-files.sh lists ${missing_paths[*]} for $app, but git tracks no such file." >&2
+    return 1
+  fi
 }
 
 write_bundle_manifest() {
@@ -81,7 +107,7 @@ ship_agent_bundles() {
   done
 }
 
-# The newest few versions of each agent; whatever else is in the directory stays.
+# The newest few versions of each agent, and no unfinished ship; whatever else is in the directory stays.
 prune_agent_bundles() {
   local host="$1"
   ssh "$host" bash -s -- "$REMOTE_ROOT/$AGENT_RELEASES_DIRECTORY" "$KEPT_AGENT_RELEASES" "$RELEASED_AGENT_VERSION" <<'REMOTE'
@@ -90,6 +116,8 @@ root="$1" kept_releases="$2" released_version="$3"
 [ -d "$root" ] || exit 0
 for app_dir in "$root"/*/; do
   [ -d "$app_dir" ] || continue
+  # Only a deploy ships, and this one already has, so a dot-name left now is an abandoned ship.
+  find "$app_dir" -mindepth 1 -maxdepth 1 -name '.*' -exec rm -rf -- {} +
   { ls -1 "$app_dir" | grep -E "$released_version" || true; } | sort -V | head -n "-$kept_releases" |
     while read -r version; do rm -rf -- "$app_dir$version"; done
 done

@@ -17,7 +17,7 @@ import { AgentReleasesService } from '../agent-releases/agent-releases.service';
 import {
   makeAgentReleasesRoot,
   writeBundle,
-} from '../agent-releases/agent-release-test-bundles';
+} from '../agent-releases/agent-release-bundles.fixtures';
 
 const NO_AGENT_RELEASES_DIRECTORY = '/nonexistent/agent-releases';
 

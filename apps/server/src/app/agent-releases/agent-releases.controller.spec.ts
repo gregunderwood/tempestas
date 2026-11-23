@@ -14,7 +14,7 @@ import {
   makeAgentReleasesRoot,
   sha256Of,
   writeBundle,
-} from './agent-release-test-bundles';
+} from './agent-release-bundles.fixtures';
 
 const AGENT_SOURCE = 'class Agent:\n    pass\n';
 

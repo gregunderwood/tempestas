@@ -79,11 +79,20 @@ async function readVerifiedBundle(
 }
 
 function parseManifest(text: string): AgentReleaseManifest {
+  let parsed: unknown;
   try {
-    return JSON.parse(text) as AgentReleaseManifest;
+    parsed = JSON.parse(text);
   } catch {
     throw new Error(`${MANIFEST_FILE} is not JSON`);
   }
+  if (!isJsonObject(parsed)) {
+    throw new Error(`${MANIFEST_FILE} is not a JSON object`);
+  }
+  return parsed as unknown as AgentReleaseManifest;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Null when the manifest is whole and agrees with the directory it sits in. */
