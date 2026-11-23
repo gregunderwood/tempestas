@@ -30,7 +30,7 @@ done
 for HOST in "${HOSTS[@]}"; do
   say "$HOST: copying"
   CHANGES="$(cd "$AGENT" && rsync -a --checksum --itemize-changes \
-    --exclude '__pycache__' --exclude '.venv' --exclude 'deployed_version.py' \
+    --exclude '__pycache__' --exclude '.venv' --exclude "$(basename "$LINUX_AGENT_VERSION_STAMP")" \
     "${LINUX_AGENT_PATHS[@]}" "$HOST:$REMOTE_AGENT/")"
   echo "$(echo "$CHANGES" | grep -c '^<f' || true) files updated"
   # The venv is an editable install, so new code needs no reinstall; new dependencies do.

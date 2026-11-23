@@ -5,7 +5,7 @@ import {
   BUNDLE_FILES_DIRECTORY,
   MANIFEST_FILE,
   readVerifiedBundles,
-  sha256Hex,
+  hashSha256,
 } from './agent-release-bundles';
 import {
   makeAgentReleasesRoot,
@@ -42,7 +42,7 @@ describe('readVerifiedBundles', () => {
         contractMajor: 1,
         contractMinor: 1,
         manifestPath: '/api/agent-releases/agent-linux/1.1.4/manifest.json',
-        manifestSha256: sha256Hex(
+        manifestSha256: hashSha256(
           readFileSync(join(bundleDirectory, MANIFEST_FILE), 'utf8'),
         ),
       },
@@ -148,6 +148,27 @@ describe('readVerifiedBundles', () => {
 
       expect(bundles).toEqual([]);
       expect(rejections).toEqual([expect.stringContaining('EACCES')]);
+    },
+  );
+
+  it.skipIf(IS_ROOT)(
+    'names a listed file it cannot read, rather than calling it missing',
+    async () => {
+      const root = makeAgentReleasesRoot();
+      const bundleDirectory = writeBundle(root, AgentApp.Linux, '1.1.4');
+      const listedFile = join(
+        bundleDirectory,
+        BUNDLE_FILES_DIRECTORY,
+        'main.py',
+      );
+      chmodSync(listedFile, UNREADABLE);
+
+      const { rejections } = await readBundles(root);
+      chmodSync(listedFile, READABLE);
+
+      expect(rejections).toEqual([
+        expect.stringContaining('main.py could not be read: EACCES'),
+      ]);
     },
   );
 

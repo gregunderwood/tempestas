@@ -11,6 +11,7 @@ import {
   type AgentReleaseManifest,
 } from '@tempestas/domain';
 import { API_PREFIX } from '../common/api-prefix';
+import { describeError } from '../common/describe-error';
 
 export const AGENT_RELEASES_ROUTE = 'agent-releases';
 export const MANIFEST_FILE = 'manifest.json';
@@ -23,7 +24,6 @@ export interface AgentReleaseBundle {
   release: AgentRelease;
   // Served from memory, so the bytes always match the sha256s they were verified against, whatever lands on disk later.
   manifestBytes: Buffer;
-  /** Only the paths the manifest lists; nothing else in the bundle is ever served. */
   filesByPath: Map<string, Buffer>;
 }
 
@@ -32,7 +32,6 @@ export type ReportRejectedBundle = (
   reason: string,
 ) => void;
 
-/** `<root>/<app>/<version>/{manifest.json,files/…}`; a bundle that does not verify is left out and reported. */
 export async function readVerifiedBundles(
   root: string,
   reportRejected: ReportRejectedBundle,
@@ -47,7 +46,7 @@ export async function readVerifiedBundles(
       try {
         bundles.push(await readVerifiedBundle(bundleDirectory, app, version));
       } catch (rejection) {
-        reportRejected(bundleDirectory, String((rejection as Error).message));
+        reportRejected(bundleDirectory, describeError(rejection));
       }
     }
   }
@@ -73,7 +72,7 @@ async function readVerifiedBundle(
       contractMajor: manifest.contractMajor,
       contractMinor: manifest.contractMinor,
       manifestPath: `/${API_PREFIX}/${AGENT_RELEASES_ROUTE}/${manifest.app}/${manifest.version}/${MANIFEST_FILE}`,
-      manifestSha256: sha256Hex(manifestBytes),
+      manifestSha256: hashSha256(manifestBytes),
     },
     manifestBytes,
     filesByPath,
@@ -162,7 +161,7 @@ async function verifyListedFiles(
   for (const file of files) {
     const onDisk = join(bundleDirectory, BUNDLE_FILES_DIRECTORY, file.path);
     const bytes = await readListedFile(onDisk, file.path);
-    if (sha256Hex(bytes) !== file.sha256) {
+    if (hashSha256(bytes) !== file.sha256) {
       throw new Error(
         `${file.path} does not have the sha256 the manifest gives`,
       );
@@ -175,8 +174,11 @@ async function verifyListedFiles(
 async function readListedFile(onDisk: string, path: string): Promise<Buffer> {
   try {
     return await readFile(onDisk);
-  } catch {
-    throw new Error(`${path} is listed but missing`);
+  } catch (failure) {
+    if ((failure as NodeJS.ErrnoException).code === MISSING_FILE_CODE) {
+      throw new Error(`${path} is listed but missing`);
+    }
+    throw new Error(`${path} could not be read: ${describeError(failure)}`);
   }
 }
 
@@ -199,6 +201,6 @@ async function listDirectories(
     .filter((name) => !name.startsWith(PARTIAL_BUNDLE_PREFIX));
 }
 
-export function sha256Hex(bytes: Buffer | string): string {
+export function hashSha256(bytes: Buffer | string): string {
   return createHash('sha256').update(bytes).digest('hex');
 }

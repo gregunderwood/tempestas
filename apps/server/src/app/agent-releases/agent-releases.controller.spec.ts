@@ -7,7 +7,7 @@ import { API_PREFIX } from '../common/api-prefix';
 import {
   BUNDLE_FILES_DIRECTORY,
   MANIFEST_FILE,
-  sha256Hex,
+  hashSha256,
 } from './agent-release-bundles';
 import { AgentReleasesController } from './agent-releases.controller';
 import {
@@ -65,7 +65,7 @@ describe('AgentReleasesController', () => {
     expect(served).toBe(
       readFileSync(join(bundleDirectory, MANIFEST_FILE), 'utf8'),
     );
-    expect(sha256Hex(served)).toBe(release.manifestSha256);
+    expect(hashSha256(served)).toBe(release.manifestSha256);
   });
 
   it('keeps serving the manifest it verified, though another lands on disk under the same version', async () => {
@@ -79,7 +79,7 @@ describe('AgentReleasesController', () => {
     ).text();
     writeFileSync(manifestOnDisk, verifiedManifest);
 
-    expect(sha256Hex(served)).toBe(release.manifestSha256);
+    expect(hashSha256(served)).toBe(release.manifestSha256);
   });
 
   it('serves a file the manifest lists, at its nested path', async () => {

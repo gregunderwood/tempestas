@@ -5,7 +5,7 @@ import type { AgentReleaseManifest } from '@tempestas/domain';
 import {
   BUNDLE_FILES_DIRECTORY,
   MANIFEST_FILE,
-  sha256Hex,
+  hashSha256,
 } from './agent-release-bundles';
 
 export function makeAgentReleasesRoot(): string {
@@ -34,7 +34,7 @@ export function writeBundle(
     contractMinor,
     files: Object.entries(files).map(([path, contents]) => ({
       path,
-      sha256: sha256Hex(contents),
+      sha256: hashSha256(contents),
     })),
     ...manifestChanges,
   };

@@ -1,5 +1,4 @@
-# Sourced by tools/deploy.sh: a release bundle per agent for the server to offer; see docs/Infrastructure/Deploys.md.
-# Needs each agent's agent-files.sh, and REMOTE_ROOT from tools/lib/release.sh.
+# Sourced by tools/deploy.sh after each agent's agent-files.sh and tools/lib/release.sh; see docs/Infrastructure/Deploys.md.
 
 AGENT_APPS=(agent-linux agent-micropython)
 AGENT_RELEASES_DIRECTORY=agent-releases
@@ -42,7 +41,7 @@ build_agent_bundle() {
   if ! mkdir -p "$bundle_dir/$BUNDLE_FILES_DIRECTORY" ||
     ! copy_agent_files "$repository" "$app" "$bundle_dir/$BUNDLE_FILES_DIRECTORY" "$version" ||
     ! write_bundle_manifest "$bundle_dir" "$app" "$version"; then
-    rm -rf "$bundle_dir"
+    rm -rf "$bundle_dir" || true
     echo "$app $version is not bundled; the server deploy goes on without it." >&2
     return
   fi
@@ -67,9 +66,10 @@ copy_agent_files() {
       ;;
   esac
   file_list="$(mktemp)"
-  git -C "$source_dir" ls-files -- "${wanted_paths[@]}" >"$file_list" &&
+  # NUL-separated, as git quotes a name holding anything unusual in its line output.
+  git -C "$source_dir" ls-files -z -- "${wanted_paths[@]}" >"$file_list" &&
     require_every_path_tracked "$app" "$file_list" "${wanted_paths[@]}" &&
-    rsync -a --files-from="$file_list" "$source_dir/" "$files_dir/" &&
+    rsync -a --from0 --files-from="$file_list" "$source_dir/" "$files_dir/" &&
     mkdir -p "$(dirname "$files_dir/$stamp")" &&
     printf 'AGENT_VERSION = "%s"\n' "$version" >"$files_dir/$stamp"
   copy_status=$?
@@ -81,12 +81,14 @@ copy_agent_files() {
 require_every_path_tracked() {
   local app="$1" file_list="$2"
   shift 2
-  local wanted_path
-  local missing_paths=()
+  local wanted_path tracked_path
+  local tracked_paths=() missing_paths=()
+  mapfile -d '' tracked_paths <"$file_list"
   for wanted_path in "$@"; do
-    if ! awk -v wanted="$wanted_path" '$0 == wanted || index($0, wanted "/") == 1 { found = 1 } END { exit !found }' "$file_list"; then
-      missing_paths+=("$wanted_path")
-    fi
+    for tracked_path in "${tracked_paths[@]}"; do
+      [[ "$tracked_path" == "$wanted_path" || "$tracked_path" == "$wanted_path"/* ]] && continue 2
+    done
+    missing_paths+=("$wanted_path")
   done
   if [ "${#missing_paths[@]}" -gt 0 ]; then
     echo "apps/$app/agent-files.sh lists ${missing_paths[*]}, but git tracks no such file." >&2

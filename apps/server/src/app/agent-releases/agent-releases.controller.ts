@@ -52,7 +52,7 @@ export class AgentReleasesController {
     const path = pathSegments.join('/');
     const bytes = this.requireBundle(app, version).filesByPath.get(path);
     if (!bytes) {
-      throw bundleNotFound(`${app} ${version} has no file ${path}`);
+      throw buildBundleNotFound(`${app} ${version} has no file ${path}`);
     }
     return new StreamableFile(bytes);
   }
@@ -60,12 +60,12 @@ export class AgentReleasesController {
   private requireBundle(app: string, version: string): AgentReleaseBundle {
     const bundle = this.agentReleases.findBundle(app, version);
     if (!bundle) {
-      throw bundleNotFound(`No release bundle for ${app} ${version}`);
+      throw buildBundleNotFound(`No release bundle for ${app} ${version}`);
     }
     return bundle;
   }
 }
 
-function bundleNotFound(message: string): NotFoundException {
+function buildBundleNotFound(message: string): NotFoundException {
   return new NotFoundException({ code: ApiErrorCode.NotFound, message });
 }
