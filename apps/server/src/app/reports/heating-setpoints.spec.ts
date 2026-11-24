@@ -89,12 +89,16 @@ describe('resolveFreezeWarning', () => {
 });
 
 describe('findOnBelowFor', () => {
-  it("uses the role's setpoint, or the default without one", () => {
+  it("uses the role's setpoint, or the default without one, and says which", () => {
     const byRole = { [DeviceRole.Heater]: 4 };
-    expect(findOnBelowFor(DeviceRole.Heater, byRole)).toBe(4);
-    expect(findOnBelowFor(DeviceRole.HeatTape, byRole)).toBe(
-      DEFAULT_FREEZE_WARNING_C,
-    );
+    expect(findOnBelowFor(DeviceRole.Heater, byRole)).toEqual({
+      onBelowC: 4,
+      isFromRule: true,
+    });
+    expect(findOnBelowFor(DeviceRole.HeatTape, byRole)).toEqual({
+      onBelowC: DEFAULT_FREEZE_WARNING_C,
+      isFromRule: false,
+    });
   });
 });
 

@@ -24,6 +24,11 @@ export interface FreezeWarning {
   isFromRules: boolean;
 }
 
+export interface RoleOnBelow {
+  onBelowC: number;
+  isFromRule: boolean;
+}
+
 export function findHeatOnBelowByRole(rulesConfig: unknown): HeatOnBelowByRole {
   const parsed = parseZoneRulesConfig(rulesConfig);
   if (parsed.ok === false) return {};
@@ -58,8 +63,12 @@ export function findSensorSourceFor(
 export function findOnBelowFor(
   role: DeviceRole,
   heatOnBelowByRole: HeatOnBelowByRole,
-): number {
-  return heatOnBelowByRole[role] ?? DEFAULT_FREEZE_WARNING_C;
+): RoleOnBelow {
+  const ruleOnBelowC = heatOnBelowByRole[role];
+  if (ruleOnBelowC === undefined) {
+    return { onBelowC: DEFAULT_FREEZE_WARNING_C, isFromRule: false };
+  }
+  return { onBelowC: ruleOnBelowC, isFromRule: true };
 }
 
 // The highest setpoint, because below it at least one heat source should already be running.

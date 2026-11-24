@@ -138,7 +138,10 @@ function describeHeatingAt(
   const coldestMs = new Date(coldest.createdAt).getTime();
   const probes = findProbesAround(coldest, input);
   return input.devices.map((device) => {
-    const onBelowC = findOnBelowFor(device.role, input.heatOnBelowByRole);
+    const { onBelowC, isFromRule } = findOnBelowFor(
+      device.role,
+      input.heatOnBelowByRole,
+    );
     const ruleTemperatureC = readRuleSourceTemperature(
       probes,
       findSensorSourceFor(device.role, input.sensorSourceByRole),
@@ -152,7 +155,7 @@ function describeHeatingAt(
         coldestMs,
       ),
       onBelowC,
-      isOnBelowFromRule: input.heatOnBelowByRole[device.role] !== undefined,
+      isOnBelowFromRule: isFromRule,
       isHeatOwed: ruleTemperatureC !== null && ruleTemperatureC < onBelowC,
     };
   });
