@@ -112,11 +112,12 @@ swap_in_built_venv() {
   ssh "$host" bash -s -- "$REMOTE_AGENT_HOME" "$REQUIREMENTS_FILE" <<'REMOTE'
 set -euo pipefail
 home="$1" requirements_file="$2"
-# First, so a .venv-replaced afterwards always means this deploy swapped.
-rm -rf "$home/.venv-replaced"
+# Kept unless replaced: after a failed restart it is the last venv known to work.
 [ -e "$home/.venv-building/$requirements_file" ] || exit 0
+rm -rf "$home/.venv-replaced"
 [ ! -e "$home/venv" ] || mv "$home/venv" "$home/.venv-replaced"
 mv "$home/.venv-building" "$home/venv"
+echo swapped
 REMOTE
 }
 
@@ -135,8 +136,10 @@ make_current_or_swap_back() {
     echo "$host: $AGENT_VERSION is current but its deploy failed after the switch; the new venv stays" >&2
     exit 1
   fi
-  echo "$host: could not make $AGENT_VERSION current, so its venv was put back" >&2
-  swap_back_venv "$host"
+  if [ "$HAS_SWAPPED_VENV" = swapped ]; then
+    echo "$host: could not make $AGENT_VERSION current, so its venv was put back" >&2
+    swap_back_venv "$host"
+  fi
   exit 1
 }
 
@@ -190,7 +193,7 @@ for HOST in "${HOSTS[@]}"; do
   copy_release "$HOST"
 
   if ! is_unit_on_release_layout "$HOST"; then
-    swap_in_built_venv "$HOST"
+    HAS_SWAPPED_VENV="$(swap_in_built_venv "$HOST")"
     make_current_or_swap_back "$HOST"
     remove_replaced_venv "$HOST"
     print_unit_install "$HOST" "its unit still runs the agent from before the release layout, so it was not restarted."
@@ -198,11 +201,15 @@ for HOST in "${HOSTS[@]}"; do
   fi
   say "$HOST: restarting (relays fail safe until the server drives them again)"
   # Back to back, then restarted: any start between them would pair code with the wrong venv.
-  swap_in_built_venv "$HOST"
+  HAS_SWAPPED_VENV="$(swap_in_built_venv "$HOST")"
   make_current_or_swap_back "$HOST"
   ssh "$HOST" "sudo -n systemctl restart tempestas-agent.service"
   sleep "$SETTLE_SECONDS"
-  ssh "$HOST" "systemctl is-active tempestas-agent && journalctl -u tempestas-agent -n 5 --no-pager"
+  if ! ssh "$HOST" "systemctl is-active tempestas-agent && journalctl -u tempestas-agent -n 5 --no-pager"; then
+    echo "$HOST: the agent is not running on $AGENT_VERSION; any venv it replaced is kept at" \
+      "$REMOTE_AGENT_HOME/.venv-replaced (journalctl -u tempestas-agent says why)" >&2
+    exit 1
+  fi
   # Only once the agent runs on the new venv, so a broken build leaves the old one to swap back.
   remove_replaced_venv "$HOST"
   are_unit_files_current "$HOST" ||

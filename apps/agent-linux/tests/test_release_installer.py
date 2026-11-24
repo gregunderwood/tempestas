@@ -269,6 +269,20 @@ def test_refuses_to_switch_when_the_running_version_was_redeployed_during_the_do
     assert layout.read_pending() is None
 
 
+def test_a_failure_before_the_switch_lock_leaves_no_download_behind(tmp_path, monkeypatch):
+    layout = make_layout(tmp_path)
+
+    def fail_to_take_the_lock(**_options):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(layout, "hold_switch_lock", fail_to_take_the_lock)
+
+    with pytest.raises(OSError, match="no space"):
+        install(layout, FakeServer())
+
+    assert_unchanged(layout)
+
+
 def test_a_pending_record_that_cannot_be_written_leaves_nothing_behind(tmp_path, monkeypatch):
     layout = make_layout(tmp_path)
 

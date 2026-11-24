@@ -76,11 +76,11 @@ class ReleaseInstaller:
             report(contract.UpdateState.VERIFYING)
             verify_files(manifest["files"], staging)
             self._require_same_dependencies(manifest["files"], running_release)
+            report(contract.UpdateState.INSTALLING)
+            return self._switch_to(staging, command, running_release, running_link_identity)
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
-        report(contract.UpdateState.INSTALLING)
-        return self._switch_to(staging, command, running_release, running_link_identity)
 
     def _require_running_release(self, version: str) -> str:
         running_release = self.layout.read_current_release()
@@ -128,7 +128,6 @@ class ReleaseInstaller:
     ) -> PendingUpdate:
         with self.layout.hold_switch_lock():
             if self.layout.read_current_link_identity() != running_link_identity:
-                shutil.rmtree(staging, ignore_errors=True)
                 raise UpdateFailed(HAND_DEPLOYED_DURING_DOWNLOAD)
             return self._switch_while_locked(staging, command, running_release)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -57,12 +57,13 @@ def judge_update_command(
     if ownership_refusal is not None:
         return ownership_refusal
 
+    command_id = body.get("id")
+    has_id = isinstance(command_id, str) and command_id != ""
     expiry_refusal = judge_expiry(body.get("expiresAt"), now)
     if expiry_refusal is not None:
-        return expiry_refusal
-
-    command_id = body.get("id")
-    if not isinstance(command_id, str) or command_id == "":
+        # With its id, so an expired repeat of a known update is ignored, not alarmed on.
+        return replace(expiry_refusal, command_id=command_id if has_id else None)
+    if not has_id:
         return build_log_only_verdict("update has no id")
 
     target_problem = describe_target_problem(body, running_app)

@@ -21,6 +21,7 @@ from tempestas_agent.agent import (
     LAST_OUTCOME_UNDELIVERED,
     LAST_UPDATE_UNSETTLED,
     NOT_INSTALLED_FROM_A_RELEASE,
+    PENDING_RECORD_LOST,
     STOPPING,
 )
 from tempestas_agent.release_installer import ReleaseInstaller, UpdateFailed
@@ -250,7 +251,9 @@ def test_a_healthy_update_is_kept_until_the_broker_has_it(tmp_path):
     assert agent.layout.read_outcome().state == contract.UpdateState.HEALTHY
 
 
-def test_a_gate_replaced_by_a_hand_deploy_neither_passes_nor_rolls_back(tmp_path):
+def test_a_gate_whose_pending_record_was_lost_neither_passes_nor_rolls_back_but_says_so(
+    tmp_path,
+):
     agent, clock = start_new_release_on_its_gate(tmp_path)
     agent.layout.clear_pending()
     agent.say_hello()
@@ -260,8 +263,19 @@ def test_a_gate_replaced_by_a_hand_deploy_neither_passes_nor_rolls_back(tmp_path
 
     assert agent.layout.read_current_release() == NEW_RELEASE
     assert not agent.restart_requested.is_set()
-    assert update_statuses(agent) == []
+    assert update_statuses(agent) == [
+        (contract.UpdateState.FAILED, PENDING_RECORD_LOST.format(version=NEW_RELEASE))
+    ]
     assert agent.update_gate is None
+
+
+def test_a_repeat_of_an_update_in_progress_is_ignored_even_once_expired(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent._installing_command_id = "update-1"
+
+    agent.on_update(build_fresh_update(expiresAt="2020-01-01T00:00:00Z"), is_retained=False)
+
+    assert agent.client.payloads() == []
 
 
 def test_an_update_to_the_version_already_running_is_refused_without_a_restart(

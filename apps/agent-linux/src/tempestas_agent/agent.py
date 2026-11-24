@@ -26,6 +26,7 @@ from .update_command import ANSWER_ALARM, ANSWER_FAILED_STATUS, UpdateVerdict, j
 from .update_gate import (
     HealthGate,
     is_already_settled,
+    is_running_another_release,
     is_still_current,
     is_still_pending,
     pass_gate,
@@ -50,6 +51,9 @@ LAST_OUTCOME_UNDELIVERED = "the last update's result has not reached the server 
 LAST_UPDATE_UNSETTLED = "the last update is not settled yet, as its state cannot be read"
 STOPPING = "the agent is stopping or restarting"
 ANOTHER_UPDATE_IN_PROGRESS = "another update is in progress"
+PENDING_RECORD_LOST = (
+    "its pending record was lost before its health gate finished, so {version} stays"
+)
 # Every holder of the switch lock lets go within this, well inside systemd's stop timeout.
 STOP_SWITCH_WAIT_S = 10.0
 # This module sits at <release>/src/tempestas_agent/agent.py.
@@ -401,12 +405,12 @@ class Agent:
             running_app=AGENT_NAME,
             now=datetime.now(UTC),
         )
+        if self._is_known_update(verdict.command_id):
+            # A redelivery, even an expired one: answering it would contradict what it reported.
+            log.info("ignored a repeat of update %s", verdict.command_id)
+            return
         if not verdict.is_accepted:
             self._report_update_refusal(verdict)
-            return
-        if self._is_known_update(verdict.command_id):
-            # A redelivery: answering it would contradict what that update already reported.
-            log.info("ignored a repeat of update %s", verdict.command_id)
             return
         # One lock with stop_updates, so an update is never claimed after the agent began stopping.
         with self._update_claim_lock:
@@ -468,6 +472,14 @@ class Agent:
             return
         # Its thread now waits on the lock this process holds until it exits.
         self._report_failed_install(command_id, STOPPING)
+
+    def has_current_moved_off_this_release(self) -> bool:
+        if self.layout is None:
+            return False
+        try:
+            return is_running_another_release(self.layout, self.loaded_release)
+        except OSError:
+            return False
 
     def request_restart(self) -> None:
         self.restart_requested.set()
@@ -569,6 +581,12 @@ class Agent:
                     if is_already_settled(recorded, gate.pending):
                         self.outcome_to_report = recorded
                         self.report_settled_update()
+                    else:
+                        self._report_install(
+                            gate.pending.command_id,
+                            contract.UpdateState.FAILED,
+                            PENDING_RECORD_LOST.format(version=gate.pending.version),
+                        )
                 elif not is_still_current(self.layout, gate):
                     # The rollback unit switched back while systemd restarted this release.
                     log.warning("update to %s was rolled back under it", gate.pending.version)
@@ -598,7 +616,7 @@ class Agent:
         try:
             prune_after_update(self.layout, gate.pending)
         except BlockingIOError:
-            log.info("left old releases for the next prune: the switch lock is busy")
+            log.info("did not prune old releases: the switch lock is busy")
         except OSError as error:
             log.error("could not prune old releases: %s", error)
 
@@ -647,7 +665,9 @@ class Agent:
         self._installing_command_id = command_id
         return None
 
-    def _is_known_update(self, command_id: str) -> bool:
+    def _is_known_update(self, command_id: str | None) -> bool:
+        if command_id is None:
+            return False
         gate, outcome = self.update_gate, self.outcome_to_report
         known_ids = {
             self._installing_command_id,

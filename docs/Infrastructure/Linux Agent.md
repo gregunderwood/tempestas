@@ -120,7 +120,9 @@ It runs the agent's lint and tests, then on each host:
    the server hears `failed`: "replaced by a hand deploy of <version>".
 4. Restarts the agent, unless the host's unit still runs the agent from before the release layout.
    Then it prints the one-time install from [Updates](#updates) instead. The replaced venv is
-   removed only once the agent is active again, so a broken build can be swapped back by hand.
+   removed only once the agent is active again. If it is not, the deploy stops and says where the
+   replaced venv is kept, `~/tempestas/agent-linux/.venv-replaced`; a later deploy that builds no
+   venv leaves it there, so a broken build can still be swapped back by hand.
 
 A restart drives the relays to their fail-safe levels until the server commands them again.
 

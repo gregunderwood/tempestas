@@ -77,6 +77,8 @@ def main() -> int:
         run_until_signalled(agent, config)
     except Exception:
         # After an update switched `current`, any other exit reads as the new release failing.
+        if agent.has_current_moved_off_this_release():
+            agent.request_restart()
         if not agent.restart_requested.is_set():
             raise
         log.exception("the agent failed after an update was installed; restarting into it")
