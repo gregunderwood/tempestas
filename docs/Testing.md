@@ -76,34 +76,43 @@ npx nx e2e web-e2e     # starts nx serve web itself, runs headless, 15 to 40 s
 
 ### Screenshots on a PR
 
-A diff does not show what a page looks like on a phone. Any PR that changes what a page shows
-posts desktop and phone screenshots before review, and the reviewer looks at them:
+A diff does not show what a page looks like on a phone, or what it looked like before. Any PR that
+changes what a page shows posts before-and-after screenshots at desktop and phone width before
+review, and the reviewer compares them:
 
 ```bash
-tools/pr-screenshots.sh 126 dashboard nodes nodes/sim-pi    # <pr> then page paths
+tools/pr-screenshots.sh 138 dashboard nodes nodes/sim-pi       # <pr> then page paths
+tools/pr-screenshots.sh --after-only 138 reports/new-report    # a page that did not exist before
 ```
 
 Run it from a checkout of the PR's branch, committed and pushed: it refuses if `HEAD` is not the
 PR's head commit or if tracked files have changes. It then:
 
-- **starts its own stack**: a fresh database `tempestas_pr_<pr>` in `tempestas-db`, migrated with
-  the branch's own migrations, the zones copied from the dev database `tempestas`, the server with
-  `HARDWARE_DRIVER=fake` and both simulated nodes admitted, and `nx serve web` proxied to it.
+- **checks out the base** for "before": the merge-base of the PR with its base branch, in a
+  temporary worktree, so before and after differ only by this PR. `--after-only` skips it.
+- **starts a stack for each side in turn**: a fresh database `tempestas_pr_<pr>_before` or
+  `_after` in `tempestas-db`, migrated with that side's own migrations, the zones copied from the
+  dev database `tempestas`, the server with `HARDWARE_DRIVER=fake` and both simulated nodes
+  admitted, and `nx serve web` proxied to it.
 - **uses ports 7020 and 4220**, and refuses to start if anything listens on either. Other ports:
   `PR_SCREENSHOTS_SERVER_PORT` and `PR_SCREENSHOTS_WEB_PORT`.
 - **takes each page at 1280 px and 390 px** with headless Chrome.
 - **adds a commit to the `pr-screenshots` branch** with the images in `<pr>/`, through a temporary
-  worktree, so no checkout changes branch.
-- **posts one "Screenshots" comment**, or updates it on a rerun, with each image pinned to that
-  commit.
-- **tears everything down**, even on failure: both processes stopped, the database dropped.
+  worktree, so no checkout changes branch. If another run pushed first, it replays its commit on
+  top and tries again.
+- **posts one "Screenshots" comment**, a Before and After table per page, or updates it on a rerun,
+  with each image pinned to that commit.
+- **tears everything down**, even on failure: the processes stopped, both databases dropped, both
+  temporary worktrees removed.
 
 **Never delete or force-push `pr-screenshots`.** Each comment links its images by commit, and a
 commit that is no longer reachable breaks the images on every old PR. Prune old folders with a
 new commit instead.
 
-A screenshot cannot show interaction. For a state reached by clicking (an open menu, a drag), take the
-screenshots by hand or with Cypress and add them to the same branch the same way.
+A screenshot cannot show interaction, and the fake driver always leads. For a state reached by
+clicking (an open menu, a drag) or one the fake driver cannot produce (a follower), take the
+screenshots with Cypress against the e2e test's stubbed API and fake socket, on the base and on the
+branch, and add them to the same branch the same way.
 
 ### The rule that makes the important tests possible
 
