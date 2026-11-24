@@ -92,8 +92,9 @@ PR's head commit or if tracked files have changes. It then:
   temporary worktree, so before and after differ only by this PR. `--after-only` skips it.
 - **starts a stack for each side in turn**: a fresh database `tempestas_pr_<pr>_before` or
   `_after` in `tempestas-db`, migrated with that side's own migrations, the zones copied from the
-  dev database `tempestas`, the server with `HARDWARE_DRIVER=fake` and both simulated nodes
-  admitted, and `nx serve web` proxied to it.
+  dev database `tempestas`, the server with `HARDWARE_DRIVER=fake`, both simulated nodes admitted
+  and a device created on each relay pin with its zone's roles, so the rules switch them and the
+  pages show equipment, and `nx serve web` proxied to it.
 - **uses ports 7020 and 4220**, and refuses to start if anything listens on either. Other ports:
   `PR_SCREENSHOTS_SERVER_PORT` and `PR_SCREENSHOTS_WEB_PORT`.
 - **takes each page at 1280 px and 390 px** with headless Chrome.

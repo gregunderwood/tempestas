@@ -137,6 +137,7 @@ shoot_checkout() {
   copy_zones_from_dev_database
   start_server "$label"
   admit_simulated_nodes
+  create_devices_on_simulated_pins
   wait_for_readings_and_rules_cycle
   start_web "$label"
   take_screenshots "$label"
@@ -208,6 +209,41 @@ admit_simulated_nodes() {
       -H 'Content-Type: application/json' -d "{\"zoneId\":\"$zone_id\"}" >/dev/null ||
       fail "could not admit node ${node_ids[$index]}"
   done
+}
+
+# Devices point at node ids, which differ per database, so they are created through the API, not copied.
+# Each zone's enabled roles go to its node's pins in order, so the rules switch them and reports have runs.
+create_devices_on_simulated_pins() {
+  say "Creating a device on each simulated relay pin"
+  SERVER_PORT="$SERVER_PORT" node -e '
+    const api = `http://127.0.0.1:${process.env.SERVER_PORT}/api`;
+    const fetchJson = async (path) => (await fetch(`${api}/${path}`)).json();
+    (async () => {
+      const zones = await fetchJson("zones");
+      const rolesByZone = new Map(zones.map((zone) => [zone.id, zone.rulesConfig?.enabledRoles ?? []]));
+      for (const node of await fetchJson("nodes")) {
+        const pins = node.capabilities?.gpio?.pins ?? [];
+        const roles = rolesByZone.get(node.zoneId) ?? [];
+        for (const [index, pin] of pins.entries()) {
+          const response = await fetch(`${api}/devices`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              nodeId: node.slug,
+              zoneId: node.zoneId,
+              name: roles[index] ? roles[index].replaceAll("_", " ") : `${node.slug} pin ${pin}`,
+              gpio: pin,
+              onLevel: 1,
+              onDelayDuration: 0,
+              rulesEnabled: true,
+              role: roles[index] ?? null,
+            }),
+          });
+          if (!response.ok) throw new Error(`device on ${node.slug} pin ${pin}: ${response.status} ${await response.text()}`);
+        }
+      }
+    })().catch((error) => { console.error(error.message); process.exit(1); });
+  ' || fail "could not create the devices"
 }
 
 have_all_simulated_nodes_said_hello() {
