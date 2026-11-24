@@ -14,6 +14,7 @@ import paho.mqtt.client as mqtt
 from . import contract
 from .agent import Agent, build_backends
 from .config import AgentConfig, ConfigError, load
+from .release_layout import ReleaseLayout
 from .runtime import AlreadyRunning, SingleInstance, sd_notify
 
 log = logging.getLogger("tempestas.agent")
@@ -21,6 +22,8 @@ log = logging.getLogger("tempestas.agent")
 EXIT_OK = 0
 EXIT_BAD_CONFIG = 2
 EXIT_ALREADY_RUNNING = 3
+# The unit's RestartForceExitStatus: systemd starts whatever `current` now points at.
+EXIT_RESTART_FOR_UPDATE = 75
 CONNECT_ACCEPTED = 0
 LOCK_PATH_TEMPLATE = "/run/tempestas/agent-{node_id}.lock"
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s %(message)s"
@@ -47,7 +50,10 @@ def main() -> int:
         return EXIT_ALREADY_RUNNING
 
     sensor, gpio = build_backends(config, simulated=arguments.simulated)
-    agent = Agent(config, client=None, sensor=sensor, gpio=gpio)
+    agent = Agent(
+        config, client=None, sensor=sensor, gpio=gpio, layout=ReleaseLayout.from_environment()
+    )
+    agent.settle_update()
     client = build_client(agent)
     agent.client = client
     wire(agent, client)
@@ -58,7 +64,7 @@ def main() -> int:
         run_until_signalled(agent, config)
     finally:
         shut_down(agent, lock)
-    return EXIT_OK
+    return EXIT_RESTART_FOR_UPDATE if agent.restart_requested.is_set() else EXIT_OK
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -108,6 +114,7 @@ def build_subscriptions(node_id: str) -> list[tuple[str, int]]:
         (contract.build_gpio_set_topic(node_id), contract.QOS["gpioSet"][0]),
         (contract.build_gpio_sync_topic(node_id), contract.QOS["gpioSync"][0]),
         (contract.build_heartbeat_topic(node_id), contract.QOS["heartbeat"][0]),
+        (contract.build_update_topic(node_id), contract.QOS["update"][0]),
         (contract.SERVER_STATUS_TOPIC, contract.QOS["serverStatus"][0]),
     ]
 
@@ -118,6 +125,7 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
         contract.build_heartbeat_topic(config.node_id): handle_heartbeat,
         contract.SERVER_STATUS_TOPIC: handle_server_status,
         contract.build_gpio_set_topic(config.node_id): handle_gpio_set,
+        contract.build_update_topic(config.node_id): handle_update,
     }
 
     def on_connect(_client, _userdata, _flags, reason_code, _properties=None):
@@ -143,6 +151,7 @@ def announce(agent: Agent) -> None:
     agent.say_hello()
     # Retained, so a restarting controller would otherwise read the level from before our restart.
     agent.publish_gpio_state(agent.config.gpio.lines)
+    agent.report_settled_update()
 
 
 def handle_heartbeat(agent: Agent, message) -> None:
@@ -155,6 +164,10 @@ def handle_gpio_set(agent: Agent, message) -> None:
         return
     agent.publish("gpioResult", contract.build_gpio_result_topic(agent.config.node_id), result)
     agent.publish_gpio_state(line["pin"] for line in result["lines"])
+
+
+def handle_update(agent: Agent, message) -> None:
+    agent.on_update(message.payload, retained=bool(message.retain))
 
 
 def handle_server_status(agent: Agent, message) -> None:
@@ -186,10 +199,11 @@ def run_until_signalled(agent: Agent, config: AgentConfig) -> None:
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
 
-    while not should_stop:
+    while not should_stop and not agent.restart_requested.is_set():
         publish_samples(agent)
         agent.check_deadman()
-        time.sleep(config.sensor.sample_interval_s)
+        agent.check_update_gate()
+        agent.restart_requested.wait(config.sensor.sample_interval_s)
 
 
 def publish_samples(agent: Agent) -> None:

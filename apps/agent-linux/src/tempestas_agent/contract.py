@@ -20,8 +20,8 @@ SCHEMAS = {
 }
 
 SUPPORTED_MAJOR = 1
-# Behind the TypeScript minor until this agent handles `update`; the minor says what it accepts.
-MQTT_CONTRACT_MINOR = 0
+# What this agent accepts, which may sit behind the TypeScript minor but never ahead of it.
+MQTT_CONTRACT_MINOR = 1
 
 
 def build_node_root(node_id: str) -> str:

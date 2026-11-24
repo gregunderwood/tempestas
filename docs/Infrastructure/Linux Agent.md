@@ -21,7 +21,11 @@ commit rather than becoming a two-repo dance that will eventually be done wrong 
 - [../../apps/agent-linux/src/tempestas_agent/sensor.py](../../apps/agent-linux/src/tempestas_agent/sensor.py) — raw SCD4x over I²C, and the closed-loop simulator
 - [../../apps/agent-linux/src/tempestas_agent/ds18b20.py](../../apps/agent-linux/src/tempestas_agent/ds18b20.py) — DS18B20 probes over the kernel's 1-Wire sysfs
 - [../../apps/agent-linux/src/tempestas_agent/gpio.py](../../apps/agent-linux/src/tempestas_agent/gpio.py) — the relay backends: `NoGpio`, `SimulatedGpio`, `LgpioBackend`
-- [../../tools/deploy-agent-linux.sh](../../tools/deploy-agent-linux.sh) — test, copy, stamp the version, restart
+- [../../apps/agent-linux/src/tempestas_agent/update_command.py](../../apps/agent-linux/src/tempestas_agent/update_command.py) — judges an `update`, as the reference judge does
+- [../../apps/agent-linux/src/tempestas_agent/release_installer.py](../../apps/agent-linux/src/tempestas_agent/release_installer.py) — download, verify, switch `current`
+- [../../apps/agent-linux/src/tempestas_agent/update_gate.py](../../apps/agent-linux/src/tempestas_agent/update_gate.py) — the health gate a new release must pass, and the rollback when it does not
+- [../../apps/agent-linux/systemd/tempestas-agent-rollback.py](../../apps/agent-linux/systemd/tempestas-agent-rollback.py) — switches back when a new release cannot start at all
+- [../../tools/deploy-agent-linux.sh](../../tools/deploy-agent-linux.sh) — test, copy into a release, build the venv when its requirements change, switch, restart
 - [../../apps/agent-linux/agent.example.toml](../../apps/agent-linux/agent.example.toml) — every option; the reasoning behind each is on this page
 
 ## Running it
@@ -104,10 +108,42 @@ Each one contradicts what was assumed, and each has a test and a comment next to
 tools/deploy-agent-linux.sh [host ...]   # elantris and patji when none are named
 ```
 
-It runs the agent's lint and tests, copies the code to `~/tempestas/apps/agent-linux` on each host,
-stamps the version, and restarts the agent. The venv is an editable install, so new code needs no
-reinstall; the script says when `pyproject.toml` or `uv.lock` changed and `uv sync` is due. A
-restart drives the relays to their fail-safe levels until the server commands them again.
+It runs the agent's lint and tests, then on each host:
+
+1. Copies the code into `~/tempestas/agent-linux/releases/<version>` and stamps the version.
+2. Builds the venv again only when its requirements changed (see [the venv](#the-venv)).
+3. Makes that release `current`, drops any update still waiting on its gate, and prunes old
+   releases.
+4. Restarts the agent, unless the host's unit still runs the agent from before the release layout.
+   Then it prints the one-time install from [Updates](#updates) instead.
+
+A restart drives the relays to their fail-safe levels until the server commands them again.
+
+### The release layout
+
+```
+~/tempestas/agent-linux/
+  releases/<version>/   one per release, the newest three kept, plus the running and previous one
+  current ->            releases/<version>, the one the unit runs
+  venv/                 shared by every release; requirements.txt records what it was built from
+  update-state/         pending.json while an update is on its gate, outcome.json until reported
+```
+
+It sits apart from the server's `~/tempestas/releases` and `current`, so neither deploy can touch
+the other's. A hand deploy and an update both change the code by switching `current`, so the unit
+never changes between them.
+
+### The venv
+
+The hosts have no `uv`, and patji is an armv6 Pi Zero, so the venv is plain
+`python3 -m venv --system-site-packages`. The system packages give it the distro's `lgpio`, which
+cannot be built on armv6. pip installs the rest from `uv export --frozen --no-dev --no-emit-project`,
+so the same `uv.lock` pins the hosts and the workstation. A rebuild happens beside the old venv
+and is swapped in only once pip has finished. On a Pi Zero it takes a few minutes.
+
+Every release shares the venv, so an update must not change it. A node refuses a bundle whose
+`uv.lock` differs from the running release's with `failed`: "its dependencies differ from this
+node's, so it needs tools/deploy-agent-linux.sh".
 
 ### The version a node reports
 
@@ -122,14 +158,13 @@ checkout that was never deployed by the script reports `0.0.0+dev`. What each nu
 ### The unit
 
 The unit lives at [../../apps/agent-linux/systemd/tempestas-agent.service](../../apps/agent-linux/systemd/tempestas-agent.service)
-and is installed by staging it in the repo checkout and then `sudo install`-ing it — never by
-piping content into a root-owned file, which is how a password once ended up inside `/etc/fstab`.
+and is installed from the release a deploy copied, then `sudo install`-ed — never by piping content
+into a root-owned file, which is how a password once ended up inside `/etc/fstab`. The full
+install, with the rollback unit, is in [Updates](#updates).
 
 ```bash
-sudo install -m 0644 -o root -g root \
-  ~/tempestas/apps/agent-linux/systemd/tempestas-agent.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl restart tempestas-agent
-systemd-analyze verify /etc/systemd/system/tempestas-agent.service   # must be silent
+systemd-analyze verify /etc/systemd/system/tempestas-agent.service \
+  /etc/systemd/system/tempestas-agent-rollback.service   # must be silent
 ```
 
 `systemd-analyze verify` is part of the procedure, not a nicety. It found two real defects in a
@@ -156,6 +191,13 @@ actually in effect with `systemctl show tempestas-agent -p StartLimitIntervalUSe
   that exposure.
 - **No `PrivateDevices=yes`.** It would give the unit a scrubbed `/dev` with no `/dev/i2c-1` and no
   `/dev/gpiochip0` — a lockdown that breaks the sensor and every relay in exchange for tidiness.
+- **`RestartForceExitStatus=75` and `SuccessExitStatus=75`.** The agent exits 75 once an update is
+  installed, so systemd starts it again on the new `current`. The second line matters as much as
+  the first: without it, exit 75 counts as a failure, and `OnFailure=` rolls the update back before
+  it ever runs. The end-to-end run caught exactly that.
+- **`OnFailure=tempestas-agent-rollback.service`.** It fires on every failed run, not only once the
+  start limit gives up, so the script decides. It switches back only when the release that failed
+  is an update still waiting on its gate. Otherwise it exits 1 and changes nothing.
 - **No ordering against the I²C bus.** systemd only creates `.device` units for devices udev tags
   for it, and i2c is not one, so `After=dev-i2c\x2d1.device` looks like ordering while doing
   nothing. The agent opens the bus, fails fast, and the restart retries.
@@ -189,12 +231,75 @@ could never be commanded at all.
 
 ## The update command
 
-Contract 1.1 adds `update` and `update/status`, and `contract.py` carries their topics, schemas,
-QoS and the `UpdateState` values. The agent still reports contract minor 0, because it does not
-subscribe to `update` yet; it raises the minor when it does. Then the refusals above apply to it,
+The agent reports contract minor 1 and subscribes to `update`. The refusals above apply to it,
 except that it refuses every update until a controller is bound, and it also refuses an update
 for another app or another contract major with an `update/status` of `failed`. The full rules
-are in [MQTT Contract](MQTT%20Contract.md#the-update-command).
+are in [MQTT Contract](MQTT%20Contract.md#the-update-command), and what happens to an accepted
+one is in [Updates](#updates).
+
+## Updates
+
+An accepted update runs on a worker thread, so samples and heartbeats carry on meanwhile:
+
+1. **`downloading`.** The node fetches the manifest and checks it against the command's
+   `manifestSha256`. Then it downloads every listed file into `releases/.<version>`, a dot-name a
+   crash leaves unfinished rather than half-installed.
+2. **`verifying`.** Every file's sha256 must match the manifest, and its `uv.lock` must match the
+   running release's (see [the venv](#the-venv)).
+3. **`installing`.** It renames the release into place, writes `pending.json`, then switches
+   `current`. Pending is written first, so a crash between the two reads as a failed start, never
+   as no update.
+4. **`restarting`.** It stops gracefully and exits 75, and systemd starts the new release.
+
+A graceful stop drives every line to its failsafe before the exit, so the five seconds of
+`RestartSec` hold the failsafe, not the last level.
+
+### The health gate
+
+The new release finds `pending.json` naming itself and has `GATE_SECONDS`, 120, to prove itself:
+a `hello`, then a heartbeat from the server after that `hello`. A heartbeat means the broker, the
+credentials and the server's view of the node all work.
+
+- **Passed**: it publishes `healthy`, clears pending, and prunes old releases.
+- **Not passed**: it switches `current` back, records `rolled-back` with the reason, and exits 75.
+  The previous release reports the outcome once it connects.
+- **Cannot start at all**: the release never gets to judge itself. The unit fails,
+  `tempestas-agent-rollback.service` runs the root-owned script, which switches back and starts the
+  agent again, and the previous release reports `rolled-back`: "<v> did not start, so <prev> runs
+  again".
+
+The script lives in `/usr/local/lib/tempestas`, outside every release, so an update can never
+change the code that rescues it from itself. It imports nothing from the agent, for the same
+reason.
+
+### Once per host
+
+A deploy copies the units and the script with the release. To install them, on the host:
+
+```bash
+release=~/tempestas/agent-linux/current
+sudo install -d -m 0755 /usr/local/lib/tempestas
+sudo install -m 0644 -o root -g root $release/systemd/tempestas-agent-rollback.py /usr/local/lib/tempestas/
+sudo install -m 0644 -o root -g root $release/systemd/tempestas-agent.service \
+  $release/systemd/tempestas-agent-rollback.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl restart tempestas-agent
+```
+
+Do it after the first deploy with this layout, which builds the release and the venv but leaves
+the old agent running and prints these lines. The old checkout in `~/tempestas/apps/agent-linux`
+is unused after that and can be removed.
+
+### Verified end to end
+
+On real systemd (a user unit mirroring this one), a local broker, and bundles served over http:
+
+| Scenario                                  | Result                                                                 |
+| ----------------------------------------- | ---------------------------------------------------------------------- |
+| Update to a working release               | `downloading` → `restarting`, `hello` from the new version, `healthy`  |
+| Update to a release that crashes on start | Rolled back on its first failed run; the previous release says why     |
+| Update that never gets a heartbeat        | Gate failed at 120 s, switched back, `rolled-back` "sent no heartbeat" |
+| Update to the version already running     | `failed`, "this node already runs 1.1.4"; nothing changed              |
+| Exit 75 without `SuccessExitStatus=75`    | The good update was rolled back at once: the reason the line is there  |
 
 ## Announcing line state
 
@@ -387,6 +492,11 @@ change.
   `server/status` turns `online`. Without the second, a node that restarted while the server was
   down kept its old boot id on the server, and every sample was dropped as a duplicate of the old
   boot's `seq`.
+- **Five starts in 300 s hits the start limit, and an update's restart counts as one.** A burst
+  of deploys and updates can trip it, and `OnFailure=` then rolls back an update that was fine.
+  `systemctl reset-failed tempestas-agent` clears the count.
+- **A change to the dependencies cannot arrive as an update.** The venv is shared, so the node
+  refuses it and the server shows why; deploy it with `tools/deploy-agent-linux.sh`.
 - **`systemctl stop` is a clean exit and does NOT trigger `Restart=on-failure`.** Stopping the
   agent therefore leaves the pads holding whatever they last drove, with nothing supervising them.
   Drive the failsafe before a long stop, or expect `relay-check.py` to be what turns things off.
@@ -396,5 +506,6 @@ change.
 - A guard is added to or changed on the command path
 - A guard, bias rule or failsafe behaviour in the GPIO backend changes
 - The systemd unit changes, or a new deployment check earns a row in the table above
+- The release layout, the health gate or the rollback changes
 - The sensor driver changes, or another sensor kind is supported
 - The dead-man behaviour or its configuration changes

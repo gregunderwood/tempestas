@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -14,6 +15,10 @@ from . import gpio as gpio_backends
 from . import sensor as sensor_backends
 from .config import AgentConfig
 from .ds18b20 import Ds18b20Sensors, Probe
+from .release_installer import ReleaseInstaller
+from .release_layout import ReleaseLayout
+from .update_command import ANSWER_ALARM, ANSWER_FAILED_STATUS, UpdateVerdict, judge_update_command
+from .update_gate import pass_gate, roll_back_gate, settle_update_on_start
 from .version import AGENT_NAME, read_agent_version
 from .world_client import WorldClient
 
@@ -26,6 +31,10 @@ SEVERITY_INFO = "info"
 SCD4X_METRICS = ("temperature", "humidity", "co2")
 SERVER_ONLINE = "online"
 SERVER_OFFLINE = "offline"
+NOT_INSTALLED_FROM_A_RELEASE = (
+    "this agent was not installed from a release, so it cannot update itself; "
+    "run tools/deploy-agent-linux.sh"
+)
 
 
 def format_current_time() -> str:
@@ -111,12 +120,27 @@ def judge_expiry(expires_at, now: datetime) -> CommandVerdict | None:
 
 
 class Agent:
-    def __init__(self, config: AgentConfig, client, sensor, gpio, clock=time.monotonic):
+    def __init__(
+        self,
+        config: AgentConfig,
+        client,
+        sensor,
+        gpio,
+        clock=time.monotonic,
+        layout: ReleaseLayout | None = None,
+        installer: ReleaseInstaller | None = None,
+    ):
         self.config = config
         self.client = client
         self.sensor = sensor
         self.gpio = gpio
         self._clock = clock
+        self.layout = layout
+        self.installer = installer or (ReleaseInstaller(layout) if layout else None)
+        self.update_gate = None
+        self.outcome_to_report = None
+        self.restart_requested = threading.Event()
+        self._update_in_progress = threading.Lock()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
         self.agent_version = read_agent_version()
         self.sample_sequence = 0
@@ -224,6 +248,7 @@ class Agent:
             self.publish_alarm(
                 contract.AlarmCode.DEADMAN_CLEARED, SEVERITY_INFO, "heartbeats resumed"
             )
+        self._settle_gate_on_heartbeat()
 
     def on_server_status(self, payload: bytes, retained: bool) -> None:
         try:
@@ -243,6 +268,64 @@ class Agent:
 
     def say_hello(self) -> None:
         self.publish("hello", contract.build_hello_topic(self.config.node_id), self.hello_payload())
+        if self.update_gate is not None:
+            self.update_gate.note_hello()
+
+    def settle_update(self) -> None:
+        settlement = settle_update_on_start(self.layout, self._clock())
+        self.update_gate = settlement.gate
+        self.outcome_to_report = settlement.outcome
+
+    def report_settled_update(self) -> None:
+        outcome = self.outcome_to_report
+        if outcome is None:
+            return
+        self.publish_update_status(outcome.command_id, outcome.state, outcome.reason)
+        self.layout.clear_outcome()
+        self.outcome_to_report = None
+
+    def on_update(self, payload: bytes, retained: bool) -> None:
+        verdict = judge_update_command(
+            payload,
+            retained=retained,
+            bound_controller=self.bound_controller,
+            running_app=AGENT_NAME,
+            now=datetime.now(UTC),
+        )
+        if not verdict.is_accepted:
+            self._report_update_refusal(verdict)
+            return
+        if self.installer is None:
+            self.publish_update_status(
+                verdict.command_id, contract.UpdateState.FAILED, NOT_INSTALLED_FROM_A_RELEASE
+            )
+            return
+        if self.update_gate is not None or not self._update_in_progress.acquire(blocking=False):
+            self.publish_update_status(
+                verdict.command_id, contract.UpdateState.FAILED, "another update is in progress"
+            )
+            return
+        # Off the MQTT thread: a download must not hold up heartbeats or commands.
+        threading.Thread(
+            target=self._install_update, args=(verdict.command,), name="update", daemon=True
+        ).start()
+
+    def check_update_gate(self) -> None:
+        gate = self.update_gate
+        if gate is None or not gate.is_overdue(self._clock()):
+            return
+        self.update_gate = None
+        log.error("update gate failed: %s - rolling back", gate.describe_failure())
+        roll_back_gate(self.layout, gate)
+        self.restart_requested.set()
+
+    def publish_update_status(self, command_id: str, state: str, reason: str | None = None) -> None:
+        payload = {**self._envelope("updateStatus"), "id": command_id, "state": state}
+        if reason is not None:
+            payload["reason"] = reason
+        self.publish(
+            "updateStatus", contract.build_update_status_topic(self.config.node_id), payload
+        )
 
     def enter_failsafe(self, code: str, message: str) -> None:
         # Hardware, then the retained state, then the alarm: whoever reacts already has the truth.
@@ -305,6 +388,45 @@ class Agent:
             self.publish_alarm(verdict.alarm, SEVERITY_CRITICAL, verdict.reason or "refused")
         else:
             log.debug("ignored a command: %s", verdict.reason)
+
+    def _settle_gate_on_heartbeat(self) -> None:
+        gate = self.update_gate
+        if gate is None:
+            return
+        gate.note_heartbeat()
+        if not gate.is_passed():
+            return
+        self.update_gate = None
+        pass_gate(self.layout, gate)
+        log.info("update to %s passed its health gate", gate.pending.version)
+        self.publish_update_status(gate.pending.command_id, contract.UpdateState.HEALTHY)
+
+    def _install_update(self, command: dict) -> None:
+        command_id = command["id"]
+        try:
+            self.installer.install(
+                command, report=lambda state: self.publish_update_status(command_id, state)
+            )
+        except Exception as error:  # noqa: BLE001 - reported to the server, never swallowed
+            log.error("update to %s failed: %s", command.get("version"), error)
+            self.publish_update_status(command_id, contract.UpdateState.FAILED, str(error))
+            self._update_in_progress.release()
+            return
+        log.warning("installed %s - restarting into it", command["version"])
+        self.publish_update_status(command_id, contract.UpdateState.RESTARTING)
+        self.restart_requested.set()
+
+    def _report_update_refusal(self, verdict: UpdateVerdict) -> None:
+        if verdict.answer == ANSWER_ALARM:
+            log.error("refused an update: %s", verdict.reason)
+            self.publish_alarm(verdict.alarm, SEVERITY_CRITICAL, verdict.reason)
+        elif verdict.answer == ANSWER_FAILED_STATUS:
+            log.error("refused an update: %s", verdict.reason)
+            self.publish_update_status(
+                verdict.command_id, contract.UpdateState.FAILED, verdict.reason
+            )
+        else:
+            log.info("ignored an update: %s", verdict.reason)
 
     def _drive_line(self, line: dict) -> dict:
         pin, level = int(line["pin"]), int(line["level"])

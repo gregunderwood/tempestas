@@ -1,0 +1,21 @@
+# Install to /etc/systemd/system/; see "Updates" in docs/Infrastructure/Linux Agent.md.
+
+[Unit]
+Description=Roll tempestas-agent back to its previous release after an update that cannot start
+Documentation=https://github.com/gregunderwood/tempestas/blob/main/docs/Infrastructure/Linux%%20Agent.md
+
+[Service]
+Type=oneshot
+User=gunderwood
+Group=gunderwood
+Environment=TEMPESTAS_AGENT_HOME=/home/gunderwood/tempestas/agent-linux
+# Root-owned and outside the releases, so an update can never change what runs here.
+ExecStart=/usr/bin/python3 /usr/local/lib/tempestas/tempestas-agent-rollback.py
+# Only after a switch: a failure with no pending update must not restart a crash loop.
+ExecStartPost=+/usr/bin/systemctl reset-failed tempestas-agent.service
+ExecStartPost=+/usr/bin/systemctl start --no-block tempestas-agent.service
+
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/gunderwood/tempestas/agent-linux
+PrivateTmp=yes

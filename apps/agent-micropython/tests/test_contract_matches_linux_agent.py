@@ -1,11 +1,13 @@
 """This contract must equal the Linux agent's, which its own test holds to the TypeScript."""
 
 import importlib.util
+import re
 from pathlib import Path
 
 import contract as micropython_contract
 
 LINUX_CONTRACT = Path(__file__).resolve().parents[2] / "agent-linux/src/tempestas_agent/contract.py"
+TYPESCRIPT_CONTRACT = Path(__file__).resolve().parents[3] / "libs/domain/src/lib/hardware/mqtt-contract.ts"
 
 
 def load_linux_contract():
@@ -22,7 +24,13 @@ def test_root_and_schemas_match():
     assert micropython_contract.MQTT_ROOT == linux_contract.MQTT_ROOT
     assert micropython_contract.SCHEMAS == linux_contract.SCHEMAS
     assert micropython_contract.SUPPORTED_MAJOR == linux_contract.SUPPORTED_MAJOR
-    assert micropython_contract.MQTT_CONTRACT_MINOR == linux_contract.MQTT_CONTRACT_MINOR
+
+
+def test_minor_is_never_ahead_of_the_typescript_contract():
+    # Each agent's minor is what it accepts, so the two agents may differ; neither may lead.
+    typescript_minor = re.search(r"MQTT_CONTRACT_MINOR = (\d+);", TYPESCRIPT_CONTRACT.read_text())
+    assert typescript_minor, "MQTT_CONTRACT_MINOR not found in the TypeScript contract"
+    assert int(typescript_minor.group(1)) >= micropython_contract.MQTT_CONTRACT_MINOR, "agent is ahead"
 
 
 def test_qos_and_retain_match():
