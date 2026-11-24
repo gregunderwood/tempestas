@@ -76,16 +76,24 @@ def settle_update_on_start(layout: ReleaseLayout | None) -> UpdateSettlement:
     if layout.read_current_release() == pending.version:
         settlement.gate = HealthGate(pending)
         return settlement
-    # The rollback unit switched back because the new release could not even start.
-    settlement.outcome = record_outcome(layout, build_did_not_start_outcome(pending))
+    settlement.outcome = record_outcome(layout, describe_finished_rollback(layout, pending))
     return settlement
 
 
-def build_did_not_start_outcome(pending: PendingUpdate) -> UpdateOutcome:
+def describe_finished_rollback(layout: ReleaseLayout, pending: PendingUpdate) -> UpdateOutcome:
+    """With `current` already back: keep a recorded reason, else tell no start from a crash."""
+    recorded = layout.read_outcome()
+    if recorded is not None and recorded.command_id == pending.command_id:
+        return recorded
+    started = layout.read_started()
+    if started is not None and started.command_id == pending.command_id:
+        what_happened = "kept failing after it started"
+    else:
+        what_happened = "did not start"
     return UpdateOutcome(
         pending.command_id,
         contract.UpdateState.ROLLED_BACK,
-        f"{pending.version} did not start, so {pending.previous_release} runs again",
+        f"{pending.version} {what_happened}, so {pending.previous_release} runs again",
     )
 
 

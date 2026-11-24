@@ -52,6 +52,19 @@ def test_keeps_saying_an_update_did_not_start_once_it_was_rolled_back(tmp_path):
     )
 
 
+def test_redeploying_the_version_on_its_gate_leaves_the_gate_to_judge_it(tmp_path):
+    layout = make_layout(tmp_path)
+    layout.locate_release(NEW_RELEASE).mkdir()
+    pending = PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE)
+    layout.write_pending(pending)
+    layout.switch_current_to(NEW_RELEASE)
+
+    make_current(layout, NEW_RELEASE)
+
+    assert layout.read_pending() == pending
+    assert layout.read_outcome() is None
+
+
 def test_refuses_a_release_that_was_never_copied(tmp_path, monkeypatch):
     monkeypatch.setenv("TEMPESTAS_AGENT_HOME", str(tmp_path))
     make_layout(tmp_path)

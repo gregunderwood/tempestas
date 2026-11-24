@@ -24,6 +24,8 @@ FAILED_RUNS_FILE = "failed-runs.json"
 SWITCH_LOCK_FILE = "switch.lock"
 # A release still arriving or being replaced: never run, and never counted as one to keep.
 UNFINISHED_PREFIX = "."
+# tools/deploy-agent-linux.sh stages here and cleans up itself, perhaps while the agent starts.
+HAND_DEPLOY_STAGING_PREFIX = ".deploy-"
 KEPT_RELEASES = 3
 
 log = logging.getLogger("tempestas.agent")
@@ -100,6 +102,9 @@ class ReleaseLayout:
     def write_started(self, started: StartedUpdate) -> None:
         write_record(self.state / STARTED_FILE, started)
 
+    def read_started(self) -> StartedUpdate | None:
+        return read_record(self.state / STARTED_FILE, StartedUpdate)
+
     def clear_start_records(self) -> None:
         (self.state / STARTED_FILE).unlink(missing_ok=True)
         (self.state / FAILED_RUNS_FILE).unlink(missing_ok=True)
@@ -126,6 +131,22 @@ class ReleaseLayout:
             # Another prune may be removing the same release at the same moment.
             shutil.rmtree(self.locate_release(release), ignore_errors=True)
         return removed
+
+    def remove_unfinished_downloads(self) -> list[str]:
+        """Only at start: a download cut off by a restart leaves its staging behind for good."""
+        unfinished = [entry for entry in self.releases.iterdir() if is_unfinished_download(entry)]
+        for entry in unfinished:
+            shutil.rmtree(entry, ignore_errors=True)
+        return [entry.name for entry in unfinished]
+
+
+def is_unfinished_download(entry: Path) -> bool:
+    name = entry.name
+    return (
+        entry.is_dir()
+        and name.startswith(UNFINISHED_PREFIX)
+        and not name.startswith(HAND_DEPLOY_STAGING_PREFIX)
+    )
 
 
 def read_modified_time(entry: Path) -> float:

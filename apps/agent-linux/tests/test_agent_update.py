@@ -227,6 +227,37 @@ def test_a_heartbeat_noted_before_the_deadline_passes_even_if_tended_after_it(tm
     assert not agent.restart_requested.is_set()
 
 
+def test_prunes_after_a_passed_gate_without_holding_the_switch_lock(tmp_path, monkeypatch):
+    agent, _ = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+    agent.on_heartbeat(HEARTBEAT)
+    lock_states_while_pruning = []
+
+    def prune_noting_the_lock(protected):
+        with agent.layout.hold_switch_lock(should_wait=False):
+            lock_states_while_pruning.append("free")
+        return []
+
+    monkeypatch.setattr(agent.layout, "prune_releases", prune_noting_the_lock)
+    agent.tend_update()
+
+    assert lock_states_while_pruning == ["free"]
+
+
+def test_an_update_thread_that_cannot_start_frees_the_next_update(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+
+    class UnstartableThread(InlineThread):
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr("tempestas_agent.agent.threading.Thread", UnstartableThread)
+    agent.on_update(build_fresh_update(), retained=False)
+
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, "can't start new thread")]
+    assert agent._update_in_progress.acquire(blocking=False)
+
+
 SERVER_OFFLINE = json.dumps({"state": "offline"}).encode()
 SERVER_ONLINE_AGAIN = json.dumps({"state": "online"}).encode()
 

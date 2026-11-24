@@ -54,6 +54,8 @@ def main() -> int:
         config, client=None, sensor=sensor, gpio=gpio, layout=ReleaseLayout.from_environment()
     )
     agent.settle_update()
+    # Before connecting, so no download of this run can be mistaken for an abandoned one.
+    agent.remove_unfinished_downloads()
     client = build_client(agent)
     agent.client = client
     wire(agent, client)

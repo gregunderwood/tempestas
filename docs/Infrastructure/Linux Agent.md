@@ -200,7 +200,8 @@ actually in effect with `systemctl show tempestas-agent -p StartLimitIntervalUSe
   the first: without it, exit 75 counts as a failure, and `OnFailure=` rolls the update back before
   it ever runs. The end-to-end run caught exactly that.
 - **`OnFailure=tempestas-agent-rollback.service`.** It fires on every failed run, not only once the
-  start limit gives up, so the script decides. It switches back only when the release that failed
+  start limit gives up, so the script decides. That is verified on systemd 257, which every host
+  runs on trixie; systemd before 254 may reach `failed` only at the start limit, so needs a check. It switches back only when the release that failed
   is an update still waiting on its gate, and only on its third failed run if it had said `hello`.
   Otherwise it exits 1 and changes nothing, and as an
   `ExecCondition=` that skips the unit rather than marking it failed after every ordinary crash.
@@ -292,12 +293,13 @@ It shows as offline on the Nodes page, and `tools/deploy-agent-linux.sh` replace
   the script forgives such a release two failed runs, counted in `failed-runs.json`, before it
   switches back on the third. A reboot inside the gate, where the agent fails fast until I²C is
   ready, does not roll back a release that works. A release that never said `hello` is switched back
-  on its first failure.
+  on its first failure. The previous release then reports "<v> kept failing after it started".
 
 An outcome stays in `outcome.json` until the broker has acknowledged it while the server was
 online. It is sent again on every connect and whenever the server comes back, so neither a dropped
 connection, a server deploy nor a crash can lose it. Until then the node refuses a new update, since
-installing one clears the record. It also refuses one while it cannot read the last update's state
+installing one clears the record. A download cut off by a restart leaves `releases/.<v>` behind,
+and the agent removes it at its next start. It also refuses one while it cannot read the last update's state
 at all. Only the main loop acts on the gate; the MQTT callbacks just note the `hello`, the
 heartbeat and the server's comings and goings, so a heartbeat arriving at the deadline cannot both
 pass and fail it.

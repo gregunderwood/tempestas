@@ -6,7 +6,12 @@ import os
 
 from release_fixtures import NEW_RELEASE, RUNNING_RELEASE, make_layout
 from tempestas_agent import contract
-from tempestas_agent.release_layout import KEPT_RELEASES, PendingUpdate, UpdateOutcome
+from tempestas_agent.release_layout import (
+    KEPT_RELEASES,
+    PendingUpdate,
+    StartedUpdate,
+    UpdateOutcome,
+)
 from tempestas_agent.update_gate import (
     GATE_SECONDS,
     HealthGate,
@@ -60,6 +65,45 @@ def test_a_release_the_rollback_unit_switched_away_from_is_reported_rolled_back(
     )
     assert layout.read_pending() is None
     assert layout.read_outcome() == settlement.outcome
+
+
+def test_a_release_rolled_back_after_it_started_is_not_reported_as_never_starting(tmp_path):
+    layout = make_layout(tmp_path)
+    install_new_release(layout)
+    layout.write_started(StartedUpdate(PENDING.command_id))
+    layout.switch_current_to(RUNNING_RELEASE)
+
+    settlement = settle_update_on_start(layout)
+
+    assert settlement.outcome.reason == (
+        f"{NEW_RELEASE} kept failing after it started, so {RUNNING_RELEASE} runs again"
+    )
+
+
+def test_a_rollback_whose_reason_was_recorded_keeps_that_reason(tmp_path):
+    layout = make_layout(tmp_path)
+    install_new_release(layout)
+    recorded = UpdateOutcome(PENDING.command_id, contract.UpdateState.ROLLED_BACK, "no heartbeat")
+    layout.write_outcome(recorded)
+    layout.switch_current_to(RUNNING_RELEASE)
+
+    settlement = settle_update_on_start(layout)
+
+    assert settlement.outcome == recorded
+    assert layout.read_pending() is None
+
+
+def test_a_start_removes_abandoned_downloads_but_not_a_hand_deploy_in_progress(tmp_path):
+    layout = make_layout(tmp_path)
+    layout.locate_unfinished_release(NEW_RELEASE).mkdir()
+    hand_deploy_staging = layout.releases / f".deploy-{NEW_RELEASE}"
+    hand_deploy_staging.mkdir()
+
+    removed = layout.remove_unfinished_downloads()
+
+    assert removed == [f".{NEW_RELEASE}"]
+    assert hand_deploy_staging.is_dir()
+    assert layout.locate_release(RUNNING_RELEASE).is_dir()
 
 
 def test_an_outcome_left_by_the_last_run_is_still_owed(tmp_path):

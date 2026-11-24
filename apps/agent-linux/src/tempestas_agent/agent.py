@@ -45,6 +45,7 @@ SERVER_OFFLINE = "offline"
 LAST_OUTCOME_UNDELIVERED = "the last update's result has not reached the server yet"
 LAST_UPDATE_UNSETTLED = "the last update is not settled yet, as its state cannot be read"
 STOPPING = "the agent is stopping or restarting"
+ANOTHER_UPDATE_IN_PROGRESS = "another update is in progress"
 NOT_INSTALLED_FROM_A_RELEASE = (
     "this agent was not installed from a release, so it cannot update itself; "
     "run tools/deploy-agent-linux.sh"
@@ -382,13 +383,28 @@ class Agent:
             return
         if self.update_gate is not None or not self._update_in_progress.acquire(blocking=False):
             self.publish_update_status(
-                verdict.command_id, contract.UpdateState.FAILED, "another update is in progress"
+                verdict.command_id, contract.UpdateState.FAILED, ANOTHER_UPDATE_IN_PROGRESS
             )
             return
-        # Off the MQTT thread: a download must not hold up heartbeats or commands.
-        threading.Thread(
-            target=self._install_update, args=(verdict.command,), name="update", daemon=True
-        ).start()
+        try:
+            # Off the MQTT thread: a download must not hold up heartbeats or commands.
+            threading.Thread(
+                target=self._install_update, args=(verdict.command,), name="update", daemon=True
+            ).start()
+        except RuntimeError as error:
+            self._update_in_progress.release()
+            self.publish_update_status(verdict.command_id, contract.UpdateState.FAILED, str(error))
+
+    def remove_unfinished_downloads(self) -> None:
+        if self.layout is None:
+            return
+        try:
+            removed = self.layout.remove_unfinished_downloads()
+        except OSError as error:
+            log.error("could not remove unfinished downloads: %s", error)
+            return
+        for name in removed:
+            log.info("removed the unfinished download %s", name)
 
     def stop_updates(self) -> None:
         """Holds the switch lock until exit, so the process never ends halfway through a switch."""
@@ -486,12 +502,14 @@ class Agent:
         has_passed = gate.is_passed()
         if not has_passed and not gate.is_overdue(self._clock()):
             return
+        should_prune = False
         try:
             with self.layout.hold_switch_lock(should_wait=False):
                 if not is_still_pending(self.layout, gate):
                     log.warning("update to %s was replaced by a hand deploy", gate.pending.version)
                 elif has_passed:
                     self._pass_update_gate(gate)
+                    should_prune = True
                 else:
                     self._fail_update_gate(gate)
         except BlockingIOError:
@@ -501,11 +519,16 @@ class Agent:
             log.error("could not settle the update to %s: %s", gate.pending.version, error)
             return
         self.update_gate = None
+        if should_prune:
+            self._prune_after_passing(gate)
 
     def _pass_update_gate(self, gate: HealthGate) -> None:
         log.info("update to %s passed its health gate", gate.pending.version)
         self.outcome_to_report = pass_gate(self.layout, gate)
         self.report_settled_update()
+
+    def _prune_after_passing(self, gate: HealthGate) -> None:
+        # Outside the switch lock: deleting releases on a slow card must not hold up a deploy.
         try:
             prune_after_update(self.layout, gate.pending)
         except OSError as error:
@@ -577,8 +600,10 @@ class Agent:
             )
         except Exception as error:  # noqa: BLE001 - reported to the server, never swallowed
             log.error("update to %s failed: %s", command.get("version"), error)
-            self.publish_update_status(command_id, contract.UpdateState.FAILED, str(error))
-            self._update_in_progress.release()
+            try:
+                self.publish_update_status(command_id, contract.UpdateState.FAILED, str(error))
+            finally:
+                self._update_in_progress.release()
             return
         log.warning("installed %s - restarting into it", command["version"])
         self.publish_update_status(command_id, contract.UpdateState.RESTARTING)
