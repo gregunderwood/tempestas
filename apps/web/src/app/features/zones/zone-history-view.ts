@@ -189,8 +189,9 @@ function buildZoneHistoryChart(
   const aggregatedProbeKeys = new Set(
     controllingLines.flatMap((controlling) => controlling.probeKeys),
   );
+  const singleSensorKeys = findSingleSensorKeys(zone.controllingSources);
   const decidingProbeKeys = zone.decidingProbeKeys.filter(
-    (key) => !aggregatedProbeKeys.has(key),
+    (key) => singleSensorKeys.has(key) || !aggregatedProbeKeys.has(key),
   );
   return {
     lines: [
@@ -320,21 +321,27 @@ function findWarmestBucket(
   );
 }
 
-// The rules' sources, each once; a single-sensor source is its probe's own line, so it is left out.
+// The rules' sources, each once, including a single sensor a role reads directly.
 export function findControllingSources(
   config: ZoneRulesConfig,
 ): SensorSource[] {
-  const enabledRoles = Array.isArray(config.enabledRoles)
-    ? config.enabledRoles
-    : [];
-  const sources = enabledRoles.flatMap((role) => {
-    const source =
-      config.rules?.[role]?.sensor?.source ??
-      config.sensorPolicy?.default?.source;
-    return source ? [source] : [];
-  });
-  return [...new Set(sources)].filter(
-    (source) => !source.startsWith(SENSOR_SOURCE_PREFIX),
+  const sources = config.enabledRoles.map(
+    (role) =>
+      config.rules[role]?.sensor?.source ?? config.sensorPolicy.default.source,
+  );
+  return [...new Set(sources)];
+}
+
+function isSingleSensorSource(source: SensorSource): boolean {
+  return source.startsWith(SENSOR_SOURCE_PREFIX);
+}
+
+// A probe a role reads on its own stays deciding, even when another role averages it.
+function findSingleSensorKeys(sources: readonly SensorSource[]): Set<string> {
+  return new Set(
+    sources
+      .filter(isSingleSensorSource)
+      .map((source) => source.slice(SENSOR_SOURCE_PREFIX.length)),
   );
 }
 
@@ -345,6 +352,7 @@ function buildControllingLines(
   timeWindow: TimeWindow,
 ): ControllingLine[] {
   return sources.flatMap((source): ControllingLine[] => {
+    if (isSingleSensorSource(source)) return [];
     const selected = selectSourceProbes(series, source);
     if (selected.length < 2) return [];
     return [

@@ -219,6 +219,19 @@ describe('ZonesPage', () => {
     expect(page.textContent).toContain('OFF · above setpoint');
   });
 
+  it('keeps drawing the other zones when a config is missing its roles', () => {
+    const brokenZone = {
+      ...PUMPHOUSE,
+      id: 'z-broken',
+      slug: 'broken',
+      displayName: 'Broken',
+      rulesConfig: {},
+    } as unknown as Zone;
+    const { page } = renderZonesPage({ zones: [brokenZone, PUMPHOUSE] });
+    expect(page.textContent).toContain('Broken');
+    expect(page.textContent).toContain('Low 2.9 °C');
+  });
+
   it('says the rules have stopped once a minute passes with no new cycle', () => {
     const { page, render } = renderZonesPage();
     expect(alertText(page)).toBeUndefined();

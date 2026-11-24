@@ -317,8 +317,9 @@ Each zone card shows the last 24 hours: a line per probe, with the probes the ru
 on in blue, the low and high and roughly when, and under it a strip per device in the zone,
 coloured on, off or unknown. When the rules act on a value worked out from several probes (`mean`,
 `min`, `max` or `node:`), that value gets its own thick blue line, worked out bucket by bucket
-from the probes that reported, and its probes are drawn plain. It answers "how often did the heater run last night, and how cold did
-it get?".
+from the probes that reported, and its probes are drawn plain, unless another role reads one of
+them on its own through `sensor:`. It answers "how often did the heater run last night, and how
+cold did it get?".
 
 - **One request for every zone**, `GET /api/zone-history`. Readings come as five-minute buckets
   (see [Readings](Infrastructure/Readings.md)); each device's runs come as contiguous spans built by
@@ -330,9 +331,10 @@ it get?".
   not counted.
 - **Live, with no polling.** A pushed reading is added in the browser to the bucket the server
   would put it in. Each probe keeps raw readings only for its newest bucket and folds the rest, no
-  further back than the window, so a page left open for days with nothing switching stays small. A device switch or a node change fetches the history again, and a pushed switch
-  is drawn on its strip at once, from its `onAt` or `offAt`, in case the refetch reads the table
-  before the transition log has written it. The last span of each strip runs on to now, and the
+  further back than the window, so a page left open for days with nothing switching stays small.
+  A device switch or a node change fetches the history again, and a pushed switch is drawn on its
+  strip at once, from its `onAt` or `offAt`, in case the refetch reads the table before the
+  transition log has written it. The last span of each strip runs on to now, and the
   window moves every 30 seconds.
 - The chart is inline SVG from a pure geometry function (`zone-history-view.ts`), with no charting
   package. The text and strips are HTML, so they stay sharp at any width. Time labels are whole

@@ -26,7 +26,7 @@ import {
 } from './zone-view';
 import { formatDuration } from './zone-words';
 import { ZoneHistoryPanel } from './zone-history-panel';
-import type { Zone } from '@tempestas/domain';
+import type { SensorSource, Zone } from '@tempestas/domain';
 import {
   buildZoneHistoryCharts,
   findControllingSources,
@@ -56,10 +56,20 @@ function toHistoryZone(card: ZoneCard, zone: Zone | undefined): HistoryZone {
     decidingProbeKeys: card.probes
       .filter((probe) => probe.isTemperatureDeciding)
       .map((probe) => probe.key),
-    controllingSources: zone?.rulesConfig
-      ? findControllingSources(zone.rulesConfig)
-      : [],
+    controllingSources: findDrawableControllingSources(zone),
   };
+}
+
+// A config the card cannot draw gets a problem on its card, so the chart just leaves its sources out.
+function findDrawableControllingSources(
+  zone: Zone | undefined,
+): SensorSource[] {
+  if (!zone?.rulesConfig) return [];
+  try {
+    return findControllingSources(zone.rulesConfig);
+  } catch {
+    return [];
+  }
 }
 
 function isSameHistoryZones(

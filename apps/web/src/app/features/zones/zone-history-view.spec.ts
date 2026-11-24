@@ -288,6 +288,24 @@ describe('controlling lines', () => {
     );
   });
 
+  it('keeps a probe one role reads on its own deciding while another role averages it', () => {
+    const chart = chartOn(['mean', 'sensor:patji/pipes']);
+    expect(chart?.lines.filter((line) => line.isControlling)).toHaveLength(1);
+    expect(
+      chart?.lines
+        .filter((line) => !line.isControlling)
+        .map((line) => [line.key, line.isDeciding]),
+    ).toEqual([
+      ['patji/air', false],
+      ['patji/pipes', true],
+    ]);
+  });
+
+  it('draws no extra line for a single-sensor source', () => {
+    const chart = chartOn(['sensor:patji/pipes']);
+    expect(chart?.lines.some((line) => line.isControlling)).toBe(false);
+  });
+
   it('draws nothing extra when the source picks a single probe', () => {
     const chart = chartOn(['node:braize']);
     expect(chart?.lines.some((line) => line.isControlling)).toBe(false);
@@ -300,7 +318,7 @@ describe('findControllingSources', () => {
     expect(findControllingSources(PUMPHOUSE.rulesConfig)).toEqual(['min']);
   });
 
-  it('uses a role override and leaves out a single-sensor source', () => {
+  it('uses a role override, keeping a single-sensor source', () => {
     expect(
       findControllingSources({
         ...GREENHOUSE.rulesConfig,
@@ -317,7 +335,7 @@ describe('findControllingSources', () => {
           },
         },
       }),
-    ).toEqual(['mean']);
+    ).toEqual(['mean', 'sensor:patji/air']);
   });
 });
 
