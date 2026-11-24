@@ -13,6 +13,7 @@ import { injectLiveReadings } from '../../core/live-readings';
 import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
 import { RealtimeService } from '../../core/realtime.service';
 import { injectServerNow } from '../../core/server-now';
+import { FOLLOWER_NOTICE, isFollowing } from '../../shared/leadership';
 import { secondsSince } from '../../shared/time';
 import { formatDuration } from '../zones/zone-words';
 import { ActivityLog } from './activity-log';
@@ -94,6 +95,7 @@ function nameNodeCard(card: NodeStatCard): string {
         class="layout__activity"
         [entries]="activity()"
         [rulesRanAt]="cycle()?.at ?? null"
+        [isFollower]="isFollower()"
       />
     </div>
   `,
@@ -148,6 +150,10 @@ export class Dashboard {
     DASHBOARD_CARD_ORDER_KEY,
   );
 
+  protected readonly isFollower = computed(() =>
+    isFollowing(this.realtime.status()),
+  );
+
   protected readonly systemState = computed(() =>
     describeSystemState({
       isConnected: this.realtime.connected(),
@@ -197,6 +203,7 @@ export class Dashboard {
   }
 
   private describeRulesAge(): string {
+    if (this.isFollower()) return FOLLOWER_NOTICE;
     const ranAt = this.cycle()?.at;
     if (!ranAt) return 'Rules have not run yet';
     return `Rules ran ${formatDuration(secondsSince(ranAt, this.now()))} ago`;

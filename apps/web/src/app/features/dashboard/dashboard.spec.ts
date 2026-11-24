@@ -29,6 +29,7 @@ import {
   device,
   pumphouseEvaluation,
 } from '../zones/zone-fixtures';
+import { FOLLOWER_NOTICE } from '../../shared/leadership';
 import { Dashboard } from './dashboard';
 import { PERIOD_START_RETRY_MILLISECONDS } from './period-start';
 
@@ -338,6 +339,22 @@ describe('Dashboard hero', () => {
     expect(page.querySelector('.hero__state')?.textContent).toContain(
       'another server runs the rules',
     );
+  });
+
+  it('says on a follower that rules run on the leader, not that they have not run', () => {
+    const { page } = renderDashboard({
+      status: statusOf({ isLeading: false }),
+    });
+    const facts = page.querySelector('.hero__facts')?.textContent ?? '';
+    expect(facts).toContain(FOLLOWER_NOTICE);
+    expect(facts).not.toContain('Rules have not run yet');
+  });
+
+  it('says on the leader that rules have not run yet before the first cycle', () => {
+    const { page } = renderDashboard({ cycle: null });
+    const facts = page.querySelector('.hero__facts')?.textContent ?? '';
+    expect(facts).toContain('Rules have not run yet');
+    expect(facts).not.toContain(FOLLOWER_NOTICE);
   });
 
   it('names the zone whose sensors have gone quiet', () => {
@@ -719,6 +736,10 @@ describe('Dashboard activity panel', () => {
     return textsOf(rendered.page, 'temp-activity-panel li');
   }
 
+  function activitySubtitleOf(rendered: RenderedDashboard): string {
+    return textsOf(rendered.page, 'temp-activity-panel mat-card-subtitle')[0];
+  }
+
   function clockTime(isoTime: string): string {
     return new Date(isoTime).toLocaleTimeString('en-GB', { hour12: false });
   }
@@ -776,5 +797,21 @@ describe('Dashboard activity panel', () => {
     const cycle = cycleOf([pumphouseEvaluation()]);
     const { text } = renderDashboard({ cycle });
     expect(text()).toContain(`Rules last ran at ${clockTime(cycle.at)}`);
+  });
+
+  it('says on the leader that rules have not run yet before the first cycle', () => {
+    const rendered = renderDashboard({ cycle: null });
+    const subtitle = activitySubtitleOf(rendered);
+    expect(subtitle).toContain('Rules have not run yet');
+    expect(subtitle).not.toContain(FOLLOWER_NOTICE);
+  });
+
+  it('says on a follower that rules run on the leader, not that they have not run', () => {
+    const rendered = renderDashboard({
+      status: statusOf({ isLeading: false }),
+    });
+    const subtitle = activitySubtitleOf(rendered);
+    expect(subtitle).toContain(FOLLOWER_NOTICE);
+    expect(subtitle).not.toContain('Rules have not run yet');
   });
 });

@@ -10,6 +10,7 @@ import {
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
+import { FOLLOWER_NOTICE as SHARED_FOLLOWER_NOTICE } from '../../shared/leadership';
 import {
   fakeRealtime,
   pushDevice,
@@ -125,6 +126,12 @@ function statusWhile(isLeading: boolean): SystemStatus {
     lastEvaluationAt: null,
     sentAt: NOW.toISOString(),
   };
+}
+
+function zoneSubtitleText(page: HTMLElement): string {
+  return (
+    page.querySelector('.zone mat-card-subtitle')?.textContent ?? ''
+  ).replace(/\s+/g, ' ');
 }
 
 function alertText(page: HTMLElement): string | undefined {
@@ -247,6 +254,22 @@ describe('ZonesPage', () => {
     render();
     expect(page.textContent).not.toContain(FOLLOWER_NOTICE);
     expect(alertText(page)).toContain('Rules have not run for over a minute.');
+  });
+
+  it("says on a follower's zone card that rules run on the leader", () => {
+    const { page, realtime, render } = renderZonesPage({ firstCycle: null });
+    realtime.status.set(statusWhile(false));
+    render();
+    expect(zoneSubtitleText(page)).toContain(SHARED_FOLLOWER_NOTICE);
+    expect(zoneSubtitleText(page)).not.toContain('rules have not run yet');
+  });
+
+  it("says on the leader's zone card that rules have not run yet before the first cycle", () => {
+    const { page, realtime, render } = renderZonesPage({ firstCycle: null });
+    realtime.status.set(statusWhile(true));
+    render();
+    expect(zoneSubtitleText(page)).toContain('rules have not run yet');
+    expect(zoneSubtitleText(page)).not.toContain(SHARED_FOLLOWER_NOTICE);
   });
 
   it('ages the subtitle with the clock', () => {
