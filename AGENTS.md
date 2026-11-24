@@ -37,7 +37,7 @@ docker compose up -d                  # local Postgres 17 on :5433
 npm run migration:run                 # apply migrations
 npx nx serve server                   # API on :7000, HARDWARE_DRIVER=fake
 npx nx serve web                      # Angular dev server (on the Mac, never on the Pi)
-npx nx run-many -t lint,typecheck,test,build,migration-round-trip    # the gate — every project, Python included
+npx nx run-many -t lint,typecheck,test,build,migration-round-trip    # the gate — every project, Python and tools/ included
 npx nx test server --coverage         # also the gate: thresholds are checked ONLY here
 npx nx test server                    # one project
 npx nx e2e web-e2e                    # Cypress smoke test, stubbed API and socket; not in the gate
