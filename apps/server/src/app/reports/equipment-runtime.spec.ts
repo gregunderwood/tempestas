@@ -18,6 +18,7 @@ const BURNER: RuntimeDevice = {
   nodeId: NODE_SLUG,
   zoneId: 'greenhouse-zone',
   timezone: TIMEZONE,
+  addedAt: new Date('2026-01-01T00:00:00Z'),
 };
 
 const ONLINE: NodeSighting = { isOnline: true, lastHeardAt: null };
@@ -67,6 +68,47 @@ function summariseBurner(scenario: Scenario): DeviceRuntime {
 }
 
 describe('summariseEquipmentRuntime', () => {
+  describe('a device added inside the window', () => {
+    const addedThisMorning = {
+      ...BURNER,
+      addedAt: atLocal('2026-09-10T08:00'),
+    };
+
+    it('marks the days before it was added and gives them no hours, not unknown ones', () => {
+      const burner = summariseBurner({
+        devices: [addedThisMorning],
+        transitions: [],
+        nowLocal: '2026-09-10T12:00',
+        days: 3,
+      });
+      expect(burner.days.map((day) => day.isBeforeDeviceAdded)).toEqual([
+        true,
+        true,
+        false,
+      ]);
+      expect(burner.days[0]).toMatchObject({
+        hoursOn: 0,
+        hoursOff: 0,
+        hoursUnknown: 0,
+      });
+    });
+
+    it('counts the day it was added only from when it was added', () => {
+      const burner = summariseBurner({
+        devices: [addedThisMorning],
+        transitions: [transition('2026-09-10T10:00', false)],
+        nowLocal: '2026-09-10T12:00',
+        days: 1,
+      });
+      expect(burner.days[0]).toMatchObject({
+        hoursUnknown: 2,
+        hoursOff: 2,
+        isBeforeDeviceAdded: false,
+      });
+      expect(burner.totalHoursUnknown).toBe(2);
+    });
+  });
+
   it('lists one day per calendar day, oldest first, ending with today so far', () => {
     const burner = summariseBurner({
       transitions: [transition('2026-09-01T00:00', false)],

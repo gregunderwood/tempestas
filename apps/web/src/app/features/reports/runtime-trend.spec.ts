@@ -4,6 +4,7 @@ import {
   countDaysWithCappedRun,
   describeDay,
   findShortestRunMinutes,
+  listDaysSinceAdded,
   TREND_BAR_PITCH,
   TREND_HEIGHT,
 } from './runtime-trend';
@@ -19,6 +20,7 @@ function runtimeDay(
     starts: 0,
     shortestRunMinutes: null,
     hasRunCappedAtLastSeen: false,
+    isBeforeDeviceAdded: false,
     ...overrides,
   };
 }
@@ -98,5 +100,30 @@ describe('countDaysWithCappedRun', () => {
         runtimeDay(),
       ]),
     ).toBe(1);
+  });
+});
+
+describe('days before the device was added', () => {
+  const beforeAdded = runtimeDay({
+    date: '2026-09-08',
+    hoursOff: 0,
+    isBeforeDeviceAdded: true,
+  });
+
+  it('describes the day as before the device, not as hours off or unknown', () => {
+    expect(describeDay(beforeAdded)).toBe(
+      '2026-09-08: before the device was added',
+    );
+  });
+
+  it('draws no bar for it', () => {
+    const [bar] = buildTrendBars([beforeAdded]);
+    expect(bar.onHeight + bar.unknownHeight).toBe(0);
+  });
+
+  it('is left out of the days since the device was added', () => {
+    expect(listDaysSinceAdded([beforeAdded, runtimeDay()])).toEqual([
+      runtimeDay(),
+    ]);
   });
 });

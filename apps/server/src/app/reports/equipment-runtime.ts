@@ -26,6 +26,7 @@ export interface RuntimeDevice {
   nodeId: string;
   zoneId: string;
   timezone: string;
+  addedAt: Date;
 }
 
 export interface NodeSighting {
@@ -261,9 +262,12 @@ function summariseDevice(
   runs: Run[],
   dayWindows: DayWindow[],
 ): DeviceRuntime {
-  const durations = dayWindows.map((window) => measureDay(window, spans));
+  const addedAtMs = device.addedAt.getTime();
+  const durations = dayWindows.map((window) =>
+    measureDay(startNoEarlierThan(window, addedAtMs), spans),
+  );
   const days = dayWindows.map((window, index) =>
-    summariseDay(window, durations[index], runs),
+    summariseDay(window, durations[index], runs, addedAtMs),
   );
   return {
     deviceId: device.id,
@@ -272,11 +276,17 @@ function summariseDevice(
     nodeId: device.nodeId,
     zoneId: device.zoneId,
     timezone: device.timezone,
+    addedAt: device.addedAt.toISOString(),
     days,
     totalHoursOn: toHours(sumOf(durations.map((day) => day.onMs))),
     totalStarts: sumOf(days.map((day) => day.starts)),
     totalHoursUnknown: toHours(sumOf(durations.map((day) => day.unknownMs))),
   };
+}
+
+// Before a device existed there is nothing to know, so those hours are not counted as unknown.
+function startNoEarlierThan(window: DayWindow, addedAtMs: number): DayWindow {
+  return { ...window, fromMs: Math.max(window.fromMs, addedAtMs) };
 }
 
 // Unknown is whatever is neither known on nor known off, so a gap in history is never counted as off.
@@ -291,6 +301,7 @@ function summariseDay(
   window: DayWindow,
   durations: DayDurations,
   runs: Run[],
+  addedAtMs: number,
 ): DeviceRuntimeDay {
   const startedThisDay = runs.filter(
     (run) => run.isStart && isWithin(run.fromMs, window),
@@ -305,6 +316,7 @@ function summariseDay(
     hasRunCappedAtLastSeen: runs.some(
       (run) => run.isCappedAtLastSeen && isTouching(run, window),
     ),
+    isBeforeDeviceAdded: window.toMs <= addedAtMs,
   };
 }
 

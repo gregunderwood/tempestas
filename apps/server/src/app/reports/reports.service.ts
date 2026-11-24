@@ -77,6 +77,7 @@ export class ReportsService {
       nodeId: device.node.slug,
       zoneId: device.zoneId,
       timezone: this.resolveTimezone(device.zone),
+      addedAt: device.createdAt,
     }));
   }
 

@@ -9,7 +9,7 @@ export interface EquipmentRuntimeQuery {
   days?: number;
 }
 
-/** One calendar day in the device's zone; the three hour figures add up to the day's length so far. */
+/** One calendar day in the device's zone; the three hour figures add up to the part of the day the device existed, so far. */
 export interface DeviceRuntimeDay {
   /** `YYYY-MM-DD`, in the device's zone. */
   date: string;
@@ -23,6 +23,8 @@ export interface DeviceRuntimeDay {
   shortestRunMinutes: number | null;
   /** A run this day had no closing transition, so it was cut at the node's last-seen time. */
   hasRunCappedAtLastSeen: boolean;
+  /** The device was added after this day ended, so the day has no hours at all rather than unknown ones. */
+  isBeforeDeviceAdded: boolean;
 }
 
 export interface DeviceRuntime {
@@ -32,6 +34,8 @@ export interface DeviceRuntime {
   nodeId: NodeId;
   zoneId: string;
   timezone: string;
+  /** When the device row was created; its days start here. */
+  addedAt: string;
   /** Oldest first, ending with today so far. */
   days: DeviceRuntimeDay[];
   totalHoursOn: number;

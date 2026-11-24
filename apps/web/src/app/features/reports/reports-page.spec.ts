@@ -24,6 +24,7 @@ function burnerRuntime(overrides: Partial<DeviceRuntime> = {}): DeviceRuntime {
     nodeId: 'elantris',
     zoneId: 'greenhouse',
     timezone: 'America/Vancouver',
+    addedAt: '2026-01-01T00:00:00.000Z',
     days: [
       {
         date: '2026-09-08',
@@ -33,6 +34,7 @@ function burnerRuntime(overrides: Partial<DeviceRuntime> = {}): DeviceRuntime {
         starts: 6,
         shortestRunMinutes: 4,
         hasRunCappedAtLastSeen: false,
+        isBeforeDeviceAdded: false,
       },
       {
         date: '2026-09-09',
@@ -42,6 +44,7 @@ function burnerRuntime(overrides: Partial<DeviceRuntime> = {}): DeviceRuntime {
         starts: 2,
         shortestRunMinutes: 12,
         hasRunCappedAtLastSeen: false,
+        isBeforeDeviceAdded: false,
       },
     ],
     totalHoursOn: 4,
@@ -122,6 +125,25 @@ describe('ReportsPage', () => {
     expect(card?.textContent).toContain('8');
     expect(card?.textContent).toContain('4.0 min');
     expect(card?.querySelectorAll('svg g')).toHaveLength(2);
+  });
+
+  it('counts and lists only the days since a device was added', () => {
+    const addedYesterday = burnerRuntime();
+    addedYesterday.days[0] = {
+      ...addedYesterday.days[0],
+      hoursOn: 0,
+      hoursOff: 0,
+      hoursUnknown: 0,
+      starts: 0,
+      shortestRunMinutes: null,
+      isBeforeDeviceAdded: true,
+    };
+    const { page } = renderReportsPage([of(report([addedYesterday]))]);
+    const card = page.querySelector('temp-equipment-runtime-card');
+    expect(card?.querySelector('.runtime-legend')?.textContent).toContain(
+      '1 day to today',
+    );
+    expect(card?.querySelectorAll('.runtime-days tbody tr')).toHaveLength(1);
   });
 
   it('says when a run was cut at the node going offline', () => {

@@ -49,6 +49,7 @@ function makeService(tables: FakeTables): ReportsService {
         zoneId: 'greenhouse-zone',
         node: { slug: 'elantris' },
         zone,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
       },
     ],
   } as unknown as Repository<DeviceEntity>;
@@ -154,5 +155,10 @@ describe('ReportsService.buildEquipmentRuntime', () => {
       hoursOn: 1,
       hasRunCappedAtLastSeen: true,
     });
+  });
+
+  it('says when each device was added', async () => {
+    const report = await makeService({}).buildEquipmentRuntime({ days: 1 });
+    expect(report.devices[0].addedAt).toBe('2026-01-01T00:00:00.000Z');
   });
 });

@@ -26,8 +26,12 @@ Built from `pin_transitions`, per device per calendar day in the **device's zone
 and unknown, starts, and the shortest run. The rows in the window are read together with the row in
 force when it opened, so the first day does not start as unknown.
 
-- **Unknown is not off.** An `energised = null` span, time before any history, and the time a node
-  was offline all count as unknown, and the three hour figures add up to the day.
+- **Unknown is not off.** An `energised = null` span, time with no history, and the time a node was
+  offline all count as unknown, and the three hour figures add up to the part of the day the device
+  existed.
+- **A device's days start when it was added.** Time before its row was created is not unknown, it
+  is nothing: a day that ended before then is marked `isBeforeDeviceAdded` with no hours, draws no
+  bar and is left out of the day-by-day table, so a new device does not show weeks of grey.
 - **Calendar days, not 24-hour blocks.** A DST day is 23 or 25 hours long.
 - **Hours split at the zone's midnight; a run does not.** A run that crosses midnight puts its hours
   on both days, but counts as one start on the day it began, at its whole length. Cutting it in two

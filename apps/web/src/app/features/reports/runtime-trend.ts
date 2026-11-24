@@ -43,6 +43,8 @@ export function buildTrendBars(days: readonly DeviceRuntimeDay[]): TrendBar[] {
 }
 
 export function describeDay(day: DeviceRuntimeDay): string {
+  if (day.isBeforeDeviceAdded)
+    return `${day.date}: before the device was added`;
   const parts = [
     `${day.date}: ${formatHours(day.hoursOn)} on`,
     `${day.starts} ${day.starts === 1 ? 'start' : 'starts'}`,
@@ -66,6 +68,12 @@ export function findShortestRunMinutes(
     .map((day) => day.shortestRunMinutes)
     .filter((minutes): minutes is number => minutes !== null);
   return measured.length === 0 ? null : Math.min(...measured);
+}
+
+export function listDaysSinceAdded(
+  days: readonly DeviceRuntimeDay[],
+): DeviceRuntimeDay[] {
+  return days.filter((day) => !day.isBeforeDeviceAdded);
 }
 
 export function countDaysWithCappedRun(

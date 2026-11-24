@@ -13,6 +13,7 @@ import {
   findShortestRunMinutes,
   formatHours,
   formatMinutes,
+  listDaysSinceAdded,
   TREND_BAR_PITCH,
   TREND_HEIGHT,
 } from './runtime-trend';
@@ -84,7 +85,9 @@ import {
         <p class="runtime-legend">
           <span class="runtime-legend__on">on</span>
           <span class="runtime-legend__unknown">unknown</span>
-          · {{ device().days.length }} days to today, {{ device().timezone }}
+          · {{ daysSinceAdded().length }}
+          {{ daysSinceAdded().length === 1 ? 'day' : 'days' }} to today,
+          {{ device().timezone }}
         </p>
         <details>
           <summary>Day by day</summary>
@@ -211,8 +214,11 @@ export class EquipmentRuntimeCard {
   protected readonly daysWithCappedRun = computed(() =>
     countDaysWithCappedRun(this.device().days),
   );
+  protected readonly daysSinceAdded = computed(() =>
+    listDaysSinceAdded(this.device().days),
+  );
   protected readonly newestFirst = computed(() =>
-    [...this.device().days].reverse(),
+    [...this.daysSinceAdded()].reverse(),
   );
   protected readonly formatHours = formatHours;
   protected readonly formatMinutes = formatMinutes;
