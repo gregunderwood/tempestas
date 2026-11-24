@@ -16,3 +16,4 @@ export { AddHeatingRoles1794976900000 } from './1794976900000-AddHeatingRoles';
 export { HumidityIsOptional1794977000000 } from './1794977000000-HumidityIsOptional';
 export { AddPicoNodeKind1795220722652 } from './1795220722652-AddPicoNodeKind';
 export { AddNodeAgentName1795330000000 } from './1795330000000-AddNodeAgentName';
+export { AddDeviceInputBtuPerHour1795488489699 } from './1795488489699-AddDeviceInputBtuPerHour';

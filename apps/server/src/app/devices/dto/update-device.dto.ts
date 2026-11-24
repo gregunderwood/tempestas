@@ -4,6 +4,7 @@ import {
   IsIn,
   IsInt,
   IsOptional,
+  IsPositive,
   IsString,
   IsUUID,
   Max,
@@ -12,6 +13,7 @@ import {
 import {
   DeviceRole,
   type GpioLevel,
+  MAX_INPUT_BTU_PER_HOUR,
   type PatchDeviceRulesPayload,
   type UpdateDevicePayload,
 } from '@tempestas/domain';
@@ -31,6 +33,11 @@ export class UpdateDeviceDto implements UpdateDevicePayload {
   @IsOptional() @IsIn(GPIO_LEVELS) onLevel?: GpioLevel;
   @IsOptional() @IsBoolean() rulesEnabled?: boolean;
   @IsOptional() @IsEnum(DeviceRole) role?: DeviceRole | null;
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  @Max(MAX_INPUT_BTU_PER_HOUR)
+  inputBtuPerHour?: number | null;
 }
 
 export class PatchDeviceRulesDto implements PatchDeviceRulesPayload {

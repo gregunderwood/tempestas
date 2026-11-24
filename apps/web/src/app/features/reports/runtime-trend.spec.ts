@@ -21,6 +21,7 @@ function runtimeDay(
     shortestRunMinutes: null,
     hasRunCappedAtLastSeen: false,
     isBeforeDeviceAdded: false,
+    propaneLitres: null,
     ...overrides,
   };
 }

@@ -77,6 +77,7 @@ export class ReportsService {
       zoneId: device.zoneId,
       timezone: this.resolveTimezone(device.zone),
       addedAt: device.createdAt,
+      inputBtuPerHour: device.inputBtuPerHour,
     }));
   }
 

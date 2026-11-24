@@ -4,6 +4,7 @@ import {
   IsIn,
   IsInt,
   IsOptional,
+  IsPositive,
   IsString,
   IsUUID,
   Max,
@@ -14,6 +15,7 @@ import {
   type CreateDevicePayload,
   type GpioLevel,
   type NodeId,
+  MAX_INPUT_BTU_PER_HOUR,
 } from '@tempestas/domain';
 import { GPIO_LEVELS, MAX_GPIO_PIN, MIN_GPIO_PIN } from './gpio-constraints';
 
@@ -52,4 +54,10 @@ export class CreateDeviceDto implements CreateDevicePayload {
   @IsOptional()
   @IsEnum(DeviceRole)
   role?: DeviceRole | null;
+
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  @Max(MAX_INPUT_BTU_PER_HOUR)
+  inputBtuPerHour?: number | null;
 }

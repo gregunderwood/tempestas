@@ -143,6 +143,7 @@ export function device(overrides: Partial<Device> = {}): Device {
     onLevel: 1,
     rulesEnabled: true,
     role: DeviceRole.Heater,
+    inputBtuPerHour: null,
     isOn: false,
     canTurnOn: true,
     canTurnOnAt: null,

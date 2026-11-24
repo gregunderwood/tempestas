@@ -14,6 +14,7 @@ import {
   pushNode,
 } from '../../testing/fake-realtime';
 import { device, node } from '../zones/zone-fixtures';
+import { PROPANE_UNIT_KEY } from './propane-units';
 import { ReportsPage } from './reports-page';
 
 function burnerRuntime(overrides: Partial<DeviceRuntime> = {}): DeviceRuntime {
@@ -35,6 +36,7 @@ function burnerRuntime(overrides: Partial<DeviceRuntime> = {}): DeviceRuntime {
         shortestRunMinutes: 4,
         hasRunCappedAtLastSeen: false,
         isBeforeDeviceAdded: false,
+        propaneLitres: null,
       },
       {
         date: '2026-09-09',
@@ -45,12 +47,28 @@ function burnerRuntime(overrides: Partial<DeviceRuntime> = {}): DeviceRuntime {
         shortestRunMinutes: 12,
         hasRunCappedAtLastSeen: false,
         isBeforeDeviceAdded: false,
+        propaneLitres: null,
       },
     ],
     totalHoursOn: 4,
     totalStarts: 8,
     totalHoursUnknown: 1,
+    inputBtuPerHour: null,
+    totalPropaneLitres: null,
     ...overrides,
+  };
+}
+
+function ratedBurnerRuntime(): DeviceRuntime {
+  const unrated = burnerRuntime();
+  return {
+    ...unrated,
+    inputBtuPerHour: 40_000,
+    days: [
+      { ...unrated.days[0], propaneLitres: 5 },
+      { ...unrated.days[1], propaneLitres: 5 / 3 },
+    ],
+    totalPropaneLitres: 20 / 3,
   };
 }
 
@@ -100,7 +118,10 @@ function renderReportsPage(
 }
 
 describe('ReportsPage', () => {
-  beforeEach(() => vi.useFakeTimers());
+  beforeEach(() => {
+    vi.useFakeTimers();
+    localStorage.clear();
+  });
   afterEach(() => vi.useRealTimers());
 
   it('lists the reports still to come, without equipment runtime', () => {
@@ -189,5 +210,86 @@ describe('ReportsPage', () => {
     pushNode(rendered.realtime, { ...node('elantris', null), online: false });
     rendered.render();
     expect(rendered.requestCount()).toBe(2);
+  });
+
+  describe('propane used', () => {
+    function propaneUnitToggles(page: HTMLElement): HTMLButtonElement[] {
+      return Array.from(
+        page.querySelectorAll<HTMLButtonElement>('.temp-propane-unit button'),
+      );
+    }
+
+    function propaneTotal(page: HTMLElement): string | undefined {
+      return page.querySelector('.runtime-propane')?.textContent?.trim();
+    }
+
+    it('shows nothing extra for a device without a burner rating', () => {
+      const { page } = renderReportsPage([of(report([burnerRuntime()]))]);
+      expect(propaneUnitToggles(page)).toHaveLength(0);
+      expect(page.textContent).not.toContain('Propane');
+    });
+
+    it('shows a rated burner in litres by default, per day and in total', () => {
+      const { page } = renderReportsPage([of(report([ratedBurnerRuntime()]))]);
+      expect(propaneTotal(page)).toBe('6.7 L');
+      const dayCells = Array.from(
+        page.querySelectorAll('.runtime-days tbody tr td:last-child'),
+      ).map((cell) => cell.textContent?.trim());
+      expect(dayCells).toEqual(['1.7 L', '5.0 L']);
+    });
+
+    it('says the estimate covers known hours only, at the rating', () => {
+      const { page } = renderReportsPage([of(report([ratedBurnerRuntime()]))]);
+      expect(page.textContent).toContain(
+        "Propane is estimated at the burner's 40,000 BTU/hr rating, from known hours on only; unknown hours are not estimated.",
+      );
+    });
+
+    it('switches every card to pounds and remembers the choice', () => {
+      const rendered = renderReportsPage([of(report([ratedBurnerRuntime()]))]);
+      const pounds = propaneUnitToggles(rendered.page).find((toggle) =>
+        toggle.textContent?.includes('Pounds'),
+      );
+      pounds?.click();
+      rendered.render();
+      expect(propaneTotal(rendered.page)).toBe('7.5 lb');
+      expect(localStorage.getItem(PROPANE_UNIT_KEY)).toBe('pounds');
+    });
+
+    it('converts only the rated card when a rated and an unrated device share the page', () => {
+      const unratedHeatTape = burnerRuntime({
+        deviceId: 'heat-tape',
+        deviceName: 'Heat tape',
+      });
+      const rendered = renderReportsPage([
+        of(report([ratedBurnerRuntime(), unratedHeatTape])),
+      ]);
+      const [ratedCard, unratedCard] = Array.from(
+        rendered.page.querySelectorAll<HTMLElement>(
+          'temp-equipment-runtime-card',
+        ),
+      );
+      const unratedCardText = unratedCard.textContent;
+      expect(propaneUnitToggles(rendered.page)).toHaveLength(2);
+      expect(unratedCardText).not.toContain('Propane');
+      expect(unratedCard.querySelector('.runtime-propane')).toBeNull();
+      expect(unratedCard.querySelector('.runtime-propane-note')).toBeNull();
+
+      const pounds = propaneUnitToggles(rendered.page).find((toggle) =>
+        toggle.textContent?.includes('Pounds'),
+      );
+      pounds?.click();
+      rendered.render();
+      expect(
+        ratedCard.querySelector('.runtime-propane')?.textContent?.trim(),
+      ).toBe('7.5 lb');
+      expect(unratedCard.textContent).toBe(unratedCardText);
+    });
+
+    it('opens on the unit chosen last time', () => {
+      localStorage.setItem(PROPANE_UNIT_KEY, 'pounds');
+      const { page } = renderReportsPage([of(report([ratedBurnerRuntime()]))]);
+      expect(propaneTotal(page)).toBe('7.5 lb');
+    });
   });
 });

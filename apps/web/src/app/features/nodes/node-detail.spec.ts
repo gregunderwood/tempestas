@@ -129,6 +129,7 @@ function device(overrides: Partial<Device> = {}): Device {
     onLevel: 0,
     rulesEnabled: true,
     role: 'co2_generator',
+    inputBtuPerHour: null,
     isOn: false,
     canTurnOn: true,
     canTurnOnAt: null,

@@ -8,6 +8,11 @@ import { MatCardModule } from '@angular/material/card';
 import type { DeviceRuntime } from '@tempestas/domain';
 import { labelRole } from '../zones/zone-words';
 import {
+  DEFAULT_PROPANE_UNIT,
+  formatPropane,
+  type PropaneUnit,
+} from './propane-units';
+import {
   buildTrendBars,
   countDaysWithCappedRun,
   findShortestRunMinutes,
@@ -46,7 +51,18 @@ import {
             <dt>Unknown</dt>
             <dd>{{ formatHours(device().totalHoursUnknown) }}</dd>
           </div>
+          @if (hasPropaneEstimate()) {
+            <div>
+              <dt>Propane</dt>
+              <dd class="runtime-propane">
+                {{ formatPropane(device().totalPropaneLitres, propaneUnit()) }}
+              </dd>
+            </div>
+          }
         </dl>
+        @if (propaneNote(); as note) {
+          <p class="runtime-propane-note">{{ note }}</p>
+        }
         @if (daysWithCappedRun() > 0) {
           <p class="runtime-capped">
             The node went offline mid-run on {{ daysWithCappedRun() }}
@@ -99,6 +115,9 @@ import {
                 <th scope="col">Starts</th>
                 <th scope="col">Shortest</th>
                 <th scope="col">Unknown</th>
+                @if (hasPropaneEstimate()) {
+                  <th scope="col">Propane</th>
+                }
               </tr>
             </thead>
             <tbody>
@@ -117,6 +136,11 @@ import {
                     }}
                   </td>
                   <td>{{ formatHours(day.hoursUnknown) }}</td>
+                  @if (hasPropaneEstimate()) {
+                    <td>
+                      {{ formatPropane(day.propaneLitres, propaneUnit()) }}
+                    </td>
+                  }
                 </tr>
               }
             </tbody>
@@ -140,6 +164,10 @@ import {
       margin: 0;
       font-size: 1.1rem;
       font-variant-numeric: tabular-nums;
+    }
+    .runtime-propane-note {
+      font-size: 0.8rem;
+      opacity: 0.7;
     }
     .runtime-capped {
       color: var(--temp-gauge-orange);
@@ -198,6 +226,7 @@ import {
 })
 export class EquipmentRuntimeCard {
   readonly device = input.required<DeviceRuntime>();
+  readonly propaneUnit = input<PropaneUnit>(DEFAULT_PROPANE_UNIT);
 
   protected readonly subtitle = computed(() => {
     const { role, nodeId } = this.device();
@@ -220,6 +249,22 @@ export class EquipmentRuntimeCard {
   protected readonly newestFirst = computed(() =>
     [...this.daysSinceAdded()].reverse(),
   );
+  protected readonly hasPropaneEstimate = computed(
+    () => this.device().totalPropaneLitres !== null,
+  );
+  protected readonly propaneNote = computed(() =>
+    describePropaneEstimate(this.device()),
+  );
+  protected readonly formatPropane = formatPropane;
   protected readonly formatHours = formatHours;
   protected readonly formatMinutes = formatMinutes;
+}
+
+function describePropaneEstimate(device: DeviceRuntime): string | null {
+  if (device.inputBtuPerHour === null) return null;
+  const rating = device.inputBtuPerHour.toLocaleString('en-US');
+  const estimate = `Propane is estimated at the burner's ${rating} BTU/hr rating, from known hours on only`;
+  return device.totalHoursUnknown > 0
+    ? `${estimate}; unknown hours are not estimated.`
+    : `${estimate}.`;
 }

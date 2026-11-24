@@ -1,5 +1,6 @@
 import {
   AddCo2DeadBand1789087500000,
+  AddDeviceInputBtuPerHour1795488489699,
   AddHeatingRoles1794976900000,
   AddNodeAgentName1795330000000,
   AddNodeBootId1788923106173,
@@ -10,7 +11,12 @@ import {
   RuleKindsPerRole1794975900000,
   ScopeReadingDedupeToBoot1788925934987,
 } from '..';
-import { NODE_ID, ZONE_ID, type Statement } from './rows-added-after';
+import {
+  DEVICE_ID,
+  NODE_ID,
+  ZONE_ID,
+  type Statement,
+} from './rows-added-after';
 
 export type RevertOverNewRows =
   { outcome: 'reverts' } | { outcome: 'refuses'; namingThem: RegExp };
@@ -165,6 +171,18 @@ export const ROWS_ONLY_NEW_CODE_WRITES = new Map<string, RowsOnlyNewCodeWrites>(
           {
             sql: `UPDATE nodes SET agent_name = $1 WHERE id = $2`,
             parameters: ['agent-linux', NODE_ID],
+          },
+        ],
+        revert: REVERTS,
+      },
+    ],
+    [
+      AddDeviceInputBtuPerHour1795488489699.name,
+      {
+        statements: [
+          {
+            sql: `UPDATE devices SET input_btu_per_hour = $1 WHERE id = $2`,
+            parameters: [40_000, DEVICE_ID],
           },
         ],
         revert: REVERTS,

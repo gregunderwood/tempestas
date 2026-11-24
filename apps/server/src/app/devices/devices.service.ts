@@ -119,6 +119,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       description: dto.description ?? null,
       rulesEnabled: dto.rulesEnabled ?? true,
       role: dto.role ?? null,
+      inputBtuPerHour: dto.inputBtuPerHour ?? null,
     } as Partial<DeviceEntity>);
     this.seedFromLastReport(row, node, dto.gpio);
 
@@ -182,6 +183,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       onLevel: row.onLevel,
       rulesEnabled: row.rulesEnabled,
       role: row.role,
+      inputBtuPerHour: row.inputBtuPerHour,
       isOn: isOn(row),
       canTurnOn: canTurnOn(row, now),
       canTurnOnAt: earliest?.toISOString() ?? null,

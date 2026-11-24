@@ -25,6 +25,8 @@ export interface DeviceRuntimeDay {
   hasRunCappedAtLastSeen: boolean;
   /** The device was added after this day ended, so the day has no hours at all rather than unknown ones. */
   isBeforeDeviceAdded: boolean;
+  /** Estimated from this day's known hours on at the burner's rating; null when the device has none. */
+  propaneLitres: number | null;
 }
 
 export interface DeviceRuntime {
@@ -41,6 +43,10 @@ export interface DeviceRuntime {
   totalHoursOn: number;
   totalStarts: number;
   totalHoursUnknown: number;
+  /** Today's rating, applied to every day in the window. */
+  inputBtuPerHour: number | null;
+  /** Known hours on only, unrounded; null when the device has no rating. */
+  totalPropaneLitres: number | null;
 }
 
 export interface EquipmentRuntimeReport {

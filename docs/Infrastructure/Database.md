@@ -61,6 +61,9 @@ from `on_at > off_at`, and the anti-short-cycle interlock from `off_at + on_dela
 - **No unique constraint on `role`.** Roles repeat, and all devices sharing one get the same
   decision, each still filtered by its own `rules_enabled`.
 - `on_level` is a per-device column, not a constant: four relays are active-LOW, one active-HIGH.
+- `input_btu_per_hour` is the burner's nameplate gas input, nullable: null means it burns no
+  propane, or the rating is not known yet. Only the propane estimate in
+  [Reports](Reports.md#propane-used) reads it, never the rules.
 
 ### `pin_transitions`
 
