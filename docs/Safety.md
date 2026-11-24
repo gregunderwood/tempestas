@@ -320,17 +320,21 @@ locks you out of your own greenhouse at 2 a.m. In priority order:
    The posture, in [../apps/broker/mosquitto/](../apps/broker/mosquitto/): `allow_anonymous false`,
    a listener bound by **interface** (`bind_interface wlan0`, not a hardcoded address — this box is
    on DHCP and a lease change would otherwise stop the broker), an explicit loopback listener
-   alongside it, and three identities scoped by ACL.
+   alongside it, and one identity per box or role, each scoped by ACL.
 
    ⚠ **The Mosquitto 2.x trap:** shipping no `listener` directive gives you a local-only listener
    that also **allows anonymous connections**. Adding a listener to reach the LAN silently inherits
    that. `allow_anonymous false` has to land in the same change, not afterwards.
 
-   | Identity             | May publish                                | May read               | Why                                                                           |
-   | -------------------- | ------------------------------------------ | ---------------------- | ----------------------------------------------------------------------------- |
-   | `tempestas-server`   | commands, heartbeat, its own status        | every node's telemetry | The only legitimate publisher of a command                                    |
-   | `elantris`           | **only its own** subtree, never `gpio/set` | its own commands       | A node that could command itself makes the controller's ownership meaningless |
-   | `tempestas-observer` | **nothing**                                | the whole tree         | The node credential cannot read its own samples, so a logger cannot borrow it |
+   | Identity             | May publish                                  | May read                        | Why                                                                            |
+   | -------------------- | -------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------ |
+   | `tempestas-server`   | commands, heartbeat, updates, its own status | every node's telemetry          | The only legitimate publisher of a command                                     |
+   | `greenhouse-server`  | **nothing**                                  | the whole tree                  | The follower's server; promoting it takes a credential change, not just config |
+   | `elantris`           | **only its own** subtree, never a command    | its own commands, server/status | A node that could command itself makes the controller's ownership meaningless  |
+   | `greenhouse`         | the same, for its own subtree                | the same                        | Provisioned as a node; one node cannot speak for another                       |
+   | `patji`              | the same, for its own subtree                | the same                        | The pumphouse node, whose relays fail on                                       |
+   | `braize`             | the same, for its own subtree                | the same                        | The crawlspace Pico; its password is in plain text on the board                |
+   | `tempestas-observer` | **nothing**                                  | the whole tree                  | The node credential cannot read its own samples, so a logger cannot borrow it  |
 
    Authentication says who a client is; only the ACL says whose relays it may command. Both halves
    were verified against the live broker with QoS-1 publishes, since **a denied QoS-0 publish is
