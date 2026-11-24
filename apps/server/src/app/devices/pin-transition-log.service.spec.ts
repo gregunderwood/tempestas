@@ -2,6 +2,7 @@ import { Subject } from 'rxjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   HardwareService,
+  NodeAvailability,
   PinStateReport,
 } from '../hardware/hardware.service';
 import { FixedClock } from '../common/clock';
@@ -21,19 +22,39 @@ function report(overrides: Partial<PinStateReport> = {}): PinStateReport {
   };
 }
 
-function buildHarness(stored: { existing?: unknown; device?: unknown } = {}) {
+function wentOffline(at: Date): NodeAvailability {
+  return { nodeId: 'elantris', online: false, at };
+}
+
+interface StoredRows {
+  existing?: unknown;
+  device?: unknown;
+  latestPerPin?: unknown[];
+}
+
+function buildHarness(stored: StoredRows = {}) {
   const inserted: Record<string, unknown>[] = [];
   const pinStates = new Subject<PinStateReport>();
+  const availability = new Subject<NodeAvailability>();
 
+  const latestPerPinQuery = {
+    distinctOn: () => latestPerPinQuery,
+    where: () => latestPerPinQuery,
+    orderBy: () => latestPerPinQuery,
+    addOrderBy: () => latestPerPinQuery,
+    getMany: async () => stored.latestPerPin ?? [],
+  };
   const transitions = {
     insert: vi.fn(async (row: Record<string, unknown>) => {
       inserted.push(row);
     }),
     findOne: vi.fn(async () => stored.existing ?? null),
+    createQueryBuilder: () => latestPerPinQuery,
   };
   const devices = { findOne: vi.fn(async () => stored.device ?? null) };
   const hardware = {
     pinStates$: pinStates.asObservable(),
+    availability$: availability.asObservable(),
   } as unknown as HardwareService;
 
   const log = new PinTransitionLog(
@@ -42,7 +63,7 @@ function buildHarness(stored: { existing?: unknown; device?: unknown } = {}) {
     hardware,
     new FixedClock(AT),
   );
-  return { log, inserted, pinStates, transitions, devices };
+  return { log, inserted, pinStates, availability, transitions, devices };
 }
 
 describe('PinTransitionLog', () => {
@@ -158,6 +179,76 @@ describe('PinTransitionLog', () => {
     // The second report still got through, which is the whole assertion.
     expect(failing.transitions.insert).toHaveBeenCalledTimes(2);
     failing.log.onModuleDestroy();
+  });
+
+  describe('a node going offline', () => {
+    const DROPPED_AT = new Date(AT.getTime() + 60_000);
+    const knownRow = (pin: number, observedAt = AT) => ({
+      nodeId: 'elantris',
+      pin,
+      level: 0,
+      known: true,
+      observedAt,
+    });
+
+    it('writes an unknown row for each known pin, stamped when it dropped', async () => {
+      const offline = buildHarness({
+        latestPerPin: [knownRow(5), knownRow(17)],
+        device: { id: 'd', name: 'CO2', onLevel: 0, role: 'co2_generator' },
+      });
+      offline.log.onModuleInit();
+
+      offline.availability.next(wentOffline(DROPPED_AT));
+      await settle();
+
+      expect(offline.inserted).toHaveLength(2);
+      expect(offline.inserted[0]).toMatchObject({
+        pin: 5,
+        level: null,
+        known: false,
+        energised: null,
+        deviceId: 'd',
+        reason: 'node-offline',
+        observedAt: DROPPED_AT,
+      });
+      offline.log.onModuleDestroy();
+    });
+
+    it('writes nothing for a pin already unknown', async () => {
+      const offline = buildHarness({
+        latestPerPin: [{ ...knownRow(5), level: null, known: false }],
+      });
+      await offline.log.recordNodeOffline(wentOffline(DROPPED_AT));
+      expect(offline.inserted).toEqual([]);
+    });
+
+    it('ignores a node coming online', async () => {
+      const online = buildHarness({ latestPerPin: [knownRow(5)] });
+      online.log.onModuleInit();
+      online.availability.next({ ...wentOffline(DROPPED_AT), online: true });
+      await settle();
+      expect(online.inserted).toEqual([]);
+      online.log.onModuleDestroy();
+    });
+
+    it('keeps the row after the last one when the node clock ran ahead', async () => {
+      const aheadAt = new Date(DROPPED_AT.getTime() + 5000);
+      const offline = buildHarness({ latestPerPin: [knownRow(5, aheadAt)] });
+      await offline.log.recordNodeOffline(wentOffline(DROPPED_AT));
+      expect(offline.inserted[0]).toMatchObject({ observedAt: aheadAt });
+    });
+
+    it('records the pin again once the node reports it on reconnect', async () => {
+      const offline = buildHarness({ latestPerPin: [knownRow(5)] });
+      await offline.log.recordNodeOffline(wentOffline(DROPPED_AT));
+      await offline.log.record(
+        report({ level: 0, observedAt: new Date(DROPPED_AT.getTime() + 1000) }),
+      );
+      expect(offline.inserted.map((row) => row['reason'])).toEqual([
+        'node-offline',
+        'level-changed',
+      ]);
+    });
   });
 });
 

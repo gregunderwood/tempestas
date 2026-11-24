@@ -105,13 +105,17 @@ export class ReportsPage {
   );
 
   constructor() {
-    this.refreshWhenADeviceSwitches();
+    this.refreshWhenADeviceSwitchesOrANodeComesAndGoes();
   }
 
-  private refreshWhenADeviceSwitches(): void {
-    const pushesAtStart = this.realtime.devicePushes();
+  private refreshWhenADeviceSwitchesOrANodeComesAndGoes(): void {
+    const devicePushesAtStart = this.realtime.devicePushes();
+    const nodePushesAtStart = this.realtime.nodePushes();
     effect(() => {
-      if (this.realtime.devicePushes() === pushesAtStart) return;
+      const hasDevicePush =
+        this.realtime.devicePushes() !== devicePushesAtStart;
+      const hasNodePush = this.realtime.nodePushes() !== nodePushesAtStart;
+      if (!hasDevicePush && !hasNodePush) return;
       untracked(() => this.runtimeSource.refresh());
     });
   }

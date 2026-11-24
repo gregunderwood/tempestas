@@ -11,6 +11,7 @@ import {
 import { Clock } from '../common/clock';
 import { MILLISECONDS_PER_DAY } from '../common/time-units';
 import { DeviceEntity, PinTransitionEntity } from '../devices/models';
+import type { TransitionReason } from '../devices/pin-transition';
 import { NodesService } from '../nodes/nodes.service';
 import { parseZoneRulesConfig } from '../rules/rules-config';
 import type { ZoneEntity } from '../zones/models';
@@ -21,6 +22,7 @@ import {
   type RuntimeTransition,
 } from './equipment-runtime';
 
+const NODE_OFFLINE_REASON: TransitionReason = 'node-offline';
 const DEFAULT_TIMEZONE = 'America/Vancouver';
 // A day of slack reaches back past the earliest local midnight in any zone; the summary trims to it.
 const LOOKBACK_SLACK_DAYS = 1;
@@ -116,6 +118,7 @@ function toRuntimeTransition(row: PinTransitionEntity): RuntimeTransition {
     energised: row.energised,
     deviceId: row.deviceId,
     observedAt: row.observedAt,
+    isNodeOffline: row.reason === NODE_OFFLINE_REASON,
   };
 }
 

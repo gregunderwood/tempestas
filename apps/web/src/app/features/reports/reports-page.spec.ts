@@ -8,8 +8,12 @@ import {
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
-import { fakeRealtime, pushDevice } from '../../testing/fake-realtime';
-import { device } from '../zones/zone-fixtures';
+import {
+  fakeRealtime,
+  pushDevice,
+  pushNode,
+} from '../../testing/fake-realtime';
+import { device, node } from '../zones/zone-fixtures';
 import { ReportsPage } from './reports-page';
 
 function burnerRuntime(overrides: Partial<DeviceRuntime> = {}): DeviceRuntime {
@@ -149,6 +153,18 @@ describe('ReportsPage', () => {
     rendered.render();
     expect(rendered.requestCount()).toBe(1);
     pushDevice(rendered.realtime, device());
+    rendered.render();
+    expect(rendered.requestCount()).toBe(2);
+  });
+
+  it('fetches again when a node goes offline or comes back', () => {
+    const rendered = renderReportsPage([
+      of(report([burnerRuntime()])),
+      of(report([burnerRuntime()])),
+    ]);
+    rendered.render();
+    expect(rendered.requestCount()).toBe(1);
+    pushNode(rendered.realtime, { ...node('elantris', null), online: false });
     rendered.render();
     expect(rendered.requestCount()).toBe(2);
   });

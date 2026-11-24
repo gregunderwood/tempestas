@@ -318,8 +318,8 @@ card per device with its hours on, starts, shortest run and unknown hours, a bar
 day-by-day table. Below it, a card names the reports still to come — time in range, freeze margin,
 CO2 enrichment and node health — and loses a line as each lands.
 
-A report is fetched once and fetched again whenever a device switches, so it follows the relays
-without polling. The server side, and the rules for unknown spans, midnight and offline nodes, are
+A report is fetched once and fetched again whenever a device switches or a node goes offline or
+comes back, so it follows the relays without polling. The server side, and the rules for unknown spans, midnight and offline nodes, are
 in [Reports](Infrastructure/Reports.md).
 
 It replaced a Readings screen that listed the latest hundred rows, newest first. `/readings` still

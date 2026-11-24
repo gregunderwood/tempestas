@@ -6,9 +6,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import type { Subscription } from 'rxjs';
+import { Subscription } from 'rxjs';
 import {
   HardwareService,
+  type NodeAvailability,
   type PinStateReport,
 } from '../hardware/hardware.service';
 import { toPinKey } from '../hardware/pin-key';
@@ -19,7 +20,7 @@ import {
   resolveEnergised,
   resolveRecordedAt,
   type LastKnown,
-  type TransitionVerdict,
+  type TransitionReason,
 } from './pin-transition';
 import { findDeviceOnPin } from './find-device-on-pin';
 
@@ -37,7 +38,7 @@ export interface TransitionQuery {
 @Injectable()
 export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PinTransitionLog.name);
-  private subscription?: Subscription;
+  private readonly subscriptions = new Subscription();
   // A cache seeded from the table, so a restart cannot invent a transition from retained state.
   private readonly lastWrittenByPin = new Map<string, LastKnown>();
 
@@ -51,18 +52,30 @@ export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    this.subscription = this.hardware.pinStates$.subscribe((report) => {
-      // Caught here so one failure cannot end the subscription and leave a silent gap.
-      void this.record(report).catch((error: unknown) => {
-        this.logger.error(
-          `Logging ${report.nodeId} pin ${report.pin} failed: ${String(error)}`,
-        );
-      });
-    });
+    this.subscriptions.add(
+      this.hardware.pinStates$.subscribe((report) => {
+        // Caught here so one failure cannot end the subscription and leave a silent gap.
+        void this.record(report).catch((error: unknown) => {
+          this.logger.error(
+            `Logging ${report.nodeId} pin ${report.pin} failed: ${String(error)}`,
+          );
+        });
+      }),
+    );
+    this.subscriptions.add(
+      this.hardware.availability$.subscribe((availability) => {
+        if (availability.online) return;
+        void this.recordNodeOffline(availability).catch((error: unknown) => {
+          this.logger.error(
+            `Logging ${availability.nodeId} going offline failed: ${String(error)}`,
+          );
+        });
+      }),
+    );
   }
 
   onModuleDestroy(): void {
-    this.subscription?.unsubscribe();
+    this.subscriptions.unsubscribe();
   }
 
   // Oldest first: the consumer is a fitting script replaying a night in order.
@@ -94,8 +107,33 @@ export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
     const last = await this.readLastKnown(pinKey, report);
     const verdict = judgeTransition(last, report);
     if (verdict.action === 'skip') return;
-    const observedAt = resolveRecordedAt(last, report, this.clock.now());
+    await this.write(
+      report,
+      resolveRecordedAt(last, report, this.clock.now()),
+      verdict.reason,
+    );
+  }
 
+  // A dropped node sends no gpio/state, so without this row its last run would last until it returned.
+  async recordNodeOffline(availability: NodeAvailability): Promise<void> {
+    const latestRows = await this.findLatestRowPerPin(availability.nodeId);
+    for (const row of latestRows) {
+      const pinKey = toPinKey(row.nodeId, row.pin);
+      const last = this.lastWrittenByPin.get(pinKey) ?? toLastKnown(row);
+      if (!last.known) continue;
+      await this.write(
+        toUnknownReport(row.nodeId, row.pin, availability.at),
+        laterOf(availability.at, last.observedAt),
+        'node-offline',
+      );
+    }
+  }
+
+  private async write(
+    report: PinStateReport,
+    observedAt: Date,
+    reason: TransitionReason,
+  ): Promise<void> {
     const device = await findDeviceOnPin(
       this.devices,
       report.nodeId,
@@ -110,17 +148,27 @@ export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
       energised: resolveEnergised(report.level, report.known, device?.onLevel),
       deviceId: device?.id ?? null,
       role: device?.role ?? null,
-      reason: verdict.reason,
+      reason,
       observedAt,
     });
 
-    this.lastWrittenByPin.set(pinKey, {
+    this.lastWrittenByPin.set(toPinKey(report.nodeId, report.pin), {
       level: report.level,
       known: report.known,
       observedAt,
     });
 
-    this.logger.log(describeTransition(report, device, verdict));
+    this.logger.log(describeTransition(report, device, reason));
+  }
+
+  private findLatestRowPerPin(nodeId: string): Promise<PinTransitionEntity[]> {
+    return this.transitions
+      .createQueryBuilder('pinTransition')
+      .distinctOn(['pinTransition.pin'])
+      .where('pinTransition.nodeId = :nodeId', { nodeId })
+      .orderBy('pinTransition.pin')
+      .addOrderBy('pinTransition.observedAt', 'DESC')
+      .getMany();
   }
 
   private async readLastKnown(
@@ -136,22 +184,35 @@ export class PinTransitionLog implements OnModuleInit, OnModuleDestroy {
     });
     if (!row) return null;
 
-    const seeded: LastKnown = {
-      level: row.level,
-      known: row.known,
-      observedAt: row.observedAt,
-    };
+    const seeded = toLastKnown(row);
     this.lastWrittenByPin.set(pinKey, seeded);
     return seeded;
   }
 }
 
+function toLastKnown(row: PinTransitionEntity): LastKnown {
+  return { level: row.level, known: row.known, observedAt: row.observedAt };
+}
+
+function toUnknownReport(
+  nodeId: string,
+  pin: number,
+  observedAt: Date,
+): PinStateReport {
+  return { nodeId, pin, level: null, known: false, observedAt, live: true };
+}
+
+// Kept after the last row even when the node's clock ran ahead, so history stays in order.
+function laterOf(first: Date, second: Date): Date {
+  return first.getTime() >= second.getTime() ? first : second;
+}
+
 function describeTransition(
   report: PinStateReport,
   device: DeviceEntity | null,
-  verdict: TransitionVerdict,
+  reason: TransitionReason,
 ): string {
   const level = report.known ? report.level : 'UNKNOWN';
   const deviceName = device ? ` (${device.name})` : '';
-  return `${report.nodeId} pin ${report.pin} -> ${level}${deviceName} [${verdict.reason}]`;
+  return `${report.nodeId} pin ${report.pin} -> ${level}${deviceName} [${reason}]`;
 }

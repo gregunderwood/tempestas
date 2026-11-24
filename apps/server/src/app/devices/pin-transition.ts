@@ -8,10 +8,13 @@ export interface LastKnown {
   observedAt: Date;
 }
 
+export type TransitionReason =
+  'first-sight' | 'level-changed' | 'became-unknown' | 'node-offline';
+
 export type TransitionVerdict =
   | {
       action: 'record';
-      reason: 'first-sight' | 'level-changed' | 'became-unknown';
+      reason: Exclude<TransitionReason, 'node-offline'>;
     }
   | { action: 'skip'; reason: 'unchanged' | 'stale' };
 

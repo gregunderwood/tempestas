@@ -36,7 +36,12 @@ function transition(
     energised,
     deviceId,
     observedAt: atLocal(localIso),
+    isNodeOffline: false,
   };
+}
+
+function nodeWentOffline(localIso: string): RuntimeTransition {
+  return { ...transition(localIso, null), isNodeOffline: true };
 }
 
 interface Scenario {
@@ -332,6 +337,41 @@ describe('summariseEquipmentRuntime', () => {
         now: atLocal('2026-09-09T12:00'),
       });
       expect(burner.days[0].hasRunCappedAtLastSeen).toBe(true);
+    });
+  });
+
+  describe('a node that went offline mid-run and has since come back', () => {
+    const outageScenario: Scenario = {
+      transitions: [
+        transition('2026-09-09T00:00', false),
+        transition('2026-09-09T08:00', true),
+        nodeWentOffline('2026-09-09T09:00'),
+        transition('2026-09-09T11:00', false),
+      ],
+      nowLocal: '2026-09-09T12:00',
+      days: 1,
+    };
+
+    it('cuts the run when the node dropped and counts the outage as unknown', () => {
+      expect(summariseBurner(outageScenario).days[0]).toMatchObject({
+        hoursOn: 1,
+        hoursOff: 9,
+        hoursUnknown: 2,
+        starts: 1,
+        shortestRunMinutes: null,
+        hasRunCappedAtLastSeen: true,
+      });
+    });
+
+    it('does not count the node reappearing on as a start', () => {
+      const burner = summariseBurner({
+        ...outageScenario,
+        transitions: [
+          ...outageScenario.transitions.slice(0, 3),
+          transition('2026-09-09T11:00', true),
+        ],
+      });
+      expect(burner.days[0]).toMatchObject({ hoursOn: 2, starts: 1 });
     });
   });
 

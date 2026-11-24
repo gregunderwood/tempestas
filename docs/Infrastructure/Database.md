@@ -81,7 +81,7 @@ between 88 and 118 ppm/min depending only on how the trajectory was anchored.
 | `device_id`, `role`            | The interpretation at the time. Nullable: BCM 12 drives nothing and BCM 16 is going dark, and both still report.                                                                                                                     |
 | `observed_at` vs `recorded_at` | The node's clock, then ours. Aligning relay changes to 10-second readings needs the moment the relay moved, not when we heard.                                                                                                       |
 
-Two things it does deliberately:
+What it does deliberately:
 
 - **Written by its own subscription**, not by reconciliation. `DevicesService`
   returns early for pins it is mid-command on, so a logger wired in there would
@@ -89,6 +89,9 @@ Two things it does deliberately:
 - **Seeded from the table before deciding.** Retained `gpio/state` is
   republished by every node on every connect; without reading the last row
   first, a restart would write a transition where no relay moved.
+- **A dropped node gets a row too.** When a node's offline status arrives, every pin of it whose last
+  row is known gets an unknown row with reason `node-offline`, stamped at that moment. A node going
+  offline sends no `gpio/state`, so otherwise its last state would run on until it reconnected.
 - **A live report is never stale.** Only a retained replay can be older than the last row. A live
   report dated before it means the node's clock is behind (a Pi has no RTC), so it is recorded and
   filed at receipt, keeping history in order. Skipping it hid patji failing safe to ON after a

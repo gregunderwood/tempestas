@@ -137,4 +137,22 @@ describe('ReportsService.buildEquipmentRuntime', () => {
       hasRunCappedAtLastSeen: true,
     });
   });
+
+  it('cuts a run at the row written when its node went offline', async () => {
+    const report = await makeService({
+      inWindow: [
+        burnerRow('2026-09-09T07:00:00Z', false),
+        burnerRow('2026-09-09T15:00:00Z', true),
+        {
+          ...burnerRow('2026-09-09T16:00:00Z', null),
+          reason: 'node-offline',
+        },
+        burnerRow('2026-09-09T18:00:00Z', false),
+      ],
+    }).buildEquipmentRuntime({ days: 1 });
+    expect(report.devices[0].days[0]).toMatchObject({
+      hoursOn: 1,
+      hasRunCappedAtLastSeen: true,
+    });
+  });
 });

@@ -15,6 +15,8 @@ export interface RuntimeTransition {
   energised: boolean | null;
   deviceId: string | null;
   observedAt: Date;
+  /** Written when the node dropped, so whatever ran before it is cut at that moment. */
+  isNodeOffline: boolean;
 }
 
 export interface RuntimeDevice {
@@ -114,7 +116,12 @@ function groupByLine(
   const byLine = new Map<string, RuntimeTransition[]>();
   for (const transition of transitions) {
     const lineKey = `${transition.nodeId}:${transition.pin}`;
-    byLine.set(lineKey, [...(byLine.get(lineKey) ?? []), transition]);
+    const lineRows = byLine.get(lineKey);
+    if (lineRows) {
+      lineRows.push(transition);
+    } else {
+      byLine.set(lineKey, [transition]);
+    }
   }
   return byLine;
 }
@@ -134,7 +141,7 @@ function buildLineSpans(
     const fromMs = row.observedAt.getTime();
     const next = rows[index + 1];
     const end = next
-      ? { atMs: next.observedAt.getTime(), ending: 'transition' as const }
+      ? resolveClosedEnd(next)
       : resolveOpenEnd(fromMs, sighting, nowMs);
     return {
       deviceId: row.deviceId,
@@ -144,6 +151,16 @@ function buildLineSpans(
       ending: end.ending,
     };
   });
+}
+
+function resolveClosedEnd(next: RuntimeTransition): {
+  atMs: number;
+  ending: SpanEnding;
+} {
+  return {
+    atMs: next.observedAt.getTime(),
+    ending: next.isNodeOffline ? 'last-seen' : 'transition',
+  };
 }
 
 // An offline node sent no closing transition, so what it last did after it was last heard is unknown.
