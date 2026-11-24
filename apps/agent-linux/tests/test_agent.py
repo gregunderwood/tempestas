@@ -244,6 +244,11 @@ class TestDeadman:
         agent.on_heartbeat(_heartbeat(controller="nestjs-99"))
         assert agent.bound_controller == "nestjs-99"
 
+    def test_ignores_a_heartbeat_that_is_not_a_json_object(self):
+        agent, _ = make_agent()
+        agent.on_heartbeat(b"[]")
+        assert agent.last_heartbeat_at is None
+
 
 def _server_status(state: str) -> bytes:
     return json.dumps({"schema": "status/1", "state": state}).encode()

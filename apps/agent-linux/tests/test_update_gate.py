@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import shutil
 
+import pytest
+
 from release_fixtures import NEW_RELEASE, RUNNING_RELEASE, make_layout
 from tempestas_agent import contract
 from tempestas_agent.release_layout import (
@@ -209,6 +211,28 @@ def test_a_passed_gate_keeps_the_newest_releases_and_both_ends_of_the_update(tmp
     assert kept == sorted([NEW_RELEASE, RUNNING_RELEASE, older_releases[-1]])
     assert layout.read_pending() is None
     assert layout.read_outcome() == UpdateOutcome("update-1", contract.UpdateState.HEALTHY)
+
+
+def test_a_prune_leaves_nothing_aside_and_a_start_sweeps_up_an_interrupted_one(tmp_path):
+    layout = make_layout(tmp_path)
+    for release in ("1.1.7", "1.1.8", "1.1.9", NEW_RELEASE):
+        layout.locate_release(release).mkdir()
+    oldest = os.path.getmtime(layout.locate_release(RUNNING_RELEASE)) - 1000
+    os.utime(layout.locate_release("1.1.7"), (oldest, oldest))
+    layout.switch_current_to(NEW_RELEASE)
+    interrupted = layout.releases / ".pruning-1.0.0"
+    interrupted.mkdir()
+
+    assert set(layout.prune_releases(protected=set())) == {"1.1.7", RUNNING_RELEASE}
+    assert not any(entry.name.startswith(".pruning-1.1") for entry in layout.releases.iterdir())
+    assert layout.remove_unfinished_downloads() == [".pruning-1.0.0"]
+
+
+def test_a_prune_does_not_wait_for_a_busy_switch_lock_when_told_not_to(tmp_path):
+    layout = make_layout(tmp_path)
+
+    with layout.hold_switch_lock(), pytest.raises(BlockingIOError):
+        layout.prune_releases(protected=set(), should_wait=False)
 
 
 def test_a_prune_never_removes_the_release_current_points_at(tmp_path):

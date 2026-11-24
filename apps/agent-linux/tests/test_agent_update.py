@@ -217,6 +217,21 @@ def test_a_gate_replaced_by_a_hand_deploy_neither_passes_nor_rolls_back(tmp_path
     assert agent.update_gate is None
 
 
+def test_an_update_to_the_version_already_running_is_refused_without_a_restart(
+    monkeypatch, tmp_path
+):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent.installer = ReleaseInstaller(agent.layout)
+
+    agent.on_update(build_fresh_update(version=RUNNING_RELEASE), retained=False)
+
+    assert not agent.restart_requested.is_set()
+    assert update_statuses(agent)[-1] == (
+        contract.UpdateState.FAILED,
+        f"this node already runs {RUNNING_RELEASE}",
+    )
+
+
 def test_a_gate_replaced_by_a_hand_deploy_reports_what_the_hand_deploy_recorded(tmp_path):
     agent, clock = start_new_release_on_its_gate(tmp_path)
     replaced = UpdateOutcome(
@@ -239,6 +254,9 @@ def test_a_failed_install_that_left_current_switched_restarts_into_it(monkeypatc
         def install(self, command, report):
             self.commands.append(command)
             agent.layout.locate_release(command["version"]).mkdir()
+            agent.layout.write_pending(
+                PendingUpdate(command["id"], command["version"], RUNNING_RELEASE)
+            )
             agent.layout.switch_current_to(command["version"])
             raise OSError("read-only file system")
 
@@ -269,7 +287,7 @@ def test_prunes_after_a_passed_gate_without_holding_the_switch_lock(tmp_path, mo
     agent.on_heartbeat(HEARTBEAT)
     lock_states_while_pruning = []
 
-    def prune_noting_the_lock(protected):
+    def prune_noting_the_lock(protected, should_wait=True):
         with agent.layout.hold_switch_lock(should_wait=False):
             lock_states_while_pruning.append("free")
         return []

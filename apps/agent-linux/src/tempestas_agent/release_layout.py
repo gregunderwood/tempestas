@@ -26,6 +26,8 @@ SWITCH_LOCK_FILE = "switch.lock"
 UNFINISHED_PREFIX = "."
 # tools/deploy-agent-linux.sh stages here and cleans up itself, perhaps while the agent starts.
 HAND_DEPLOY_STAGING_PREFIX = ".deploy-"
+# Left behind only by an interrupted prune, so the start's sweep removes it like a download.
+PRUNING_PREFIX = ".pruning-"
 KEPT_RELEASES = 3
 
 log = logging.getLogger("tempestas.agent")
@@ -118,21 +120,32 @@ class ReleaseLayout:
     def clear_outcome(self) -> None:
         (self.state / OUTCOME_FILE).unlink(missing_ok=True)
 
-    def prune_releases(self, protected: set[str]) -> list[str]:
+    def prune_releases(self, protected: set[str], should_wait: bool = True) -> list[str]:
+        # Chosen and moved aside under the lock, so no switch can make one current meanwhile.
+        with self.hold_switch_lock(should_wait=should_wait):
+            removed = self._choose_releases_to_prune(protected)
+            doomed = [self._move_aside_for_pruning(release) for release in removed]
+        # Deleted outside it: removing trees on a slow card must not hold up a switch.
+        for path in doomed:
+            shutil.rmtree(path, ignore_errors=True)
+        return removed
+
+    def _choose_releases_to_prune(self, protected: set[str]) -> list[str]:
         finished = [
             entry
             for entry in self.releases.iterdir()
             if entry.is_dir() and not entry.name.startswith(UNFINISHED_PREFIX)
         ]
         newest_first = sorted(finished, key=read_modified_time, reverse=True)
-        # `current` too: a hand deploy may switch to an older release while this prune runs.
         kept = {entry.name for entry in newest_first[:KEPT_RELEASES]} | protected
         kept.add(self.read_current_release())
-        removed = [entry.name for entry in newest_first if entry.name not in kept]
-        for release in removed:
-            # Another prune may be removing the same release at the same moment.
-            shutil.rmtree(self.locate_release(release), ignore_errors=True)
-        return removed
+        return [entry.name for entry in newest_first if entry.name not in kept]
+
+    def _move_aside_for_pruning(self, release: str) -> Path:
+        aside = self.releases / f"{PRUNING_PREFIX}{release}"
+        shutil.rmtree(aside, ignore_errors=True)
+        self.locate_release(release).rename(aside)
+        return aside
 
     def remove_unfinished_downloads(self) -> list[str]:
         """Only at start: a download cut off by a restart leaves its staging behind for good."""

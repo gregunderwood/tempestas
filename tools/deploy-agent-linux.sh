@@ -124,9 +124,19 @@ swap_back_venv() {
 make_current_or_swap_back() {
   local host="$1"
   make_current "$host" && return 0
+  # It may have failed after switching, say while pruning; then the new venv belongs to `current`.
+  if is_current "$host"; then
+    echo "$host: $AGENT_VERSION is current but its deploy failed after the switch; the new venv stays" >&2
+    exit 1
+  fi
   echo "$host: could not make $AGENT_VERSION current, so its venv was put back" >&2
   swap_back_venv "$host"
   exit 1
+}
+
+is_current() {
+  local host="$1"
+  [ "$(ssh "$host" "readlink $REMOTE_AGENT_HOME/current")" = "releases/$AGENT_VERSION" ]
 }
 
 remove_replaced_venv() {

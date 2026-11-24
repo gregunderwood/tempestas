@@ -276,6 +276,8 @@ class Agent:
             body = json.loads(payload)
         except (ValueError, UnicodeDecodeError):
             return
+        if not isinstance(body, dict):
+            return
         controller = body.get("controller")
         if isinstance(controller, str) and controller != self.bound_controller:
             log.warning("bound to controller %s (epoch %s)", controller, body.get("epoch"))
@@ -558,6 +560,8 @@ class Agent:
         # Outside the switch lock: deleting releases on a slow card must not hold up a deploy.
         try:
             prune_after_update(self.layout, gate.pending)
+        except BlockingIOError:
+            log.info("left old releases for the next prune: the switch lock is busy")
         except OSError as error:
             log.error("could not prune old releases: %s", error)
 
@@ -654,7 +658,7 @@ class Agent:
             )
         except Exception as error:  # noqa: BLE001 - reported to the server, never swallowed
             log.error("update to %s failed: %s", command.get("version"), error)
-            if self._is_switch_left_in_place(command):
+            if self._is_switch_left_in_place(command_id, command["version"]):
                 log.error(
                     "could not undo the switch to %s - restarting into it", command["version"]
                 )
@@ -674,10 +678,12 @@ class Agent:
             # `current` already points at the new release, so it restarts whatever the publish did.
             self.request_restart()
 
-    def _is_switch_left_in_place(self, command: dict) -> bool:
-        """True when a failed install could not put `current` back: its gate must judge it."""
+    def _is_switch_left_in_place(self, command_id: str, version: str) -> bool:
+        """True when this install switched and could not switch back: its gate must judge it."""
         try:
-            return self.layout.read_current_release() == command["version"]
+            pending = self.layout.read_pending()
+            is_this_install_pending = pending is not None and pending.command_id == command_id
+            return is_this_install_pending and self.layout.read_current_release() == version
         except OSError:
             return False
 

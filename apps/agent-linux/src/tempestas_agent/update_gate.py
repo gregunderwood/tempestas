@@ -121,7 +121,10 @@ def pass_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
 
 
 def prune_after_update(layout: ReleaseLayout, pending: PendingUpdate) -> list[str]:
-    return layout.prune_releases(protected={pending.version, pending.previous_release})
+    """Raises BlockingIOError rather than wait for the switch lock."""
+    return layout.prune_releases(
+        protected={pending.version, pending.previous_release}, should_wait=False
+    )
 
 
 def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:

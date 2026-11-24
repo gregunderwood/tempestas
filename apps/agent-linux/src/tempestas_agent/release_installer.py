@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shutil
 import time
 import urllib.request
@@ -101,7 +102,7 @@ class ReleaseInstaller:
             path = listed_file["path"]
             destination = staging / path
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(self.fetch(build_file_url(manifest_url, path)))
+            write_durably(destination, self.fetch(build_file_url(manifest_url, path)))
 
     def _require_same_dependencies(self, files: list[dict], running_release: str) -> None:
         running_lock = self.layout.locate_release(running_release) / DEPENDENCY_LOCK
@@ -156,6 +157,14 @@ class ReleaseInstaller:
             log.error("could not clear the pending %s: %s", destination.name, error)
             return
         shutil.rmtree(destination, ignore_errors=True)
+
+
+def write_durably(path: Path, content: bytes) -> None:
+    # Synced before `current` can point at it: a power cut must not leave a truncated release.
+    with open(path, "wb") as file:
+        file.write(content)
+        file.flush()
+        os.fsync(file.fileno())
 
 
 def parse_manifest(manifest_bytes: bytes) -> dict:
