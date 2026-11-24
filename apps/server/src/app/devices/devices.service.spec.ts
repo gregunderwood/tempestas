@@ -821,3 +821,133 @@ describe('DevicesService reconciliation during its own command', () => {
     });
   });
 });
+
+// A correction loads and saves the whole row, so it takes the device's turn like an edit or a switch.
+describe('DevicesService reconciliation alongside edits and switches', () => {
+  interface HeldLoad {
+    release: () => void;
+  }
+
+  function harness() {
+    let storedRow = burner({ node: NODE });
+    const heldLoads: HeldLoad[] = [];
+    let holdNextLoad = false;
+    const pinStates = new Subject<PinStateReport>();
+    const divergences = new DivergenceLog();
+    const publishDeviceState = vi.fn();
+    const loadStoredRow = vi.fn(() => {
+      const snapshot = { ...storedRow };
+      if (!holdNextLoad) return Promise.resolve(snapshot);
+      holdNextLoad = false;
+      return new Promise<DeviceEntity>((resolve) => {
+        heldLoads.push({ release: () => resolve(snapshot) });
+      });
+    });
+    const deviceRepository = {
+      findOne: loadStoredRow,
+      findOneBy: vi.fn().mockResolvedValue(null),
+      save: vi.fn(async (row: DeviceEntity) => {
+        storedRow = { ...row };
+        return row;
+      }),
+    } as unknown as Repository<DeviceEntity>;
+    const hardware = {
+      setPin: vi.fn().mockResolvedValue(undefined),
+      lastPinReport: vi.fn().mockReturnValue(null),
+      pinStates$: pinStates.asObservable(),
+      hello$: new Subject<NodeHello>().asObservable(),
+    } as unknown as HardwareService;
+    const service = new DevicesService(
+      deviceRepository,
+      {
+        find: vi.fn().mockResolvedValue([{ ...NODE, bootId: 'boot-1' }]),
+      } as unknown as Repository<NodeEntity>,
+      hardware,
+      new FixedClock(NOW),
+      { publishDeviceState } as unknown as RealtimeGateway,
+      divergences,
+    );
+    return {
+      service,
+      pinStates,
+      divergences,
+      publishDeviceState,
+      loadStoredRow,
+      heldLoads,
+      holdNextLoad: () => {
+        holdNextLoad = true;
+      },
+      storedRow: () => storedRow,
+    };
+  }
+
+  const reportAtLevel = (level: 0 | 1): PinStateReport => ({
+    nodeId: NODE.slug,
+    pin: 16,
+    level,
+    known: true,
+    observedAt: NOW,
+    live: true,
+  });
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('reads a report under an on level changed while it waited, and does not put the old one back', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.holdNextLoad();
+    const editing = stack.service.update('dev-1', { onLevel: 1 });
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    // Level 0 is on under the old active-LOW mapping, off under the new one.
+    stack.pinStates.next(reportAtLevel(0));
+    await settle();
+    stack.heldLoads[0].release();
+    await editing;
+    await settle();
+
+    expect(stack.storedRow()).toMatchObject({ onLevel: 1, onAt: null });
+    expect(stack.divergences.since(new Date(0))).toHaveLength(0);
+    expect(stack.publishDeviceState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ onLevel: 1, isOn: false }),
+    );
+    stack.service.onModuleDestroy();
+  });
+
+  it('refuses a remap queued behind a correction to on, and leaves the pin where it is', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.pinStates.next(reportAtLevel(0));
+    await vi.waitFor(() => expect(stack.loadStoredRow).toHaveBeenCalled());
+    stack.holdNextLoad();
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    const remapping = stack.service.update('dev-1', { gpio: 12 });
+    stack.heldLoads[0].release();
+
+    await expect(remapping).rejects.toMatchObject({
+      response: { code: ApiErrorCode.DeviceAlreadyOn },
+    });
+    expect(stack.storedRow()).toMatchObject({ gpio: 16, onAt: NOW });
+    stack.service.onModuleDestroy();
+  });
+
+  it('ignores a report that a later command of ours overtook', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.holdNextLoad();
+    const turningOn = stack.service.turnOn('dev-1');
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    // Taken while the relay was still off, before the command reached the node.
+    stack.pinStates.next(reportAtLevel(1));
+    await settle();
+    stack.heldLoads[0].release();
+    await turningOn;
+    await settle();
+
+    expect(stack.storedRow()).toMatchObject({ onAt: NOW, offAt: null });
+    expect(stack.divergences.since(new Date(0))).toHaveLength(0);
+    stack.service.onModuleDestroy();
+  });
+});

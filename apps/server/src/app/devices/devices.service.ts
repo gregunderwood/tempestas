@@ -34,12 +34,20 @@ import {
   correctionPatch,
   reconcileNewMapping,
   reconcilePinState,
+  type Reconciliation,
 } from './reconcile-pin-state';
 import { findDeviceOnPin } from './find-device-on-pin';
 import { NodeBoots } from './node-boots';
 import { PerDeviceQueue } from './per-device-queue';
 
 type Direction = 'on' | 'off';
+type Correction = Extract<Reconciliation, { action: 'correct' }>;
+
+interface ReportArrival {
+  report: PinStateReport;
+  isFirstReportSinceBoot: boolean;
+  commandsSentBefore: number;
+}
 
 // The single owner of the on/off interlocks; every switch funnels through `drive()`.
 @Injectable()
@@ -49,7 +57,8 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
   private readonly nodeBoots = new NodeBoots();
   // Our own command's `gpio/state` must not be reconciled as a divergence; see docs/Safety.md 3c.
   private readonly pinsMidCommand = new Set<string>();
-  // An edit and a switch of one device must not interleave, or a save writes back stale times.
+  private readonly commandCountsByPin = new Map<string, number>();
+  // Edits, switches and corrections of one device run in turn, or a save writes back stale columns.
   private readonly deviceWrites = new PerDeviceQueue();
 
   constructor(
@@ -207,33 +216,55 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
   }
 
   private reconcileInBackground(report: PinStateReport): void {
+    const pinKey = toPinKey(report.nodeId, report.pin);
     // Decided as the report arrives, before any await can reorder it behind a later one.
-    const isFirstReportSinceBoot = this.nodeBoots.isFirstReportSinceBoot(
+    const arrival: ReportArrival = {
+      report,
+      isFirstReportSinceBoot: this.nodeBoots.isFirstReportSinceBoot(
+        report.nodeId,
+        report.pin,
+      ),
+      commandsSentBefore: this.commandsSentTo(pinKey),
+    };
+    // Caught here so one failure cannot end the subscription.
+    void this.reconcile(arrival).catch((error: unknown) => {
+      this.logger.error(
+        `Reconciling ${report.nodeId} pin ${report.pin} failed: ${String(error)}`,
+      );
+    });
+  }
+
+  private async reconcile(arrival: ReportArrival): Promise<void> {
+    const { report } = arrival;
+    if (this.pinsMidCommand.has(toPinKey(report.nodeId, report.pin))) return;
+
+    const deviceOnPin = await findDeviceOnPin(
+      this.devices,
       report.nodeId,
       report.pin,
     );
-    // Caught here so one failure cannot end the subscription.
-    void this.reconcile(report, isFirstReportSinceBoot).catch(
-      (error: unknown) => {
-        this.logger.error(
-          `Reconciling ${report.nodeId} pin ${report.pin} failed: ${String(error)}`,
-        );
-      },
+    if (!deviceOnPin) return;
+
+    // Loaded and saved in the device's turn, or an edit or switch in between is quietly undone.
+    await this.deviceWrites.runInTurn(deviceOnPin.id, () =>
+      this.correctFromReport(deviceOnPin.id, arrival),
     );
   }
 
-  private async reconcile(
-    report: PinStateReport,
-    isFirstReportSinceBoot: boolean,
+  private async correctFromReport(
+    deviceId: string,
+    arrival: ReportArrival,
   ): Promise<void> {
-    if (this.pinsMidCommand.has(toPinKey(report.nodeId, report.pin))) return;
+    if (this.wasOvertakenByCommand(arrival)) return;
 
+    const { report } = arrival;
     const device = await findDeviceOnPin(
       this.devices,
       report.nodeId,
       report.pin,
     );
-    if (!device) return;
+    const isStillOnPin = device?.id === deviceId;
+    if (!device || !isStillOnPin) return;
 
     const now = this.clock.now();
     const verdict = reconcilePinState(device, report, now);
@@ -242,6 +273,28 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     Object.assign(device, correctionPatch(verdict));
     await this.devices.save(device);
 
+    this.reportDivergence(device, arrival, verdict, now);
+    this.realtime.publishDeviceState(this.toDto(device));
+  }
+
+  // A report taken before our own later command describes the pin as it was, however live it is.
+  private wasOvertakenByCommand(arrival: ReportArrival): boolean {
+    const { report, commandsSentBefore } = arrival;
+    const pinKey = toPinKey(report.nodeId, report.pin);
+    return this.commandsSentTo(pinKey) !== commandsSentBefore;
+  }
+
+  private commandsSentTo(pinKey: string): number {
+    return this.commandCountsByPin.get(pinKey) ?? 0;
+  }
+
+  private reportDivergence(
+    device: DeviceEntity,
+    arrival: ReportArrival,
+    verdict: Correction,
+    now: Date,
+  ): void {
+    const { report, isFirstReportSinceBoot } = arrival;
     this.divergences.record({
       deviceName: device.name,
       nodeId: report.nodeId,
@@ -259,12 +312,11 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
         `${device.name} (${report.nodeId} pin ${report.pin}) changed when ` +
           `${report.nodeId} restarted and claimed its fail-safe level: ${correction}`,
       );
-    } else {
-      this.logger.error(
-        `DIVERGENCE on ${device.name} (${report.nodeId} pin ${report.pin}): ${correction}`,
-      );
+      return;
     }
-    this.realtime.publishDeviceState(this.toDto(device));
+    this.logger.error(
+      `DIVERGENCE on ${device.name} (${report.nodeId} pin ${report.pin}): ${correction}`,
+    );
   }
 
   // Saving switches nothing; a remapped pin is read under its new mapping straight away.
@@ -355,6 +407,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
 
     const pinKey = toPinKey(device.node.slug, device.gpio);
     this.pinsMidCommand.add(pinKey);
+    this.commandCountsByPin.set(pinKey, this.commandsSentTo(pinKey) + 1);
     try {
       await this.hardware.setPin(device.node.slug, {
         pin: device.gpio,
