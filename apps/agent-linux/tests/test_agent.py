@@ -22,14 +22,14 @@ PUBLISH_NO_CONNECTION = 4
 
 
 class FakeDelivery:
-    def __init__(self, is_delivered: bool, rc: int = PUBLISH_QUEUED):
-        self.is_delivered = is_delivered
+    def __init__(self, has_reached_broker: bool, rc: int = PUBLISH_QUEUED):
+        self.has_reached_broker = has_reached_broker
         self.rc = rc
 
     def is_published(self) -> bool:
         if self.rc != PUBLISH_QUEUED:
             raise RuntimeError("Message publish failed")
-        return self.is_delivered
+        return self.has_reached_broker
 
 
 class FakeClient:

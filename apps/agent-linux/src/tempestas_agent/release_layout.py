@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
 import shutil
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -15,6 +18,7 @@ CURRENT_LINK = "current"
 STATE_DIRECTORY = "update-state"
 PENDING_FILE = "pending.json"
 OUTCOME_FILE = "outcome.json"
+SWITCH_LOCK_FILE = "switch.lock"
 # A release still arriving or being replaced: never run, and never counted as one to keep.
 UNFINISHED_PREFIX = "."
 KEPT_RELEASES = 3
@@ -47,6 +51,14 @@ class ReleaseLayout:
     def from_environment(cls) -> ReleaseLayout | None:
         home = os.environ.get(HOME_ENVIRONMENT_VARIABLE)
         return cls(Path(home)) if home else None
+
+    @contextmanager
+    def hold_switch_lock(self) -> Iterator[None]:
+        """Held around every read-then-switch of `current`, by the agent and a hand deploy alike."""
+        self.state.mkdir(parents=True, exist_ok=True)
+        with open(self.state / SWITCH_LOCK_FILE, "w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            yield
 
     def read_current_release(self) -> str | None:
         try:

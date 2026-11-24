@@ -60,7 +60,7 @@ def settle_update_on_start(layout: ReleaseLayout | None, now: float) -> UpdateSe
         UpdateOutcome(
             pending.command_id,
             contract.UpdateState.ROLLED_BACK,
-            f"{pending.version} did not start, so {layout.read_current_release()} runs again",
+            f"{pending.version} did not start, so {pending.previous_release} runs again",
         ),
     )
     return settlement
@@ -73,11 +73,13 @@ def is_still_pending(layout: ReleaseLayout, gate: HealthGate) -> bool:
 
 def pass_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
     # Recorded, not just published, so a lost publish or a crash still tells the server.
-    outcome = record_outcome(
+    return record_outcome(
         layout, UpdateOutcome(gate.pending.command_id, contract.UpdateState.HEALTHY)
     )
-    layout.prune_releases(protected={gate.pending.version, gate.pending.previous_release})
-    return outcome
+
+
+def prune_after_update(layout: ReleaseLayout, pending: PendingUpdate) -> list[str]:
+    return layout.prune_releases(protected={pending.version, pending.previous_release})
 
 
 def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> None:

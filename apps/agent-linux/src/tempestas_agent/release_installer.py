@@ -18,6 +18,8 @@ from .version import AGENT_NAME
 
 log = logging.getLogger("tempestas.agent")
 
+HAND_DEPLOYED_DURING_DOWNLOAD = "a hand deploy changed the running release during the download"
+
 BUNDLE_FILES_DIRECTORY = "files"
 DEPENDENCY_LOCK = "uv.lock"
 FETCH_TIMEOUT_S = 30
@@ -99,6 +101,15 @@ class ReleaseInstaller:
             )
 
     def _switch_to(self, staging: Path, command: dict, running_release: str) -> PendingUpdate:
+        with self.layout.hold_switch_lock():
+            if self.layout.read_current_release() != running_release:
+                shutil.rmtree(staging, ignore_errors=True)
+                raise UpdateFailed(HAND_DEPLOYED_DURING_DOWNLOAD)
+            return self._switch_while_locked(staging, command, running_release)
+
+    def _switch_while_locked(
+        self, staging: Path, command: dict, running_release: str
+    ) -> PendingUpdate:
         version = command["version"]
         destination = self.layout.release_path(version)
         shutil.rmtree(destination, ignore_errors=True)

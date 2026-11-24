@@ -11,6 +11,7 @@ from tempestas_agent.update_gate import (
     GATE_SECONDS,
     HealthGate,
     pass_gate,
+    prune_after_update,
     roll_back_gate,
     settle_update_on_start,
 )
@@ -115,6 +116,7 @@ def test_a_passed_gate_keeps_the_newest_releases_and_both_ends_of_the_update(tmp
     install_new_release(layout)
 
     pass_gate(layout, HealthGate(PENDING, STARTED_AT))
+    prune_after_update(layout, PENDING)
 
     kept = sorted(entry.name for entry in layout.releases.iterdir())
     assert NEW_RELEASE in kept and RUNNING_RELEASE in kept

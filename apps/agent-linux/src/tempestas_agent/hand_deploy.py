@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import sys
 
-from .release_layout import ReleaseLayout
+from . import contract
+from .release_layout import ReleaseLayout, UpdateOutcome
+from .update_gate import record_outcome
 
 EXIT_DEPLOYED = 0
 EXIT_NO_SUCH_RELEASE = 1
@@ -12,14 +14,21 @@ EXIT_USAGE = 2
 
 
 def make_current(layout: ReleaseLayout, release: str) -> list[str]:
-    previous_release = layout.read_current_release()
-    pending = layout.read_pending()
-    layout.switch_current_to(release)
-    # A hand deploy supersedes any update still waiting on its health gate.
-    layout.clear_pending()
-    # The running agent may still roll its gate back before the deploy restarts it.
-    protected = {release, previous_release, pending.previous_release if pending else None}
-    return layout.prune_releases(protected - {None})
+    with layout.hold_switch_lock():
+        previous_release = layout.read_current_release()
+        pending = layout.read_pending()
+        layout.switch_current_to(release)
+        if pending is not None:
+            # The server is still waiting to hear how that update ended.
+            record_outcome(
+                layout,
+                UpdateOutcome(
+                    pending.command_id,
+                    contract.UpdateState.FAILED,
+                    f"replaced by a hand deploy of {release} before its health gate passed",
+                ),
+            )
+    return layout.prune_releases({release, previous_release} - {None})
 
 
 def main(arguments: list[str]) -> int:

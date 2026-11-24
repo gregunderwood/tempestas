@@ -32,33 +32,49 @@ for HOST in "${HOSTS[@]}"; do
   require_passwordless_systemctl "$HOST" "restart tempestas-agent.service"
 done
 
+# Copied under a dot-name and renamed in whole, so a redeploy never edits the tree the agent runs.
 copy_release() {
   local host="$1"
-  ssh "$host" "mkdir -p $REMOTE_RELEASE"
-  (cd "$AGENT" && rsync -a --delete --checksum \
+  local releases="$REMOTE_AGENT_HOME/releases"
+  ssh "$host" "rm -rf $releases/.$AGENT_VERSION && mkdir -p $releases/.$AGENT_VERSION"
+  (cd "$AGENT" && rsync -a \
     --exclude '__pycache__' --exclude '.venv' --exclude "$(basename "$LINUX_AGENT_VERSION_STAMP")" \
-    "${LINUX_AGENT_PATHS[@]}" "$host:$REMOTE_RELEASE/")
+    "${LINUX_AGENT_PATHS[@]}" "$host:$releases/.$AGENT_VERSION/")
   printf 'AGENT_VERSION = "%s"\n' "$AGENT_VERSION" |
-    ssh "$host" "cat > $REMOTE_RELEASE/$LINUX_AGENT_VERSION_STAMP"
+    ssh "$host" "cat > $releases/.$AGENT_VERSION/$LINUX_AGENT_VERSION_STAMP"
+  ssh "$host" "cd $releases && rm -rf .$AGENT_VERSION-replaced && \
+    { [ ! -e $AGENT_VERSION ] || mv -T $AGENT_VERSION .$AGENT_VERSION-replaced; } && \
+    mv -T .$AGENT_VERSION $AGENT_VERSION && rm -rf .$AGENT_VERSION-replaced"
 }
 
-# A fresh venv beside the old one, swapped in only once pip has finished.
+# Built beside the running venv, which the agent keeps using until swap_in_built_venv.
 build_venv_if_needed() {
   local host="$1"
   printf '%s\n' "$REQUIREMENTS" | ssh "$host" "cat > $REMOTE_AGENT_HOME/.$REQUIREMENTS_FILE"
   ssh "$host" bash -s -- "$REMOTE_AGENT_HOME" "$REQUIREMENTS_FILE" <<'REMOTE'
 set -euo pipefail
 home="$1" requirements_file="$2"
+rm -rf "$home/.venv-building"
 if cmp -s "$home/.$requirements_file" "$home/venv/$requirements_file"; then
   rm -f "$home/.$requirements_file"
   echo "venv is up to date"
   exit 0
 fi
 echo "building the venv; on a Pi Zero this takes a few minutes"
-rm -rf "$home/.venv-building"
 python3 -m venv --system-site-packages "$home/.venv-building"
+"$home/.venv-building/bin/pip" install --quiet --disable-pip-version-check -r "$home/.$requirements_file"
+# Last, so only a finished build carries the file swap_in_built_venv looks for.
 mv "$home/.$requirements_file" "$home/.venv-building/$requirements_file"
-"$home/.venv-building/bin/pip" install --quiet --disable-pip-version-check -r "$home/.venv-building/$requirements_file"
+REMOTE
+}
+
+# Just before the restart, so the old agent never runs against packages it was not built for.
+swap_in_built_venv() {
+  local host="$1"
+  ssh "$host" bash -s -- "$REMOTE_AGENT_HOME" "$REQUIREMENTS_FILE" <<'REMOTE'
+set -euo pipefail
+home="$1" requirements_file="$2"
+[ -e "$home/.venv-building/$requirements_file" ] || exit 0
 rm -rf "$home/.venv-replaced"
 [ ! -e "$home/venv" ] || mv "$home/venv" "$home/.venv-replaced"
 mv "$home/.venv-building" "$home/venv"
@@ -66,10 +82,11 @@ rm -rf "$home/.venv-replaced"
 REMOTE
 }
 
+# The system python: hand_deploy needs only the standard library, and the venv may not exist yet.
 make_current() {
   local host="$1"
   ssh "$host" "cd $REMOTE_RELEASE && TEMPESTAS_AGENT_HOME=$REMOTE_AGENT_HOME PYTHONPATH=$REMOTE_RELEASE/src \
-    $REMOTE_AGENT_HOME/venv/bin/python -m tempestas_agent.hand_deploy $AGENT_VERSION"
+    python3 -m tempestas_agent.hand_deploy $AGENT_VERSION"
 }
 
 is_unit_on_release_layout() {
@@ -94,6 +111,7 @@ for HOST in "${HOSTS[@]}"; do
   say "$HOST: copying into $REMOTE_RELEASE"
   copy_release "$HOST"
   build_venv_if_needed "$HOST"
+  swap_in_built_venv "$HOST"
   make_current "$HOST"
 
   if ! is_unit_on_release_layout "$HOST"; then

@@ -12,7 +12,7 @@ from release_fixtures import (
     make_layout,
 )
 from tempestas_agent import contract
-from tempestas_agent.agent import NOT_INSTALLED_FROM_A_RELEASE
+from tempestas_agent.agent import LAST_OUTCOME_UNDELIVERED, NOT_INSTALLED_FROM_A_RELEASE
 from tempestas_agent.release_installer import ReleaseInstaller, UpdateFailed
 from tempestas_agent.release_layout import PendingUpdate, UpdateOutcome
 from tempestas_agent.update_gate import GATE_SECONDS
@@ -237,6 +237,54 @@ def test_keeps_the_rollback_until_the_broker_has_it_and_sends_it_again_on_reconn
 
     assert update_statuses(agent) == [(contract.UpdateState.ROLLED_BACK, reason)] * 2
     assert agent.layout.read_outcome() is None
+
+
+def test_refuses_a_new_update_until_the_last_result_has_reached_the_server(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent.outcome_to_report = UpdateOutcome("update-0", contract.UpdateState.HEALTHY)
+
+    agent.on_update(build_fresh_update(), retained=False)
+
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, LAST_OUTCOME_UNDELIVERED)]
+    assert agent.installer.commands == []
+
+
+def test_takes_a_new_update_once_the_last_result_is_delivered_even_before_tidying_up(
+    monkeypatch, tmp_path
+):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent.outcome_to_report = UpdateOutcome("update-0", contract.UpdateState.HEALTHY)
+    agent.report_settled_update()
+
+    agent.on_update(build_fresh_update(), retained=False)
+
+    assert len(agent.installer.commands) == 1
+
+
+def test_a_gate_that_cannot_be_settled_is_logged_and_the_agent_carries_on(tmp_path, monkeypatch):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    def fail_switching(_release):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(agent.layout, "switch_current_to", fail_switching)
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert agent.update_gate is None
+    assert not agent.restart_requested.is_set()
+
+
+def test_keeps_an_outcome_a_hand_deploy_recorded_after_the_last_one_was_sent(tmp_path):
+    agent, _ = roll_back_before_this_start(tmp_path)
+    agent.report_settled_update()
+    newer = UpdateOutcome("update-2", contract.UpdateState.FAILED, "replaced by a hand deploy")
+    agent.layout.write_outcome(newer)
+
+    agent.tend_update()
+
+    assert agent.layout.read_outcome() == newer
 
 
 def test_a_publish_made_while_disconnected_is_kept_for_the_next_connect(tmp_path):

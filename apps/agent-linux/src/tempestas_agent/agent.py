@@ -20,7 +20,14 @@ from .ds18b20 import Ds18b20Sensors, Probe
 from .release_installer import ReleaseInstaller
 from .release_layout import ReleaseLayout
 from .update_command import ANSWER_ALARM, ANSWER_FAILED_STATUS, UpdateVerdict, judge_update_command
-from .update_gate import is_still_pending, pass_gate, roll_back_gate, settle_update_on_start
+from .update_gate import (
+    HealthGate,
+    is_still_pending,
+    pass_gate,
+    prune_after_update,
+    roll_back_gate,
+    settle_update_on_start,
+)
 from .version import AGENT_NAME, read_agent_version
 from .world_client import WorldClient
 
@@ -33,6 +40,7 @@ SEVERITY_INFO = "info"
 SCD4X_METRICS = ("temperature", "humidity", "co2")
 SERVER_ONLINE = "online"
 SERVER_OFFLINE = "offline"
+LAST_OUTCOME_UNDELIVERED = "the last update's result has not reached the server yet"
 NOT_INSTALLED_FROM_A_RELEASE = (
     "this agent was not installed from a release, so it cannot update itself; "
     "run tools/deploy-agent-linux.sh"
@@ -313,6 +321,12 @@ class Agent:
                 verdict.command_id, contract.UpdateState.FAILED, NOT_INSTALLED_FROM_A_RELEASE
             )
             return
+        if self._has_undelivered_outcome():
+            # Installing clears the recorded outcome, which the server would then never hear.
+            self.publish_update_status(
+                verdict.command_id, contract.UpdateState.FAILED, LAST_OUTCOME_UNDELIVERED
+            )
+            return
         if self.update_gate is not None or not self._update_in_progress.acquire(blocking=False):
             self.publish_update_status(
                 verdict.command_id, contract.UpdateState.FAILED, "another update is in progress"
@@ -406,23 +420,47 @@ class Agent:
         if not has_passed and not gate.is_overdue(self._clock()):
             return
         self.update_gate = None
-        if not is_still_pending(self.layout, gate):
-            log.warning("update to %s was replaced by a hand deploy", gate.pending.version)
-            return
-        if has_passed:
-            log.info("update to %s passed its health gate", gate.pending.version)
-            self.outcome_to_report = pass_gate(self.layout, gate)
-            self.report_settled_update()
-            return
+        try:
+            with self.layout.hold_switch_lock():
+                if not is_still_pending(self.layout, gate):
+                    log.warning("update to %s was replaced by a hand deploy", gate.pending.version)
+                elif has_passed:
+                    self._pass_update_gate(gate)
+                else:
+                    self._fail_update_gate(gate)
+        except OSError as error:
+            # Housekeeping that fails must never stop sampling or the dead-man.
+            log.error("could not settle the update to %s: %s", gate.pending.version, error)
+
+    def _pass_update_gate(self, gate: HealthGate) -> None:
+        log.info("update to %s passed its health gate", gate.pending.version)
+        self.outcome_to_report = pass_gate(self.layout, gate)
+        self.report_settled_update()
+        prune_after_update(self.layout, gate.pending)
+
+    def _fail_update_gate(self, gate: HealthGate) -> None:
         log.error("update gate failed: %s - rolling back", gate.describe_failure())
         roll_back_gate(self.layout, gate)
         self.restart_requested.set()
+
+    def _has_undelivered_outcome(self) -> bool:
+        delivery = self._outcome_delivery
+        return self.outcome_to_report is not None and (
+            delivery is None or not is_delivered(delivery)
+        )
 
     def _forget_delivered_outcome(self) -> None:
         delivery = self._outcome_delivery
         if delivery is None or not is_delivered(delivery):
             return
-        self.layout.clear_outcome()
+        try:
+            with self.layout.hold_switch_lock():
+                # A hand deploy may have recorded a newer outcome since this one was sent.
+                if self.layout.read_outcome() == self.outcome_to_report:
+                    self.layout.clear_outcome()
+        except OSError as error:
+            log.error("could not forget a delivered update outcome: %s", error)
+            return
         self.outcome_to_report = None
         self._outcome_delivery = None
 
