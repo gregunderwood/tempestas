@@ -25,6 +25,13 @@ GET /api/readings/latest                            one row per sensor, unwindow
 GET /api/readings/stats?days=&from=&to=&nodeId=      min/max/average over the window
 ```
 
+`GET /api/zone-history` also reads this table, through `ReadingsService.bucketTemperatures`: each
+sensor's temperature over the last 24 hours as five-minute buckets (average, lowest, highest and
+sample count), so a zone card draws 288 points per probe instead of 8,640 rows. Buckets start on
+whole multiples of five minutes since the epoch (`date_bin` from `TIMESTAMPTZ 'epoch'`), which lets
+the browser add a pushed reading to the bucket the next fetch will put it in. See
+[Web App](../Web%20App.md#the-last-24-hours-on-a-zone-card).
+
 `nodeId` is the node **slug**, as everywhere on the wire. `limit` defaults to **500** and caps at
 5,000 — 90 days of retention at one sample per node per 10 s is over three quarters of a million
 rows, and a dashboard wants `/stats` over a window rather than the window itself.

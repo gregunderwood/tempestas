@@ -85,3 +85,93 @@ describe('ReadingsService.findLatestPerSensor', () => {
     );
   });
 });
+
+describe('ReadingsService.bucketTemperatures', () => {
+  function makeServiceAnsweringBuckets(rawRows: unknown[]) {
+    const conditions: string[] = [];
+    const parameters: Record<string, unknown> = {};
+    const groupings: string[] = [];
+    const recordCondition = (
+      condition: string,
+      conditionParameters: Record<string, unknown> = {},
+    ) => {
+      conditions.push(condition);
+      Object.assign(parameters, conditionParameters);
+      return builder;
+    };
+    const builder = {
+      innerJoin: () => builder,
+      select: () => builder,
+      addSelect: () => builder,
+      where: recordCondition,
+      andWhere: recordCondition,
+      setParameter: (name: string, value: unknown) => {
+        parameters[name] = value;
+        return builder;
+      },
+      groupBy: (grouping: string) => {
+        groupings.push(grouping);
+        return builder;
+      },
+      addGroupBy: (grouping: string) => {
+        groupings.push(grouping);
+        return builder;
+      },
+      orderBy: () => builder,
+      limit: () => builder,
+      getRawMany: async () => rawRows,
+    };
+    const readings = {
+      createQueryBuilder: () => builder,
+    } as unknown as Repository<SensorReadingEntity>;
+    const service = new ReadingsService(
+      readings,
+      {} as Repository<NodeEntity>,
+      new SystemClock(),
+      {} as ConfigService,
+    );
+    return { service, conditions, parameters, groupings };
+  }
+
+  const WINDOW = {
+    from: new Date('2026-11-22T12:00:00Z'),
+    to: new Date('2026-11-23T12:00:00Z'),
+  };
+
+  it('buckets each sensor inside the window', async () => {
+    const { service, conditions, parameters, groupings } =
+      makeServiceAnsweringBuckets([]);
+    await service.bucketTemperatures(WINDOW, 5);
+    expect(conditions).toEqual([
+      'reading.createdAt >= :from',
+      'reading.createdAt <= :to',
+    ]);
+    expect(parameters).toMatchObject({ ...WINDOW, bucketMinutes: 5 });
+    expect(groupings).toEqual(['node.slug', 'reading.sensorId', '"at"']);
+  });
+
+  it('turns the strings Postgres returns for AVG and COUNT into numbers', async () => {
+    const { service } = makeServiceAnsweringBuckets([
+      {
+        nodeId: 'patji',
+        sensorId: 'pipes',
+        at: new Date('2026-11-23T03:00:00Z'),
+        averageC: '3.14159',
+        lowestC: '2.5',
+        highestC: '3.75',
+        sampleCount: '30',
+      },
+    ]);
+    expect(await service.bucketTemperatures(WINDOW, 5)).toEqual([
+      {
+        nodeId: 'patji',
+        sensorId: 'pipes',
+        at: new Date('2026-11-23T03:00:00Z'),
+        averageC: 3.14,
+        lowestC: 2.5,
+        highestC: 3.75,
+        sampleCount: 30,
+      },
+    ]);
+  });
+});

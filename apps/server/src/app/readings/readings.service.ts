@@ -52,6 +52,30 @@ interface MetricExtremes {
 
 const EXTREME_METRICS: readonly Metric[] = ['temperature', 'humidity', 'co2'];
 
+// Bounded like every readings query: a day of five-minute buckets for seventy probes.
+const MAX_TEMPERATURE_BUCKET_ROWS = 20_000;
+
+/** One bucket of one sensor's temperatures; `nodeId` is the node slug. */
+export interface TemperatureBucketRow {
+  nodeId: string;
+  sensorId: string;
+  at: Date;
+  averageC: number;
+  lowestC: number;
+  highestC: number;
+  sampleCount: number;
+}
+
+interface RawTemperatureBucket {
+  nodeId: string;
+  sensorId: string;
+  at: Date;
+  averageC: string;
+  lowestC: string;
+  highestC: string;
+  sampleCount: string;
+}
+
 @Injectable()
 export class ReadingsService {
   constructor(
@@ -151,6 +175,36 @@ export class ReadingsService {
       from: window.from.toISOString(),
       to: window.to.toISOString(),
     };
+  }
+
+  // Buckets start on whole multiples since the epoch, so a client can bucket a pushed reading to match.
+  async bucketTemperatures(
+    window: ReadingWindow,
+    bucketMinutes: number,
+  ): Promise<TemperatureBucketRow[]> {
+    const rows = await this.readings
+      .createQueryBuilder('reading')
+      .innerJoin('reading.node', 'node')
+      .select('node.slug', 'nodeId')
+      .addSelect('reading.sensorId', 'sensorId')
+      .addSelect(
+        `date_bin(make_interval(mins => :bucketMinutes), reading.createdAt, TIMESTAMPTZ 'epoch')`,
+        'at',
+      )
+      .addSelect('AVG(reading.temperature)', 'averageC')
+      .addSelect('MIN(reading.temperature)', 'lowestC')
+      .addSelect('MAX(reading.temperature)', 'highestC')
+      .addSelect('COUNT(*)', 'sampleCount')
+      .where('reading.createdAt >= :from', { from: window.from })
+      .andWhere('reading.createdAt <= :to', { to: window.to })
+      .setParameter('bucketMinutes', bucketMinutes)
+      .groupBy('node.slug')
+      .addGroupBy('reading.sensorId')
+      .addGroupBy('"at"')
+      .orderBy('"at"', 'ASC')
+      .limit(MAX_TEMPERATURE_BUCKET_ROWS)
+      .getRawMany<RawTemperatureBucket>();
+    return rows.map(toTemperatureBucketRow);
   }
 
   private async computeSegmentStats(
@@ -277,6 +331,21 @@ function toReading(row: SensorReadingEntity): Reading {
     humidity: row.humidity === null ? null : Number(row.humidity),
     co2: row.co2 === null ? null : Number(row.co2),
     createdAt: row.createdAt.toISOString(),
+  };
+}
+
+// Postgres returns AVG and COUNT as strings.
+function toTemperatureBucketRow(
+  raw: RawTemperatureBucket,
+): TemperatureBucketRow {
+  return {
+    nodeId: raw.nodeId,
+    sensorId: raw.sensorId,
+    at: new Date(raw.at),
+    averageC: Math.round(Number(raw.averageC) * 100) / 100,
+    lowestC: Number(raw.lowestC),
+    highestC: Number(raw.highestC),
+    sampleCount: Number(raw.sampleCount),
   };
 }
 

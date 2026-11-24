@@ -22,6 +22,7 @@ import { RulesModule } from './rules/rules.module';
 import { SensorReadingEntity } from './readings/models';
 import { ZoneEntity } from './zones/models';
 import { ZonesModule } from './zones/zones.module';
+import { ZoneHistoryModule } from './zone-history/zone-history.module';
 import { HealthModule } from './health/health.module';
 
 const WEB_BUNDLE_DIRECTORY = join(__dirname, '..', 'web');
@@ -64,6 +65,7 @@ const ENTITIES = [
     ReportsModule,
     RulesModule,
     ZonesModule,
+    ZoneHistoryModule,
     HealthModule,
     AgentReleasesModule,
   ],

@@ -10,6 +10,7 @@ the first; the next reports follow the same shape.
 ## Key files
 
 - [../../apps/server/src/app/reports/equipment-runtime.ts](../../apps/server/src/app/reports/equipment-runtime.ts) — transitions to per-day runtime, pure
+- [../../apps/server/src/app/devices/relay-spans.ts](../../apps/server/src/app/devices/relay-spans.ts) — transitions to on, off and unknown spans, pure; shared with the zones page's history
 - [../../apps/server/src/app/reports/reports.service.ts](../../apps/server/src/app/reports/reports.service.ts) — loads the rows, resolves each zone's timezone
 - [../../libs/domain/src/lib/reports/equipment-runtime.model.ts](../../libs/domain/src/lib/reports/equipment-runtime.model.ts) — the wire types
 - [../../apps/web/src/app/features/reports/equipment-runtime-card.ts](../../apps/web/src/app/features/reports/equipment-runtime-card.ts) — the card
