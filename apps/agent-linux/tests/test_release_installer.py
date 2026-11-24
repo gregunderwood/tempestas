@@ -247,7 +247,7 @@ class TricklingResponse:
     def __init__(self, clock):
         self.clock = clock
 
-    def read(self, _size):
+    def read1(self, _size):
         self.clock.append(self.clock[-1] + 30)
         return b"x"
 

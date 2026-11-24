@@ -359,6 +359,24 @@ def test_an_update_refused_for_a_passing_reason_can_be_retried_under_its_id(monk
     assert len(agent.installer.commands) == 1
 
 
+def test_a_failure_the_installer_recorded_is_reported_once_and_then_cleared(monkeypatch, tmp_path):
+    class RecordingFailureInstaller(InlineInstaller):
+        def install(self, command, report):
+            self.commands.append(command)
+            failure = UpdateOutcome(command["id"], contract.UpdateState.FAILED, "card full")
+            agent.layout.write_outcome(failure)
+            raise OSError("card full")
+
+    agent, _ = make_updating_agent(monkeypatch, tmp_path, RecordingFailureInstaller())
+    agent.is_server_online = True
+
+    agent.on_update(build_fresh_update(), retained=False)
+    agent.tend_update()
+
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, "card full")]
+    assert agent.layout.read_outcome() is None
+
+
 def test_ignores_a_repeat_of_an_update_that_already_failed(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path, InlineInstaller(failure="no space"))
     agent.on_update(build_fresh_update(), retained=False)

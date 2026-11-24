@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import quote, urljoin, urlparse
 
 from . import contract
-from .release_layout import PendingUpdate, ReleaseLayout, UpdateOutcome
+from .release_layout import PendingUpdate, ReleaseLayout, UpdateOutcome, sync_directory
 from .update_command import SHA256_HEX
 from .update_gate import record_outcome
 from .version import AGENT_NAME
@@ -47,7 +47,8 @@ def fetch_over_http(url: str, clock: Callable[[], float] = time.monotonic) -> by
 
 def read_within(response, url: str, deadline: float, clock: Callable[[], float]) -> bytes:
     body = bytearray()
-    while chunk := response.read(FETCH_CHUNK_BYTES):
+    # read1, not read: read waits to fill the chunk, so a trickle would never reach the check.
+    while chunk := response.read1(FETCH_CHUNK_BYTES):
         body += chunk
         if len(body) > MAX_FILE_BYTES:
             raise UpdateFailed(f"{url} is larger than {MAX_FILE_BYTES} bytes")
@@ -104,6 +105,7 @@ class ReleaseInstaller:
             destination = staging / path
             destination.parent.mkdir(parents=True, exist_ok=True)
             write_durably(destination, self.fetch(build_file_url(manifest_url, path)))
+        sync_directories_under(staging)
 
     def _require_same_dependencies(self, files: list[dict], running_release: str) -> None:
         running_lock = self.layout.locate_release(running_release) / DEPENDENCY_LOCK
@@ -131,6 +133,7 @@ class ReleaseInstaller:
         try:
             shutil.rmtree(destination, ignore_errors=True)
             staging.rename(destination)
+            sync_directory(self.layout.releases)
             # Before the switch: a crash between the two reads as a failed start, never as none.
             self.layout.clear_start_records()
             self.layout.write_pending(pending)
@@ -177,6 +180,12 @@ def write_durably(path: Path, content: bytes) -> None:
         file.write(content)
         file.flush()
         os.fsync(file.fileno())
+
+
+def sync_directories_under(root: Path) -> None:
+    # The entries, not just the files: a power cut must not lose a file the switch relies on.
+    for directory in [root, *(path for path in root.rglob("*") if path.is_dir())]:
+        sync_directory(directory)
 
 
 def parse_manifest(manifest_bytes: bytes) -> dict:

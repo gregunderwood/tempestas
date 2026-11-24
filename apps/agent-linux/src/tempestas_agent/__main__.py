@@ -6,6 +6,7 @@ import argparse
 import faulthandler
 import json
 import logging
+import math
 import os
 import signal
 import sys
@@ -31,6 +32,8 @@ LOCK_PATH_TEMPLATE = "/run/tempestas/agent-{node_id}.lock"
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s %(message)s"
 # Gives the network loop time to send the offline status before it stops.
 OFFLINE_FLUSH_S = 0.2
+# A signal handler cannot safely wake an Event, so a stop is noticed within this.
+STOP_CHECK_S = 1.0
 # systemd asks for a ping at least every half of WatchdogSec.
 WATCHDOG_PING_SHARE = 0.5
 MICROSECONDS_PER_SECOND = 1_000_000
@@ -211,22 +214,26 @@ def start(agent: Agent, config: AgentConfig) -> None:
 
 
 def run_until_signalled(agent: Agent, config: AgentConfig) -> None:
-    should_stop = False
-
-    def request_stop(_signal_number, _frame):
-        nonlocal should_stop
-        should_stop = True
-        agent.wake_main_loop.set()
-
-    signal.signal(signal.SIGINT, request_stop)
-    signal.signal(signal.SIGTERM, request_stop)
+    stop = StopRequest()
+    signal.signal(signal.SIGINT, stop.request)
+    signal.signal(signal.SIGTERM, stop.request)
     ping_interval_s = read_watchdog_ping_interval_s()
 
-    while not should_stop and not agent.restart_requested.is_set():
+    while not stop.is_requested and not agent.restart_requested.is_set():
         publish_samples(agent)
         agent.check_deadman()
         agent.tend_update()
-        wait_for_next_tick(agent, config.sensor.sample_interval_s, ping_interval_s)
+        wait_for_next_tick(agent, config.sensor.sample_interval_s, ping_interval_s, stop)
+
+
+class StopRequest:
+    """Set by a signal handler, which takes no lock: it may interrupt a thread holding one."""
+
+    def __init__(self):
+        self.is_requested = False
+
+    def request(self, _signal_number=None, _frame=None) -> None:
+        self.is_requested = True
 
 
 def read_watchdog_ping_interval_s() -> float | None:
@@ -243,18 +250,21 @@ def read_watchdog_ping_interval_s() -> float | None:
     return timeout_us / MICROSECONDS_PER_SECOND * WATCHDOG_PING_SHARE
 
 
-def wait_for_next_tick(agent: Agent, interval_s: float, ping_interval_s: float | None) -> None:
+def wait_for_next_tick(
+    agent: Agent, interval_s: float, ping_interval_s: float | None, stop: StopRequest
+) -> None:
     """Pings the watchdog through the wait, so only a pass of the loop that hangs trips it."""
-    if ping_interval_s is None:
-        agent.wake_main_loop.wait(interval_s)
-        return
     deadline = time.monotonic() + interval_s
-    while not agent.wake_main_loop.is_set():
-        sd_notify("WATCHDOG=1")
-        remaining_s = deadline - time.monotonic()
+    next_ping_at = time.monotonic() if ping_interval_s is not None else math.inf
+    while not agent.wake_main_loop.is_set() and not stop.is_requested:
+        now = time.monotonic()
+        if ping_interval_s is not None and now >= next_ping_at:
+            sd_notify("WATCHDOG=1")
+            next_ping_at = now + ping_interval_s
+        remaining_s = deadline - now
         if remaining_s <= 0:
             return
-        agent.wake_main_loop.wait(min(remaining_s, ping_interval_s))
+        agent.wake_main_loop.wait(min(remaining_s, next_ping_at - now, STOP_CHECK_S))
 
 
 def publish_samples(agent: Agent) -> None:

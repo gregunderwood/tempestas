@@ -19,7 +19,7 @@ from . import sensor as sensor_backends
 from .config import AgentConfig
 from .ds18b20 import Ds18b20Sensors, Probe
 from .release_installer import ReleaseInstaller
-from .release_layout import ReleaseLayout
+from .release_layout import ReleaseLayout, UpdateOutcome
 from .update_command import ANSWER_ALARM, ANSWER_FAILED_STATUS, UpdateVerdict, judge_update_command
 from .update_gate import (
     HealthGate,
@@ -165,7 +165,7 @@ class Agent:
         self.is_connected = False
         self.is_server_online = False
         self.restart_requested = threading.Event()
-        # Set by a restart request or a stop, so the main loop's wait ends at once.
+        # Set by a restart request, so the main loop's wait ends at once.
         self.wake_main_loop = threading.Event()
         self._update_in_progress = threading.Lock()
         self.is_stopping = False
@@ -666,7 +666,7 @@ class Agent:
                 self.request_restart()
                 return
             try:
-                self._report_install(command_id, contract.UpdateState.FAILED, str(error))
+                self._report_failed_install(command_id, str(error))
             finally:
                 self._installing_command_id = None
                 self._update_in_progress.release()
@@ -687,6 +687,25 @@ class Agent:
             return is_this_install_pending and self.layout.read_current_release() == version
         except OSError:
             return False
+
+    def _report_failed_install(self, command_id: str, reason: str) -> None:
+        recorded = self._read_recorded_outcome(command_id)
+        if recorded is None:
+            self._report_install(command_id, contract.UpdateState.FAILED, reason)
+            return
+        # Tracked like any outcome, so the record is cleared once the server has heard it.
+        with self._update_claim_lock:
+            if command_id in self._settled_command_ids:
+                return
+            self.outcome_to_report = recorded
+            self.report_settled_update()
+
+    def _read_recorded_outcome(self, command_id: str) -> UpdateOutcome | None:
+        try:
+            recorded = self.layout.read_outcome()
+        except OSError:
+            return None
+        return recorded if recorded is not None and recorded.command_id == command_id else None
 
     def _report_install(self, command_id: str, state: str, reason: str | None = None) -> None:
         # Under the claim lock: a stop and the install thread may both answer, and only one may.

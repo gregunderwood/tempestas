@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from types import SimpleNamespace
 
 from tempestas_agent import __main__ as main_module
-from tempestas_agent.__main__ import read_watchdog_ping_interval_s, wait_for_next_tick
+from tempestas_agent.__main__ import (
+    STOP_CHECK_S,
+    StopRequest,
+    read_watchdog_ping_interval_s,
+    wait_for_next_tick,
+)
 
 WATCHDOG_USEC_FOR_A_MINUTE = "60000000"
 
@@ -52,7 +58,7 @@ def test_does_not_ping_a_watchdog_meant_for_another_process(monkeypatch):
 def test_keeps_pinging_through_a_wait_longer_than_the_watchdog(monkeypatch):
     pings = record_pings(monkeypatch)
 
-    wait_for_next_tick(make_waiting_agent(), interval_s=0.05, ping_interval_s=0.01)
+    wait_for_next_tick(make_waiting_agent(), 0.05, ping_interval_s=0.01, stop=StopRequest())
 
     assert len(pings) >= 3
     assert set(pings) == {"WATCHDOG=1"}
@@ -61,7 +67,7 @@ def test_keeps_pinging_through_a_wait_longer_than_the_watchdog(monkeypatch):
 def test_a_wait_without_a_watchdog_never_pings(monkeypatch):
     pings = record_pings(monkeypatch)
 
-    wait_for_next_tick(make_waiting_agent(), interval_s=0.01, ping_interval_s=None)
+    wait_for_next_tick(make_waiting_agent(), 0.01, ping_interval_s=None, stop=StopRequest())
 
     assert pings == []
 
@@ -71,4 +77,15 @@ def test_a_restart_or_a_stop_ends_the_wait_at_once(monkeypatch):
     agent = make_waiting_agent()
     agent.wake_main_loop.set()
 
-    wait_for_next_tick(agent, interval_s=60, ping_interval_s=30)
+    wait_for_next_tick(agent, 60, ping_interval_s=30, stop=StopRequest())
+
+
+def test_a_stop_from_a_signal_ends_the_wait_within_a_second(monkeypatch):
+    record_pings(monkeypatch)
+    stop = StopRequest()
+    threading.Timer(0.05, stop.request).start()
+    started_at = time.monotonic()
+
+    wait_for_next_tick(make_waiting_agent(), 60, ping_interval_s=None, stop=stop)
+
+    assert time.monotonic() - started_at < STOP_CHECK_S + 0.5
