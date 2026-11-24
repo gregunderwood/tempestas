@@ -125,7 +125,9 @@ class ReleaseLayout:
             if entry.is_dir() and not entry.name.startswith(UNFINISHED_PREFIX)
         ]
         newest_first = sorted(finished, key=read_modified_time, reverse=True)
+        # `current` too: a hand deploy may switch to an older release while this prune runs.
         kept = {entry.name for entry in newest_first[:KEPT_RELEASES]} | protected
+        kept.add(self.read_current_release())
         removed = [entry.name for entry in newest_first if entry.name not in kept]
         for release in removed:
             # Another prune may be removing the same release at the same moment.

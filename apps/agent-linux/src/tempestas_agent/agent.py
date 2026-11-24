@@ -23,6 +23,7 @@ from .release_layout import ReleaseLayout
 from .update_command import ANSWER_ALARM, ANSWER_FAILED_STATUS, UpdateVerdict, judge_update_command
 from .update_gate import (
     HealthGate,
+    is_still_current,
     is_still_pending,
     pass_gate,
     prune_after_update,
@@ -525,6 +526,10 @@ class Agent:
             with self.layout.hold_switch_lock(should_wait=False):
                 if not is_still_pending(self.layout, gate):
                     log.warning("update to %s was replaced by a hand deploy", gate.pending.version)
+                elif not is_still_current(self.layout, gate):
+                    # The rollback unit switched back while systemd restarted this release.
+                    log.warning("update to %s was rolled back under it", gate.pending.version)
+                    self.request_restart()
                 elif has_passed:
                     self._pass_update_gate(gate)
                     should_prune = True
@@ -641,20 +646,28 @@ class Agent:
         command_id = command["id"]
         try:
             self.installer.install(
-                command, report=lambda state: self.publish_update_status(command_id, state)
+                command, report=lambda state: self._report_install(command_id, state)
             )
         except Exception as error:  # noqa: BLE001 - reported to the server, never swallowed
             log.error("update to %s failed: %s", command.get("version"), error)
             try:
-                self.publish_update_status(command_id, contract.UpdateState.FAILED, str(error))
+                self._report_install(command_id, contract.UpdateState.FAILED, str(error))
             finally:
                 self._installing_command_id = None
                 self._update_in_progress.release()
             return
         log.warning("installed %s - restarting into it", command["version"])
-        # Before the publish: `current` already points at the new release, whatever happens next.
-        self.request_restart()
-        self.publish_update_status(command_id, contract.UpdateState.RESTARTING)
+        try:
+            # Sent before the main loop wakes and stops the network loop, or it is often lost.
+            self.publish_update_status(command_id, contract.UpdateState.RESTARTING)
+        finally:
+            # `current` already points at the new release, so it restarts whatever the publish did.
+            self.request_restart()
+
+    def _report_install(self, command_id: str, state: str, reason: str | None = None) -> None:
+        # A stop may have answered it already, and one update gets one final answer.
+        if command_id not in self._settled_command_ids:
+            self.publish_update_status(command_id, state, reason)
 
     def _report_update_refusal(self, verdict: UpdateVerdict) -> None:
         if verdict.answer == ANSWER_ALARM:

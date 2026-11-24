@@ -113,7 +113,6 @@ mv "$home/.venv-building" "$home/venv"
 REMOTE
 }
 
-# Only once the agent has restarted onto the new venv, as the old one ran from it until then.
 remove_replaced_venv() {
   local host="$1"
   ssh "$host" "rm -rf $REMOTE_AGENT_HOME/.venv-replaced"
@@ -156,20 +155,23 @@ for HOST in "${HOSTS[@]}"; do
   say "$HOST: copying into $REMOTE_RELEASE"
   copy_release "$HOST"
   build_venv_if_needed "$HOST"
-  make_current "$HOST"
 
   if ! is_unit_on_release_layout "$HOST"; then
     swap_in_built_venv "$HOST"
+    make_current "$HOST"
     remove_replaced_venv "$HOST"
     print_unit_install "$HOST" "its unit still runs the agent from before the release layout, so it was not restarted."
     continue
   fi
   say "$HOST: restarting (relays fail safe until the server drives them again)"
+  # Back to back, then restarted: any start between them would pair code with the wrong venv.
   swap_in_built_venv "$HOST"
+  make_current "$HOST"
   ssh "$HOST" "sudo -n systemctl restart tempestas-agent.service"
-  remove_replaced_venv "$HOST"
   sleep "$SETTLE_SECONDS"
   ssh "$HOST" "systemctl is-active tempestas-agent && journalctl -u tempestas-agent -n 5 --no-pager"
+  # Only once the agent runs on the new venv, so a broken build leaves the old one to swap back.
+  remove_replaced_venv "$HOST"
   are_unit_files_current "$HOST" ||
     print_unit_install "$HOST" "the installed unit files or rollback script differ from this release's."
 done

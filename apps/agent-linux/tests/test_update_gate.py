@@ -211,6 +211,19 @@ def test_a_passed_gate_keeps_the_newest_releases_and_both_ends_of_the_update(tmp
     assert layout.read_outcome() == UpdateOutcome("update-1", contract.UpdateState.HEALTHY)
 
 
+def test_a_prune_never_removes_the_release_current_points_at(tmp_path):
+    layout = make_layout(tmp_path)
+    for release in ("1.1.7", "1.1.8", "1.1.9", NEW_RELEASE):
+        layout.locate_release(release).mkdir()
+    oldest = os.path.getmtime(layout.locate_release(RUNNING_RELEASE)) - 1000
+    os.utime(layout.locate_release(RUNNING_RELEASE), (oldest, oldest))
+
+    removed = layout.prune_releases(protected={NEW_RELEASE})
+
+    assert RUNNING_RELEASE not in removed
+    assert layout.locate_release(RUNNING_RELEASE).is_dir()
+
+
 def test_a_prune_skips_a_release_another_prune_removed_first(tmp_path, monkeypatch):
     layout = make_layout(tmp_path)
     older_releases = [f"1.0.{patch}" for patch in range(KEPT_RELEASES + 1)]

@@ -318,6 +318,30 @@ def test_a_gate_with_nothing_to_roll_back_to_stays_and_reports_at_once(tmp_path)
     assert update_statuses(agent)[-1][0] == contract.UpdateState.FAILED
 
 
+def test_a_release_the_rollback_unit_switched_away_from_never_records_healthy(tmp_path):
+    agent, _ = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+    agent.on_heartbeat(HEARTBEAT)
+    agent.layout.switch_current_to(RUNNING_RELEASE)
+
+    agent.tend_update()
+
+    assert agent.layout.read_outcome() is None
+    assert agent.layout.read_pending() is not None
+    assert agent.restart_requested.is_set()
+    assert update_statuses(agent) == []
+
+
+def test_an_install_failing_after_a_stop_answered_it_is_not_answered_again(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path, InlineInstaller(failure="timed out"))
+    agent._update_in_progress.acquire()
+    agent.publish_update_status("update-1", contract.UpdateState.FAILED, STOPPING)
+
+    agent._install_update(json.loads(build_fresh_update()))
+
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, STOPPING)]
+
+
 def test_stopping_fails_an_install_that_can_no_longer_switch(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent._installing_command_id = "update-7"

@@ -108,6 +108,11 @@ def is_still_pending(layout: ReleaseLayout, gate: HealthGate) -> bool:
     return layout.read_pending() == gate.pending
 
 
+def is_still_current(layout: ReleaseLayout, gate: HealthGate) -> bool:
+    """False once the rollback unit switched back, which leaves the pending record in place."""
+    return layout.read_current_release() == gate.pending.version
+
+
 def pass_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
     # Recorded, not just published, so a lost publish or a crash still tells the server.
     return record_outcome(

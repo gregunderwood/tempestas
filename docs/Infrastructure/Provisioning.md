@@ -79,8 +79,10 @@ Raspbian ships.
    leaves `index.html` one deeper than it looks and every deep link 404s while
    `/` still works.
 
-4. **Agent**: run `tools/deploy-agent-linux.sh HOST` from the workstation. It builds the release
-   and the venv, then prints the one-time unit install from
+4. **Agent**: first, on the host, `sudo apt install python3-lgpio python3-venv rsync`. The agent's
+   venv sees the distro's packages and takes `lgpio` from there, as armv6 cannot build it; without
+   it the agent cannot drive a relay. Then run `tools/deploy-agent-linux.sh HOST` from the
+   workstation. It builds the release and the venv, then prints the one-time unit install from
    [Linux Agent](Linux%20Agent.md#once-per-host).
 
 5. **Secrets**, all `0600 root` under `/etc/tempestas/`: `db.env`,

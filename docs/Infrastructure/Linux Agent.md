@@ -113,12 +113,13 @@ It runs the agent's lint and tests, then on each host:
 1. Copies the code under a dot-name, stamps the version, and renames it into
    `~/tempestas/agent-linux/releases/<version>` in one step, exchanged with one already there. A
    redeploy of the running version never edits the tree the agent is running from.
-2. Builds the venv again only when its requirements changed (see [the venv](#the-venv)), and swaps
-   it in just before the restart.
-3. Makes that release `current` and prunes old releases. An update still waiting on its gate is
-   replaced, and the server hears `failed`: "replaced by a hand deploy of <version>".
+2. Builds the venv again only when its requirements changed (see [the venv](#the-venv)).
+3. Swaps in that venv and makes the release `current`, back to back so no start pairs code with
+   the wrong venv, and prunes old releases. An update still waiting on its gate is replaced, and
+   the server hears `failed`: "replaced by a hand deploy of <version>".
 4. Restarts the agent, unless the host's unit still runs the agent from before the release layout.
-   Then it prints the one-time install from [Updates](#updates) instead.
+   Then it prints the one-time install from [Updates](#updates) instead. The replaced venv is
+   removed only once the agent is active again, so a broken build can be swapped back by hand.
 
 A restart drives the relays to their fail-safe levels until the server commands them again.
 
@@ -142,8 +143,8 @@ The hosts have no `uv`, and patji is an armv6 Pi Zero, so the venv is plain
 `python3 -m venv --system-site-packages`. The system packages give it the distro's `lgpio`, which
 cannot be built on armv6. pip installs the rest from `uv export --frozen --no-dev --no-emit-project`,
 so the same `uv.lock` pins the hosts and the workstation. A rebuild happens beside the old venv,
-which the running agent keeps using, and is swapped in only once pip has finished and just before
-the restart. On a Pi Zero it takes a few minutes.
+which the running agent keeps using, and is swapped in only once pip has finished, together with
+the switch of `current` and just before the restart. On a Pi Zero it takes a few minutes.
 
 Every release shares the venv, so an update must not change it. A node refuses a bundle whose
 `uv.lock` differs from the running release's with `failed`: "its dependencies differ from this
