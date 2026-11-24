@@ -9,6 +9,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 from . import contract
+from .instants import parse_instant
 
 ANSWER_LOG = "log"
 ANSWER_ALARM = "alarm"
@@ -17,8 +18,6 @@ AGENT_APPS = ("agent-linux", "agent-micropython")
 
 AGENT_VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.+-]+)?")
 SHA256_HEX = re.compile(r"[0-9a-f]{64}")
-# Stricter than fromisoformat, so this judge and the reference refuse the same strings.
-ISO_8601_INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")
 MANIFEST_URL_SCHEMES = ("http", "https")
 
 
@@ -35,7 +34,7 @@ class UpdateVerdict:
 def judge_update_command(
     payload: bytes,
     *,
-    retained: bool,
+    is_retained: bool,
     bound_controller: str | None,
     running_app: str,
     now: datetime,
@@ -43,7 +42,7 @@ def judge_update_command(
     if payload.strip() == b"":
         # Reacting to a clear, even by alarming, risks a loop against whoever cleared it.
         return build_log_only_verdict("empty payload (a retained clear)")
-    if retained:
+    if is_retained:
         return build_alarm_verdict(
             "update carried the retain flag", contract.AlarmCode.RETAINED_COMMAND_DROPPED
         )
@@ -92,12 +91,8 @@ def judge_ownership(issued_by, bound_controller: str | None) -> UpdateVerdict | 
 def judge_expiry(expires_at, now: datetime) -> UpdateVerdict | None:
     if not isinstance(expires_at, str):
         return build_log_only_verdict("update has no expiresAt")
-    if not ISO_8601_INSTANT.fullmatch(expires_at):
-        return build_log_only_verdict(f'unparseable expiresAt "{expires_at}"')
-    try:
-        deadline = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-    except ValueError:
-        # The pattern checks the shape only, so a month 13 still reaches here.
+    deadline = parse_instant(expires_at)
+    if deadline is None:
         return build_log_only_verdict(f'unparseable expiresAt "{expires_at}"')
     if deadline < now:
         return build_alarm_verdict("update expired", contract.AlarmCode.COMMAND_EXPIRED)

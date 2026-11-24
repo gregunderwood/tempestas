@@ -217,7 +217,9 @@ actually in effect with `systemctl show tempestas-agent -p StartLimitIntervalUSe
   sample interval is fine. Sixty seconds is well above the longest pass, an SCD4x self-test of
   10 s. systemd then kills the agent with `SIGABRT`; `faulthandler` writes where every thread was
   to the journal first, and the failed run goes through `OnFailure=` like any other. It applies
-  outside updates too: a hung agent is restarted rather than left holding its lines.
+  outside updates too: a hung agent is restarted rather than left holding its lines. A callback
+  that raises ends paho's network thread for good, so the main loop also fails the run once that
+  thread has died, rather than run on unable to hear.
 - **No ordering against the I²C bus.** systemd only creates `.device` units for devices udev tags
   for it, and i2c is not one, so `After=dev-i2c\x2d1.device` looks like ordering while doing
   nothing. The agent opens the bus, fails fast, and the restart retries.

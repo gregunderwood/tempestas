@@ -18,6 +18,7 @@ from . import gpio as gpio_backends
 from . import sensor as sensor_backends
 from .config import AgentConfig
 from .ds18b20 import Ds18b20Sensors, Probe
+from .instants import parse_instant
 from .release_installer import ReleaseInstaller
 from .release_layout import ReleaseLayout, UpdateOutcome
 from .update_command import ANSWER_ALARM, ANSWER_FAILED_STATUS, UpdateVerdict, judge_update_command
@@ -72,7 +73,7 @@ class CommandVerdict:
 def judge_command(
     payload: bytes,
     *,
-    retained: bool,
+    is_retained: bool,
     bound_controller: str | None,
     now: datetime,
 ) -> CommandVerdict:
@@ -81,7 +82,7 @@ def judge_command(
         # Reacting to a clear, even by alarming, risks a loop against whoever cleared it.
         return CommandVerdict(False, "empty payload (a retained clear)")
 
-    if retained:
+    if is_retained:
         # Catches replay-on-subscribe only; the ownership check below is what protects the relay.
         return CommandVerdict(
             False, "command carried the retain flag", contract.AlarmCode.RETAINED_COMMAND_DROPPED
@@ -124,9 +125,8 @@ def is_retained_clear(payload: bytes) -> bool:
 def judge_expiry(expires_at, now: datetime) -> CommandVerdict | None:
     if not isinstance(expires_at, str):
         return CommandVerdict(False, "command has no expiresAt")
-    try:
-        deadline = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-    except ValueError:
+    deadline = parse_instant(expires_at)
+    if deadline is None:
         return CommandVerdict(False, f"unparseable expiresAt {expires_at!r}")
     if deadline < now:
         return CommandVerdict(False, "command expired", contract.AlarmCode.COMMAND_EXPIRED)
@@ -165,6 +165,7 @@ class Agent:
         self.is_connected = False
         self.is_server_online = False
         self.restart_requested = threading.Event()
+        self.network_thread: threading.Thread | None = None
         # Set by a restart request, so the main loop's wait ends at once.
         self.wake_main_loop = threading.Event()
         self._update_in_progress = threading.Lock()
@@ -245,11 +246,11 @@ class Agent:
             "message": message,
         }
 
-    def on_command(self, payload: bytes, retained: bool) -> dict | None:
+    def on_command(self, payload: bytes, is_retained: bool) -> dict | None:
         """Judge a `gpio/set` and, if it passes, apply it. Returns the result."""
         verdict = judge_command(
             payload,
-            retained=retained,
+            is_retained=is_retained,
             bound_controller=self.bound_controller,
             now=datetime.now(UTC),
         )
@@ -287,22 +288,22 @@ class Agent:
         if gate is not None:
             gate.note_heartbeat()
 
-    def on_server_status(self, payload: bytes, retained: bool) -> None:
+    def on_server_status(self, payload: bytes, is_retained: bool) -> None:
         try:
             body = json.loads(payload)
         except (ValueError, UnicodeDecodeError):
             return
         state = body.get("state") if isinstance(body, dict) else None
         if state == SERVER_ONLINE:
-            self._on_server_online(retained)
+            self._on_server_online(is_retained)
         elif state == SERVER_OFFLINE:
             self._on_server_offline()
 
-    def _on_server_online(self, retained: bool) -> None:
+    def _on_server_online(self, is_retained: bool) -> None:
         self.is_server_online = True
         self._start_watching_the_gate()
         # A retained online is the replay on our own connect, which announce has already answered.
-        if not retained:
+        if not is_retained:
             log.info("the server came back online - saying hello again")
             self.say_hello()
         if not self._was_server_online_at_report:
@@ -321,10 +322,12 @@ class Agent:
         )
 
     def say_hello(self) -> None:
-        self.publish("hello", contract.build_hello_topic(self.config.node_id), self.hello_payload())
+        topic = contract.build_hello_topic(self.config.node_id)
+        delivery = self.publish("hello", topic, self.hello_payload())
         # Read once: the main loop may drop the gate between a check and a use.
         gate = self.update_gate
-        if gate is not None:
+        # A hello that never left must not count; the next connect's announce says it again.
+        if gate is not None and delivery.rc == MQTTErrorCode.MQTT_ERR_SUCCESS:
             gate.note_hello()
             if self.is_server_online:
                 gate.start_watching(self._clock())
@@ -371,10 +374,10 @@ class Agent:
             outcome.command_id, outcome.state, outcome.reason
         )
 
-    def on_update(self, payload: bytes, retained: bool) -> None:
+    def on_update(self, payload: bytes, is_retained: bool) -> None:
         verdict = judge_update_command(
             payload,
-            retained=retained,
+            is_retained=is_retained,
             bound_controller=self.bound_controller,
             running_app=AGENT_NAME,
             now=datetime.now(UTC),

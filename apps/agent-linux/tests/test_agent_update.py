@@ -80,7 +80,7 @@ def update_statuses(agent) -> list[tuple[str, str | None]]:
 def test_installs_an_accepted_update_and_asks_to_restart_into_it(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert update_statuses(agent) == [
         (contract.UpdateState.DOWNLOADING, None),
@@ -93,8 +93,8 @@ def test_reports_a_failed_install_and_keeps_running(monkeypatch, tmp_path):
     installer = InlineInstaller(failure="the manifest is not JSON")
     agent, _ = make_updating_agent(monkeypatch, tmp_path, installer)
 
-    agent.on_update(build_fresh_update(), retained=False)
-    agent.on_update(build_fresh_update(id="update-2"), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
+    agent.on_update(build_fresh_update(id="update-2"), is_retained=False)
 
     assert update_statuses(agent)[-1] == (contract.UpdateState.FAILED, "the manifest is not JSON")
     assert len(installer.commands) == 2
@@ -105,7 +105,7 @@ def test_says_why_it_cannot_update_when_not_installed_from_a_release(monkeypatch
     agent, _ = make_agent()
     agent.on_heartbeat(HEARTBEAT)
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert update_statuses(agent) == [(contract.UpdateState.FAILED, NOT_INSTALLED_FROM_A_RELEASE)]
 
@@ -113,7 +113,7 @@ def test_says_why_it_cannot_update_when_not_installed_from_a_release(monkeypatch
 def test_reports_an_update_for_another_app_as_failed(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
 
-    agent.on_update(build_fresh_update(app="agent-micropython"), retained=False)
+    agent.on_update(build_fresh_update(app="agent-micropython"), is_retained=False)
 
     assert update_statuses(agent)[0][0] == contract.UpdateState.FAILED
     assert agent.installer.commands == []
@@ -122,7 +122,7 @@ def test_reports_an_update_for_another_app_as_failed(monkeypatch, tmp_path):
 def test_alarms_on_a_foreign_update_and_never_installs_it(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
 
-    agent.on_update(build_fresh_update(issuedBy="laptop"), retained=False)
+    agent.on_update(build_fresh_update(issuedBy="laptop"), is_retained=False)
 
     alarms = [payload["code"] for payload in agent.client.payloads() if "code" in payload]
     assert alarms == [contract.AlarmCode.CONTROLLER_CONFLICT]
@@ -133,7 +133,7 @@ def test_refuses_a_second_update_while_one_is_in_progress(monkeypatch, tmp_path)
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent._update_in_progress.acquire()
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert update_statuses(agent) == [
         (contract.UpdateState.FAILED, "another update is in progress")
@@ -144,7 +144,7 @@ def test_refuses_an_update_once_the_agent_is_stopping(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent.stop_updates()
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert update_statuses(agent) == [(contract.UpdateState.FAILED, STOPPING)]
     assert agent.installer.commands == []
@@ -154,7 +154,7 @@ def test_refuses_an_update_while_a_restart_is_on_its_way(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent.restart_requested.set()
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert update_statuses(agent) == [(contract.UpdateState.FAILED, STOPPING)]
 
@@ -223,7 +223,7 @@ def test_an_update_to_the_version_already_running_is_refused_without_a_restart(
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent.installer = ReleaseInstaller(agent.layout)
 
-    agent.on_update(build_fresh_update(version=RUNNING_RELEASE), retained=False)
+    agent.on_update(build_fresh_update(version=RUNNING_RELEASE), is_retained=False)
 
     assert not agent.restart_requested.is_set()
     assert update_statuses(agent)[-1] == (
@@ -262,10 +262,19 @@ def test_a_failed_install_that_left_current_switched_restarts_into_it(monkeypatc
 
     agent, _ = make_updating_agent(monkeypatch, tmp_path, SwitchStuckInstaller())
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert agent.restart_requested.is_set()
     assert update_statuses(agent) == []
+
+
+def test_a_hello_that_never_left_does_not_count_toward_the_gate(tmp_path):
+    agent, _ = start_new_release_on_its_gate(tmp_path)
+    agent.client.publish_rc = PUBLISH_NO_CONNECTION
+
+    agent.say_hello()
+
+    assert not agent.update_gate.has_said_hello
 
 
 def test_a_heartbeat_noted_before_the_deadline_passes_even_if_tended_after_it(tmp_path):
@@ -306,7 +315,7 @@ def test_an_update_thread_that_cannot_start_frees_the_next_update(monkeypatch, t
             raise RuntimeError("can't start new thread")
 
     monkeypatch.setattr("tempestas_agent.agent.threading.Thread", UnstartableThread)
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert update_statuses(agent) == [(contract.UpdateState.FAILED, "can't start new thread")]
     assert agent._update_in_progress.acquire(blocking=False)
@@ -317,7 +326,7 @@ def test_ignores_a_repeat_of_the_update_it_is_installing(monkeypatch, tmp_path):
     agent._installing_command_id = "update-1"
     agent._update_in_progress.acquire()
 
-    agent.on_update(build_fresh_update(id="update-1"), retained=False)
+    agent.on_update(build_fresh_update(id="update-1"), is_retained=False)
 
     assert update_statuses(agent) == []
 
@@ -326,7 +335,7 @@ def test_ignores_a_repeat_of_the_update_on_its_gate(tmp_path):
     agent, _ = start_new_release_on_its_gate(tmp_path)
     agent.installer = InlineInstaller()
 
-    agent.on_update(build_fresh_update(id=agent.update_gate.pending.command_id), retained=False)
+    agent.on_update(build_fresh_update(id=agent.update_gate.pending.command_id), is_retained=False)
 
     assert update_statuses(agent) == []
     assert agent.installer.commands == []
@@ -341,7 +350,7 @@ def test_ignores_a_repeat_of_an_update_whose_outcome_the_server_already_heard(tm
     agent.tend_update()
     agent.installer = InlineInstaller()
 
-    agent.on_update(build_fresh_update(id=command_id), retained=False)
+    agent.on_update(build_fresh_update(id=command_id), is_retained=False)
 
     assert agent.outcome_to_report is None
     assert agent.installer.commands == []
@@ -351,10 +360,10 @@ def test_ignores_a_repeat_of_an_update_whose_outcome_the_server_already_heard(tm
 def test_an_update_refused_for_a_passing_reason_can_be_retried_under_its_id(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent._update_in_progress.acquire()
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
     agent._update_in_progress.release()
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert len(agent.installer.commands) == 1
 
@@ -370,7 +379,7 @@ def test_a_failure_the_installer_recorded_is_reported_once_and_then_cleared(monk
     agent, _ = make_updating_agent(monkeypatch, tmp_path, RecordingFailureInstaller())
     agent.is_server_online = True
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
     agent.tend_update()
 
     assert update_statuses(agent) == [(contract.UpdateState.FAILED, "card full")]
@@ -379,9 +388,9 @@ def test_a_failure_the_installer_recorded_is_reported_once_and_then_cleared(monk
 
 def test_ignores_a_repeat_of_an_update_that_already_failed(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path, InlineInstaller(failure="no space"))
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert len(agent.installer.commands) == 1
     assert update_statuses(agent)[-1] == (contract.UpdateState.FAILED, "no space")
@@ -432,9 +441,9 @@ def test_an_outcome_acked_just_before_the_server_left_is_sent_again_when_it_retu
     agent.tend_update()
 
     agent._outcome_delivery.has_reached_broker = True
-    agent.on_server_status(SERVER_OFFLINE, retained=False)
+    agent.on_server_status(SERVER_OFFLINE, is_retained=False)
     agent.tend_update()
-    agent.on_server_status(SERVER_ONLINE_AGAIN, retained=False)
+    agent.on_server_status(SERVER_ONLINE_AGAIN, is_retained=False)
 
     assert update_statuses(agent).count((contract.UpdateState.HEALTHY, None)) == 2
 
@@ -478,7 +487,7 @@ def test_a_server_that_goes_offline_pauses_the_gate_instead_of_failing_the_relea
     agent, clock = start_new_release_on_its_gate(tmp_path)
     agent.say_hello()
 
-    agent.on_server_status(SERVER_OFFLINE, retained=False)
+    agent.on_server_status(SERVER_OFFLINE, is_retained=False)
     clock.advance(10 * GATE_SECONDS)
     agent.tend_update()
 
@@ -495,7 +504,7 @@ def test_a_hello_before_the_server_is_known_online_does_not_start_the_clock(tmp_
     agent.tend_update()
     assert not agent.restart_requested.is_set()
 
-    agent.on_server_status(SERVER_ONLINE_AGAIN, retained=True)
+    agent.on_server_status(SERVER_ONLINE_AGAIN, is_retained=True)
     clock.advance(GATE_SECONDS)
     agent.tend_update()
     assert agent.restart_requested.is_set()
@@ -597,7 +606,7 @@ def test_an_outcome_sent_while_the_server_was_away_is_sent_again_when_it_returns
     agent.tend_update()
     assert agent.layout.read_outcome() is not None
 
-    agent.on_server_status(SERVER_ONLINE_AGAIN, retained=False)
+    agent.on_server_status(SERVER_ONLINE_AGAIN, is_retained=False)
     agent.tend_update()
 
     assert update_statuses(agent) == [(contract.UpdateState.ROLLED_BACK, reason)] * 2
@@ -608,7 +617,7 @@ def test_refuses_an_update_while_the_last_one_could_not_be_settled(monkeypatch, 
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent._is_update_settled = False
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert update_statuses(agent) == [(contract.UpdateState.FAILED, LAST_UPDATE_UNSETTLED)]
 
@@ -654,7 +663,7 @@ def test_refuses_a_new_update_until_the_last_result_has_reached_the_server(monke
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent.outcome_to_report = UpdateOutcome("update-0", contract.UpdateState.HEALTHY)
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert update_statuses(agent) == [(contract.UpdateState.FAILED, LAST_OUTCOME_UNDELIVERED)]
     assert agent.installer.commands == []
@@ -668,7 +677,7 @@ def test_takes_a_new_update_once_the_last_result_is_delivered_even_before_tidyin
     agent.is_server_online = True
     agent.report_settled_update()
 
-    agent.on_update(build_fresh_update(), retained=False)
+    agent.on_update(build_fresh_update(), is_retained=False)
 
     assert len(agent.installer.commands) == 1
 
@@ -742,7 +751,7 @@ def test_installs_a_real_bundle_end_to_end(monkeypatch, tmp_path):
         build_fresh_update(
             manifestUrl=command["manifestUrl"], manifestSha256=command["manifestSha256"]
         ),
-        retained=False,
+        is_retained=False,
     )
 
     assert agent.layout.read_current_release() == NEW_RELEASE

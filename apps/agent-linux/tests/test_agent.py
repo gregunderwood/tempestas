@@ -176,7 +176,7 @@ class TestGpioSeam:
     # A write to a node with no GPIO is a programming error and has to be loud.
     def test_a_sensor_only_node_refuses_to_drive_a_pin(self):
         agent, _ = make_agent(lines=())
-        result = agent.on_command(_command(), retained=False)
+        result = agent.on_command(_command(), is_retained=False)
         assert result["ok"] is False
         assert result["lines"][0]["readback"] is None
         assert "no GPIO configured" in result["lines"][0]["error"]
@@ -184,14 +184,14 @@ class TestGpioSeam:
     def test_a_node_with_lines_drives_and_reads_back(self):
         agent, _ = make_agent(lines=(16,), failsafe={16: 1})
         agent.bound_controller = "ctl"
-        result = agent.on_command(_command(issuedBy="ctl"), retained=False)
+        result = agent.on_command(_command(issuedBy="ctl"), is_retained=False)
         assert result["ok"] is True
         assert result["lines"] == [{"pin": 16, "requested": 0, "readback": 0, "ok": True}]
 
     def test_a_refused_command_produces_no_result_at_all(self):
         agent, _ = make_agent(lines=(16,), failsafe={16: 1})
         agent.bound_controller = "ctl"
-        assert agent.on_command(_command(issuedBy="someone-else"), retained=False) is None
+        assert agent.on_command(_command(issuedBy="someone-else"), is_retained=False) is None
 
     def test_an_unwritten_line_reads_back_unknown(self):
         agent, _ = make_agent(lines=(16,), failsafe={16: 1})
@@ -257,8 +257,8 @@ def _server_status(state: str) -> bytes:
 class TestServerStatus:
     def test_says_hello_again_when_the_server_comes_back_online(self):
         agent, _ = make_agent(lines=(16,), failsafe={16: 1})
-        agent.on_server_status(_server_status("offline"), retained=False)
-        agent.on_server_status(_server_status("online"), retained=False)
+        agent.on_server_status(_server_status("offline"), is_retained=False)
+        agent.on_server_status(_server_status("online"), is_retained=False)
 
         hellos = [
             (payload, qos, retain)
@@ -273,20 +273,20 @@ class TestServerStatus:
 
     def test_does_not_repeat_the_hello_for_the_retained_online_replayed_on_connect(self):
         agent, _ = make_agent()
-        agent.on_server_status(_server_status("online"), retained=True)
+        agent.on_server_status(_server_status("online"), is_retained=True)
         assert agent.client.published == []
 
     def test_going_offline_publishes_nothing_and_leaves_the_lines_alone(self):
         agent, _ = make_agent(lines=(16,), failsafe={16: 1})
         agent.on_heartbeat(_heartbeat())
         agent.gpio.write(16, 0)
-        agent.on_server_status(_server_status("offline"), retained=False)
+        agent.on_server_status(_server_status("offline"), is_retained=False)
         assert agent.client.published == []
         assert agent.gpio.level(16) == 0
 
     def test_ignores_a_payload_that_is_not_json(self):
         agent, _ = make_agent()
-        agent.on_server_status(b"not json", retained=False)
+        agent.on_server_status(b"not json", is_retained=False)
         assert agent.client.published == []
 
 

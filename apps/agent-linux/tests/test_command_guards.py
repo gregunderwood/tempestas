@@ -26,8 +26,8 @@ def command(**overrides) -> bytes:
     return json.dumps(body).encode()
 
 
-def judge(payload: bytes, *, retained: bool = False, bound: str | None = CONTROLLER):
-    return judge_command(payload, retained=retained, bound_controller=bound, now=NOW)
+def judge(payload: bytes, *, is_retained: bool = False, bound: str | None = CONTROLLER):
+    return judge_command(payload, is_retained=is_retained, bound_controller=bound, now=NOW)
 
 
 def test_accepts_a_well_formed_command_from_the_bound_controller():
@@ -35,7 +35,7 @@ def test_accepts_a_well_formed_command_from_the_bound_controller():
 
 
 def test_refuses_a_retained_command_and_alarms():
-    verdict = judge(command(), retained=True)
+    verdict = judge(command(), is_retained=True)
     assert verdict.is_accepted is False
     assert verdict.alarm == contract.AlarmCode.RETAINED_COMMAND_DROPPED
 
@@ -63,6 +63,12 @@ def test_refuses_a_command_with_no_expiry():
     body = json.loads(command())
     del body["expiresAt"]
     assert judge(json.dumps(body).encode()).is_accepted is False
+
+
+def test_refuses_an_expiry_with_no_time_zone_rather_than_crash():
+    verdict = judge(command(expiresAt="2099-12-01T00:00:00"))
+    assert verdict.is_accepted is False
+    assert verdict.alarm is None
 
 
 # An empty payload clears a retained command; alarming on it risks a loop against the clearer.

@@ -10,6 +10,7 @@ import math
 import os
 import signal
 import sys
+import threading
 import time
 
 import paho.mqtt.client as mqtt
@@ -181,7 +182,7 @@ def handle_heartbeat(agent: Agent, message) -> None:
 
 
 def handle_gpio_set(agent: Agent, message) -> None:
-    result = agent.on_command(message.payload, retained=bool(message.retain))
+    result = agent.on_command(message.payload, is_retained=bool(message.retain))
     if result is None:
         return
     agent.publish("gpioResult", contract.build_gpio_result_topic(agent.config.node_id), result)
@@ -189,11 +190,11 @@ def handle_gpio_set(agent: Agent, message) -> None:
 
 
 def handle_update(agent: Agent, message) -> None:
-    agent.on_update(message.payload, retained=bool(message.retain))
+    agent.on_update(message.payload, is_retained=bool(message.retain))
 
 
 def handle_server_status(agent: Agent, message) -> None:
-    agent.on_server_status(message.payload, retained=bool(message.retain))
+    agent.on_server_status(message.payload, is_retained=bool(message.retain))
 
 
 def start(agent: Agent, config: AgentConfig) -> None:
@@ -211,6 +212,8 @@ def start(agent: Agent, config: AgentConfig) -> None:
     broker = config.mqtt
     agent.client.connect_async(broker.host, broker.port, keepalive=broker.keepalive_s)
     agent.client.loop_start()
+    # Kept here: paho keeps it private, and forgets it once a raising callback has ended it.
+    agent.network_thread = getattr(agent.client, "_thread", None)
 
 
 def run_until_signalled(agent: Agent, config: AgentConfig) -> None:
@@ -220,10 +223,21 @@ def run_until_signalled(agent: Agent, config: AgentConfig) -> None:
     ping_interval_s = read_watchdog_ping_interval_s()
 
     while not stop.is_requested and not agent.restart_requested.is_set():
+        require_network_loop_alive(agent.network_thread)
         publish_samples(agent)
         agent.check_deadman()
         agent.tend_update()
         wait_for_next_tick(agent, config.sensor.sample_interval_s, ping_interval_s, stop)
+
+
+class NetworkLoopDied(RuntimeError):
+    """A failed run: systemd restarts the agent, and OnFailure judges an update on its gate."""
+
+
+def require_network_loop_alive(network_thread: threading.Thread | None) -> None:
+    # A callback that raises ends paho's thread for good, leaving an agent that cannot hear.
+    if network_thread is not None and not network_thread.is_alive():
+        raise NetworkLoopDied("the MQTT network thread died, so this agent can no longer hear")
 
 
 class StopRequest:

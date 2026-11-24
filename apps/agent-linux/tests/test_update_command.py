@@ -37,9 +37,9 @@ def build_update(**overrides) -> bytes:
     return json.dumps({key: value for key, value in body.items() if value is not OMITTED}).encode()
 
 
-def judge(payload: bytes, *, retained: bool = False, bound: str | None = SERVER):
+def judge(payload: bytes, *, is_retained: bool = False, bound: str | None = SERVER):
     return judge_update_command(
-        payload, retained=retained, bound_controller=bound, running_app="agent-linux", now=NOW
+        payload, is_retained=is_retained, bound_controller=bound, running_app="agent-linux", now=NOW
     )
 
 
@@ -60,7 +60,7 @@ def test_logs_an_expiry_shaped_like_a_date_that_is_not_one():
 
 
 def test_drops_a_retained_update_and_alarms():
-    verdict = judge(build_update(), retained=True)
+    verdict = judge(build_update(), is_retained=True)
     assert verdict.answer == ANSWER_ALARM
     assert verdict.alarm == contract.AlarmCode.RETAINED_COMMAND_DROPPED
 
@@ -82,8 +82,8 @@ def test_refuses_an_expired_update_and_alarms():
 
 def test_judges_the_retain_flag_before_ownership_and_ownership_before_expiry():
     foreign_and_expired = build_update(issuedBy="laptop", expiresAt="2026-11-21T11:00:00Z")
-    retained = judge(foreign_and_expired, retained=True)
-    assert retained.alarm == contract.AlarmCode.RETAINED_COMMAND_DROPPED
+    retained_verdict = judge(foreign_and_expired, is_retained=True)
+    assert retained_verdict.alarm == contract.AlarmCode.RETAINED_COMMAND_DROPPED
     assert judge(foreign_and_expired).alarm == contract.AlarmCode.CONTROLLER_CONFLICT
 
 
