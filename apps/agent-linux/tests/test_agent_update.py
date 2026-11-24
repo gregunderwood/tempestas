@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 
 import pytest
 
@@ -446,6 +447,42 @@ def test_an_outcome_acked_just_before_the_server_left_is_sent_again_when_it_retu
     agent.on_server_status(SERVER_ONLINE_AGAIN, is_retained=False)
 
     assert update_statuses(agent).count((contract.UpdateState.HEALTHY, None)) == 2
+
+
+def test_stopping_waits_only_so_long_for_a_busy_switch_lock(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent._installing_command_id = "update-7"
+    monkeypatch.setattr("tempestas_agent.agent.STOP_SWITCH_WAIT_S", 0.2)
+
+    with agent.layout.hold_switch_lock():
+        started_at = time.monotonic()
+        agent.stop_updates()
+
+    assert time.monotonic() - started_at < 1
+    assert agent.is_stopping
+    assert update_statuses(agent) == []
+
+
+def test_forgetting_a_delivered_outcome_keeps_one_a_failed_install_put_there_meanwhile(
+    monkeypatch, tmp_path
+):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent.is_server_online = True
+    delivered = UpdateOutcome("update-1", contract.UpdateState.HEALTHY)
+    agent.layout.write_outcome(delivered)
+    agent.outcome_to_report = delivered
+    agent.report_settled_update()
+    newer = UpdateOutcome("update-2", contract.UpdateState.FAILED, "card full")
+    read_outcome = agent.layout.read_outcome
+
+    def read_while_an_install_fails():
+        agent.outcome_to_report = newer
+        return read_outcome()
+
+    monkeypatch.setattr(agent.layout, "read_outcome", read_while_an_install_fails)
+    agent.tend_update()
+
+    assert agent.outcome_to_report == newer
 
 
 def test_stopping_fails_an_install_that_can_no_longer_switch(monkeypatch, tmp_path):

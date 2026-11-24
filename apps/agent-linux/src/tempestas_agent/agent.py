@@ -48,6 +48,9 @@ LAST_OUTCOME_UNDELIVERED = "the last update's result has not reached the server 
 LAST_UPDATE_UNSETTLED = "the last update is not settled yet, as its state cannot be read"
 STOPPING = "the agent is stopping or restarting"
 ANOTHER_UPDATE_IN_PROGRESS = "another update is in progress"
+# Every holder of the switch lock lets go within this, well inside systemd's stop timeout.
+STOP_SWITCH_WAIT_S = 10.0
+SWITCH_LOCK_RETRY_S = 0.1
 FINAL_UPDATE_STATES = frozenset(
     {contract.UpdateState.HEALTHY, contract.UpdateState.ROLLED_BACK, contract.UpdateState.FAILED}
 )
@@ -133,9 +136,13 @@ def judge_expiry(expires_at, now: datetime) -> CommandVerdict | None:
     return None
 
 
+def has_left_this_node(delivery) -> bool:
+    return delivery.rc == MQTTErrorCode.MQTT_ERR_SUCCESS
+
+
 def is_delivered(delivery) -> bool:
     # paho raises from is_published() for a publish that never left; the next connect resends it.
-    return delivery.rc == MQTTErrorCode.MQTT_ERR_SUCCESS and delivery.is_published()
+    return has_left_this_node(delivery) and delivery.is_published()
 
 
 class Agent:
@@ -306,8 +313,7 @@ class Agent:
         if not is_retained:
             log.info("the server came back online - saying hello again")
             self.say_hello()
-        if not self._was_server_online_at_report:
-            # Sent while the server was away, the broker took it and nobody was listening.
+        if self._was_outcome_sent_while_server_away():
             self.report_settled_update()
 
     def _on_server_offline(self) -> None:
@@ -326,8 +332,7 @@ class Agent:
         delivery = self.publish("hello", topic, self.hello_payload())
         # Read once: the main loop may drop the gate between a check and a use.
         gate = self.update_gate
-        # A hello that never left must not count; the next connect's announce says it again.
-        if gate is not None and delivery.rc == MQTTErrorCode.MQTT_ERR_SUCCESS:
+        if gate is not None and has_left_this_node(delivery):
             gate.note_hello()
             if self.is_server_online:
                 gate.start_watching(self._clock())
@@ -424,10 +429,23 @@ class Agent:
         if self.layout is None:
             return
         try:
-            self._held_until_exit.enter_context(self.layout.hold_switch_lock())
-            self._fail_an_install_that_cannot_switch(installing_command_id)
+            if self._hold_switch_lock_until_exit():
+                self._fail_an_install_that_cannot_switch(installing_command_id)
         except OSError as error:
             log.error("could not hold the switch lock while stopping: %s", error)
+
+    def _hold_switch_lock_until_exit(self) -> bool:
+        """Waits only so long: the relays are released after this, never behind a slow card."""
+        deadline = time.monotonic() + STOP_SWITCH_WAIT_S
+        while True:
+            try:
+                self._held_until_exit.enter_context(self.layout.hold_switch_lock(should_wait=False))
+                return True
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    log.error("stopping without the switch lock: it stayed busy")
+                    return False
+                time.sleep(SWITCH_LOCK_RETRY_S)
 
     def _fail_an_install_that_cannot_switch(self, command_id: str | None) -> None:
         if command_id is None:
@@ -575,12 +593,19 @@ class Agent:
             # Kept unsent when it restarts: the previous release reports it then.
             self.outcome_to_report = roll_back_gate(self.layout, gate)
         finally:
-            # Once `current` points back, run it even if the outcome could not be recorded.
-            if self.layout.read_current_release() == gate.pending.previous_release:
+            # Even if the outcome could not be recorded.
+            if self._has_switched_back(gate):
                 self.request_restart()
         if not self.restart_requested.is_set():
             # Nothing to roll back to, so this release stays and says so now.
             self.report_settled_update()
+
+    def _has_switched_back(self, gate: HealthGate) -> bool:
+        return self.layout.read_current_release() == gate.pending.previous_release
+
+    def _was_outcome_sent_while_server_away(self) -> bool:
+        # The broker took it then, with nobody listening.
+        return not self._was_server_online_at_report
 
     def _start_watching_the_gate(self) -> None:
         gate = self.update_gate
@@ -639,20 +664,24 @@ class Agent:
         gate.is_start_recorded = True
 
     def _forget_delivered_outcome(self) -> None:
-        if self.outcome_to_report is None or self._has_undelivered_outcome():
+        outcome = self.outcome_to_report
+        if outcome is None or self._has_undelivered_outcome():
             return
         try:
             with self.layout.hold_switch_lock(should_wait=False):
                 # A hand deploy may have recorded a newer outcome since this one was sent.
-                if self.layout.read_outcome() == self.outcome_to_report:
+                if self.layout.read_outcome() == outcome:
                     self.layout.clear_outcome()
         except BlockingIOError:
             return
         except OSError as error:
             log.error("could not forget a delivered update outcome: %s", error)
             return
-        self.outcome_to_report = None
-        self._outcome_delivery = None
+        with self._update_claim_lock:
+            # A failed install may have put a newer outcome here meanwhile.
+            if self.outcome_to_report is outcome:
+                self.outcome_to_report = None
+                self._outcome_delivery = None
 
     def _install_update(self, command: dict) -> None:
         command_id = command["id"]

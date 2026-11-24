@@ -236,8 +236,12 @@ class NetworkLoopDied(RuntimeError):
 
 def require_network_loop_alive(network_thread: threading.Thread | None) -> None:
     # A callback that raises ends paho's thread for good, leaving an agent that cannot hear.
-    if network_thread is not None and not network_thread.is_alive():
+    if has_died(network_thread):
         raise NetworkLoopDied("the MQTT network thread died, so this agent can no longer hear")
+
+
+def has_died(thread: threading.Thread | None) -> bool:
+    return thread is not None and not thread.is_alive()
 
 
 class StopRequest:
