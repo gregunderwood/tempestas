@@ -6,10 +6,7 @@ import {
   readProcessEnvironment,
   type ReadSetting,
 } from './app/common/postgres-connection';
-import { ZoneEntity } from './app/zones/models';
-import { NodeEntity } from './app/nodes/models';
-import { DeviceEntity } from './app/devices/models';
-import { SensorReadingEntity } from './app/readings/models';
+import { ENTITIES } from './app/entities';
 import * as migrations from './migrations';
 import { isIrreversible } from './migrations/irreversible-migration';
 
@@ -45,14 +42,14 @@ const MIGRATION_COMMANDS = new Map<string, MigrationCommand>([
   ['revert-applied', revertAppliedMigrations],
 ]);
 
-// Listed rather than globbed: a webpack bundle has no directory to scan.
+// Migrations listed rather than globbed: a webpack bundle has no directory to scan.
 export function createMigrationDataSource(
   readSetting: ReadSetting = readProcessEnvironment,
 ): DataSource {
   return new DataSource({
     ...postgresConnectionOptions(readSetting),
     logging: ['error', 'schema'],
-    entities: [ZoneEntity, NodeEntity, DeviceEntity, SensorReadingEntity],
+    entities: ENTITIES,
     migrations: Object.values(migrations),
   });
 }
