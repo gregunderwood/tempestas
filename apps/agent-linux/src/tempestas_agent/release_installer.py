@@ -144,10 +144,16 @@ class ReleaseInstaller:
         shutil.rmtree(staging, ignore_errors=True)
         try:
             self.layout.switch_current_to(running_release)
-            self.layout.clear_pending()
         except OSError as error:
             # The error that stopped the switch is the one worth raising, so this one is logged.
             log.error("could not undo the switch to %s: %s", destination.name, error)
+        if self.layout.read_current_release() != running_release:
+            # Kept pending: the next start then judges the release `current` really points at.
+            return
+        try:
+            self.layout.clear_pending()
+        except OSError as error:
+            log.error("could not clear the pending %s: %s", destination.name, error)
             return
         shutil.rmtree(destination, ignore_errors=True)
 

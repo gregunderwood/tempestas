@@ -188,6 +188,25 @@ def test_a_switch_that_fails_leaves_the_running_release_and_no_pending_update(
     assert_unchanged(layout)
 
 
+def test_a_switch_back_that_lands_but_cannot_sync_still_drops_the_pending_update(
+    tmp_path, monkeypatch
+):
+    layout = make_layout(tmp_path)
+    switch_current_to = layout.switch_current_to
+
+    def switch_then_fail_to_sync(release):
+        switch_current_to(release)
+        raise OSError("input/output error")
+
+    monkeypatch.setattr(layout, "switch_current_to", switch_then_fail_to_sync)
+
+    with pytest.raises(OSError):
+        install(layout, FakeServer())
+
+    assert layout.read_current_release() == RUNNING_RELEASE
+    assert layout.read_pending() is None
+
+
 def test_refuses_to_switch_when_a_hand_deploy_moved_current_during_the_download(tmp_path):
     layout = make_layout(tmp_path)
     server = FakeServer()

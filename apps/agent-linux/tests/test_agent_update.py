@@ -342,6 +342,21 @@ def test_an_install_failing_after_a_stop_answered_it_is_not_answered_again(monke
     assert update_statuses(agent) == [(contract.UpdateState.FAILED, STOPPING)]
 
 
+def test_an_outcome_acked_just_before_the_server_left_is_sent_again_when_it_returns(tmp_path):
+    agent, _ = start_new_release_on_its_gate(tmp_path)
+    agent.client.is_delivering = False
+    agent.say_hello()
+    agent.on_heartbeat(HEARTBEAT)
+    agent.tend_update()
+
+    agent._outcome_delivery.has_reached_broker = True
+    agent.on_server_status(SERVER_OFFLINE, retained=False)
+    agent.tend_update()
+    agent.on_server_status(SERVER_ONLINE_AGAIN, retained=False)
+
+    assert update_statuses(agent).count((contract.UpdateState.HEALTHY, None)) == 2
+
+
 def test_stopping_fails_an_install_that_can_no_longer_switch(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent._installing_command_id = "update-7"

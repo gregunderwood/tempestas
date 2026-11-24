@@ -115,7 +115,7 @@ It runs the agent's lint and tests, then on each host:
    redeploy of the running version never edits the tree the agent is running from.
 2. Builds the venv again only when its requirements changed (see [the venv](#the-venv)).
 3. Swaps in that venv and makes the release `current`, back to back so no start pairs code with
-   the wrong venv, and prunes old releases. An update still waiting on its gate is replaced, and
+   the wrong venv, and puts the old venv back if `current` cannot follow. Then prunes old releases. An update still waiting on its gate is replaced, and
    the server hears `failed`: "replaced by a hand deploy of <version>".
 4. Restarts the agent, unless the host's unit still runs the agent from before the release layout.
    Then it prints the one-time install from [Updates](#updates) instead. The replaced venv is

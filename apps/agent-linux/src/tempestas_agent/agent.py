@@ -176,8 +176,7 @@ class Agent:
         self.is_stopping = False
         self._installing_command_id: str | None = None
         self._update_claim_lock = threading.Lock()
-        # Every id answered with a final state, kept for the life of the process: a redelivery
-        # must not be answered again after its outcome.
+        # A redelivery must not be answered again after its final state.
         self._settled_command_ids: set[str] = set()
         self._held_until_exit = ExitStack()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
@@ -308,6 +307,8 @@ class Agent:
             self.report_settled_update()
         elif state == SERVER_OFFLINE:
             self.is_server_online = False
+            # The broker's ack is not the server's: one sent just before it left may be unread.
+            self._was_server_online_at_report = False
             self._stop_watching_the_gate()
             # A deploy restarts the server too; the dead-man decides whether it is really gone.
             log.warning(
@@ -427,7 +428,7 @@ class Agent:
         if pending is not None and pending.command_id == command_id:
             return
         # Its thread now waits on the lock this process holds until it exits.
-        self.publish_update_status(command_id, contract.UpdateState.FAILED, STOPPING)
+        self._report_install(command_id, contract.UpdateState.FAILED, STOPPING)
 
     def request_restart(self) -> None:
         self.restart_requested.set()
@@ -665,9 +666,10 @@ class Agent:
             self.request_restart()
 
     def _report_install(self, command_id: str, state: str, reason: str | None = None) -> None:
-        # A stop may have answered it already, and one update gets one final answer.
-        if command_id not in self._settled_command_ids:
-            self.publish_update_status(command_id, state, reason)
+        # Under the claim lock: a stop and the install thread may both answer, and only one may.
+        with self._update_claim_lock:
+            if command_id not in self._settled_command_ids:
+                self.publish_update_status(command_id, state, reason)
 
     def _report_update_refusal(self, verdict: UpdateVerdict) -> None:
         if verdict.answer == ANSWER_ALARM:

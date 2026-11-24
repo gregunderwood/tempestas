@@ -106,11 +106,27 @@ swap_in_built_venv() {
   ssh "$host" bash -s -- "$REMOTE_AGENT_HOME" "$REQUIREMENTS_FILE" <<'REMOTE'
 set -euo pipefail
 home="$1" requirements_file="$2"
-[ -e "$home/.venv-building/$requirements_file" ] || exit 0
+# First, so a .venv-replaced afterwards always means this deploy swapped.
 rm -rf "$home/.venv-replaced"
+[ -e "$home/.venv-building/$requirements_file" ] || exit 0
 [ ! -e "$home/venv" ] || mv "$home/venv" "$home/.venv-replaced"
 mv "$home/.venv-building" "$home/venv"
 REMOTE
+}
+
+# When `current` could not follow, so the running release keeps the packages it was built for.
+swap_back_venv() {
+  local host="$1"
+  ssh "$host" "[ ! -e $REMOTE_AGENT_HOME/.venv-replaced ] || \
+    { rm -rf $REMOTE_AGENT_HOME/venv && mv $REMOTE_AGENT_HOME/.venv-replaced $REMOTE_AGENT_HOME/venv; }"
+}
+
+make_current_or_swap_back() {
+  local host="$1"
+  make_current "$host" && return 0
+  echo "$host: could not make $AGENT_VERSION current, so its venv was put back" >&2
+  swap_back_venv "$host"
+  exit 1
 }
 
 remove_replaced_venv() {
@@ -158,7 +174,7 @@ for HOST in "${HOSTS[@]}"; do
 
   if ! is_unit_on_release_layout "$HOST"; then
     swap_in_built_venv "$HOST"
-    make_current "$HOST"
+    make_current_or_swap_back "$HOST"
     remove_replaced_venv "$HOST"
     print_unit_install "$HOST" "its unit still runs the agent from before the release layout, so it was not restarted."
     continue
@@ -166,7 +182,7 @@ for HOST in "${HOSTS[@]}"; do
   say "$HOST: restarting (relays fail safe until the server drives them again)"
   # Back to back, then restarted: any start between them would pair code with the wrong venv.
   swap_in_built_venv "$HOST"
-  make_current "$HOST"
+  make_current_or_swap_back "$HOST"
   ssh "$HOST" "sudo -n systemctl restart tempestas-agent.service"
   sleep "$SETTLE_SECONDS"
   ssh "$HOST" "systemctl is-active tempestas-agent && journalctl -u tempestas-agent -n 5 --no-pager"
