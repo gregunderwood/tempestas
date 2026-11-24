@@ -40,7 +40,26 @@ export function reconcilePinState(
   if (isRetainedReplayNoNewerThanRow(device, observation, now)) {
     return { action: 'none', reason: 'the device row is at least as current' };
   }
+  return readLevelAgainstRow(device, observation, now);
+}
 
+// A new or remapped row's times are not this mapping's, so the ordering guard cannot apply.
+export function reconcileNewMapping(
+  device: ReconcileTarget,
+  observation: PinObservation,
+  now: Date,
+): Reconciliation {
+  if (!isLevelKnown(observation)) {
+    return { action: 'none', reason: 'hardware level is unknown' };
+  }
+  return readLevelAgainstRow(device, observation, now);
+}
+
+function readLevelAgainstRow(
+  device: ReconcileTarget,
+  observation: PinObservation,
+  now: Date,
+): Reconciliation {
   const hardwareOn = observation.level === device.onLevel;
   if (hardwareOn === isOn(device)) {
     return { action: 'none', reason: 'hardware and the row agree' };

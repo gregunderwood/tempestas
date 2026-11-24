@@ -544,6 +544,61 @@ describe('DevicesService remapping a relay', () => {
     expect(dto.isOn).toBe(true);
     expect(setPin).not.toHaveBeenCalled();
   });
+
+  // After a restart the last report is the retained replay, older than the row's own offAt.
+  it.each([
+    ['on level', { onLevel: 1 as const }, 16],
+    ['pin', { gpio: 12 }, 12],
+  ])(
+    'reads a retained replay older than the row after a %s change',
+    async (_change, edit, reportedPin) => {
+      const turnedOffAt = new Date(NOW.getTime() - 60_000);
+      const replay: PinStateReport = {
+        nodeId: 'elantris',
+        pin: reportedPin,
+        level: reportedPin === 16 ? 1 : 0,
+        known: true,
+        observedAt: new Date(turnedOffAt.getTime() - 1_000),
+        live: false,
+      };
+      const { service } = makeService(
+        burnerOnElantris({ onAt: runningSince, offAt: turnedOffAt }),
+        undefined,
+        NODE,
+        replay,
+      );
+      const dto = await service.update('dev-1', edit);
+      expect(dto.isOn).toBe(true);
+    },
+  );
+
+  it('refuses a remap that queued behind a turn-on, and leaves the pin where it is', async () => {
+    let storedRow = burnerOnElantris();
+    let finishCommand: () => void = () => undefined;
+    const slowSetPin = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishCommand = resolve;
+        }),
+    );
+    const { service, mocks } = makeService(storedRow, slowSetPin);
+    mocks.findOne.mockImplementation(async () => ({ ...storedRow }));
+    mocks.save.mockImplementation(async (row: DeviceEntity) => {
+      storedRow = { ...row };
+      return row;
+    });
+
+    const turningOn = service.turnOn('dev-1');
+    const remapping = service.update('dev-1', { gpio: 12 });
+    await vi.waitFor(() => expect(slowSetPin).toHaveBeenCalled());
+    finishCommand();
+
+    await expect(turningOn).resolves.toMatchObject({ isOn: true, gpio: 16 });
+    await expect(remapping).rejects.toMatchObject({
+      response: { code: ApiErrorCode.DeviceAlreadyOn },
+    });
+    expect(storedRow).toMatchObject({ gpio: 16, onAt: NOW });
+  });
 });
 
 describe('DevicesService realtime fan-out', () => {

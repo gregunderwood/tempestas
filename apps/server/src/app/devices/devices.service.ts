@@ -30,9 +30,14 @@ import { DeviceEntity } from './models';
 import type { CreateDeviceDto } from './dto/create-device.dto';
 import type { UpdateDeviceDto } from './dto/update-device.dto';
 import { canTurnOn, canTurnOnAt, isOn } from './device-state';
-import { correctionPatch, reconcilePinState } from './reconcile-pin-state';
+import {
+  correctionPatch,
+  reconcileNewMapping,
+  reconcilePinState,
+} from './reconcile-pin-state';
 import { findDeviceOnPin } from './find-device-on-pin';
 import { NodeBoots } from './node-boots';
+import { PerDeviceQueue } from './per-device-queue';
 
 type Direction = 'on' | 'off';
 
@@ -44,6 +49,8 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
   private readonly nodeBoots = new NodeBoots();
   // Our own command's `gpio/state` must not be reconciled as a divergence; see docs/Safety.md 3c.
   private readonly pinsMidCommand = new Set<string>();
+  // An edit and a switch of one device must not interleave, or a save writes back stale times.
+  private readonly deviceWrites = new PerDeviceQueue();
 
   constructor(
     @InjectRepository(DeviceEntity)
@@ -128,27 +135,14 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     return this.publishSaved(saved);
   }
 
-  // Saving switches nothing; a remapped pin is read under its new mapping straight away.
-  async update(id: string, dto: UpdateDeviceDto): Promise<Device> {
-    const row = await this.findOneEntity(id);
-    const isRemapping = changesRelayMapping(row, dto);
-    if (isRemapping) assertIsOffForRemapping(row);
-    if (dto.gpio !== undefined && dto.gpio !== row.gpio) {
-      assertPinAvailable(row.node, dto.gpio);
-      await this.assertPinUnclaimed(row.node, dto.gpio);
-    }
-
-    Object.assign(row, dto);
-    if (isRemapping) this.seedFromLastReport(row, row.node, row.gpio);
-    return this.publishSaved(await this.devices.save(row));
+  update(id: string, dto: UpdateDeviceDto): Promise<Device> {
+    return this.deviceWrites.runInTurn(id, () => this.applyEdit(id, dto));
   }
 
-  async setRulesEnabled(id: string, rulesEnabled: boolean): Promise<Device> {
-    const row = await this.findOneEntity(id);
-    row.rulesEnabled = rulesEnabled;
-    const dto = this.toDto(await this.devices.save(row));
-    this.realtime.publishDeviceState(dto);
-    return dto;
+  setRulesEnabled(id: string, rulesEnabled: boolean): Promise<Device> {
+    return this.deviceWrites.runInTurn(id, () =>
+      this.applyRulesEnabled(id, rulesEnabled),
+    );
   }
 
   async remove(id: string): Promise<void> {
@@ -156,24 +150,30 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     await this.devices.remove(row);
   }
 
-  async turnOn(id: string): Promise<Device> {
-    const device = await this.findOneEntity(id);
-    assertIsOff(device);
-    assertCooldownOver(device, this.clock.now());
-    return this.drive(device, device.onLevel, 'on');
+  turnOn(id: string): Promise<Device> {
+    return this.deviceWrites.runInTurn(id, async () => {
+      const device = await this.findOneEntity(id);
+      assertIsOff(device);
+      assertCooldownOver(device, this.clock.now());
+      return this.drive(device, device.onLevel, 'on');
+    });
   }
 
   /** Bypasses the cooldown, but NOT the already-on check. */
-  async forceOn(id: string): Promise<Device> {
-    const device = await this.findOneEntity(id);
-    assertIsOff(device);
-    return this.drive(device, device.onLevel, 'on');
+  forceOn(id: string): Promise<Device> {
+    return this.deviceWrites.runInTurn(id, async () => {
+      const device = await this.findOneEntity(id);
+      assertIsOff(device);
+      return this.drive(device, device.onLevel, 'on');
+    });
   }
 
-  async turnOff(id: string): Promise<Device> {
-    const device = await this.findOneEntity(id);
-    assertIsOn(device);
-    return this.drive(device, offLevelOf(device), 'off');
+  turnOff(id: string): Promise<Device> {
+    return this.deviceWrites.runInTurn(id, async () => {
+      const device = await this.findOneEntity(id);
+      assertIsOn(device);
+      return this.drive(device, offLevelOf(device), 'off');
+    });
   }
 
   toDto(row: DeviceEntity): Device {
@@ -267,6 +267,30 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     this.realtime.publishDeviceState(this.toDto(device));
   }
 
+  // Saving switches nothing; a remapped pin is read under its new mapping straight away.
+  private async applyEdit(id: string, dto: UpdateDeviceDto): Promise<Device> {
+    const row = await this.findOneEntity(id);
+    const isRemapping = changesRelayMapping(row, dto);
+    if (isRemapping) assertIsOffForRemapping(row);
+    if (dto.gpio !== undefined && dto.gpio !== row.gpio) {
+      assertPinAvailable(row.node, dto.gpio);
+      await this.assertPinUnclaimed(row.node, dto.gpio);
+    }
+
+    Object.assign(row, dto);
+    if (isRemapping) this.seedFromLastReport(row, row.node, row.gpio);
+    return this.publishSaved(await this.devices.save(row));
+  }
+
+  private async applyRulesEnabled(
+    id: string,
+    rulesEnabled: boolean,
+  ): Promise<Device> {
+    const row = await this.findOneEntity(id);
+    row.rulesEnabled = rulesEnabled;
+    return this.publishSaved(await this.devices.save(row));
+  }
+
   private publishSaved(row: DeviceEntity): Device {
     const device = this.toDto(row);
     this.realtime.publishDeviceState(device);
@@ -311,7 +335,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     const report = this.hardware.lastPinReport(node.slug, pin);
     if (!report) return;
 
-    const verdict = reconcilePinState(row, report, this.clock.now());
+    const verdict = reconcileNewMapping(row, report, this.clock.now());
     if (verdict.action !== 'correct') return;
 
     Object.assign(row, correctionPatch(verdict));

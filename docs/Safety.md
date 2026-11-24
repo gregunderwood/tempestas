@@ -124,6 +124,21 @@ turn-on that had returned **409** then returned **200** and switched the relay.
 > The row is corrected; the hardware is **not** re-driven to match the database. A controller
 > restart must not energise a burner with no human involved.
 
+### 3d. A device that is on keeps its pin and on level
+
+The pin and the on level decide which relay a device drives and what "on" means. `PUT
+/api/devices/:id` refuses to change either while the device is on, with **409**
+`DEVICE_ALREADY_ON`: moving an energised device would leave its old relay running with nothing
+tracking it. Turn it off first. Other fields can still change while it runs.
+
+- **An edit and a switch of the same device run one at a time** (`PerDeviceQueue` in
+  `DevicesService`). Otherwise a rules cycle could turn the device on between the edit's check and
+  its save, and the save would write back the stale times and move the pin anyway.
+- **Saving switches nothing.** After a remap the row is read from the pin's last report under the
+  new mapping, without 3c's ordering guard: the row's times belong to the old mapping, and after a
+  restart the last report is a retained replay older than them. A device whose on level flipped
+  can show as on without anything having switched, which is the truth about the relay.
+
 ### 4. A null CO2 means unknown, never zero
 
 The node reports validity honestly and **never substitutes a last-known-good value**. A null

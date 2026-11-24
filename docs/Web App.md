@@ -397,7 +397,7 @@ The pin and the on level decide which relay a device drives and what "on" means,
 - an edit that changes either says what it does before saving;
 - a device that is **on** cannot change either. The dialog locks both fields, and the server
   refuses with `DEVICE_ALREADY_ON`, because moving an energised device would leave its old relay
-  running with nothing tracking it. Turn it off first.
+  running with nothing tracking it. Turn it off first. See [Safety](Safety.md) 3d.
 
 After a remap the server reads the pin's last reported level under the new mapping straight away,
 so a device whose on level flipped may show as on without anything having switched.
