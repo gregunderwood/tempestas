@@ -120,7 +120,11 @@ class ReleaseInstaller:
             )
 
     def _switch_to(
-        self, staging: Path, command: dict, running_release: str, running_link_identity: int
+        self,
+        staging: Path,
+        command: dict,
+        running_release: str,
+        running_link_identity: tuple[int, int],
     ) -> PendingUpdate:
         with self.layout.hold_switch_lock():
             if self.layout.read_current_link_identity() != running_link_identity:

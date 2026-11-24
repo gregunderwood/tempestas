@@ -78,9 +78,11 @@ class ReleaseLayout:
         except OSError:
             return None
 
-    def read_current_link_identity(self) -> int:
+    def read_current_link_identity(self) -> tuple[int, int]:
         """Changes with every switch, even back to the same release, as a hand deploy makes."""
-        return os.lstat(self.current_link).st_ino
+        link = os.lstat(self.current_link)
+        # The creation time too: a freed inode is often handed to the very next new link.
+        return link.st_ino, link.st_ctime_ns
 
     def locate_release(self, release: str) -> Path:
         return self.releases / release

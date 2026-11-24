@@ -157,8 +157,13 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
 
     def on_message(_client, _userdata, message):
         handler = handlers.get(message.topic)
-        if handler is not None:
+        if handler is None:
+            return
+        try:
             handler(agent, message)
+        except Exception:
+            # Raised here it would end the network thread, and every later command with it.
+            log.exception("could not handle a message on %s", message.topic)
 
     def on_disconnect(_client, _userdata, _flags, _reason_code, _properties=None):
         agent.on_disconnected()

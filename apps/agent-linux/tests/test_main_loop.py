@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from tempestas_agent import __main__ as main_module
+from tempestas_agent import contract
 from tempestas_agent.__main__ import (
     STOP_CHECK_S,
     NetworkLoopDied,
@@ -106,3 +107,16 @@ def test_a_dead_network_thread_fails_the_run():
 
 def test_a_client_whose_loop_has_not_started_is_not_judged():
     require_network_loop_alive(None)
+
+
+def test_a_message_its_handler_cannot_take_leaves_the_network_thread_running(monkeypatch):
+    def raise_on_any_update(_agent, _message):
+        raise ValueError("invalid literal for int()")
+
+    monkeypatch.setattr(main_module, "handle_update", raise_on_any_update)
+    agent = SimpleNamespace(config=SimpleNamespace(node_id="patji"))
+    client = SimpleNamespace()
+    main_module.wire(agent, client)
+    message = SimpleNamespace(topic=contract.build_update_topic("patji"), payload=b"{}")
+
+    client.on_message(client, None, message)

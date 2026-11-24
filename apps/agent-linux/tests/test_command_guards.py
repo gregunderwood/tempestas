@@ -82,6 +82,7 @@ def test_ignores_an_empty_payload_silently():
 def test_refuses_an_unknown_schema_major():
     assert judge(command(schema="gpioSet/2")).is_accepted is False
     assert judge(command(schema="nonsense")).is_accepted is False
+    assert judge(command(schema="gpioSet/²")).is_accepted is False
 
 
 def test_refuses_malformed_payloads():
