@@ -51,6 +51,8 @@ STOPPING = "the agent is stopping or restarting"
 ANOTHER_UPDATE_IN_PROGRESS = "another update is in progress"
 # Every holder of the switch lock lets go within this, well inside systemd's stop timeout.
 STOP_SWITCH_WAIT_S = 10.0
+# Resolved on import, as the code was loaded: `current` may be switched under this process later.
+LOADED_RELEASE = Path(__file__).resolve().parents[2]
 SWITCH_LOCK_RETRY_S = 0.1
 FINAL_UPDATE_STATES = frozenset(
     {contract.UpdateState.HEALTHY, contract.UpdateState.ROLLED_BACK, contract.UpdateState.FAILED}
@@ -185,8 +187,7 @@ class Agent:
         self._held_until_exit = ExitStack()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
         self.agent_version = read_agent_version()
-        # Resolved now: `current` may be switched under this process once it runs.
-        self.loaded_release = Path(__file__).resolve().parents[2]
+        self.loaded_release = LOADED_RELEASE
         self.sample_sequence = 0
         self.bound_controller: str | None = None
         self.last_heartbeat_at: float | None = None

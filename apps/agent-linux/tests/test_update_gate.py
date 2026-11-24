@@ -54,6 +54,20 @@ def test_the_new_release_starts_under_a_health_gate(tmp_path):
     assert settlement.outcome is None
 
 
+def test_an_outcome_recorded_just_before_a_crash_settles_the_update_without_a_new_gate(
+    tmp_path,
+):
+    layout = make_layout(tmp_path)
+    install_new_release(layout)
+    healthy = UpdateOutcome(PENDING.command_id, contract.UpdateState.HEALTHY)
+    layout.write_outcome(healthy)
+
+    settlement = settle_update_on_start(layout)
+
+    assert (settlement.gate, settlement.outcome) == (None, healthy)
+    assert layout.read_pending() is None
+
+
 def test_a_release_the_rollback_unit_switched_away_from_is_reported_rolled_back(tmp_path):
     layout = make_layout(tmp_path)
     install_new_release(layout)

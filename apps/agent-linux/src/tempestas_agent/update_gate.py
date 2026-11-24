@@ -79,11 +79,19 @@ def settle_while_locked(layout: ReleaseLayout) -> UpdateSettlement:
     pending = layout.read_pending()
     if pending is None:
         return settlement
+    if is_already_settled(settlement.outcome, pending):
+        # A crash between recording the outcome and clearing the pending record; finish it.
+        record_outcome(layout, settlement.outcome)
+        return settlement
     if layout.read_current_release() == pending.version:
         settlement.gate = HealthGate(pending)
         return settlement
     settlement.outcome = record_outcome(layout, describe_finished_rollback(layout, pending))
     return settlement
+
+
+def is_already_settled(outcome: UpdateOutcome | None, pending: PendingUpdate) -> bool:
+    return outcome is not None and outcome.command_id == pending.command_id
 
 
 def describe_finished_rollback(layout: ReleaseLayout, pending: PendingUpdate) -> UpdateOutcome:

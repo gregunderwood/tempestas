@@ -125,7 +125,11 @@ def describe_target_problem(body: dict, running_app: str) -> str | None:
 def is_fetchable_url(value) -> bool:
     if not isinstance(value, str):
         return False
-    parsed = urlparse(value)
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        # Raised on the network thread, it would leave the agent deaf.
+        return False
     return parsed.scheme in MANIFEST_URL_SCHEMES and bool(parsed.netloc)
 
 
