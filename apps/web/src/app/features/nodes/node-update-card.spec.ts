@@ -9,7 +9,7 @@ import {
   type NodeUpdate,
   type NodeUpdateSummary,
 } from '@tempestas/domain';
-import { NodeUpdateCard, type UpdateAction } from './node-update-card';
+import { NodeUpdateCard, type UpdateConfirmation } from './node-update-card';
 
 function node(
   overrides: Partial<Node> = {},
@@ -51,9 +51,9 @@ function renderCard(shown: Node) {
   });
   const fixture = TestBed.createComponent(NodeUpdateCard);
   fixture.componentRef.setInput('node', shown);
-  const confirmed: UpdateAction[] = [];
-  fixture.componentInstance.confirmed.subscribe((action) =>
-    confirmed.push(action),
+  const confirmed: UpdateConfirmation[] = [];
+  fixture.componentInstance.confirmed.subscribe((confirmation) =>
+    confirmed.push(confirmation),
   );
   fixture.detectChanges();
   const card = fixture.nativeElement as HTMLElement;
@@ -66,6 +66,10 @@ function renderCard(shown: Node) {
       );
     },
     render: () => fixture.detectChanges(),
+    show(next: Node) {
+      fixture.componentRef.setInput('node', next);
+      fixture.detectChanges();
+    },
   };
 }
 
@@ -80,7 +84,7 @@ describe('NodeUpdateCard', () => {
     expect(card.textContent).toContain('fail-safe levels');
 
     findButton('Update to 1.1.1')?.click();
-    expect(confirmed).toEqual(['update']);
+    expect(confirmed).toEqual([{ action: 'update', version: '1.1.1' }]);
   });
 
   it('lets the operator back out', () => {
@@ -104,7 +108,7 @@ describe('NodeUpdateCard', () => {
     render();
     findButton('Roll back to 1.1.0')?.click();
 
-    expect(confirmed).toEqual(['roll-back']);
+    expect(confirmed).toEqual([{ action: 'roll-back', version: '1.1.0' }]);
   });
 
   it('disables the buttons and says why when an update cannot be sent', () => {
@@ -150,5 +154,49 @@ describe('NodeUpdateCard', () => {
     const { card } = renderCard(node({ availableUpdate: null }));
 
     expect(card.textContent).toContain('Up to date.');
+  });
+
+  it('drops an open confirmation once the offer changes, so a stale version is never sent', () => {
+    const { card, findButton, render, show } = renderCard(node());
+
+    findButton('Update to 1.1.1')?.click();
+    render();
+    show(node({ availableUpdate: '1.1.2' }));
+
+    expect(card.textContent).not.toContain('fail-safe levels');
+    expect(findButton('Update to 1.1.2')).toBeDefined();
+  });
+
+  it('drops an open confirmation when the page moves to another node', () => {
+    const { card, findButton, render, show } = renderCard(node());
+
+    findButton('Update to 1.1.1')?.click();
+    render();
+    show(node({ id: 'elantris-id', slug: 'elantris' }));
+
+    expect(card.textContent).not.toContain('fail-safe levels');
+  });
+
+  it('drops an open confirmation when the update becomes blocked', () => {
+    const { card, findButton, render, show } = renderCard(node());
+
+    findButton('Update to 1.1.1')?.click();
+    render();
+    show(node({}, { blockedBecause: '"elantris" is updating.' }));
+
+    expect(card.textContent).not.toContain('fail-safe levels');
+    expect(findButton('Update to 1.1.1')?.disabled).toBe(true);
+  });
+
+  it('says why a node that cannot update from here is not offered one', () => {
+    const { card } = renderCard(
+      node(
+        { availableUpdate: null },
+        { notUpdatableBecause: 'This agent needs contract 1.1.' },
+      ),
+    );
+
+    expect(card.textContent).toContain('This agent needs contract 1.1.');
+    expect(card.textContent).not.toContain('Up to date.');
   });
 });

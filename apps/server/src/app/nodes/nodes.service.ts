@@ -395,6 +395,19 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
 
   private async publishNodeState(entity: NodeEntity): Promise<Node> {
     const [node] = await this.decorate([entity]);
+    this.publishDecorated(entity, node);
+    return node;
+  }
+
+  private async republishAll(): Promise<void> {
+    const entities = await this.nodes.find({ order: { slug: 'ASC' } });
+    const decorated = await this.decorate(entities);
+    entities.forEach((entity, index) =>
+      this.publishDecorated(entity, decorated[index]),
+    );
+  }
+
+  private publishDecorated(entity: NodeEntity, node: Node): void {
     this.realtime.publishNodeState(node);
     this.publishedLiveness.set(node.id, {
       evidence: {
@@ -404,7 +417,6 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       },
       isPublishedOnline: node.online,
     });
-    return node;
   }
 
   private async republishNode(id: string): Promise<void> {
@@ -414,11 +426,6 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     await this.publishNodeState(node);
-  }
-
-  private async republishAll(): Promise<void> {
-    const entities = await this.nodes.find({ order: { slug: 'ASC' } });
-    for (const entity of entities) await this.publishNodeState(entity);
   }
 
   private async applyOperatorFields(
@@ -443,16 +450,27 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     return zone.id;
   }
 
-  // Two grouped aggregates, so the nodes list stays three round-trips however many nodes exist.
+  // Grouped queries, so the nodes list costs the same round-trips however many nodes exist.
   private async decorate(nodes: NodeEntity[]): Promise<Node[]> {
     if (nodes.length === 0) return [];
     const ids = nodes.map((node) => node.id);
     const deviceCounts = await this.countDevicesByNode(ids);
     const latestReadings = await this.findLatestReadingByNode(ids);
-    const updateSummaries = await this.nodeUpdates.summarize(nodes);
     const now = this.clock.now();
+    const candidates = nodes.map((node) => ({
+      node,
+      isOnline: isNodeOnline(
+        {
+          online: node.online,
+          lastSeenAt: node.lastSeenAt,
+          latestReadingAt: latestReadings.get(node.id) ?? null,
+        },
+        now,
+      ),
+    }));
+    const updateSummaries = await this.nodeUpdates.summarize(candidates);
 
-    return nodes.map((node) => {
+    return candidates.map(({ node, isOnline }) => {
       const latestReadingAt = latestReadings.get(node.id) ?? null;
       return {
         id: node.id,
@@ -461,14 +479,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
         location: node.location,
         kind: node.kind,
         status: node.status,
-        online: isNodeOnline(
-          {
-            online: node.online,
-            lastSeenAt: node.lastSeenAt,
-            latestReadingAt,
-          },
-          now,
-        ),
+        online: isOnline,
         lastSeenAt: node.lastSeenAt?.toISOString() ?? null,
         agentName: node.agentName,
         agentVersion: node.agentVersion,

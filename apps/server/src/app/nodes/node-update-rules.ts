@@ -20,29 +20,64 @@ const OUTCOME_OF_FINAL_STATE: Partial<Record<UpdateState, NodeUpdateOutcome>> =
     [UpdateState.Failed]: NodeUpdateOutcome.Failed,
   };
 
+const RELEASES_URL_SCHEMES = new Set(['http:', 'https:']);
+const TRAILING_SLASHES = /\/+$/;
+
 export interface UpdateRefusal {
   code: ApiErrorCode;
   message: string;
 }
 
+export type ReleasesAddress = { url: string } | { problem: string };
+
 /** What decides whether a node may be sent an update right now. */
 export interface UpdateConditions {
-  isReleasesUrlSet: boolean;
+  releasesUrlProblem: string | null;
   isLeader: boolean;
   /** The one update any node is still running, with the slug of that node. */
   updateInProgress: { nodeSlug: string } | null;
 }
 
+/** A node with its derived `online`, the one the page shows, not the stored flag. */
+export interface UpdateCandidate {
+  node: NodeEntity;
+  isOnline: boolean;
+}
+
+// Checked when the server starts, so a typo disables the button instead of failing every update on the node.
+export function readReleasesAddress(setting: string): ReleasesAddress {
+  const trimmed = setting.trim();
+  if (trimmed === '') {
+    return {
+      problem:
+        'Set AGENT_RELEASES_URL on the server, so nodes know where to download releases.',
+    };
+  }
+  if (!isHttpUrl(trimmed)) {
+    return {
+      problem: `AGENT_RELEASES_URL "${trimmed}" is not an http(s) address, such as http://192.168.2.70:7000.`,
+    };
+  }
+  return { url: trimmed.replace(TRAILING_SLASHES, '') };
+}
+
+function isHttpUrl(candidate: string): boolean {
+  try {
+    return RELEASES_URL_SCHEMES.has(new URL(candidate).protocol);
+  } catch {
+    return false;
+  }
+}
+
 // Checked for the button as well as the request, so the page says why before anyone presses it.
 export function findUpdateRefusal(
-  node: NodeEntity,
+  { node, isOnline }: UpdateCandidate,
   conditions: UpdateConditions,
 ): UpdateRefusal | null {
-  if (!conditions.isReleasesUrlSet) {
+  if (conditions.releasesUrlProblem) {
     return {
       code: ApiErrorCode.UpdatesNotConfigured,
-      message:
-        'Set AGENT_RELEASES_URL on the server, so nodes know where to download releases.',
+      message: conditions.releasesUrlProblem,
     };
   }
   if (!conditions.isLeader) {
@@ -57,7 +92,7 @@ export function findUpdateRefusal(
       message: `"${node.slug}" is ${node.status}. Only an admitted node is updated.`,
     };
   }
-  if (!node.online) {
+  if (!isOnline) {
     return {
       code: ApiErrorCode.NodeOffline,
       message: `"${node.slug}" is offline.`,
@@ -89,26 +124,28 @@ function isWaitingForNode(update: NodeUpdateEntity): boolean {
   );
 }
 
-/** Applies what the node said, and reports whether anything changed. */
+// After a time-out only a final state is news; a late progress report would revive it.
+export function isNewsAbout(
+  update: NodeUpdateEntity,
+  status: UpdateStatusReport,
+): boolean {
+  if (!isWaitingForNode(update)) return false;
+  const isFinal = OUTCOME_OF_FINAL_STATE[status.state] !== undefined;
+  return isFinal || update.outcome === NodeUpdateOutcome.InProgress;
+}
+
 export function applyUpdateStatus(
   update: NodeUpdateEntity,
   status: UpdateStatusReport,
   now: Date,
-): boolean {
-  if (!isWaitingForNode(update)) return false;
+): void {
   const finalOutcome = OUTCOME_OF_FINAL_STATE[status.state];
-  // After a time-out only a final state is news; a late progress report would revive it.
-  const isLateProgress =
-    !finalOutcome && update.outcome === NodeUpdateOutcome.TimedOut;
-  if (isLateProgress) return false;
-
   update.lastState = status.state;
   update.reason = status.reason;
   if (finalOutcome) {
     update.outcome = finalOutcome;
     update.finishedAt = now;
   }
-  return true;
 }
 
 export function isStalled(update: NodeUpdateEntity, now: Date): boolean {

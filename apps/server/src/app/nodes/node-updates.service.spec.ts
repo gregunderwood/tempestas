@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { Subject } from 'rxjs';
-import type { Repository } from 'typeorm';
+import { FindOperator, type Repository } from 'typeorm';
 import {
   AgentApp,
   ApiErrorCode,
@@ -20,6 +20,7 @@ import {
   type HardwareService,
   type UpdateStatusReport,
 } from '../hardware/hardware.service';
+import type { SensorReadingEntity } from '../readings/models';
 import type { NodeEntity, NodeUpdateEntity } from './models';
 import { FINAL_STATE_WAIT_MS } from './node-update-rules';
 import { NodeUpdatesService } from './node-updates.service';
@@ -42,27 +43,37 @@ function patji(overrides: Partial<NodeEntity> = {}): NodeEntity {
     online: true,
     agentName: AgentApp.Linux,
     agentVersion: '1.1.0',
+    lastSeenAt: NOW,
     capabilities: CAPABILITIES,
     ...overrides,
   } as NodeEntity;
 }
 
-function matches(row: NodeUpdateEntity, where: Partial<NodeUpdateEntity>) {
-  return Object.entries(where).every(
-    ([field, value]) => row[field as keyof NodeUpdateEntity] === value,
-  );
+function matches(row: NodeUpdateEntity, where: Record<string, unknown>) {
+  return Object.entries(where).every(([field, value]) => {
+    const stored = row[field as keyof NodeUpdateEntity];
+    return value instanceof FindOperator
+      ? (value.value as unknown[]).includes(stored)
+      : stored === value;
+  });
+}
+
+function newestFirst(first: NodeUpdateEntity, second: NodeUpdateEntity) {
+  return second.startedAt.getTime() - first.startedAt.getTime();
 }
 
 interface Scenario {
   nodes?: NodeEntity[];
   releasesUrl?: string;
   isLeader?: boolean;
+  hasRecentReading?: boolean;
 }
 
 async function makeService({
   nodes = [patji()],
   releasesUrl = RELEASES_URL,
   isLeader = true,
+  hasRecentReading = true,
 }: Scenario = {}) {
   const root = makeAgentReleasesRoot();
   writeBundle(root, AgentApp.Linux, '1.1.0');
@@ -89,25 +100,23 @@ async function makeService({
       else updateRows[index] = row;
       return row;
     }),
-    delete: vi.fn(async (id: string) => {
-      updateRows.splice(
-        updateRows.findIndex((row) => row.id === id),
-        1,
-      );
-    }),
-    find: vi.fn(async ({ where }: { where: Partial<NodeUpdateEntity> }) =>
-      updateRows.filter((row) => matches(row, where)).map(withNode),
-    ),
-    findOne: vi.fn(async ({ where }: { where: Partial<NodeUpdateEntity> }) => {
-      const found = updateRows
+    find: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+      updateRows
         .filter((row) => matches(row, where))
-        .sort(
-          (first, second) =>
-            second.startedAt.getTime() - first.startedAt.getTime(),
-        )[0];
+        .sort(newestFirst)
+        .map(withNode),
+    ),
+    findOne: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+      const [found] = updateRows
+        .filter((row) => matches(row, where))
+        .sort(newestFirst);
       return found ? withNode(found) : null;
     }),
   } as unknown as Repository<NodeUpdateEntity>;
+  const clock = new FixedClock(NOW);
+  const readingRepository = {
+    findOne: async () => (hasRecentReading ? { createdAt: clock.now() } : null),
+  } as unknown as Repository<SensorReadingEntity>;
 
   const statuses = new Subject<UpdateStatusReport>();
   const sendUpdate = vi.fn(async () => undefined);
@@ -116,11 +125,11 @@ async function makeService({
     sendUpdate,
     updateStatuses$: statuses.asObservable(),
   } as unknown as HardwareService;
-  const clock = new FixedClock(NOW);
 
   const service = new NodeUpdatesService(
     nodeRepository,
     updateRepository,
+    readingRepository,
     hardware,
     agentReleases,
     clock,
@@ -151,7 +160,7 @@ describe('NodeUpdatesService.updateToOffered', () => {
   it('sends the offered release with its manifest address, and records it in progress', async () => {
     const { service, updateRows, sendUpdate, changes } = await makeService();
 
-    await service.updateToOffered('patji-uuid');
+    await service.updateToOffered('patji-uuid', '1.1.1');
 
     expect(updateRows).toHaveLength(1);
     expect(updateRows[0]).toMatchObject({
@@ -177,7 +186,7 @@ describe('NodeUpdatesService.updateToOffered', () => {
       releasesUrl: `${RELEASES_URL}/`,
     });
 
-    await service.updateToOffered('patji-uuid');
+    await service.updateToOffered('patji-uuid', '1.1.1');
 
     expect(sendUpdate).toHaveBeenCalledWith(
       'patji',
@@ -192,7 +201,9 @@ describe('NodeUpdatesService.updateToOffered', () => {
   it('refuses while no releases address is set', async () => {
     const { service, sendUpdate } = await makeService({ releasesUrl: '' });
 
-    await expect(service.updateToOffered('patji-uuid')).rejects.toMatchObject({
+    await expect(
+      service.updateToOffered('patji-uuid', '1.1.1'),
+    ).rejects.toMatchObject({
       response: { code: ApiErrorCode.UpdatesNotConfigured },
     });
     expect(sendUpdate).not.toHaveBeenCalled();
@@ -203,7 +214,9 @@ describe('NodeUpdatesService.updateToOffered', () => {
       nodes: [patji({ agentVersion: '1.1.1' })],
     });
 
-    await expect(service.updateToOffered('patji-uuid')).rejects.toMatchObject({
+    await expect(
+      service.updateToOffered('patji-uuid', '1.1.1'),
+    ).rejects.toMatchObject({
       response: { code: ApiErrorCode.UpdateNotAvailable },
     });
   });
@@ -214,8 +227,8 @@ describe('NodeUpdatesService.updateToOffered', () => {
     });
 
     const results = await Promise.allSettled([
-      service.updateToOffered('patji-uuid'),
-      service.updateToOffered('elantris-uuid'),
+      service.updateToOffered('patji-uuid', '1.1.1'),
+      service.updateToOffered('elantris-uuid', '1.1.1'),
     ]);
 
     expect(results.map((result) => result.status)).toEqual([
@@ -225,23 +238,117 @@ describe('NodeUpdatesService.updateToOffered', () => {
     expect(sendUpdate).toHaveBeenCalledTimes(1);
   });
 
-  it('forgets the update when it could not be sent', async () => {
-    const { service, updateRows, sendUpdate } = await makeService();
+  it('records nothing when the update could not be sent, so no node stays blocked', async () => {
+    const { service, updateRows, sendUpdate, changes } = await makeService();
     sendUpdate.mockRejectedValueOnce(
       new HardwareError(ApiErrorCode.HardwareUnreachable, 'broker gone'),
     );
 
-    await expect(service.updateToOffered('patji-uuid')).rejects.toMatchObject({
-      status: 503,
-    });
+    await expect(
+      service.updateToOffered('patji-uuid', '1.1.1'),
+    ).rejects.toMatchObject({ status: 503 });
     expect(updateRows).toHaveLength(0);
+    expect(changes).not.toHaveBeenCalled();
+  });
+
+  it('refuses a version the operator did not confirm', async () => {
+    const { service, sendUpdate } = await makeService();
+
+    await expect(
+      service.updateToOffered('patji-uuid', '1.1.2'),
+    ).rejects.toMatchObject({
+      response: {
+        code: ApiErrorCode.UpdateNotAvailable,
+        message: expect.stringContaining('now offered 1.1.1, not 1.1.2'),
+      },
+    });
+    expect(sendUpdate).not.toHaveBeenCalled();
+  });
+
+  it('refuses a node the page shows as offline, though its stored flag says online', async () => {
+    const { service, sendUpdate } = await makeService({
+      nodes: [patji({ lastSeenAt: null })],
+      hasRecentReading: false,
+    });
+
+    await expect(
+      service.updateToOffered('patji-uuid', '1.1.1'),
+    ).rejects.toMatchObject({ response: { code: ApiErrorCode.NodeOffline } });
+    expect(sendUpdate).not.toHaveBeenCalled();
+  });
+
+  it('refuses an address no node could download from', async () => {
+    const { service } = await makeService({ releasesUrl: '192.168.2.70:7000' });
+
+    await expect(
+      service.updateToOffered('patji-uuid', '1.1.1'),
+    ).rejects.toMatchObject({
+      response: {
+        code: ApiErrorCode.UpdatesNotConfigured,
+        message: expect.stringContaining('is not an http(s) address'),
+      },
+    });
+  });
+});
+
+describe('NodeUpdatesService.summarize', () => {
+  it('shows the newest update and offers a roll back after a healthy one', async () => {
+    const node = patji();
+    const { service, report } = await makeService({ nodes: [node] });
+    await service.updateToOffered('patji-uuid', '1.1.1');
+    await report(UpdateState.Healthy);
+    node.agentVersion = '1.1.1';
+
+    const summary = (await service.summarize([{ node, isOnline: true }])).get(
+      'patji-uuid',
+    );
+
+    expect(summary).toMatchObject({
+      notUpdatableBecause: null,
+      blockedBecause: null,
+      rollBackVersion: '1.1.0',
+      lastUpdate: {
+        toVersion: '1.1.1',
+        outcome: NodeUpdateOutcome.Healthy,
+      },
+    });
+  });
+
+  it('blocks every node while one is updating', async () => {
+    const elantris = patji({ id: 'elantris-uuid', slug: 'elantris' });
+    const { service } = await makeService({ nodes: [patji(), elantris] });
+    await service.updateToOffered('patji-uuid', '1.1.1');
+
+    const summary = (
+      await service.summarize([{ node: elantris, isOnline: true }])
+    ).get('elantris-uuid');
+
+    expect(summary?.blockedBecause).toContain('"patji" is updating');
+    expect(summary?.lastUpdate).toBeNull();
+  });
+
+  it('says why an agent that cannot take the command is never offered one', async () => {
+    const braize = patji({
+      id: 'braize-uuid',
+      slug: 'braize',
+      agentName: AgentApp.MicroPython,
+      agentVersion: '1.0.8',
+      capabilities: { ...CAPABILITIES, contractMinor: 0 },
+    });
+    const { service } = await makeService({ nodes: [braize] });
+
+    const summary = (
+      await service.summarize([{ node: braize, isOnline: true }])
+    ).get('braize-uuid');
+
+    expect(summary?.notUpdatableBecause).toContain('needs contract 1.1');
   });
 });
 
 describe('NodeUpdatesService status tracking', () => {
   it('follows the node through to healthy', async () => {
     const { service, updateRows, report } = await makeService();
-    await service.updateToOffered('patji-uuid');
+    await service.updateToOffered('patji-uuid', '1.1.1');
 
     await report(UpdateState.Installing);
     expect(updateRows[0].lastState).toBe(UpdateState.Installing);
@@ -255,7 +362,7 @@ describe('NodeUpdatesService status tracking', () => {
 
   it('ignores a status for an update it never sent', async () => {
     const { service, updateRows, deliver } = await makeService();
-    await service.updateToOffered('patji-uuid');
+    await service.updateToOffered('patji-uuid', '1.1.1');
 
     await deliver({
       nodeId: 'patji',
@@ -269,7 +376,7 @@ describe('NodeUpdatesService status tracking', () => {
 
   it("ignores a status about another node's update", async () => {
     const { service, updateRows, deliver } = await makeService();
-    await service.updateToOffered('patji-uuid');
+    await service.updateToOffered('patji-uuid', '1.1.1');
 
     await deliver({
       nodeId: 'elantris',
@@ -283,13 +390,13 @@ describe('NodeUpdatesService status tracking', () => {
 
   it('times out an update with no final state, which frees the next one', async () => {
     const { service, updateRows, clock, sendUpdate } = await makeService();
-    await service.updateToOffered('patji-uuid');
+    await service.updateToOffered('patji-uuid', '1.1.1');
 
     clock.set(new Date(NOW.getTime() + FINAL_STATE_WAIT_MS));
     await service.sweepStalledUpdates();
 
     expect(updateRows[0].outcome).toBe(NodeUpdateOutcome.TimedOut);
-    await service.updateToOffered('patji-uuid');
+    await service.updateToOffered('patji-uuid', '1.1.1');
     expect(sendUpdate).toHaveBeenCalledTimes(2);
   });
 });
@@ -300,11 +407,11 @@ describe('NodeUpdatesService.rollBack', () => {
     const { service, updateRows, sendUpdate, report } = await makeService({
       nodes: [node],
     });
-    await service.updateToOffered('patji-uuid');
+    await service.updateToOffered('patji-uuid', '1.1.1');
     await report(UpdateState.Healthy);
     node.agentVersion = '1.1.1';
 
-    await service.rollBack('patji-uuid');
+    await service.rollBack('patji-uuid', '1.1.0');
 
     expect(sendUpdate).toHaveBeenLastCalledWith(
       'patji',
@@ -320,8 +427,10 @@ describe('NodeUpdatesService.rollBack', () => {
   it('refuses when there is nothing to roll back to', async () => {
     const { service } = await makeService();
 
-    await expect(service.rollBack('patji-uuid')).rejects.toMatchObject({
-      response: { code: ApiErrorCode.UpdateNotAvailable },
-    });
+    await expect(service.rollBack('patji-uuid', '1.1.0')).rejects.toMatchObject(
+      {
+        response: { code: ApiErrorCode.UpdateNotAvailable },
+      },
+    );
   });
 });

@@ -141,10 +141,13 @@ a fault, and the value alone cannot tell them apart.
 Under the gauges, **Software** shows the agent the node runs. With a newer release offered, it
 has an **Update to X** button. Pressing it first says what will happen: the node restarts, its
 relays go to their fail-safe levels for a few seconds, and it goes back to what it runs now if the
-new version does not come up healthy. Then progress follows the node's own reports over
+new version does not come up healthy. The confirmation goes away if the offer changes, the update
+becomes blocked or the page moves to another node, and the request carries the version confirmed,
+so a version nobody saw is never sent. Then progress follows the node's own reports over
 `node:state`, and the result and its reason stay on the card. **Roll back to Y** appears straight
 after a healthy update. When the server would refuse, the buttons are disabled and the card says
-why. See [Nodes](Infrastructure/Nodes.md#updating-a-node-from-the-web).
+why. A node that cannot update from here, such as a MicroPython agent before contract 1.1, says so
+instead of "Up to date." See [Nodes](Infrastructure/Nodes.md#updating-a-node-from-the-web).
 
 There is no combined 24-hour row, deliberately: the burner is enrichment by day and heat by night,
 so a figure spanning both describes neither. See

@@ -63,6 +63,7 @@ const COMMAND_TIMEOUT_MS = 5_000;
 // Outlives the ack timeout, yet short enough that a queued or replayed command is refused.
 const COMMAND_TTL_MS = 15_000;
 const UPDATE_COMMAND_TTL_MS = 30_000;
+const UPDATE_PUBLISH_TIMEOUT_MS = 5_000;
 /** The node's dead-man counts these. Missing them is what makes it fail safe. */
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const WARN_THROTTLE_MS = 5 * 60 * 1000;
@@ -189,7 +190,7 @@ export class MqttHardwareService
 
   async sendUpdate(nodeId: NodeId, order: UpdateOrder): Promise<void> {
     this.refuseIfFollower('update a node');
-    const client = this.requireClient();
+    const client = this.requireConnectedClient();
     this.refuseIfKnownOffline(nodeId);
     const payload = buildUpdate(
       { nodeId, now: this.clock.now() },
@@ -198,10 +199,14 @@ export class MqttHardwareService
       UPDATE_COMMAND_TTL_MS,
     );
     try {
-      await client.publishAsync(
-        mqttTopics.update(nodeId),
-        JSON.stringify(payload),
-        mqttQos.update,
+      await rejectAfter(
+        client.publishAsync(
+          mqttTopics.update(nodeId),
+          JSON.stringify(payload),
+          mqttQos.update,
+        ),
+        UPDATE_PUBLISH_TIMEOUT_MS,
+        `the broker did not acknowledge it within ${UPDATE_PUBLISH_TIMEOUT_MS}ms`,
       );
     } catch (error: unknown) {
       throw new HardwareError(
@@ -753,6 +758,18 @@ export class MqttHardwareService
     this.logger.debug(message);
   }
 
+  // mqtt.js keeps a QoS 1 publish made while disconnected and sends it on reconnect, past its expiry.
+  private requireConnectedClient(): MqttClient {
+    const client = this.requireClient();
+    if (!client.connected) {
+      throw new HardwareError(
+        ApiErrorCode.HardwareUnreachable,
+        `Not connected to the broker (${MQTT_ROOT}), so the update was not sent`,
+      );
+    }
+    return client;
+  }
+
   private requireClient(): MqttClient {
     if (!this.client) {
       // Never queue a burner command for an unknown future.
@@ -763,4 +780,16 @@ export class MqttHardwareService
     }
     return this.client;
   }
+}
+
+function rejectAfter<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  reason: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((neverResolves, reject) => {
+    timer = setTimeout(() => reject(new Error(reason)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

@@ -114,8 +114,8 @@ GET    /api/nodes/:id
 PUT    /api/nodes/:id            # displayName, location, zoneId — nothing else
 POST   /api/nodes/:id/admit      # optional { zoneId, displayName, location }
 POST   /api/nodes/:id/disable
-POST   /api/nodes/:id/update     # sends the node its availableUpdate
-POST   /api/nodes/:id/roll-back  # sends the node updates.rollBackVersion
+POST   /api/nodes/:id/update     # { version }: sends the node its availableUpdate
+POST   /api/nodes/:id/roll-back  # { version }: sends the node updates.rollBackVersion
 DELETE /api/nodes/:id            # pending only
 ```
 
@@ -129,13 +129,26 @@ bundles it comes from are listed at `GET /api/agent-releases`; see
 [`update` command](MQTT%20Contract.md#the-update-command) for its `availableUpdate`, and answers
 `202` once the broker has it. The node does the rest and reports each step on `update/status`.
 
+- **The request names the version the operator confirmed.** What is offered can change while the
+  confirmation is open, through another browser or a deploy's new bundles. A version that no longer
+  matches is refused with `409 UPDATE_NOT_AVAILABLE`, rather than sending one nobody saw.
+- **Never while the broker is disconnected**, and a publish the broker does not acknowledge within
+  5 s is a `503`. mqtt.js would otherwise keep the command and send it after reconnecting, past its
+  expiry, while the request hung.
+- **Published first, saved once the broker has it**, so a failed send leaves no row behind to
+  block the other nodes.
 - **One node at a time.** The server refuses with `409 UPDATE_IN_PROGRESS` while any node's update
   is still in progress, so a bad release cannot take out every node at once. Two quick presses are
   queued, so the second sees the first.
-- **Only an admitted, online node, from the leader**, and only once `AGENT_RELEASES_URL` is set
-  (`409 UPDATES_NOT_CONFIGURED`): it is the address the node downloads the bundle from, as the
-  node sees the server. `updates.blockedBecause` says which of these stands in the way, so the page
-  disables the button and says why before anyone presses it.
+- **Only an admitted, online node, from the leader**, and only once `AGENT_RELEASES_URL` is set to
+  an http(s) address (`409 UPDATES_NOT_CONFIGURED`): it is the address the node downloads the
+  bundle from, as the node sees the server. Online is the derived `online` the page shows, not the
+  stored flag, so a node whose agent hung is not sent an update. `updates.blockedBecause` says
+  which of these stands in the way, so the page disables the button and says why before anyone
+  presses it.
+- **A node that can never take an update from here says why** in `updates.notUpdatableBecause`:
+  an agent too old to name itself, one that is not an agent this server bundles, or one before
+  contract 1.1. The page shows that instead of "Up to date."
 - **Every update is a row in `node_updates`**, keyed by the command's `id`: from and to versions,
   whether it was a roll back, the last state the node reported, the outcome and its reason. A
   status is matched by `id` and by the node it came from, so a node cannot report on another's

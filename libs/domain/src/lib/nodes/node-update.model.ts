@@ -25,6 +25,8 @@ export interface NodeUpdate {
 
 /** What the node page needs to offer an update or a roll back, and to show the last one. */
 export interface NodeUpdateSummary {
+  /** Why this node's agent never takes an update from the web, so "up to date" would mislead. */
+  notUpdatableBecause: string | null;
   /** Why neither button may be pressed right now, or null when they may. */
   blockedBecause: string | null;
   /** The version the node ran before its last healthy update, while that bundle is still offered. */
@@ -33,10 +35,16 @@ export interface NodeUpdateSummary {
 }
 
 export const NO_UPDATE_SUMMARY: NodeUpdateSummary = {
+  notUpdatableBecause: null,
   blockedBecause: null,
   rollBackVersion: null,
   lastUpdate: null,
 };
+
+/** The version the operator confirmed, so the server never sends one they did not see. */
+export interface NodeUpdateRequest {
+  version: string;
+}
 
 export function isUpdateInProgress(update: NodeUpdate | null): boolean {
   return update?.outcome === NodeUpdateOutcome.InProgress;

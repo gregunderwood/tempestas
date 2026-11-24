@@ -9,7 +9,7 @@ import type {
   UpdateState,
 } from '@tempestas/domain';
 
-// Keeps drivers free of HTTP; `DevicesService` maps the code to a status, never a bare 500.
+// Keeps drivers free of HTTP; `translateHardwareError` maps the code to a status, never a bare 500.
 export class HardwareError extends Error {
   constructor(
     readonly code: ApiErrorCode,

@@ -14,7 +14,11 @@ import type {
   ReadingStats,
   SegmentStats,
 } from '@tempestas/domain';
-import { NO_UPDATE_SUMMARY, NodeStatus } from '@tempestas/domain';
+import {
+  NO_UPDATE_SUMMARY,
+  NodeStatus,
+  type NodeUpdateRequest,
+} from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import {
@@ -151,7 +155,7 @@ function renderNodeDetail(
     devices?: Device[];
     node?: Node;
     slug?: string;
-    updateNode?: (id: string) => Observable<Node>;
+    updateNode?: (id: string, request: NodeUpdateRequest) => Observable<Node>;
   } = {},
 ): HTMLElement {
   statsRequestCount = 0;
@@ -203,7 +207,9 @@ function clickButton(page: HTMLElement, label: string): void {
 
 describe('NodeDetail', () => {
   it('sends a confirmed update for this node', async () => {
-    const updateNode = vi.fn((nodeId: string) => of(node({ id: nodeId })));
+    const updateNode = vi.fn<
+      (id: string, request: NodeUpdateRequest) => Observable<Node>
+    >((nodeId) => of(node({ id: nodeId })));
     const page = renderNodeDetail({
       node: node({ availableUpdate: '1.1.1' }),
       updateNode,
@@ -213,7 +219,7 @@ describe('NodeDetail', () => {
     await TestBed.inject(ApplicationRef).whenStable();
     clickButton(page, 'Update to 1.1.1');
 
-    expect(updateNode).toHaveBeenCalledWith('n1');
+    expect(updateNode).toHaveBeenCalledWith('n1', { version: '1.1.1' });
   });
 
   it('names itself in the top bar, with its kind and whether it is online', () => {

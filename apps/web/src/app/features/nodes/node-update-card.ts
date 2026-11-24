@@ -19,9 +19,13 @@ import {
 } from '@tempestas/domain';
 export type UpdateAction = 'update' | 'roll-back';
 
-interface PendingConfirmation {
+export interface UpdateConfirmation {
   action: UpdateAction;
   version: string;
+}
+
+interface PendingConfirmation extends UpdateConfirmation {
+  nodeId: string;
 }
 
 const OUTCOME_LABELS: Record<NodeUpdateOutcome, string> = {
@@ -49,7 +53,7 @@ const OUTCOME_LABELS: Record<NodeUpdateOutcome, string> = {
             <strong>{{ update.lastState ?? 'sent' }}</strong>
           </p>
           <mat-progress-bar mode="indeterminate" />
-        } @else if (confirmation(); as pending) {
+        } @else if (shownConfirmation(); as pending) {
           <p class="caution">
             {{ node().displayName }} restarts, and its relays go to their
             fail-safe levels for a few seconds. If {{ pending.version }} does
@@ -85,6 +89,8 @@ const OUTCOME_LABELS: Record<NodeUpdateOutcome, string> = {
           @if (node().updates.blockedBecause; as reason) {
             <p class="blocked">{{ reason }}</p>
           }
+        } @else if (node().updates.notUpdatableBecause; as reason) {
+          <p class="quiet">{{ reason }}</p>
         } @else {
           <p class="quiet">Up to date.</p>
         }
@@ -143,9 +149,19 @@ const OUTCOME_LABELS: Record<NodeUpdateOutcome, string> = {
 })
 export class NodeUpdateCard {
   readonly node = input.required<Node>();
-  readonly confirmed = output<UpdateAction>();
+  readonly confirmed = output<UpdateConfirmation>();
 
   protected readonly confirmation = signal<PendingConfirmation | null>(null);
+
+  // Hidden once it no longer matches this node's offer, so a stale version is never confirmed.
+  protected readonly shownConfirmation = computed(() => {
+    const pending = this.confirmation();
+    if (!pending || this.isBlocked()) return null;
+    if (pending.nodeId !== this.node().id) return null;
+    return this.findOffered(pending.action) === pending.version
+      ? pending
+      : null;
+  });
 
   protected readonly agent = computed(() => describeAgent(this.node()));
 
@@ -170,12 +186,18 @@ export class NodeUpdateCard {
   );
 
   protected ask(action: UpdateAction, version: string): void {
-    this.confirmation.set({ action, version });
+    this.confirmation.set({ action, version, nodeId: this.node().id });
   }
 
-  protected confirm(pending: PendingConfirmation): void {
+  protected confirm({ action, version }: PendingConfirmation): void {
     this.confirmation.set(null);
-    this.confirmed.emit(pending.action);
+    this.confirmed.emit({ action, version });
+  }
+
+  private findOffered(action: UpdateAction): string | null {
+    return action === 'update'
+      ? this.node().availableUpdate
+      : this.node().updates.rollBackVersion;
   }
 
   protected labelAction(pending: PendingConfirmation): string {

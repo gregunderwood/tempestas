@@ -14,6 +14,7 @@ import { NodesService } from './nodes.service';
 import { NodeUpdatesService } from './node-updates.service';
 import { AdmitNodeDto } from './dto/admit-node.dto';
 import { UpdateNodeDto } from './dto/update-node.dto';
+import { NodeUpdateRequestDto } from './dto/node-update-request.dto';
 
 // No POST: a node exists by announcing itself on MQTT, and the only thing a human does is admit it.
 @Controller('nodes')
@@ -58,15 +59,21 @@ export class NodesController {
 
   @Post(':id/update')
   @HttpCode(202)
-  async startUpdate(@Param('id', ParseUUIDPipe) id: string): Promise<Node> {
-    await this.nodeUpdates.updateToOffered(id);
+  async startUpdate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() request: NodeUpdateRequestDto,
+  ): Promise<Node> {
+    await this.nodeUpdates.updateToOffered(id, request.version);
     return this.nodes.findOne(id);
   }
 
   @Post(':id/roll-back')
   @HttpCode(202)
-  async rollBack(@Param('id', ParseUUIDPipe) id: string): Promise<Node> {
-    await this.nodeUpdates.rollBack(id);
+  async rollBack(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() request: NodeUpdateRequestDto,
+  ): Promise<Node> {
+    await this.nodeUpdates.rollBack(id, request.version);
     return this.nodes.findOne(id);
   }
 

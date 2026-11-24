@@ -41,7 +41,7 @@ import { Gauge } from '../../shared/gauge/gauge';
 import { metricsFor, nodeMetrics } from '../../shared/metrics';
 import { LONGEST_TIMEOUT_MILLISECONDS } from '../../shared/time';
 import { isHeldOffByInterlock } from '../devices/device-hold';
-import { NodeUpdateCard, type UpdateAction } from './node-update-card';
+import { NodeUpdateCard, type UpdateConfirmation } from './node-update-card';
 
 // Each refresh is three periods of aggregates on an SD card; a reading arrives every 10 s.
 export const STATS_REFRESH_THROTTLE_MILLISECONDS = 60_000;
@@ -478,11 +478,14 @@ export class NodeDetail {
     return this.decimalPipe.transform(value, digitsInfo) ?? ABSENT_FIGURE;
   }
 
-  protected sendUpdate(node: Node, action: UpdateAction): void {
+  protected sendUpdate(
+    node: Node,
+    { action, version }: UpdateConfirmation,
+  ): void {
     const request =
       action === 'update'
-        ? this.api.updateNode(node.id)
-        : this.api.rollBackNode(node.id);
+        ? this.api.updateNode(node.id, { version })
+        : this.api.rollBackNode(node.id, { version });
     refreshAfterSuccess(request, this.liveNodes.refresh);
   }
 

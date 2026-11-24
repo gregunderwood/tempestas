@@ -195,6 +195,7 @@ describe('MqttHardwareService updates', () => {
 
   it('publishes the update on the node topic, never retained', async () => {
     const service = startService('leader');
+    brokerClient.connected = true;
 
     await service.sendUpdate('patji', ORDER);
 
@@ -218,6 +219,36 @@ describe('MqttHardwareService updates', () => {
       code: ApiErrorCode.ControllerIsFollower,
     });
     expect(brokerClient.publishAsync).not.toHaveBeenCalled();
+    await service.onModuleDestroy();
+  });
+
+  it('refuses while the broker is disconnected, as mqtt.js would hold the command and send it late', async () => {
+    const service = startService('leader');
+
+    await expect(service.sendUpdate('patji', ORDER)).rejects.toMatchObject({
+      code: ApiErrorCode.HardwareUnreachable,
+    });
+    expect(brokerClient.publishAsync).not.toHaveBeenCalled();
+    await service.onModuleDestroy();
+  });
+
+  it('gives up on a publish the broker never acknowledges', async () => {
+    vi.useFakeTimers();
+    const service = startService('leader');
+    brokerClient.connected = true;
+    brokerClient.publishAsync.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+
+    const sending = service.sendUpdate('patji', ORDER);
+    const refused = expect(sending).rejects.toMatchObject({
+      code: ApiErrorCode.HardwareUnreachable,
+      message: expect.stringContaining('did not acknowledge'),
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await refused;
+    vi.useRealTimers();
     await service.onModuleDestroy();
   });
 

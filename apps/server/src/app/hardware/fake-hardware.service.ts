@@ -40,7 +40,10 @@ const ON_LEVEL_ACTIVE_LOW = 0;
 
 const DEFAULT_TICK_MS = 10_000;
 const SIM_CONTRACT_VERSION = 1;
-const SIM_AGENT_VERSION = '1.1.0';
+const SIM_LINUX_AGENT_VERSION = '1.1.0';
+// The MicroPython agent does not take `update` yet, so its stand-in must not either.
+const SIM_MICROPYTHON_CONTRACT_MINOR = 0;
+const SIM_MICROPYTHON_AGENT_VERSION = '1.0.8';
 const UPDATE_STEP_MS = 1_500;
 const STATES_BEFORE_RESTART = [
   UpdateState.Downloading,
@@ -228,19 +231,8 @@ export class FakeHardwareService
     for (const command of commands) await this.setPin(nodeId, command);
   }
 
-  // Plays an update through as an agent would, restarting with a hello on the new version.
   async sendUpdate(nodeId: NodeId, order: UpdateOrder): Promise<void> {
-    const node = this.requireNode(nodeId);
-    STATES_BEFORE_RESTART.forEach((state, step) =>
-      this.afterUpdateSteps(step + 1, () =>
-        this.reportUpdate(nodeId, order.id, state),
-      ),
-    );
-    this.afterUpdateSteps(STATES_BEFORE_RESTART.length + 1, () => {
-      this.agentVersionByNode.set(nodeId, order.version);
-      this.hello.next(this.helloFor(node));
-      this.reportUpdate(nodeId, order.id, UpdateState.Healthy);
-    });
+    this.playUpdateThrough(this.requireNode(nodeId), order);
   }
 
   getPin(nodeId: NodeId, pin: number): number | undefined {
@@ -287,7 +279,21 @@ export class FakeHardwareService
     return node;
   }
 
-  private afterUpdateSteps(steps: number, action: () => void): void {
+  // As an agent would: progress, then a restart that says hello on the new version.
+  private playUpdateThrough(node: FakeNodeSpec, order: UpdateOrder): void {
+    STATES_BEFORE_RESTART.forEach((state, step) =>
+      this.scheduleAfterUpdateSteps(step + 1, () =>
+        this.reportUpdate(node.nodeId, order.id, state),
+      ),
+    );
+    this.scheduleAfterUpdateSteps(STATES_BEFORE_RESTART.length + 1, () => {
+      this.agentVersionByNode.set(node.nodeId, order.version);
+      this.hello.next(this.helloFor(node));
+      this.reportUpdate(node.nodeId, order.id, UpdateState.Healthy);
+    });
+  }
+
+  private scheduleAfterUpdateSteps(steps: number, action: () => void): void {
     const updateTimer = setTimeout(() => {
       this.updateTimers.delete(updateTimer);
       action();
@@ -303,7 +309,9 @@ export class FakeHardwareService
     const isEsp32 = spec.nodeId === SIM_ESP32_NODE_ID;
     const capabilities: NodeCapabilities = {
       contractVersion: SIM_CONTRACT_VERSION,
-      contractMinor: MQTT_CONTRACT_MINOR,
+      contractMinor: isEsp32
+        ? SIM_MICROPYTHON_CONTRACT_MINOR
+        : MQTT_CONTRACT_MINOR,
       ...(spec.pins.length
         ? { gpio: { pins: spec.pins, supportsReadback: true } }
         : {}),
@@ -324,7 +332,8 @@ export class FakeHardwareService
       kind: isEsp32 ? NodeKind.Esp32 : NodeKind.RaspberryPi,
       agentName: isEsp32 ? AgentApp.MicroPython : AgentApp.Linux,
       agentVersion:
-        this.agentVersionByNode.get(spec.nodeId) ?? SIM_AGENT_VERSION,
+        this.agentVersionByNode.get(spec.nodeId) ??
+        (isEsp32 ? SIM_MICROPYTHON_AGENT_VERSION : SIM_LINUX_AGENT_VERSION),
       capabilities,
       bootId: `sim-${Date.now()}`,
       receivedAt: new Date(),
