@@ -3,6 +3,7 @@ import {
   IsEnum,
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsPositive,
   IsString,
@@ -29,6 +30,7 @@ export class CreateDeviceDto implements CreateDevicePayload {
   zoneId?: string;
 
   @IsString()
+  @IsNotEmpty()
   name!: string;
 
   @IsOptional()

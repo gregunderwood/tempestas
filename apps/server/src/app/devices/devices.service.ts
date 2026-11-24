@@ -110,6 +110,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
   async create(dto: CreateDeviceDto): Promise<Device> {
     const node = await this.findNodeBySlug(dto.nodeId);
     assertPinAvailable(node, dto.gpio);
+    await this.assertPinUnclaimed(node, dto.gpio);
 
     const row = this.devices.create({
       ...dto,
@@ -124,13 +125,22 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
 
     const saved = await this.devices.save(row);
     saved.node = node;
-    return this.toDto(saved);
+    return this.publishSaved(saved);
   }
 
+  // Saving switches nothing; a remapped pin is read under its new mapping straight away.
   async update(id: string, dto: UpdateDeviceDto): Promise<Device> {
     const row = await this.findOneEntity(id);
+    const isRemapping = changesRelayMapping(row, dto);
+    if (isRemapping) assertIsOffForRemapping(row);
+    if (dto.gpio !== undefined && dto.gpio !== row.gpio) {
+      assertPinAvailable(row.node, dto.gpio);
+      await this.assertPinUnclaimed(row.node, dto.gpio);
+    }
+
     Object.assign(row, dto);
-    return this.toDto(await this.devices.save(row));
+    if (isRemapping) this.seedFromLastReport(row, row.node, row.gpio);
+    return this.publishSaved(await this.devices.save(row));
   }
 
   async setRulesEnabled(id: string, rulesEnabled: boolean): Promise<Device> {
@@ -257,6 +267,29 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     this.realtime.publishDeviceState(this.toDto(device));
   }
 
+  private publishSaved(row: DeviceEntity): Device {
+    const device = this.toDto(row);
+    this.realtime.publishDeviceState(device);
+    return device;
+  }
+
+  // Checked here so a clash is a 409 naming the device, not a 500 from the unique constraint.
+  private async assertPinUnclaimed(
+    node: NodeEntity,
+    pin: number,
+  ): Promise<void> {
+    const occupant = await this.devices.findOneBy({
+      nodeId: node.id,
+      gpio: pin,
+    });
+    if (!occupant) return;
+    throw new ConflictException({
+      code: ApiErrorCode.PinNotAvailable,
+      message: `Pin ${pin} on "${node.slug}" is already used by ${occupant.name}`,
+      details: { usedBy: occupant.id },
+    });
+  }
+
   // `nodeId` on the wire is the node slug; the foreign key is the node's uuid.
   private async findNodeBySlug(slug: string): Promise<NodeEntity> {
     const node = await this.nodes.findOne({ where: { slug } });
@@ -332,6 +365,25 @@ function assertPinAvailable(node: NodeEntity, pin: number): void {
     code: ApiErrorCode.PinNotAvailable,
     message: `Node "${node.slug}" does not expose GPIO pin ${pin}`,
     details: { availablePins: pins },
+  });
+}
+
+function changesRelayMapping(
+  device: DeviceEntity,
+  dto: UpdateDeviceDto,
+): boolean {
+  const changesPin = dto.gpio !== undefined && dto.gpio !== device.gpio;
+  const changesOnLevel =
+    dto.onLevel !== undefined && dto.onLevel !== device.onLevel;
+  return changesPin || changesOnLevel;
+}
+
+// Moving an energised device would leave its old relay on with nothing tracking it.
+function assertIsOffForRemapping(device: DeviceEntity): void {
+  if (!isOn(device)) return;
+  throw new ConflictException({
+    code: ApiErrorCode.DeviceAlreadyOn,
+    message: `${device.name} is on; turn it off before changing its pin or on level`,
   });
 }
 

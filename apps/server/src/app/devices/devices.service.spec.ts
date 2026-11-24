@@ -67,6 +67,7 @@ function makeService(
   const mocks = {
     findOne: vi.fn().mockResolvedValue(device),
     find: vi.fn().mockResolvedValue([device]),
+    findOneBy: vi.fn().mockResolvedValue(null),
     save: vi.fn(async (device: DeviceEntity) => device),
     remove: vi.fn(async (device: DeviceEntity) => device),
     create: vi.fn(
@@ -418,10 +419,130 @@ describe('DevicesService mutations', () => {
     expect(setPin).not.toHaveBeenCalled();
   });
 
+  it('publishes an edit, so every open page shows it', async () => {
+    const { service, publishDeviceState } = makeService(burner());
+    await service.update('dev-1', { name: 'Burner' });
+    expect(publishDeviceState).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Burner' }),
+    );
+  });
+
+  it('publishes a new device', async () => {
+    const { service, publishDeviceState } = makeService(burner());
+    await service.create({
+      nodeId: 'elantris',
+      name: 'Extra Relay',
+      gpio: 12,
+      onDelayDuration: 0,
+      onLevel: 0,
+    });
+    expect(publishDeviceState).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Extra Relay' }),
+    );
+  });
+
   it('removes a device', async () => {
     const { service, mocks } = makeService(burner());
     await service.remove('dev-1');
     expect(mocks.remove).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DevicesService remapping a relay', () => {
+  const burnerOnElantris = (overrides: Partial<DeviceEntity> = {}) =>
+    burner({ node: NODE, ...overrides });
+  const runningSince = new Date('2026-01-10T11:00:00Z');
+
+  it.each([
+    ['pin', { gpio: 12 }],
+    ['on level', { onLevel: 1 as const }],
+  ])(
+    'refuses to change the %s of a device that is on, and switches nothing',
+    async (_change, edit) => {
+      const { service, setPin, save } = makeService(
+        burnerOnElantris({ onAt: runningSince }),
+      );
+      await expect(service.update('dev-1', edit)).rejects.toMatchObject({
+        response: { code: ApiErrorCode.DeviceAlreadyOn },
+      });
+      expect(save).not.toHaveBeenCalled();
+      expect(setPin).not.toHaveBeenCalled();
+    },
+  );
+
+  it('lets a device that is on keep its pin and on level while other fields change', async () => {
+    const { service } = makeService(burnerOnElantris({ onAt: runningSince }));
+    const dto = await service.update('dev-1', {
+      name: 'Burner',
+      gpio: 16,
+      onLevel: 0,
+    });
+    expect(dto).toMatchObject({ name: 'Burner', isOn: true });
+  });
+
+  it('moves a device that is off to another exposed pin without switching anything', async () => {
+    const { service, setPin } = makeService(burnerOnElantris());
+    const dto = await service.update('dev-1', { gpio: 12 });
+    expect(dto.gpio).toBe(12);
+    expect(setPin).not.toHaveBeenCalled();
+  });
+
+  it('refuses a pin the node does not expose', async () => {
+    const { service, save } = makeService(burnerOnElantris());
+    await expect(service.update('dev-1', { gpio: 17 })).rejects.toMatchObject({
+      response: { code: ApiErrorCode.PinNotAvailable },
+    });
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('refuses a pin another device already uses, and names it', async () => {
+    const { service, mocks, save } = makeService(burnerOnElantris());
+    mocks.findOneBy.mockResolvedValue({ id: 'dev-2', name: 'Exhaust Fan' });
+    await expect(service.update('dev-1', { gpio: 20 })).rejects.toMatchObject({
+      response: {
+        code: ApiErrorCode.PinNotAvailable,
+        message: 'Pin 20 on "elantris" is already used by Exhaust Fan',
+      },
+    });
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('refuses to create a device on a pin another device already uses', async () => {
+    const { service, mocks, save } = makeService(burner());
+    mocks.findOneBy.mockResolvedValue({ id: 'dev-1', name: 'CO2 Generator' });
+    await expect(
+      service.create({
+        nodeId: 'elantris',
+        name: 'Second burner',
+        gpio: 16,
+        onDelayDuration: 0,
+        onLevel: 0,
+      }),
+    ).rejects.toMatchObject({
+      response: { code: ApiErrorCode.PinNotAvailable },
+    });
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  // The relay has not moved; only what its level means has.
+  it('reads the pin under the new on level straight away', async () => {
+    const pinAtHigh: PinStateReport = {
+      nodeId: 'elantris',
+      pin: 16,
+      level: 1,
+      known: true,
+      observedAt: new Date(NOW.getTime() - 60_000),
+      live: true,
+    };
+    const { service, setPin } = makeService(
+      burnerOnElantris(),
+      undefined,
+      NODE,
+      pinAtHigh,
+    );
+    const dto = await service.update('dev-1', { onLevel: 1 });
+    expect(dto.isOn).toBe(true);
+    expect(setPin).not.toHaveBeenCalled();
   });
 });
 
