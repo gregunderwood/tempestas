@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import json
 import logging
+import os
 import signal
 import sys
 import time
@@ -29,11 +31,16 @@ LOCK_PATH_TEMPLATE = "/run/tempestas/agent-{node_id}.lock"
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s %(message)s"
 # Gives the network loop time to send the offline status before it stops.
 OFFLINE_FLUSH_S = 0.2
+# systemd asks for a ping at least every half of WatchdogSec.
+WATCHDOG_PING_SHARE = 0.5
+MICROSECONDS_PER_SECOND = 1_000_000
 
 
 def main() -> int:
     arguments = parse_arguments()
     configure_logging(arguments.log_level)
+    # The watchdog kills a hung agent with SIGABRT; this writes where it hung to the journal.
+    faulthandler.enable()
 
     try:
         config = load(arguments.config)
@@ -212,12 +219,39 @@ def run_until_signalled(agent: Agent, config: AgentConfig) -> None:
 
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
+    ping_interval_s = read_watchdog_ping_interval_s()
 
     while not should_stop and not agent.restart_requested.is_set():
         publish_samples(agent)
         agent.check_deadman()
         agent.tend_update()
-        agent.restart_requested.wait(config.sensor.sample_interval_s)
+        wait_for_next_tick(agent, config.sensor.sample_interval_s, ping_interval_s)
+
+
+def read_watchdog_ping_interval_s() -> float | None:
+    """None unless systemd watches this very process."""
+    watchdog_pid = os.environ.get("WATCHDOG_PID")
+    if watchdog_pid and watchdog_pid != str(os.getpid()):
+        return None
+    try:
+        timeout_us = int(os.environ.get("WATCHDOG_USEC", ""))
+    except ValueError:
+        return None
+    return timeout_us / MICROSECONDS_PER_SECOND * WATCHDOG_PING_SHARE
+
+
+def wait_for_next_tick(agent: Agent, interval_s: float, ping_interval_s: float | None) -> None:
+    """Pings the watchdog through the wait, so only a pass of the loop that hangs trips it."""
+    if ping_interval_s is None:
+        agent.restart_requested.wait(interval_s)
+        return
+    deadline = time.monotonic() + interval_s
+    while not agent.restart_requested.is_set():
+        sd_notify("WATCHDOG=1")
+        remaining_s = deadline - time.monotonic()
+        if remaining_s <= 0:
+            return
+        agent.restart_requested.wait(min(remaining_s, ping_interval_s))
 
 
 def publish_samples(agent: Agent) -> None:

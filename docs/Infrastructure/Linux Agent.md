@@ -203,11 +203,18 @@ actually in effect with `systemctl show tempestas-agent -p StartLimitIntervalUSe
   start limit gives up, so the script decides. That needs systemd 254 or later, where a restarting
   unit passes through `failed`; before it, the unit reached `failed` only at the start limit. Every
   host runs 257 on trixie. The deploy script warns about a host with less but still deploys to it,
-  so a fix can reach it; do not send such a host updates from the server. It switches back only when the release that failed
-  is an update still waiting on its gate, and only on its third failed run if it had said `hello`.
-  Otherwise it exits 1 and changes nothing, and as an
-  `ExecCondition=` that skips the unit rather than marking it failed after every ordinary crash.
-  A rollback that itself fails exits 255, which does mark the unit failed.
+  so a fix can reach it; do not send such a host updates from the server. The script switches back
+  only when the release that failed is an update still waiting on its gate, and only on its third
+  failed run if it had said `hello`. Otherwise it exits 1 and changes nothing, and as an
+  `ExecCondition=` that skips the unit rather than marking it failed after every ordinary crash. A
+  rollback that itself fails exits 255, which does mark the unit failed.
+- **`WatchdogSec=60`.** The gate is judged by the new release's own main loop, so a release that
+  hangs after its `hello` would otherwise never be rolled back. The main loop pings the watchdog on
+  every pass and through the wait between samples, so only a pass that hangs trips it, and any
+  sample interval is fine. Sixty seconds is well above the longest pass, an SCD4x self-test of
+  10 s. systemd then kills the agent with `SIGABRT`; `faulthandler` writes where every thread was
+  to the journal first, and the failed run goes through `OnFailure=` like any other. It applies
+  outside updates too: a hung agent is restarted rather than left holding its lines.
 - **No ordering against the I²C bus.** systemd only creates `.device` units for devices udev tags
   for it, and i2c is not one, so `After=dev-i2c\x2d1.device` looks like ordering while doing
   nothing. The agent opens the bus, fails fast, and the restart retries.

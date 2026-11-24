@@ -36,6 +36,10 @@ EnvironmentFile=/etc/tempestas/agent.env
 RuntimeDirectory=tempestas
 RuntimeDirectoryMode=0755
 
+# Pinged by the main loop: a hang fails the run, so OnFailure can roll a hung update back.
+# Well above its longest pass, an SCD4x self-test of 10 s, and any sample interval: it pings while waiting.
+WatchdogSec=60
+
 # Never Restart=always; RestartSec is how long a killed agent leaves its pads unsupervised.
 Restart=on-failure
 RestartSec=5
