@@ -20,6 +20,7 @@ import {
 import {
   buildDeviceLine,
   buildZoneCards,
+  describeZoneSubtitle,
   type ZoneCard,
   type ZonesInput,
 } from './zone-view';
@@ -436,5 +437,35 @@ describe('buildDeviceLine', () => {
       hasFailed: true,
       outcome: 'FAILED: NODE_OFFLINE',
     });
+  });
+});
+
+describe('describeZoneSubtitle', () => {
+  const card = {
+    localTime: '14:05',
+    timezone: 'America/Vancouver',
+    rulesRanAgoSeconds: 60,
+  } as ZoneCard;
+
+  it('joins the local time and when the rules ran', () => {
+    expect(describeZoneSubtitle(card, false)).toBe(
+      '14:05 America/Vancouver · rules ran 1 min ago',
+    );
+  });
+
+  it('says the rules have not run when there is no cycle yet', () => {
+    expect(
+      describeZoneSubtitle({ ...card, rulesRanAgoSeconds: null }, false),
+    ).toBe('14:05 America/Vancouver · rules have not run yet');
+  });
+
+  it('leaves the rules out on a follower', () => {
+    expect(describeZoneSubtitle(card, true)).toBe('14:05 America/Vancouver');
+  });
+
+  it('shows only the rules when the local time is unknown', () => {
+    expect(describeZoneSubtitle({ ...card, localTime: null }, false)).toBe(
+      'rules ran 1 min ago',
+    );
   });
 });

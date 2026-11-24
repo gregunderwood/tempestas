@@ -18,7 +18,11 @@ import { injectServerNow } from '../../core/server-now';
 import { injectCardArrangement } from '../../shared/arrange/card-arrangement';
 import { FOLLOWER_NOTICE, isFollowing } from '../../shared/leadership';
 import { Pinboard } from '../../shared/pinboard/pinboard';
-import { buildZoneCards, type ZoneCard } from './zone-view';
+import {
+  buildZoneCards,
+  describeZoneSubtitle,
+  type ZoneCard,
+} from './zone-view';
 import { formatDuration } from './zone-words';
 
 const CLOCK_TICK_MILLISECONDS = 1_000;
@@ -81,18 +85,9 @@ interface NamedSource {
         >
           <mat-card-header>
             <h2 mat-card-title class="zone__name">{{ zone.name }}</h2>
-            <mat-card-subtitle>
-              @if (zone.localTime) {
-                {{ zone.localTime }} {{ zone.timezone }} ·
-              }
-              @if (isFollower()) {
-                {{ followerNotice }}
-              } @else if (zone.rulesRanAgoSeconds === null) {
-                rules have not run yet
-              } @else {
-                rules ran {{ formatDuration(zone.rulesRanAgoSeconds) }} ago
-              }
-            </mat-card-subtitle>
+            <mat-card-subtitle>{{
+              describeZoneSubtitle(zone, isFollower())
+            }}</mat-card-subtitle>
           </mat-card-header>
 
           <mat-card-content>
@@ -600,6 +595,8 @@ export class ZonesPage {
   ];
 
   protected readonly formatDuration = formatDuration;
+
+  protected readonly describeZoneSubtitle = describeZoneSubtitle;
 
   protected readonly followerNotice = FOLLOWER_NOTICE;
 

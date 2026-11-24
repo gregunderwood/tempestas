@@ -1,6 +1,5 @@
 import type { Reading, RulesCycle, SystemStatus } from '@tempestas/domain';
 import { READING_QUIET_AFTER_SECONDS } from '../../shared/freshness';
-import { isFollowing } from '../../shared/leadership';
 import { secondsSince } from '../../shared/time';
 import {
   chooseDecisionTone,
@@ -26,7 +25,6 @@ export interface AttentionFacts {
 export function listAttentionItems(facts: AttentionFacts): AttentionItem[] {
   return [
     ...listConnectionProblems(facts),
-    ...listLeadershipProblems(facts.status),
     ...listWaitingNodes(facts.status),
     ...listQuietProbes(facts.readings, facts.now),
     ...listFailingZones(facts.cycle),
@@ -40,17 +38,6 @@ function listConnectionProblems(facts: AttentionFacts): AttentionItem[] {
     {
       key: 'offline',
       text: 'Not connected to the server, so nothing here is updating.',
-      link: null,
-    },
-  ];
-}
-
-function listLeadershipProblems(status: SystemStatus | null): AttentionItem[] {
-  if (!isFollowing(status)) return [];
-  return [
-    {
-      key: 'follower',
-      text: 'This server is a follower: it runs no rules and switches nothing.',
       link: null,
     },
   ];
