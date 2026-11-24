@@ -32,7 +32,7 @@ from .update_gate import (
     roll_back_gate,
     settle_update_on_start,
 )
-from .version import AGENT_NAME, read_agent_version
+from .version import AGENT_NAME, UNSTAMPED_VERSION, read_agent_version
 from .world_client import WorldClient
 
 log = logging.getLogger("tempestas.agent")
@@ -346,6 +346,13 @@ class Agent:
         self._stop_watching_the_gate()
 
     def settle_update(self) -> None:
+        if self._is_running_another_release():
+            log.warning(
+                "`current` moved off %s after this process loaded it - restarting into it",
+                self.agent_version,
+            )
+            self.request_restart()
+            return
         try:
             settlement = settle_update_on_start(self.layout)
         except BlockingIOError:
@@ -426,7 +433,8 @@ class Agent:
         with self._update_claim_lock:
             self.is_stopping = True
             installing_command_id = self._installing_command_id
-        if self.layout is None:
+        if self.layout is None or installing_command_id is None:
+            # Nothing of this process can switch now, so the relays need not wait on the lock.
             return
         try:
             if self._hold_switch_lock_until_exit():
@@ -447,9 +455,7 @@ class Agent:
                     return False
                 time.sleep(SWITCH_LOCK_RETRY_S)
 
-    def _fail_an_install_that_cannot_switch(self, command_id: str | None) -> None:
-        if command_id is None:
-            return
+    def _fail_an_install_that_cannot_switch(self, command_id: str) -> None:
         pending = self.layout.read_pending()
         if pending is not None and pending.command_id == command_id:
             return
@@ -695,7 +701,7 @@ class Agent:
                 log.error(
                     "could not undo the switch to %s - restarting into it", command["version"]
                 )
-                self.request_restart()
+                self._report_restart_into(command_id)
                 return
             try:
                 self._report_failed_install(command_id, str(error))
@@ -704,12 +710,22 @@ class Agent:
                 self._update_in_progress.release()
             return
         log.warning("installed %s - restarting into it", command["version"])
+        self._report_restart_into(command_id)
+
+    def _report_restart_into(self, command_id: str) -> None:
         try:
             # Sent before the main loop wakes and stops the network loop, or it is often lost.
             self.publish_update_status(command_id, contract.UpdateState.RESTARTING)
         finally:
             # `current` already points at the new release, so it restarts whatever the publish did.
             self.request_restart()
+
+    def _is_running_another_release(self) -> bool:
+        """True when a rollback switched `current` after systemd had already restarted this code."""
+        if self.layout is None or self.agent_version == UNSTAMPED_VERSION:
+            return False
+        current_release = self.layout.read_current_release()
+        return current_release is not None and current_release != self.agent_version
 
     def _is_switch_left_in_place(self, command_id: str, version: str) -> bool:
         """True when this install switched and could not switch back: its gate must judge it."""

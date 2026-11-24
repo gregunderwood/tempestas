@@ -160,13 +160,38 @@ def test_refuses_an_update_while_a_restart_is_on_its_way(monkeypatch, tmp_path):
     assert update_statuses(agent) == [(contract.UpdateState.FAILED, STOPPING)]
 
 
-def test_stopping_holds_the_switch_lock_so_no_switch_is_cut_off(monkeypatch, tmp_path):
+def test_stopping_mid_install_holds_the_switch_lock_so_no_switch_is_cut_off(
+    monkeypatch, tmp_path
+):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent._installing_command_id = "update-1"
 
     agent.stop_updates()
 
     with pytest.raises(BlockingIOError), agent.layout.hold_switch_lock(should_wait=False):
         pass
+
+
+def test_stopping_with_no_install_leaves_the_switch_lock_to_others(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+
+    agent.stop_updates()
+
+    with agent.layout.hold_switch_lock(should_wait=False):
+        pass
+
+
+def test_a_release_restarts_when_current_was_switched_off_it_before_it_settled(tmp_path):
+    agent, _ = make_agent()
+    agent.layout = make_layout(tmp_path)
+    agent.agent_version = NEW_RELEASE
+    agent.layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
+
+    agent.settle_update()
+
+    assert agent.restart_requested.is_set()
+    assert agent.layout.read_pending() is not None
+    assert update_statuses(agent) == []
 
 
 def start_new_release_on_its_gate(tmp_path):
@@ -266,7 +291,7 @@ def test_a_failed_install_that_left_current_switched_restarts_into_it(monkeypatc
     agent.on_update(build_fresh_update(), is_retained=False)
 
     assert agent.restart_requested.is_set()
-    assert update_statuses(agent) == []
+    assert update_statuses(agent) == [(contract.UpdateState.RESTARTING, None)]
 
 
 def test_a_hello_that_never_left_does_not_count_toward_the_gate(tmp_path):

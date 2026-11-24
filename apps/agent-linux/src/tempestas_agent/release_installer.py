@@ -170,8 +170,15 @@ class ReleaseInstaller:
             log.error(
                 "could not record the failed switch to %s: %s", destination.name, record_error
             )
-            return
+            self._clear_pending_without_raising()
         shutil.rmtree(destination, ignore_errors=True)
+
+    def _clear_pending_without_raising(self) -> None:
+        # The failure is reported now, so it must not be reported again as a rollback at start.
+        try:
+            self.layout.clear_pending()
+        except OSError as error:
+            log.error("could not clear the failed switch's pending record: %s", error)
 
 
 def write_durably(path: Path, content: bytes) -> None:

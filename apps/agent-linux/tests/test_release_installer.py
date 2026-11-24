@@ -208,6 +208,25 @@ def test_a_switch_back_that_lands_but_cannot_sync_still_drops_the_pending_update
     assert layout.read_outcome().state == contract.UpdateState.FAILED
 
 
+def test_a_failed_switch_whose_outcome_cannot_be_written_is_not_later_read_as_a_rollback(
+    tmp_path, monkeypatch
+):
+    layout = make_layout(tmp_path)
+
+    def fail_on_a_full_card(*_arguments):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(layout, "clear_outcome", fail_on_a_full_card)
+    monkeypatch.setattr(layout, "write_outcome", fail_on_a_full_card)
+
+    with pytest.raises(OSError, match="no space"):
+        install(layout, FakeServer())
+
+    assert layout.read_current_release() == RUNNING_RELEASE
+    assert layout.read_pending() is None
+    assert not layout.locate_release(NEW_RELEASE).exists()
+
+
 def test_refuses_to_switch_when_a_hand_deploy_moved_current_during_the_download(tmp_path):
     layout = make_layout(tmp_path)
     server = FakeServer()
