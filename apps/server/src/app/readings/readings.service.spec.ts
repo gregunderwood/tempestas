@@ -91,6 +91,7 @@ describe('ReadingsService.bucketTemperatures', () => {
     const conditions: string[] = [];
     const parameters: Record<string, unknown> = {};
     const groupings: string[] = [];
+    const orderings: [string, string][] = [];
     const recordCondition = (
       condition: string,
       conditionParameters: Record<string, unknown> = {},
@@ -117,7 +118,10 @@ describe('ReadingsService.bucketTemperatures', () => {
         groupings.push(grouping);
         return builder;
       },
-      orderBy: () => builder,
+      orderBy: (ordering: string, direction: string) => {
+        orderings.push([ordering, direction]);
+        return builder;
+      },
       limit: () => builder,
       getRawMany: async () => rawRows,
     };
@@ -130,7 +134,7 @@ describe('ReadingsService.bucketTemperatures', () => {
       new SystemClock(),
       {} as ConfigService,
     );
-    return { service, conditions, parameters, groupings };
+    return { service, conditions, parameters, groupings, orderings };
   }
 
   const WINDOW = {
@@ -148,6 +152,28 @@ describe('ReadingsService.bucketTemperatures', () => {
     ]);
     expect(parameters).toMatchObject({ ...WINDOW, bucketMinutes: 5 });
     expect(groupings).toEqual(['node.slug', 'reading.sensorId', '"at"']);
+  });
+
+  it('takes the newest buckets under the limit and hands them back oldest first', async () => {
+    const rawBucket = (at: string) => ({
+      nodeId: 'patji',
+      sensorId: 'pipes',
+      at: new Date(at),
+      averageC: '3',
+      lowestC: '3',
+      highestC: '3',
+      sampleCount: '1',
+    });
+    const { service, orderings } = makeServiceAnsweringBuckets([
+      rawBucket('2026-11-23T03:05:00Z'),
+      rawBucket('2026-11-23T03:00:00Z'),
+    ]);
+    const buckets = await service.bucketTemperatures(WINDOW, 5);
+    expect(orderings).toEqual([['"at"', 'DESC']]);
+    expect(buckets.map((bucket) => bucket.at.toISOString())).toEqual([
+      '2026-11-23T03:00:00.000Z',
+      '2026-11-23T03:05:00.000Z',
+    ]);
   });
 
   it('turns the strings Postgres returns for AVG and COUNT into numbers', async () => {

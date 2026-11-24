@@ -24,6 +24,7 @@ import {
               <path
                 class="plot__line plot__line--{{ line.styleIndex }}"
                 [class.plot__line--deciding]="line.isDeciding"
+                [class.plot__line--controlling]="line.isControlling"
                 [attr.d]="line.path"
                 vector-effect="non-scaling-stroke"
               />
@@ -49,6 +50,7 @@ import {
                   <path
                     class="plot__line plot__line--{{ line.styleIndex }}"
                     [class.plot__line--deciding]="line.isDeciding"
+                    [class.plot__line--controlling]="line.isControlling"
                     d="M0 4 H24"
                   />
                 </svg>
@@ -143,6 +145,9 @@ import {
       stroke: var(--temp-gauge-blue);
       stroke-width: 2.5px;
       opacity: 1;
+    }
+    .plot__line--controlling {
+      stroke-width: 3.5px;
     }
     .plot__scale {
       position: absolute;

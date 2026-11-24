@@ -26,8 +26,10 @@ import {
 } from './zone-view';
 import { formatDuration } from './zone-words';
 import { ZoneHistoryPanel } from './zone-history-panel';
+import type { Zone } from '@tempestas/domain';
 import {
   buildZoneHistoryCharts,
+  findControllingSources,
   type HistoryZone,
   type ZoneHistoryChart,
 } from './zone-history-view';
@@ -47,13 +49,16 @@ function nameZoneCard(zone: ZoneCard): string {
   return zone.name;
 }
 
-function toHistoryZone(zone: ZoneCard): HistoryZone {
+function toHistoryZone(card: ZoneCard, zone: Zone | undefined): HistoryZone {
   return {
-    zoneId: zone.id,
-    timezone: zone.timezone,
-    decidingProbeKeys: zone.probes
+    zoneId: card.id,
+    timezone: card.timezone,
+    decidingProbeKeys: card.probes
       .filter((probe) => probe.isTemperatureDeciding)
       .map((probe) => probe.key),
+    controllingSources: zone?.rulesConfig
+      ? findControllingSources(zone.rulesConfig)
+      : [],
   };
 }
 
@@ -684,7 +689,14 @@ export class ZonesPage {
   protected readonly historyState = this.history.sourceState;
 
   private readonly historyZones = computed(
-    () => this.cards().map(toHistoryZone),
+    () => {
+      const zonesById = new Map(
+        (this.zones.latest()?.payload ?? []).map((zone) => [zone.id, zone]),
+      );
+      return this.cards().map((card) =>
+        toHistoryZone(card, zonesById.get(card.id)),
+      );
+    },
     { equal: isSameHistoryZones },
   );
 

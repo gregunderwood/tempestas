@@ -1,22 +1,27 @@
 import {
   sensorKey,
-  ZONE_HISTORY_BUCKET_MINUTES,
-  ZONE_HISTORY_HOURS,
   type Device,
   type DeviceRunHistory,
   type ProbeHistory,
-  type Reading,
   type RelaySpan,
   type RelayState,
+  type SensorSource,
   type TemperatureBucket,
   type ZoneHistory,
   type ZoneHistoryReport,
+  type ZoneRulesConfig,
 } from '@tempestas/domain';
 import {
-  MILLISECONDS_PER_SECOND,
-  MINUTES_PER_HOUR,
-  SECONDS_PER_MINUTE,
-} from '../../shared/time';
+  BUCKET_MILLISECONDS,
+  bucketStartOf,
+  combineBuckets,
+  dropWhatTheFetchCovered,
+  foldReadings,
+  WINDOW_MILLISECONDS,
+  type PushedProbe,
+  type PushedReadings,
+} from '../../core/pushed-readings';
+import { MILLISECONDS_PER_SECOND, SECONDS_PER_MINUTE } from '../../shared/time';
 import { formatDuration } from './zone-words';
 
 export const PLOT_WIDTH = 1000;
@@ -24,10 +29,6 @@ export const PLOT_HEIGHT = 100;
 export const LINE_STYLE_COUNT = 4;
 
 const MILLISECONDS_PER_MINUTE = SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
-const MILLISECONDS_PER_HOUR = MINUTES_PER_HOUR * MILLISECONDS_PER_MINUTE;
-const WINDOW_MILLISECONDS = ZONE_HISTORY_HOURS * MILLISECONDS_PER_HOUR;
-const BUCKET_MILLISECONDS =
-  ZONE_HISTORY_BUCKET_MINUTES * MILLISECONDS_PER_MINUTE;
 // More than this many empty buckets in a row is a gap in the readings, not a line to draw across.
 const LONGEST_JOINED_GAP_BUCKETS = 3;
 const SMALLEST_SCALE_DEGREES = 4;
@@ -39,6 +40,13 @@ const FULL_PERCENT = 100;
 const PERCENT_DECIMALS = 3;
 const COORDINATE_SCALE = 10;
 const LONE_POINT_TICK = 'h4';
+const NODE_SOURCE_PREFIX = 'node:';
+const SENSOR_SOURCE_PREFIX = 'sensor:';
+const AGGREGATE_LABELS = new Map<string, string>([
+  ['mean', 'average'],
+  ['min', 'coldest'],
+  ['max', 'warmest'],
+]);
 
 export interface HistoryLine {
   key: string;
@@ -46,6 +54,8 @@ export interface HistoryLine {
   path: string;
   styleIndex: number;
   isDeciding: boolean;
+  /** The value the rules act on, worked out from several probes. */
+  isControlling: boolean;
 }
 
 export interface PositionedLabel {
@@ -82,13 +92,14 @@ export interface HistoryZone {
   zoneId: string;
   timezone: string;
   decidingProbeKeys: readonly string[];
+  controllingSources: readonly SensorSource[];
 }
 
 export interface ZoneHistoryChartsInput {
   report: ZoneHistoryReport;
   zones: readonly HistoryZone[];
-  /** Readings pushed over the socket since the page opened, any order. */
-  pushedReadings: readonly Reading[];
+  /** Readings pushed over the socket, folded into buckets as they came. */
+  pushedReadings: PushedReadings;
   zoneIdByNodeSlug: ReadonlyMap<string, string>;
   /** The newest push per device. */
   pushedDevices: readonly Device[];
@@ -119,6 +130,11 @@ interface Stretch {
   toMs: number;
 }
 
+interface ControllingLine {
+  line: HistoryLine;
+  probeKeys: readonly string[];
+}
+
 interface Scale {
   topC: number;
   bottomC: number;
@@ -127,23 +143,25 @@ interface Scale {
 export function buildZoneHistoryCharts(
   input: ZoneHistoryChartsInput,
 ): Map<string, ZoneHistoryChart> {
-  const window = { fromMs: input.now - WINDOW_MILLISECONDS, toMs: input.now };
-  const fetchedToMs = Date.parse(input.report.to);
-  const freshReadings = input.pushedReadings.filter(
-    (reading) => Date.parse(reading.createdAt) > fetchedToMs,
-  );
+  const timeWindow = {
+    fromMs: input.now - WINDOW_MILLISECONDS,
+    toMs: input.now,
+  };
+  const freshProbes = [
+    ...dropWhatTheFetchCovered(input.pushedReadings, input.report.to).values(),
+  ];
   const charts = new Map<string, ZoneHistoryChart>();
   for (const zone of input.zones) {
     const history = input.report.zones.find(
       (candidate) => candidate.zoneId === zone.zoneId,
     );
     if (!history) continue;
-    const zoneReadings = freshReadings.filter(
-      (reading) => input.zoneIdByNodeSlug.get(reading.nodeId) === zone.zoneId,
+    const zoneProbes = freshProbes.filter(
+      (probe) => input.zoneIdByNodeSlug.get(probe.nodeId) === zone.zoneId,
     );
     charts.set(
       zone.zoneId,
-      buildZoneHistoryChart(zone, history, zoneReadings, input, window),
+      buildZoneHistoryChart(zone, history, zoneProbes, input, timeWindow),
     );
   }
   return charts;
@@ -152,33 +170,52 @@ export function buildZoneHistoryCharts(
 function buildZoneHistoryChart(
   zone: HistoryZone,
   history: ZoneHistory,
-  freshReadings: readonly Reading[],
+  pushedProbes: readonly PushedProbe[],
   input: ZoneHistoryChartsInput,
-  window: TimeWindow,
+  timeWindow: TimeWindow,
 ): ZoneHistoryChart {
-  const series = mergePushedReadings(history.probes, freshReadings)
-    .map((probe) => keepBucketsInWindow(probe, window))
+  const series = mergePushedReadings(history.probes, pushedProbes)
+    .map((probe) => keepBucketsInWindow(probe, timeWindow))
     .filter((probe) => probe.buckets.length > 0);
   const scale = chooseScale(series);
   const formatClock = buildClockFormatter(zone.timezone);
   const extremes = describeExtremes(series, formatClock);
+  const controllingLines = buildControllingLines(
+    series,
+    zone.controllingSources,
+    scale,
+    timeWindow,
+  );
+  const aggregatedProbeKeys = new Set(
+    controllingLines.flatMap((controlling) => controlling.probeKeys),
+  );
+  const decidingProbeKeys = zone.decidingProbeKeys.filter(
+    (key) => !aggregatedProbeKeys.has(key),
+  );
   return {
-    lines: buildLines(series, scale, window, zone.decidingProbeKeys),
+    lines: [
+      ...buildProbeLines(series, scale, timeWindow, decidingProbeKeys),
+      ...controllingLines.map((controlling) => controlling.line),
+    ],
     hasReadings: series.length > 0,
     topLabel: `${scale.topC} °C`,
     bottomLabel: `${scale.bottomC} °C`,
     extremes,
-    screenReaderText: describeTemperatureChart(series.length, extremes),
-    timeLabels: buildTimeLabels(window, formatClock),
+    screenReaderText: describeTemperatureChart(
+      series.length,
+      controllingLines.map((controlling) => controlling.line.label),
+      extremes,
+    ),
+    timeLabels: buildTimeLabels(timeWindow, formatClock),
     strips: history.devices.map((device) =>
-      buildRunStrip(device, findPushedDevice(input, device), window),
+      buildRunStrip(device, findPushedDevice(input, device), timeWindow),
     ),
   };
 }
 
 export function mergePushedReadings(
   probes: readonly ProbeHistory[],
-  freshReadings: readonly Reading[],
+  pushedProbes: readonly PushedProbe[],
 ): ProbeSeries[] {
   const probesByKey = new Map<string, ProbeBuckets>(
     probes.map((probe) => [
@@ -192,14 +229,16 @@ export function mergePushedReadings(
       },
     ]),
   );
-  for (const reading of freshReadings) {
-    const key = sensorKey(reading);
+  for (const pushed of pushedProbes) {
+    const key = sensorKey(pushed);
     const probe = probesByKey.get(key) ?? {
-      nodeId: reading.nodeId,
-      sensorId: reading.sensorId,
+      nodeId: pushed.nodeId,
+      sensorId: pushed.sensorId,
       bucketsByStart: new Map(),
     };
-    addReadingToBuckets(probe.bucketsByStart, reading);
+    for (const bucket of toPushedBuckets(pushed)) {
+      addBucket(probe.bucketsByStart, bucket);
+    }
     probesByKey.set(key, probe);
   }
   return [...probesByKey.entries()]
@@ -207,21 +246,25 @@ export function mergePushedReadings(
     .map(([key, probe]) => toProbeSeries(key, probe));
 }
 
-// Bucketed the way the server does, so a reading lands in the bucket the next fetch will put it in.
-function addReadingToBuckets(
+function toPushedBuckets(pushed: PushedProbe): TemperatureBucket[] {
+  const [firstOpenReading] = pushed.openReadings;
+  if (!firstOpenReading) return [...pushed.closedBuckets];
+  const openBucketStart = bucketStartOf(Date.parse(firstOpenReading.createdAt));
+  return [
+    ...pushed.closedBuckets,
+    foldReadings(openBucketStart, pushed.openReadings),
+  ];
+}
+
+// Bucketed the way the server does, so pushed readings join the bucket the fetch started.
+function addBucket(
   bucketsByStart: Map<string, TemperatureBucket>,
-  reading: Reading,
+  bucket: TemperatureBucket,
 ): void {
-  const readingMs = Date.parse(reading.createdAt);
-  const bucketStart = new Date(
-    Math.floor(readingMs / BUCKET_MILLISECONDS) * BUCKET_MILLISECONDS,
-  ).toISOString();
-  const existing = bucketsByStart.get(bucketStart);
+  const existing = bucketsByStart.get(bucket.at);
   bucketsByStart.set(
-    bucketStart,
-    existing
-      ? combineWithReading(existing, reading)
-      : toSingleReadingBucket(bucketStart, reading),
+    bucket.at,
+    existing ? combineBuckets(existing, bucket) : bucket,
   );
 }
 
@@ -236,43 +279,15 @@ function toProbeSeries(key: string, probe: ProbeBuckets): ProbeSeries {
   };
 }
 
-function toSingleReadingBucket(
-  at: string,
-  reading: Reading,
-): TemperatureBucket {
-  return {
-    at,
-    averageC: reading.temperature,
-    lowestC: reading.temperature,
-    highestC: reading.temperature,
-    sampleCount: 1,
-  };
-}
-
-function combineWithReading(
-  bucket: TemperatureBucket,
-  reading: Reading,
-): TemperatureBucket {
-  const sampleCount = bucket.sampleCount + 1;
-  return {
-    at: bucket.at,
-    averageC:
-      (bucket.averageC * bucket.sampleCount + reading.temperature) /
-      sampleCount,
-    lowestC: Math.min(bucket.lowestC, reading.temperature),
-    highestC: Math.max(bucket.highestC, reading.temperature),
-    sampleCount,
-  };
-}
-
 function keepBucketsInWindow(
   series: ProbeSeries,
-  window: TimeWindow,
+  timeWindow: TimeWindow,
 ): ProbeSeries {
   return {
     ...series,
     buckets: series.buckets.filter(
-      (bucket) => Date.parse(bucket.at) + BUCKET_MILLISECONDS > window.fromMs,
+      (bucket) =>
+        Date.parse(bucket.at) + BUCKET_MILLISECONDS > timeWindow.fromMs,
     ),
   };
 }
@@ -305,37 +320,137 @@ function findWarmestBucket(
   );
 }
 
-function buildLines(
+// The rules' sources, each once; a single-sensor source is its probe's own line, so it is left out.
+export function findControllingSources(
+  config: ZoneRulesConfig,
+): SensorSource[] {
+  const enabledRoles = Array.isArray(config.enabledRoles)
+    ? config.enabledRoles
+    : [];
+  const sources = enabledRoles.flatMap((role) => {
+    const source =
+      config.rules?.[role]?.sensor?.source ??
+      config.sensorPolicy?.default?.source;
+    return source ? [source] : [];
+  });
+  return [...new Set(sources)].filter(
+    (source) => !source.startsWith(SENSOR_SOURCE_PREFIX),
+  );
+}
+
+function buildControllingLines(
+  series: readonly ProbeSeries[],
+  sources: readonly SensorSource[],
+  scale: Scale,
+  timeWindow: TimeWindow,
+): ControllingLine[] {
+  return sources.flatMap((source): ControllingLine[] => {
+    const selected = selectSourceProbes(series, source);
+    if (selected.length < 2) return [];
+    return [
+      {
+        line: {
+          key: `controlling:${source}`,
+          label: labelControllingSource(source),
+          path: buildLinePath(
+            aggregateBuckets(selected, source),
+            scale,
+            timeWindow,
+          ),
+          styleIndex: 0,
+          isDeciding: true,
+          isControlling: true,
+        },
+        probeKeys: selected.map((probe) => probe.key),
+      },
+    ];
+  });
+}
+
+function selectSourceProbes(
+  series: readonly ProbeSeries[],
+  source: SensorSource,
+): ProbeSeries[] {
+  if (!source.startsWith(NODE_SOURCE_PREFIX)) return [...series];
+  const nodeSlug = source.slice(NODE_SOURCE_PREFIX.length);
+  return series.filter((probe) => probe.nodeId === nodeSlug);
+}
+
+function labelControllingSource(source: SensorSource): string {
+  return (
+    AGGREGATE_LABELS.get(source) ??
+    `average on ${source.slice(NODE_SOURCE_PREFIX.length)}`
+  );
+}
+
+// Worked out the way the rules do, over whichever probes reported in each bucket.
+function aggregateBuckets(
+  selected: readonly ProbeSeries[],
+  source: SensorSource,
+): TemperatureBucket[] {
+  const averagesByStart = new Map<string, number[]>();
+  for (const bucket of selected.flatMap((probe) => probe.buckets)) {
+    const averages = averagesByStart.get(bucket.at) ?? [];
+    averages.push(bucket.averageC);
+    averagesByStart.set(bucket.at, averages);
+  }
+  return [...averagesByStart.entries()]
+    .sort(([firstStart], [secondStart]) =>
+      firstStart.localeCompare(secondStart),
+    )
+    .map(([at, averages]) => {
+      const pickedC = pickBySource(averages, source);
+      return {
+        at,
+        averageC: pickedC,
+        lowestC: pickedC,
+        highestC: pickedC,
+        sampleCount: averages.length,
+      };
+    });
+}
+
+function pickBySource(values: readonly number[], source: SensorSource): number {
+  if (source === 'min') return Math.min(...values);
+  if (source === 'max') return Math.max(...values);
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function buildProbeLines(
   series: readonly ProbeSeries[],
   scale: Scale,
-  window: TimeWindow,
+  timeWindow: TimeWindow,
   decidingProbeKeys: readonly string[],
 ): HistoryLine[] {
   const hasSeveralNodes = new Set(series.map((probe) => probe.nodeId)).size > 1;
   return series.map((probe, index) => ({
     key: probe.key,
     label: hasSeveralNodes ? probe.key : probe.sensorId,
-    path: buildLinePath(probe.buckets, scale, window),
+    path: buildLinePath(probe.buckets, scale, timeWindow),
     styleIndex: index % LINE_STYLE_COUNT,
     isDeciding: decidingProbeKeys.includes(probe.key),
+    isControlling: false,
   }));
 }
 
 export function buildLinePath(
   buckets: readonly TemperatureBucket[],
   scale: Scale,
-  window: TimeWindow,
+  timeWindow: TimeWindow,
 ): string {
   const commands: string[] = [];
   buckets.forEach((bucket, index) => {
     const isAfterGap = isGapBetween(buckets[index - 1], bucket);
     const middleMs = Math.min(
-      Math.max(Date.parse(bucket.at) + BUCKET_MILLISECONDS / 2, window.fromMs),
-      window.toMs,
+      Math.max(
+        Date.parse(bucket.at) + BUCKET_MILLISECONDS / 2,
+        timeWindow.fromMs,
+      ),
+      timeWindow.toMs,
     );
-    const x = roundCoordinate(toPlotX(middleMs, window));
-    const y = roundCoordinate(toPlotY(bucket.averageC, scale));
-    commands.push(`${isAfterGap ? 'M' : 'L'}${x} ${y}`);
+    const plotX = roundCoordinate(toPlotX(middleMs, timeWindow));
+    const plotY = roundCoordinate(toPlotY(bucket.averageC, scale));
+    commands.push(`${isAfterGap ? 'M' : 'L'}${plotX} ${plotY}`);
     // A lone point draws nothing, so it gets a short tick to stay visible.
     if (isAfterGap && isGapBetween(bucket, buckets[index + 1])) {
       commands.push(LONE_POINT_TICK);
@@ -353,9 +468,10 @@ function isGapBetween(
   return apartMs > LONGEST_JOINED_GAP_BUCKETS * BUCKET_MILLISECONDS;
 }
 
-function toPlotX(instantMs: number, window: TimeWindow): number {
+function toPlotX(instantMs: number, timeWindow: TimeWindow): number {
   return (
-    ((instantMs - window.fromMs) / (window.toMs - window.fromMs)) * PLOT_WIDTH
+    ((instantMs - timeWindow.fromMs) / (timeWindow.toMs - timeWindow.fromMs)) *
+    PLOT_WIDTH
   );
 }
 
@@ -389,11 +505,16 @@ function formatTemperature(temperatureC: number): string {
 
 function describeTemperatureChart(
   probeCount: number,
+  controllingLabels: readonly string[],
   extremes: string | null,
 ): string {
   if (probeCount === 0) return 'No temperature readings in the last 24 hours.';
   const probes = probeCount === 1 ? 'one probe' : `${probeCount} probes`;
-  return `Temperature over the last 24 hours from ${probes}. ${extremes}.`;
+  const controlling =
+    controllingLabels.length === 0
+      ? ''
+      : `, with the ${controllingLabels.join(' and the ')} the rules act on`;
+  return `Temperature over the last 24 hours from ${probes}${controlling}. ${extremes}.`;
 }
 
 type ClockFormatter = (instantMs: number) => string;
@@ -421,20 +542,20 @@ function createHourMinuteFormat(timezone: string): Intl.DateTimeFormat | null {
 
 // Whole local hours a quarter-day apart, found by stepping half-hours so a half-hour zone still lands on them.
 export function buildTimeLabels(
-  window: TimeWindow,
+  timeWindow: TimeWindow,
   formatClock: ClockFormatter,
 ): PositionedLabel[] {
   const labels: PositionedLabel[] = [];
   const firstStepMs =
-    Math.ceil(window.fromMs / TIME_LABEL_STEP_MILLISECONDS) *
+    Math.ceil(timeWindow.fromMs / TIME_LABEL_STEP_MILLISECONDS) *
     TIME_LABEL_STEP_MILLISECONDS;
   for (
     let instantMs = firstStepMs;
-    instantMs <= window.toMs;
+    instantMs <= timeWindow.toMs;
     instantMs += TIME_LABEL_STEP_MILLISECONDS
   ) {
     const text = formatClock(instantMs);
-    const atPercent = toPercent(instantMs - window.fromMs, window);
+    const atPercent = toPercent(instantMs - timeWindow.fromMs, timeWindow);
     if (isQuarterDayLabel(text) && isAwayFromEdges(atPercent)) {
       labels.push({ text, atPercent });
     }
@@ -468,11 +589,15 @@ function findPushedDevice(
 export function buildRunStrip(
   device: DeviceRunHistory,
   pushedDevice: Device | null,
-  window: TimeWindow,
+  timeWindow: TimeWindow,
 ): RunStrip {
   const stretches = clipToWindow(
-    applyPushedSwitch(extendToNow(device.spans, window), pushedDevice, window),
-    window,
+    applyPushedSwitch(
+      extendToNow(device.spans, timeWindow),
+      pushedDevice,
+      timeWindow,
+    ),
+    timeWindow,
   );
   const onMs = sumStateMs(stretches, 'on');
   const unknownMs = sumStateMs(stretches, 'unknown');
@@ -484,8 +609,8 @@ export function buildRunStrip(
     screenReaderText: `${device.deviceName}, last 24 hours: ${describeRuns(onMs, starts, unknownMs)}.`,
     segments: stretches.map((stretch) => ({
       state: stretch.state,
-      fromPercent: toPercent(stretch.fromMs - window.fromMs, window),
-      widthPercent: toPercent(stretch.toMs - stretch.fromMs, window),
+      fromPercent: toPercent(stretch.fromMs - timeWindow.fromMs, timeWindow),
+      widthPercent: toPercent(stretch.toMs - stretch.fromMs, timeWindow),
     })),
   };
 }
@@ -493,14 +618,14 @@ export function buildRunStrip(
 // The last span holds until something changes, and a change refetches; until then it runs on to now.
 function extendToNow(
   spans: readonly RelaySpan[],
-  window: TimeWindow,
+  timeWindow: TimeWindow,
 ): Stretch[] {
   return spans.map((span, index) => ({
     state: span.state,
     fromMs: Date.parse(span.from),
     toMs:
       index === spans.length - 1
-        ? Math.max(Date.parse(span.to), window.toMs)
+        ? Math.max(Date.parse(span.to), timeWindow.toMs)
         : Date.parse(span.to),
   }));
 }
@@ -509,7 +634,7 @@ function extendToNow(
 function applyPushedSwitch(
   stretches: Stretch[],
   pushedDevice: Device | null,
-  window: TimeWindow,
+  timeWindow: TimeWindow,
 ): Stretch[] {
   const last = stretches[stretches.length - 1];
   const switchedAt = pushedDevice?.isOn
@@ -524,16 +649,16 @@ function applyPushedSwitch(
   return [
     ...stretches.slice(0, -1),
     { ...last, toMs: switchedAtMs },
-    { state: pushedState, fromMs: switchedAtMs, toMs: window.toMs },
+    { state: pushedState, fromMs: switchedAtMs, toMs: timeWindow.toMs },
   ];
 }
 
-function clipToWindow(stretches: Stretch[], window: TimeWindow): Stretch[] {
+function clipToWindow(stretches: Stretch[], timeWindow: TimeWindow): Stretch[] {
   return stretches
     .map((stretch) => ({
       state: stretch.state,
-      fromMs: Math.max(stretch.fromMs, window.fromMs),
-      toMs: Math.min(stretch.toMs, window.toMs),
+      fromMs: Math.max(stretch.fromMs, timeWindow.fromMs),
+      toMs: Math.min(stretch.toMs, timeWindow.toMs),
     }))
     .filter((stretch) => stretch.toMs > stretch.fromMs);
 }
@@ -565,11 +690,13 @@ function formatMilliseconds(milliseconds: number): string {
   return formatDuration(milliseconds / MILLISECONDS_PER_SECOND);
 }
 
-function toPercent(milliseconds: number, window: TimeWindow): number {
+function toPercent(milliseconds: number, timeWindow: TimeWindow): number {
   const scale = 10 ** PERCENT_DECIMALS;
   return (
     Math.round(
-      (milliseconds / (window.toMs - window.fromMs)) * FULL_PERCENT * scale,
+      (milliseconds / (timeWindow.toMs - timeWindow.fromMs)) *
+        FULL_PERCENT *
+        scale,
     ) / scale
   );
 }

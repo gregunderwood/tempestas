@@ -178,6 +178,7 @@ export class ReadingsService {
   }
 
   // Buckets start on whole multiples since the epoch, so a client can bucket a pushed reading to match.
+  // Newest first under the limit, so a truncated answer loses the oldest end rather than now.
   async bucketTemperatures(
     window: ReadingWindow,
     bucketMinutes: number,
@@ -201,10 +202,10 @@ export class ReadingsService {
       .groupBy('node.slug')
       .addGroupBy('reading.sensorId')
       .addGroupBy('"at"')
-      .orderBy('"at"', 'ASC')
+      .orderBy('"at"', 'DESC')
       .limit(MAX_TEMPERATURE_BUCKET_ROWS)
       .getRawMany<RawTemperatureBucket>();
-    return rows.map(toTemperatureBucketRow);
+    return rows.reverse().map(toTemperatureBucketRow);
   }
 
   private async computeSegmentStats(

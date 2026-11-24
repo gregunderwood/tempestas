@@ -1,3 +1,4 @@
+import { DeviceRole } from '@tempestas/domain';
 import type {
   DeviceRunHistory,
   Reading,
@@ -9,10 +10,23 @@ import {
   buildRunStrip,
   buildTimeLabels,
   buildZoneHistoryCharts,
+  findControllingSources,
   mergePushedReadings,
+  type HistoryZone,
   type ZoneHistoryChartsInput,
 } from './zone-history-view';
-import { NOW, device, pumphouseHistory } from './zone-fixtures';
+import {
+  GREENHOUSE,
+  NOW,
+  PUMPHOUSE,
+  device,
+  pumphouseHistory,
+} from './zone-fixtures';
+import {
+  addPushedReadings,
+  NO_PUSHED_READINGS,
+  type PushedReadings,
+} from '../../core/pushed-readings';
 
 const MILLISECONDS_PER_MINUTE = 60_000;
 const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE;
@@ -50,6 +64,10 @@ function pushedReading(
   };
 }
 
+function pushedSoFar(readings: readonly Reading[]): PushedReadings {
+  return addPushedReadings(NO_PUSHED_READINGS, readings, null);
+}
+
 function chartsFor(overrides: Partial<ZoneHistoryChartsInput> = {}) {
   return buildZoneHistoryCharts({
     report: pumphouseHistory(),
@@ -58,9 +76,10 @@ function chartsFor(overrides: Partial<ZoneHistoryChartsInput> = {}) {
         zoneId: 'z-pump',
         timezone: 'America/Vancouver',
         decidingProbeKeys: ['patji/pipes'],
+        controllingSources: [],
       },
     ],
-    pushedReadings: [],
+    pushedReadings: NO_PUSHED_READINGS,
     zoneIdByNodeSlug: new Map([['patji', 'z-pump']]),
     pushedDevices: [],
     now: NOW_MS,
@@ -97,6 +116,7 @@ describe('buildZoneHistoryCharts', () => {
           zoneId: 'z-pump',
           timezone: 'Asia/Kolkata',
           decidingProbeKeys: ['patji/pipes'],
+          controllingSources: [],
         },
       ],
     }).get('z-pump');
@@ -125,7 +145,14 @@ describe('buildZoneHistoryCharts', () => {
 
   it('leaves out a zone the report does not cover', () => {
     const charts = chartsFor({
-      zones: [{ zoneId: 'z-other', timezone: 'UTC', decidingProbeKeys: [] }],
+      zones: [
+        {
+          zoneId: 'z-other',
+          timezone: 'UTC',
+          decidingProbeKeys: [],
+          controllingSources: [],
+        },
+      ],
     });
     expect(charts.size).toBe(0);
   });
@@ -136,14 +163,14 @@ describe('buildZoneHistoryCharts', () => {
     const charts = chartsFor({
       report,
       now: later,
-      pushedReadings: [
+      pushedReadings: pushedSoFar([
         pushedReading(minutesBeforeNow(1), 40),
         pushedReading(new Date(later - 60_000).toISOString(), 8),
         {
           ...pushedReading(new Date(later).toISOString(), 99),
           nodeId: 'elsewhere',
         },
-      ],
+      ]),
     });
     const chart = charts.get('z-pump');
     expect(chart?.topLabel).toBe('8 °C');
@@ -158,12 +185,12 @@ describe('buildZoneHistoryCharts', () => {
         ['patji', 'z-pump'],
         ['braize', 'z-pump'],
       ]),
-      pushedReadings: [
+      pushedReadings: pushedSoFar([
         {
           ...pushedReading(new Date(later).toISOString(), 5),
           nodeId: 'braize',
         },
-      ],
+      ]),
     }).get('z-pump');
     expect(chart?.lines.map((line) => line.label)).toEqual([
       'braize/pipes',
@@ -175,7 +202,12 @@ describe('buildZoneHistoryCharts', () => {
   it('falls back to UTC, and says so, for a timezone the browser does not know', () => {
     const chart = chartsFor({
       zones: [
-        { zoneId: 'z-pump', timezone: 'Mars/Olympus', decidingProbeKeys: [] },
+        {
+          zoneId: 'z-pump',
+          timezone: 'Mars/Olympus',
+          decidingProbeKeys: [],
+          controllingSources: [],
+        },
       ],
     }).get('z-pump');
     expect(chart?.extremes).toContain('11:14 UTC');
@@ -186,6 +218,106 @@ describe('buildZoneHistoryCharts', () => {
       now: NOW_MS + 15 * MILLISECONDS_PER_HOUR,
     }).get('z-pump');
     expect(chart?.hasReadings).toBe(false);
+  });
+});
+
+describe('controlling lines', () => {
+  function twoProbeReport(): ZoneHistoryReport {
+    const report = pumphouseHistory();
+    report.zones[0].probes = [
+      {
+        nodeId: 'patji',
+        sensorId: 'air',
+        buckets: [bucketAt(60, 2), bucketAt(55, 6)],
+      },
+      {
+        nodeId: 'patji',
+        sensorId: 'pipes',
+        buckets: [bucketAt(60, 4), bucketAt(55, 8)],
+      },
+    ];
+    return report;
+  }
+
+  function chartOn(controllingSources: HistoryZone['controllingSources']) {
+    return chartsFor({
+      report: twoProbeReport(),
+      zones: [
+        {
+          zoneId: 'z-pump',
+          timezone: 'UTC',
+          decidingProbeKeys: ['patji/air', 'patji/pipes'],
+          controllingSources,
+        },
+      ],
+    }).get('z-pump');
+  }
+
+  it('draws the mean the rules act on, and leaves its probes plain', () => {
+    const chart = chartOn(['mean']);
+    const controlling = chart?.lines.find((line) => line.isControlling);
+    expect(controlling).toMatchObject({ label: 'average', isDeciding: true });
+    expect(controlling?.path).toBe(
+      buildLinePath(
+        [bucketAt(60, 3), bucketAt(55, 7)],
+        { topC: 8, bottomC: 2 },
+        WINDOW,
+      ),
+    );
+    expect(
+      chart?.lines
+        .filter((line) => !line.isControlling)
+        .map((line) => line.isDeciding),
+    ).toEqual([false, false]);
+    expect(chart?.screenReaderText).toContain(
+      'from 2 probes, with the average the rules act on',
+    );
+  });
+
+  it('follows the coldest probe bucket by bucket for min', () => {
+    const controlling = chartOn(['min'])?.lines.find(
+      (line) => line.isControlling,
+    );
+    expect(controlling?.label).toBe('coldest');
+    expect(controlling?.path).toBe(
+      buildLinePath(
+        [bucketAt(60, 2), bucketAt(55, 6)],
+        { topC: 8, bottomC: 2 },
+        WINDOW,
+      ),
+    );
+  });
+
+  it('draws nothing extra when the source picks a single probe', () => {
+    const chart = chartOn(['node:braize']);
+    expect(chart?.lines.some((line) => line.isControlling)).toBe(false);
+    expect(chart?.lines.map((line) => line.isDeciding)).toEqual([true, true]);
+  });
+});
+
+describe('findControllingSources', () => {
+  it('takes the zone default for each enabled role, once', () => {
+    expect(findControllingSources(PUMPHOUSE.rulesConfig)).toEqual(['min']);
+  });
+
+  it('uses a role override and leaves out a single-sensor source', () => {
+    expect(
+      findControllingSources({
+        ...GREENHOUSE.rulesConfig,
+        enabledRoles: [DeviceRole.Co2Generator, DeviceRole.ExhaustFan],
+        rules: {
+          ...GREENHOUSE.rulesConfig.rules,
+          exhaust_fan: {
+            kind: 'thermostat',
+            mode: 'cool',
+            onAtC: 30,
+            offAtC: 29.5,
+            onStale: 'hold',
+            sensor: { source: 'sensor:patji/air' },
+          },
+        },
+      }),
+    ).toEqual(['mean']);
   });
 });
 
@@ -208,7 +340,14 @@ describe('mergePushedReadings', () => {
           ],
         },
       ],
-      [pushedReading(new Date(bucketStart.getTime() + 1_000).toISOString(), 8)],
+      [
+        ...pushedSoFar([
+          pushedReading(
+            new Date(bucketStart.getTime() + 1_000).toISOString(),
+            8,
+          ),
+        ]).values(),
+      ],
     );
     expect(series.buckets).toEqual([
       {
@@ -224,7 +363,7 @@ describe('mergePushedReadings', () => {
   it('starts a new probe for a sensor the fetch did not have', () => {
     const series = mergePushedReadings(
       [],
-      [pushedReading(NOW.toISOString(), 6, 'air')],
+      [...pushedSoFar([pushedReading(NOW.toISOString(), 6, 'air')]).values()],
     );
     expect(series.map((probe) => probe.key)).toEqual(['patji/air']);
     expect(series[0].buckets[0]).toMatchObject({ averageC: 6, sampleCount: 1 });
