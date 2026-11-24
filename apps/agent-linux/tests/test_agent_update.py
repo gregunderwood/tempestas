@@ -206,12 +206,47 @@ def test_a_healthy_update_is_kept_until_the_broker_has_it(tmp_path):
 def test_a_gate_replaced_by_a_hand_deploy_neither_passes_nor_rolls_back(tmp_path):
     agent, clock = start_new_release_on_its_gate(tmp_path)
     agent.layout.clear_pending()
+    agent.say_hello()
 
     clock.advance(GATE_SECONDS)
     agent.tend_update()
 
     assert agent.layout.read_current_release() == NEW_RELEASE
     assert not agent.restart_requested.is_set()
+    assert update_statuses(agent) == []
+    assert agent.update_gate is None
+
+
+def test_a_gate_replaced_by_a_hand_deploy_reports_what_the_hand_deploy_recorded(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    replaced = UpdateOutcome(
+        agent.update_gate.pending.command_id,
+        contract.UpdateState.FAILED,
+        "replaced by a hand deploy",
+    )
+    agent.layout.write_outcome(replaced)
+    agent.layout.clear_pending()
+    agent.say_hello()
+
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, "replaced by a hand deploy")]
+
+
+def test_a_failed_install_that_left_current_switched_restarts_into_it(monkeypatch, tmp_path):
+    class SwitchStuckInstaller(InlineInstaller):
+        def install(self, command, report):
+            self.commands.append(command)
+            agent.layout.locate_release(command["version"]).mkdir()
+            agent.layout.switch_current_to(command["version"])
+            raise OSError("read-only file system")
+
+    agent, _ = make_updating_agent(monkeypatch, tmp_path, SwitchStuckInstaller())
+
+    agent.on_update(build_fresh_update(), retained=False)
+
+    assert agent.restart_requested.is_set()
     assert update_statuses(agent) == []
 
 

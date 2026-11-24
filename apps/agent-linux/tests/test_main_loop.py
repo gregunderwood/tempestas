@@ -35,6 +35,13 @@ def test_does_not_ping_without_a_watchdog(monkeypatch):
     assert read_watchdog_ping_interval_s() is None
 
 
+def test_does_not_ping_a_watchdog_with_no_timeout(monkeypatch):
+    monkeypatch.setenv("WATCHDOG_USEC", "0")
+    monkeypatch.delenv("WATCHDOG_PID", raising=False)
+
+    assert read_watchdog_ping_interval_s() is None
+
+
 def test_does_not_ping_a_watchdog_meant_for_another_process(monkeypatch):
     monkeypatch.setenv("WATCHDOG_USEC", WATCHDOG_USEC_FOR_A_MINUTE)
     monkeypatch.setenv("WATCHDOG_PID", str(os.getpid() + 1))

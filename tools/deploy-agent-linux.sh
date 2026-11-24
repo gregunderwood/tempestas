@@ -82,7 +82,7 @@ REMOTE
 # Built beside the running venv, which the agent keeps using until swap_in_built_venv.
 build_venv_if_needed() {
   local host="$1"
-  printf '%s\n' "$REQUIREMENTS" | ssh "$host" "cat > $REMOTE_AGENT_HOME/.$REQUIREMENTS_FILE"
+  printf '%s\n' "$REQUIREMENTS" | ssh "$host" "mkdir -p $REMOTE_AGENT_HOME && cat > $REMOTE_AGENT_HOME/.$REQUIREMENTS_FILE"
   ssh "$host" bash -s -- "$REMOTE_AGENT_HOME" "$REQUIREMENTS_FILE" <<'REMOTE'
 set -euo pipefail
 home="$1" requirements_file="$2"
@@ -169,8 +169,9 @@ EOF
 
 for HOST in "${HOSTS[@]}"; do
   say "$HOST: copying into $REMOTE_RELEASE"
-  copy_release "$HOST"
+  # The venv first: a redeploy of the running version replaces the code `current` already runs.
   build_venv_if_needed "$HOST"
+  copy_release "$HOST"
 
   if ! is_unit_on_release_layout "$HOST"; then
     swap_in_built_venv "$HOST"

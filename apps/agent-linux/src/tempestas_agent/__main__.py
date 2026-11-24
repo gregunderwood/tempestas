@@ -238,6 +238,8 @@ def read_watchdog_ping_interval_s() -> float | None:
         timeout_us = int(os.environ.get("WATCHDOG_USEC", ""))
     except ValueError:
         return None
+    if timeout_us <= 0:
+        return None
     return timeout_us / MICROSECONDS_PER_SECOND * WATCHDOG_PING_SHARE
 
 

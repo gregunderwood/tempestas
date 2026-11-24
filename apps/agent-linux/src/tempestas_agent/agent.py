@@ -527,6 +527,9 @@ class Agent:
             with self.layout.hold_switch_lock(should_wait=False):
                 if not is_still_pending(self.layout, gate):
                     log.warning("update to %s was replaced by a hand deploy", gate.pending.version)
+                    # The hand deploy recorded what became of it; an install would clear that.
+                    self.outcome_to_report = self.layout.read_outcome()
+                    self.report_settled_update()
                 elif not is_still_current(self.layout, gate):
                     # The rollback unit switched back while systemd restarted this release.
                     log.warning("update to %s was rolled back under it", gate.pending.version)
@@ -651,6 +654,12 @@ class Agent:
             )
         except Exception as error:  # noqa: BLE001 - reported to the server, never swallowed
             log.error("update to %s failed: %s", command.get("version"), error)
+            if self._is_switch_left_in_place(command):
+                log.error(
+                    "could not undo the switch to %s - restarting into it", command["version"]
+                )
+                self.request_restart()
+                return
             try:
                 self._report_install(command_id, contract.UpdateState.FAILED, str(error))
             finally:
@@ -664,6 +673,13 @@ class Agent:
         finally:
             # `current` already points at the new release, so it restarts whatever the publish did.
             self.request_restart()
+
+    def _is_switch_left_in_place(self, command: dict) -> bool:
+        """True when a failed install could not put `current` back: its gate must judge it."""
+        try:
+            return self.layout.read_current_release() == command["version"]
+        except OSError:
+            return False
 
     def _report_install(self, command_id: str, state: str, reason: str | None = None) -> None:
         # Under the claim lock: a stop and the install thread may both answer, and only one may.

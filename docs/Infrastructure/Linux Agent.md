@@ -110,10 +110,11 @@ tools/deploy-agent-linux.sh [host ...]   # elantris and patji when none are name
 
 It runs the agent's lint and tests, then on each host:
 
-1. Copies the code under a dot-name, stamps the version, and renames it into
+1. Builds the venv again only when its requirements changed (see [the venv](#the-venv)), first, so
+   a redeploy of the running version does not leave its new code beside the old venv for minutes.
+2. Copies the code under a dot-name, stamps the version, and renames it into
    `~/tempestas/agent-linux/releases/<version>` in one step, exchanged with one already there. A
    redeploy of the running version never edits the tree the agent is running from.
-2. Builds the venv again only when its requirements changed (see [the venv](#the-venv)).
 3. Swaps in that venv and makes the release `current`, back to back so no start pairs code with
    the wrong venv, and puts the old venv back if `current` cannot follow. Then prunes old releases. An update still waiting on its gate is replaced, and
    the server hears `failed`: "replaced by a hand deploy of <version>".
