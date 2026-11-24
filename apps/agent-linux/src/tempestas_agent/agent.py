@@ -121,11 +121,6 @@ def is_retained_clear(payload: bytes) -> bool:
     return payload.strip() == b""
 
 
-def is_server_back_online(state: str | None, retained: bool) -> bool:
-    # A retained online is the replay on our own connect, which announce has already answered.
-    return state == SERVER_ONLINE and not retained
-
-
 def judge_expiry(expires_at, now: datetime) -> CommandVerdict | None:
     if not isinstance(expires_at, str):
         return CommandVerdict(False, "command has no expiresAt")
@@ -176,7 +171,7 @@ class Agent:
         self.is_stopping = False
         self._installing_command_id: str | None = None
         self._update_claim_lock = threading.Lock()
-        # A redelivery must not be answered again after its final state.
+        # Ids this agent installed or reported on; a refusal stays open to a retry under its id.
         self._settled_command_ids: set[str] = set()
         self._held_until_exit = ExitStack()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
@@ -299,24 +294,31 @@ class Agent:
             return
         state = body.get("state") if isinstance(body, dict) else None
         if state == SERVER_ONLINE:
-            self.is_server_online = True
-            self._start_watching_the_gate()
-        if is_server_back_online(state, retained):
+            self._on_server_online(retained)
+        elif state == SERVER_OFFLINE:
+            self._on_server_offline()
+
+    def _on_server_online(self, retained: bool) -> None:
+        self.is_server_online = True
+        self._start_watching_the_gate()
+        # A retained online is the replay on our own connect, which announce has already answered.
+        if not retained:
             log.info("the server came back online - saying hello again")
             self.say_hello()
-        if state == SERVER_ONLINE and not self._was_server_online_at_report:
+        if not self._was_server_online_at_report:
             # Sent while the server was away, the broker took it and nobody was listening.
             self.report_settled_update()
-        elif state == SERVER_OFFLINE:
-            self.is_server_online = False
-            # The broker's ack is not the server's: one sent just before it left may be unread.
-            self._was_server_online_at_report = False
-            self._stop_watching_the_gate()
-            # A deploy restarts the server too; the dead-man decides whether it is really gone.
-            log.warning(
-                "the server reported itself offline - holding the lines for the dead-man (%.0fs)",
-                self.config.deadman_s,
-            )
+
+    def _on_server_offline(self) -> None:
+        self.is_server_online = False
+        # The broker's ack is not the server's: one sent just before it left may be unread.
+        self._was_server_online_at_report = False
+        self._stop_watching_the_gate()
+        # A deploy restarts the server too; the dead-man decides whether it is really gone.
+        log.warning(
+            "the server reported itself offline - holding the lines for the dead-man (%.0fs)",
+            self.config.deadman_s,
+        )
 
     def say_hello(self) -> None:
         self.publish("hello", contract.build_hello_topic(self.config.node_id), self.hello_payload())
@@ -364,6 +366,7 @@ class Agent:
         if outcome is None:
             return
         self._was_server_online_at_report = self.is_server_online
+        self._settled_command_ids.add(outcome.command_id)
         self._outcome_delivery = self.publish_update_status(
             outcome.command_id, outcome.state, outcome.reason
         )
@@ -446,8 +449,6 @@ class Agent:
         self._forget_delivered_outcome()
 
     def publish_update_status(self, command_id: str, state: str, reason: str | None = None):
-        if state in FINAL_UPDATE_STATES:
-            self._settled_command_ids.add(command_id)
         payload = {**self._envelope("updateStatus"), "id": command_id, "state": state}
         if reason is not None:
             payload["reason"] = reason
@@ -690,8 +691,11 @@ class Agent:
     def _report_install(self, command_id: str, state: str, reason: str | None = None) -> None:
         # Under the claim lock: a stop and the install thread may both answer, and only one may.
         with self._update_claim_lock:
-            if command_id not in self._settled_command_ids:
-                self.publish_update_status(command_id, state, reason)
+            if command_id in self._settled_command_ids:
+                return
+            if state in FINAL_UPDATE_STATES:
+                self._settled_command_ids.add(command_id)
+            self.publish_update_status(command_id, state, reason)
 
     def _report_update_refusal(self, verdict: UpdateVerdict) -> None:
         if verdict.answer == ANSWER_ALARM:

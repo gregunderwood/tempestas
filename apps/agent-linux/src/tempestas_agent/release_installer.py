@@ -14,8 +14,9 @@ from pathlib import Path
 from urllib.parse import quote, urljoin, urlparse
 
 from . import contract
-from .release_layout import PendingUpdate, ReleaseLayout
+from .release_layout import PendingUpdate, ReleaseLayout, UpdateOutcome
 from .update_command import SHA256_HEX
+from .update_gate import record_outcome
 from .version import AGENT_NAME
 
 log = logging.getLogger("tempestas.agent")
@@ -135,12 +136,19 @@ class ReleaseInstaller:
             self.layout.write_pending(pending)
             self.layout.clear_outcome()
             self.layout.switch_current_to(version)
-        except BaseException:
-            self._abandon_switch(staging, destination, running_release)
+        except BaseException as error:
+            self._abandon_switch(staging, destination, running_release, pending, error)
             raise
         return pending
 
-    def _abandon_switch(self, staging: Path, destination: Path, running_release: str) -> None:
+    def _abandon_switch(
+        self,
+        staging: Path,
+        destination: Path,
+        running_release: str,
+        pending: PendingUpdate,
+        cause: BaseException,
+    ) -> None:
         """Reported as failed, so it must not also read as a rollback, or keep a release slot."""
         shutil.rmtree(staging, ignore_errors=True)
         try:
@@ -152,9 +160,13 @@ class ReleaseInstaller:
             # Kept pending: the next start then judges the release `current` really points at.
             return
         try:
-            self.layout.clear_pending()
-        except OSError as error:
-            log.error("could not clear the pending %s: %s", destination.name, error)
+            # Recorded, not just cleared: a pending record left behind would read as a rollback.
+            failure = UpdateOutcome(pending.command_id, contract.UpdateState.FAILED, str(cause))
+            record_outcome(self.layout, failure)
+        except OSError as record_error:
+            log.error(
+                "could not record the failed switch to %s: %s", destination.name, record_error
+            )
             return
         shutil.rmtree(destination, ignore_errors=True)
 

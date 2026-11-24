@@ -186,9 +186,10 @@ actually in effect with `systemctl show tempestas-agent -p StartLimitIntervalUSe
 
 ### What the unit is doing and why
 
-- **`Type=notify`.** The agent calls `sd_notify("READY=1")` after the chip is claimed, the sensor
-  has started, and MQTT is connected. Readiness is a fact; the old system guessed at it with an
-  unconditional `sleep 15` in the unit and another `sleep 5` in the app.
+- **`Type=notify`.** The agent calls `sd_notify("READY=1")` after the chip is claimed and the sensor
+  has started, so it can fail safe on its own. It does not wait for the broker, which it keeps
+  retrying, so `active` says nothing about MQTT. Readiness is a fact; the old system guessed at it
+  with an unconditional `sleep 15` in the unit and another `sleep 5` in the app.
 - **`SupplementaryGroups=i2c gpio`.** `/dev/gpiochip0` is `crw-rw---- root:gpio`. Listed explicitly
   rather than inherited from the account, so the unit states what it needs.
 - **`Restart=on-failure`, never `always`,** with the start limit in `[Unit]`. `RestartSec=5` is not

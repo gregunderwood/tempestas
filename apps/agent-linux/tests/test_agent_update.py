@@ -348,6 +348,17 @@ def test_ignores_a_repeat_of_an_update_whose_outcome_the_server_already_heard(tm
     assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
 
 
+def test_an_update_refused_for_a_passing_reason_can_be_retried_under_its_id(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent._update_in_progress.acquire()
+    agent.on_update(build_fresh_update(), retained=False)
+    agent._update_in_progress.release()
+
+    agent.on_update(build_fresh_update(), retained=False)
+
+    assert len(agent.installer.commands) == 1
+
+
 def test_ignores_a_repeat_of_an_update_that_already_failed(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path, InlineInstaller(failure="no space"))
     agent.on_update(build_fresh_update(), retained=False)
@@ -388,7 +399,7 @@ def test_a_release_the_rollback_unit_switched_away_from_never_records_healthy(tm
 def test_an_install_failing_after_a_stop_answered_it_is_not_answered_again(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path, InlineInstaller(failure="timed out"))
     agent._update_in_progress.acquire()
-    agent.publish_update_status("update-1", contract.UpdateState.FAILED, STOPPING)
+    agent._report_install("update-1", contract.UpdateState.FAILED, STOPPING)
 
     agent._install_update(json.loads(build_fresh_update()))
 

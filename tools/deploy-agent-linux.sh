@@ -75,6 +75,8 @@ elif ! mv -T --exchange "$staging" "$release" 2>/dev/null; then
   mv -T "$staging" "$release"
   mv -T "$staging-replaced" "$staging"
 fi
+# Released first: deleting the replaced tree on a slow card must not hold up a switch.
+exec {lock_descriptor}>&-
 rm -rf "$staging"
 REMOTE
 }

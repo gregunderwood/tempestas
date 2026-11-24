@@ -205,6 +205,7 @@ def test_a_switch_back_that_lands_but_cannot_sync_still_drops_the_pending_update
 
     assert layout.read_current_release() == RUNNING_RELEASE
     assert layout.read_pending() is None
+    assert layout.read_outcome().state == contract.UpdateState.FAILED
 
 
 def test_refuses_to_switch_when_a_hand_deploy_moved_current_during_the_download(tmp_path):
