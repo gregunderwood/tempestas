@@ -2,7 +2,7 @@ import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Subject } from 'rxjs';
 import { DivergenceLog } from '../common/divergence-log';
 import type { NodeHello, PinStateReport } from '../hardware/hardware.service';
-import type { Repository } from 'typeorm';
+import type { FindOneOptions, Repository } from 'typeorm';
 import {
   ApiErrorCode,
   DeviceRole,
@@ -835,24 +835,29 @@ describe('DevicesService reconciliation alongside edits and switches', () => {
     const pinStates = new Subject<PinStateReport>();
     const divergences = new DivergenceLog();
     const publishDeviceState = vi.fn();
-    const loadStoredRow = vi.fn(() => {
+    const loadStoredRow = vi.fn((query: FindOneOptions<DeviceEntity>) => {
+      const askedPin = (query.where as { gpio?: number }).gpio;
+      const isElsewhere = askedPin !== undefined && askedPin !== storedRow.gpio;
+      if (isElsewhere) return Promise.resolve(null);
       const snapshot = { ...storedRow };
       if (!holdNextLoad) return Promise.resolve(snapshot);
       holdNextLoad = false;
-      return new Promise<DeviceEntity>((resolve) => {
+      return new Promise<DeviceEntity | null>((resolve) => {
         heldLoads.push({ release: () => resolve(snapshot) });
       });
     });
+    const findDeviceOnPinForClaim = vi.fn().mockResolvedValue(null);
     const deviceRepository = {
       findOne: loadStoredRow,
-      findOneBy: vi.fn().mockResolvedValue(null),
+      findOneBy: findDeviceOnPinForClaim,
       save: vi.fn(async (row: DeviceEntity) => {
         storedRow = { ...row };
         return row;
       }),
     } as unknown as Repository<DeviceEntity>;
+    const setPin = vi.fn().mockResolvedValue(undefined);
     const hardware = {
-      setPin: vi.fn().mockResolvedValue(undefined),
+      setPin,
       lastPinReport: vi.fn().mockReturnValue(null),
       pinStates$: pinStates.asObservable(),
       hello$: new Subject<NodeHello>().asObservable(),
@@ -873,11 +878,16 @@ describe('DevicesService reconciliation alongside edits and switches', () => {
       divergences,
       publishDeviceState,
       loadStoredRow,
+      setPin,
       heldLoads,
       holdNextLoad: () => {
         holdNextLoad = true;
       },
+      findDeviceOnPinForClaim,
       storedRow: () => storedRow,
+      replaceStoredRow: (row: DeviceEntity) => {
+        storedRow = row;
+      },
     };
   }
 
@@ -947,6 +957,63 @@ describe('DevicesService reconciliation alongside edits and switches', () => {
     await settle();
 
     expect(stack.storedRow()).toMatchObject({ onAt: NOW, offAt: null });
+    expect(stack.divergences.since(new Date(0))).toHaveLength(0);
+    stack.service.onModuleDestroy();
+  });
+  it('still reads a waiting report when the command ahead of it never reached the node', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.setPin.mockRejectedValueOnce(new Error('node unreachable'));
+    stack.holdNextLoad();
+    const turningOn = stack.service.turnOn('dev-1');
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    stack.pinStates.next(reportAtLevel(0));
+    await settle();
+    stack.heldLoads[0].release();
+    await expect(turningOn).rejects.toBeDefined();
+    await settle();
+
+    expect(stack.storedRow()).toMatchObject({ onAt: NOW });
+    expect(stack.divergences.since(new Date(0))).toHaveLength(1);
+    stack.service.onModuleDestroy();
+  });
+
+  it('drops a waiting report once an edit ahead of it moved the device off that pin', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.holdNextLoad();
+    const remapping = stack.service.update('dev-1', { gpio: 12 });
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    stack.pinStates.next(reportAtLevel(0));
+    await settle();
+    stack.heldLoads[0].release();
+    await remapping;
+    await settle();
+
+    expect(stack.storedRow()).toMatchObject({ gpio: 12, onAt: null });
+    expect(stack.divergences.since(new Date(0))).toHaveLength(0);
+    stack.service.onModuleDestroy();
+  });
+  it('leaves alone a device that took the pin while the report waited', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.findDeviceOnPinForClaim.mockResolvedValue({ id: 'dev-3' });
+    stack.holdNextLoad();
+    const refusedEdit = stack.service.update('dev-1', { gpio: 20 });
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    stack.pinStates.next(reportAtLevel(0));
+    await settle();
+    stack.replaceStoredRow(
+      burner({ id: 'dev-2', name: 'Exhaust Fan', node: NODE }),
+    );
+    stack.heldLoads[0].release();
+    await expect(refusedEdit).rejects.toBeInstanceOf(ConflictException);
+    await settle();
+
+    expect(stack.storedRow()).toMatchObject({ id: 'dev-2', onAt: null });
     expect(stack.divergences.since(new Date(0))).toHaveLength(0);
     stack.service.onModuleDestroy();
   });

@@ -138,7 +138,8 @@ tracking it. Turn it off first. Other fields can still change while it runs.
   the old pin or on level back.
 - **A report one of our own commands overtook is dropped.** A correction waits its turn, so it
   can run after a switch that started once the report arrived. That report describes the pin
-  before the command, however live it is.
+  before the command, however live it is. A command that failed never reached the node, so it
+  overtakes nothing.
 - **Saving switches nothing.** After a remap the row is read from the pin's last report under the
   new mapping, without 3c's ordering guard: the row's times belong to the old mapping, and after a
   restart the last report is a retained replay older than them. A device whose on level flipped

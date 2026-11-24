@@ -264,7 +264,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       report.pin,
     );
     const isStillOnPin = device?.id === deviceId;
-    if (!device || !isStillOnPin) return;
+    if (!isStillOnPin) return;
 
     const now = this.clock.now();
     const verdict = reconcilePinState(device, report, now);
@@ -407,7 +407,6 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
 
     const pinKey = toPinKey(device.node.slug, device.gpio);
     this.pinsMidCommand.add(pinKey);
-    this.commandCountsByPin.set(pinKey, this.commandsSentTo(pinKey) + 1);
     try {
       await this.hardware.setPin(device.node.slug, {
         pin: device.gpio,
@@ -418,6 +417,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       this.pinsMidCommand.delete(pinKey);
       throw translateHardwareError(error);
     }
+    this.commandCountsByPin.set(pinKey, this.commandsSentTo(pinKey) + 1);
 
     stampTransition(device, direction, this.clock.now());
     try {
