@@ -17,9 +17,8 @@ def make_current(layout: ReleaseLayout, release: str) -> list[str]:
     with layout.hold_switch_lock():
         previous_release = layout.read_current_release()
         pending = layout.read_pending()
-        layout.switch_current_to(release)
         if pending is not None:
-            # The server is still waiting to hear how that update ended.
+            # Before the switch, so a crash between them cannot read as the update failing to start.
             record_outcome(
                 layout,
                 UpdateOutcome(
@@ -28,7 +27,9 @@ def make_current(layout: ReleaseLayout, release: str) -> list[str]:
                     f"replaced by a hand deploy of {release} before its health gate passed",
                 ),
             )
-        return layout.prune_releases({release, previous_release} - {None})
+        layout.switch_current_to(release)
+    # Outside the lock: deleting releases on a slow card must not hold up the agent.
+    return layout.prune_releases({release, previous_release} - {None})
 
 
 def main(arguments: list[str]) -> int:

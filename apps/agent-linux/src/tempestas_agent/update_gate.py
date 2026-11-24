@@ -123,6 +123,7 @@ def record_start(layout: ReleaseLayout, gate: HealthGate) -> None:
 def record_outcome(layout: ReleaseLayout, outcome: UpdateOutcome) -> UpdateOutcome:
     # The outcome before the pending record goes, so a crash between them still reports.
     layout.write_outcome(outcome)
-    layout.clear_pending()
     layout.clear_start_records()
+    # Last, so a failure before it leaves the update pending and the whole step is tried again.
+    layout.clear_pending()
     return outcome

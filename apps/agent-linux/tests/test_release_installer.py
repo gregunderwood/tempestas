@@ -157,6 +157,12 @@ def test_replaces_a_leftover_partial_download(tmp_path):
     assert not leftover.exists()
 
 
+def test_carries_the_manifest_query_to_every_file():
+    assert build_file_url("http://elantris/r/1.1.4/manifest.json?token=abc", "src/a.py") == (
+        "http://elantris/r/1.1.4/files/src/a.py?token=abc"
+    )
+
+
 def test_fetches_each_file_beside_the_manifest():
     assert build_file_url(MANIFEST_URL, "src/tempestas_agent/agent.py") == (
         "http://elantris:7000/api/agent-releases/agent-linux/1.1.4/files/src/tempestas_agent/agent.py"

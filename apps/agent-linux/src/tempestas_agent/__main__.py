@@ -62,6 +62,11 @@ def main() -> int:
     sd_notify("READY=1")
     try:
         run_until_signalled(agent, config)
+    except Exception:
+        # After an update switched `current`, any other exit reads as the new release failing.
+        if not agent.restart_requested.is_set():
+            raise
+        log.exception("the agent failed after an update was installed; restarting into it")
     finally:
         shut_down_without_raising(agent, lock)
     return EXIT_RESTART_FOR_UPDATE if agent.restart_requested.is_set() else EXIT_OK
@@ -225,7 +230,9 @@ def shut_down_without_raising(agent: Agent, lock: SingleInstance) -> None:
     # A requested restart must still exit 75, or the rollback unit reads it as the update failing.
     try:
         shut_down(agent, lock)
-    except Exception:  # noqa: BLE001 - logged; the exit code must stay what was asked for
+    except Exception:
+        if not agent.restart_requested.is_set():
+            raise
         log.exception("the agent did not shut down cleanly")
 
 

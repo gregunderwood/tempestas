@@ -61,11 +61,11 @@ class ReleaseLayout:
         return cls(Path(home)) if home else None
 
     @contextmanager
-    def hold_switch_lock(self) -> Iterator[None]:
-        """Held around every read-then-switch of `current`, by the agent and a hand deploy alike."""
+    def hold_switch_lock(self, should_wait: bool = True) -> Iterator[None]:
+        """Around every read-then-switch of `current`; BlockingIOError if busy and not waiting."""
         self.state.mkdir(parents=True, exist_ok=True)
         with open(self.state / SWITCH_LOCK_FILE, "w") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            fcntl.flock(lock_file, fcntl.LOCK_EX if should_wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
             yield
 
     def read_current_release(self) -> str | None:

@@ -283,6 +283,7 @@ class Agent:
         state = body.get("state") if isinstance(body, dict) else None
         if state == SERVER_ONLINE:
             self.is_server_online = True
+            self._start_watching_the_gate()
         if is_server_back_online(state, retained):
             log.info("the server came back online - saying hello again")
             self.say_hello()
@@ -304,7 +305,8 @@ class Agent:
         gate = self.update_gate
         if gate is not None:
             gate.note_hello()
-            gate.start_watching(self._clock())
+            if self.is_server_online:
+                gate.start_watching(self._clock())
 
     def on_connected(self) -> None:
         self.is_connected = True
@@ -381,7 +383,7 @@ class Agent:
         ).start()
 
     def tend_update(self) -> None:
-        """Main loop only: the MQTT callbacks note what happened, and this alone acts on it."""
+        """Main loop only, and never waits for the switch lock: a busy one is tried next tick."""
         if not self._is_update_settled:
             # A pending update left unsettled would read as a failed start at the next crash.
             self.settle_update()
@@ -467,13 +469,15 @@ class Agent:
         if not has_passed and not gate.is_overdue(self._clock()):
             return
         try:
-            with self.layout.hold_switch_lock():
+            with self.layout.hold_switch_lock(should_wait=False):
                 if not is_still_pending(self.layout, gate):
                     log.warning("update to %s was replaced by a hand deploy", gate.pending.version)
                 elif has_passed:
                     self._pass_update_gate(gate)
                 else:
                     self._fail_update_gate(gate)
+        except BlockingIOError:
+            return
         except OSError as error:
             # Kept, so the next tick tries again; failing here must never stop the dead-man.
             log.error("could not settle the update to %s: %s", gate.pending.version, error)
@@ -491,8 +495,17 @@ class Agent:
 
     def _fail_update_gate(self, gate: HealthGate) -> None:
         log.error("update gate failed: %s - rolling back", gate.describe_failure())
-        roll_back_gate(self.layout, gate)
-        self.restart_requested.set()
+        try:
+            roll_back_gate(self.layout, gate)
+        finally:
+            # Once `current` points back, run it even if the outcome could not be recorded.
+            if self.layout.read_current_release() == gate.pending.previous_release:
+                self.restart_requested.set()
+
+    def _start_watching_the_gate(self) -> None:
+        gate = self.update_gate
+        if gate is not None and gate.has_said_hello:
+            gate.start_watching(self._clock())
 
     def _stop_watching_the_gate(self) -> None:
         gate = self.update_gate
@@ -511,9 +524,11 @@ class Agent:
         if gate is None or gate.is_start_recorded or not gate.has_said_hello:
             return
         try:
-            with self.layout.hold_switch_lock():
+            with self.layout.hold_switch_lock(should_wait=False):
                 if is_still_pending(self.layout, gate):
                     record_start(self.layout, gate)
+        except BlockingIOError:
+            return
         except OSError as error:
             log.error("could not record that %s started: %s", gate.pending.version, error)
             return
@@ -523,10 +538,12 @@ class Agent:
         if self.outcome_to_report is None or self._has_undelivered_outcome():
             return
         try:
-            with self.layout.hold_switch_lock():
+            with self.layout.hold_switch_lock(should_wait=False):
                 # A hand deploy may have recorded a newer outcome since this one was sent.
                 if self.layout.read_outcome() == self.outcome_to_report:
                     self.layout.clear_outcome()
+        except BlockingIOError:
+            return
         except OSError as error:
             log.error("could not forget a delivered update outcome: %s", error)
             return

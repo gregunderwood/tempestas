@@ -268,10 +268,10 @@ The new release finds `pending.json` naming itself and has `GATE_SECONDS`, 120, 
 a `hello`, then a heartbeat from the server after that `hello`. A heartbeat means the broker, the
 credentials and the server's view of the node all work.
 
-The 120 s count only while the broker is connected and the server is online. The clock starts with
-each `hello` and stops when the server reports itself offline or the connection drops. So a server
-deploy or a broker restart during the gate is no verdict, and a good release is not rolled back for
-it. The cost is that a release that never reaches the broker at all waits rather than rolling back.
+The 120 s count only while the broker is connected and the server is online. The clock runs once
+the node has said `hello` and the server is known to be online, and stops when the server reports
+itself offline or the connection drops. So a server deploy or a broker restart during the gate is no
+verdict, and a good release is not rolled back for it. The cost is that a release that never reaches the broker at all waits rather than rolling back.
 It shows as offline on the Nodes page, and `tools/deploy-agent-linux.sh` replaces it.
 
 - **Passed**: it records `healthy`, clears pending, prunes old releases, and reports.

@@ -10,7 +10,7 @@ import time
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 
 from . import contract
 from .release_layout import PendingUpdate, ReleaseLayout
@@ -125,22 +125,23 @@ class ReleaseInstaller:
     ) -> PendingUpdate:
         version = command["version"]
         destination = self.layout.locate_release(version)
-        shutil.rmtree(destination, ignore_errors=True)
-        staging.rename(destination)
         pending = PendingUpdate(command["id"], version, running_release)
         try:
+            shutil.rmtree(destination, ignore_errors=True)
+            staging.rename(destination)
             # Before the switch: a crash between the two reads as a failed start, never as none.
             self.layout.clear_start_records()
             self.layout.write_pending(pending)
             self.layout.clear_outcome()
             self.layout.switch_current_to(version)
         except BaseException:
-            self._abandon_switch(destination, running_release)
+            self._abandon_switch(staging, destination, running_release)
             raise
         return pending
 
-    def _abandon_switch(self, destination: Path, running_release: str) -> None:
+    def _abandon_switch(self, staging: Path, destination: Path, running_release: str) -> None:
         """Reported as failed, so it must not also read as a rollback, or keep a release slot."""
+        shutil.rmtree(staging, ignore_errors=True)
         try:
             self.layout.switch_current_to(running_release)
             self.layout.clear_pending()
@@ -200,7 +201,10 @@ def verify_files(files: list[dict], staging: Path) -> None:
 
 
 def build_file_url(manifest_url: str, path: str) -> str:
-    return urljoin(manifest_url, f"{BUNDLE_FILES_DIRECTORY}/{quote(path)}")
+    # The manifest's query, a signature say, must reach every file too; urljoin drops it.
+    query = urlparse(manifest_url).query
+    file_url = urljoin(manifest_url, f"{BUNDLE_FILES_DIRECTORY}/{quote(path)}")
+    return f"{file_url}?{query}" if query else file_url
 
 
 def hash_sha256(content: bytes) -> str:

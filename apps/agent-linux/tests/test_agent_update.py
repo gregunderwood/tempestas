@@ -143,6 +143,7 @@ def start_new_release_on_its_gate(tmp_path):
     agent.layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
     agent.layout.switch_current_to(NEW_RELEASE)
     agent.settle_update()
+    agent.is_server_online = True
     return agent, clock
 
 
@@ -209,6 +210,51 @@ def test_a_server_that_goes_offline_pauses_the_gate_instead_of_failing_the_relea
 
     assert agent.update_gate is not None
     assert not agent.restart_requested.is_set()
+
+
+def test_a_hello_before_the_server_is_known_online_does_not_start_the_clock(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.is_server_online = False
+    agent.say_hello()
+
+    clock.advance(10 * GATE_SECONDS)
+    agent.tend_update()
+    assert not agent.restart_requested.is_set()
+
+    agent.on_server_status(SERVER_ONLINE_AGAIN, retained=True)
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+    assert agent.restart_requested.is_set()
+
+
+def test_a_busy_switch_lock_is_left_for_the_next_tick(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+    clock.advance(GATE_SECONDS)
+
+    with agent.layout.hold_switch_lock():
+        agent.tend_update()
+        assert agent.update_gate is not None
+
+    agent.tend_update()
+    assert agent.restart_requested.is_set()
+
+
+def test_restarts_onto_the_previous_release_even_if_the_rollback_cannot_be_recorded(
+    tmp_path, monkeypatch
+):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    def fail_writing(_outcome):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(agent.layout, "write_outcome", fail_writing)
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert agent.layout.read_current_release() == RUNNING_RELEASE
+    assert agent.restart_requested.is_set()
 
 
 def test_a_lost_broker_connection_pauses_the_gate(tmp_path):
