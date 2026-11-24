@@ -10,7 +10,7 @@ import {
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
-import { FOLLOWER_NOTICE as SHARED_FOLLOWER_NOTICE } from '../../shared/leadership';
+import { FOLLOWER_NOTICE } from '../../shared/leadership';
 import {
   fakeRealtime,
   pushDevice,
@@ -110,9 +110,6 @@ function probeLabelsOf(page: HTMLElement): string[] {
     (label) => label.textContent?.trim() ?? '',
   );
 }
-
-const FOLLOWER_NOTICE =
-  'This controller is a follower; rules run on the leader.';
 
 function statusWhile(isLeading: boolean): SystemStatus {
   return {
@@ -233,7 +230,7 @@ describe('ZonesPage', () => {
     realtime.status.set(statusWhile(false));
     vi.advanceTimersByTime(61_000);
     render();
-    expect(page.textContent).toContain(FOLLOWER_NOTICE);
+    expect(page.textContent).toContain(`${FOLLOWER_NOTICE}.`);
     expect(alertText(page)).toBeUndefined();
   });
 
@@ -241,7 +238,7 @@ describe('ZonesPage', () => {
     const { page, realtime, render } = renderZonesPage({ firstCycle: null });
     realtime.status.set(statusWhile(false));
     render();
-    expect(page.textContent).toContain(FOLLOWER_NOTICE);
+    expect(page.textContent).toContain(`${FOLLOWER_NOTICE}.`);
     expect(alertText(page)).toBeUndefined();
   });
 
@@ -260,7 +257,7 @@ describe('ZonesPage', () => {
     const { page, realtime, render } = renderZonesPage({ firstCycle: null });
     realtime.status.set(statusWhile(false));
     render();
-    expect(zoneSubtitleText(page)).toContain(SHARED_FOLLOWER_NOTICE);
+    expect(zoneSubtitleText(page)).toContain(FOLLOWER_NOTICE);
     expect(zoneSubtitleText(page)).not.toContain('rules have not run yet');
   });
 
@@ -269,7 +266,7 @@ describe('ZonesPage', () => {
     realtime.status.set(statusWhile(true));
     render();
     expect(zoneSubtitleText(page)).toContain('rules have not run yet');
-    expect(zoneSubtitleText(page)).not.toContain(SHARED_FOLLOWER_NOTICE);
+    expect(zoneSubtitleText(page)).not.toContain(FOLLOWER_NOTICE);
   });
 
   it('ages the subtitle with the clock', () => {

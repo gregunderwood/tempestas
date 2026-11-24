@@ -13,6 +13,7 @@ import {
   labelRole,
   type DecisionTone,
 } from '../zones/zone-words';
+import { isFollowing } from '../../shared/leadership';
 import { secondsSince } from '../../shared/time';
 
 export const UNKNOWN_VALUE = '—';
@@ -54,7 +55,7 @@ export function describeSystemState(facts: SystemFacts): SystemState {
       tone: 'alarm',
     };
   }
-  if (status?.isLeading === false) {
+  if (isFollowing(status)) {
     return {
       headline: 'Following: another server runs the rules',
       tone: 'warn',

@@ -15,6 +15,7 @@ import {
   type PushedDevice,
 } from './device-pushes';
 import { recordNodePush, type PushedNode } from './node-pushes';
+import { isFollowing } from '../shared/leadership';
 
 const SOCKET_TRANSPORTS = ['websocket', 'polling'];
 
@@ -97,6 +98,6 @@ export class RealtimeService implements OnDestroy {
       measureServerClockOffset(status, Date.now()),
     );
     // The server forgets its cycle when it stops leading but sends no event saying so.
-    if (status.isLeading === false) this.latestRulesCycle.set(null);
+    if (isFollowing(status)) this.latestRulesCycle.set(null);
   }
 }
