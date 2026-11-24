@@ -122,7 +122,11 @@ def read_schema_major(schema: object) -> int | None:
     if not isinstance(schema, str):
         return None
     parts = schema.split("/")
-    # isascii too: isdigit accepts '²', which int() then refuses.
-    if len(parts) != 2 or not (parts[1].isascii() and parts[1].isdigit()):
+    if len(parts) != 2 or not is_ascii_number(parts[1]):
         return None
     return int(parts[1])
+
+
+def is_ascii_number(text: str) -> bool:
+    # isdigit alone accepts '²', which int() then refuses.
+    return text.isascii() and text.isdigit()

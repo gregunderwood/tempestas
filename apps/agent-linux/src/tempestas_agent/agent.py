@@ -424,8 +424,9 @@ class Agent:
                 target=self._install_update, args=(verdict.command,), name="update", daemon=True
             ).start()
         except RuntimeError as error:
-            self._installing_command_id = None
-            self._update_in_progress.release()
+            with self._update_claim_lock:
+                self._installing_command_id = None
+                self._update_in_progress.release()
             self._report_install(verdict.command_id, contract.UpdateState.FAILED, str(error))
 
     def remove_unfinished_downloads(self) -> None:
@@ -660,7 +661,9 @@ class Agent:
         if self._has_undelivered_outcome():
             # Installing clears the recorded outcome, which the server would then never hear.
             return LAST_OUTCOME_UNDELIVERED
-        if self.update_gate is not None or not self._update_in_progress.acquire(blocking=False):
+        if self.update_gate is not None:
+            return ANOTHER_UPDATE_IN_PROGRESS
+        if not self._update_in_progress.acquire(blocking=False):
             return ANOTHER_UPDATE_IN_PROGRESS
         self._installing_command_id = command_id
         return None

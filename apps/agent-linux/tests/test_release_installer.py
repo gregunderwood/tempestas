@@ -22,6 +22,7 @@ from tempestas_agent.release_installer import (
     ReleaseInstaller,
     UpdateFailed,
     build_file_url,
+    describe_without_query,
     read_within,
 )
 from tempestas_agent.release_layout import PendingUpdate
@@ -160,6 +161,14 @@ def test_replaces_a_leftover_partial_download(tmp_path):
 def test_carries_the_manifest_query_to_every_file():
     assert build_file_url("http://elantris/r/1.1.4/manifest.json?token=abc", "src/a.py") == (
         "http://elantris/r/1.1.4/files/src/a.py?token=abc"
+    )
+
+
+def test_a_failure_reason_leaves_out_the_signature_in_the_query():
+    signed = "http://elantris:7000/api/agent-releases/agent-linux/1.1.4/manifest.json?sig=secret"
+
+    assert describe_without_query(signed) == (
+        "http://elantris:7000/api/agent-releases/agent-linux/1.1.4/manifest.json"
     )
 
 

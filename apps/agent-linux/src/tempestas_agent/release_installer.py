@@ -43,7 +43,12 @@ def fetch_over_http(url: str, clock: Callable[[], float] = time.monotonic) -> by
         with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_S) as response:
             return read_within(response, url, deadline, clock)
     except (OSError, http.client.HTTPException) as error:
-        raise UpdateFailed(f"could not fetch {url}: {error}") from error
+        raise UpdateFailed(f"could not fetch {describe_without_query(url)}: {error}") from error
+
+
+def describe_without_query(url: str) -> str:
+    # The query may carry a signature, and the reason goes to every updateStatus subscriber.
+    return urlparse(url)._replace(query="").geturl()
 
 
 def read_within(response, url: str, deadline: float, clock: Callable[[], float]) -> bytes:
