@@ -6,6 +6,8 @@ import type {
   AdmitNodePayload,
   DayNightStats,
   Device,
+  EquipmentRuntimeQuery,
+  EquipmentRuntimeReport,
   Node,
   Reading,
   ReadingStats,
@@ -16,6 +18,8 @@ import type {
 } from '@tempestas/domain';
 
 const API_ROOT = '/api';
+
+type QueryParameters = ReadingsQuery | EquipmentRuntimeQuery;
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -82,6 +86,17 @@ export class ApiService {
     );
   }
 
+  fetchEquipmentRuntime(
+    query: EquipmentRuntimeQuery = {},
+    options: RequestOptions = {},
+  ): Observable<EquipmentRuntimeReport> {
+    return this.getFromApi<EquipmentRuntimeReport>(
+      '/reports/equipment-runtime',
+      options,
+      query,
+    );
+  }
+
   fetchZones(options: RequestOptions = {}): Observable<Zone[]> {
     return this.getFromApi<Zone[]>('/zones', options);
   }
@@ -102,7 +117,7 @@ export class ApiService {
   private getFromApi<Payload>(
     path: string,
     options: RequestOptions = {},
-    query?: ReadingsQuery,
+    query?: QueryParameters,
   ): Observable<Payload> {
     return this.http.get<Payload>(`${API_ROOT}${path}`, {
       params: query === undefined ? undefined : buildQueryParams(query),
@@ -119,7 +134,7 @@ export class ApiService {
 }
 
 // Undefined keys are dropped rather than sent as the string "undefined".
-function buildQueryParams(query: ReadingsQuery): HttpParams {
+function buildQueryParams(query: QueryParameters): HttpParams {
   let params = new HttpParams();
   for (const [key, value] of Object.entries(query)) {
     if (value !== undefined && value !== null) {

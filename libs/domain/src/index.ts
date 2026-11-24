@@ -11,3 +11,4 @@ export * from './lib/agent-releases/agent-release.model';
 export * from './lib/realtime/realtime.model';
 export * from './lib/health/health.model';
 export * from './lib/ui/gauge-metrics';
+export * from './lib/reports/equipment-runtime.model';
