@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# tools/pr-screenshots.sh [--after-only] <pr> <page>...
+# tools/pr-screenshots.sh [--after-only] [--history] <pr> <page>...
 # Posts before-and-after desktop and phone screenshots of a PR's pages, each taken on a throwaway dev stack with the fake driver.
 # When and how to use it: docs/Testing.md.
 
 set -euo pipefail
 
-readonly USAGE="Usage: tools/pr-screenshots.sh [--after-only] <pr> <page>...   e.g. tools/pr-screenshots.sh 138 dashboard nodes/sim-pi"
+readonly USAGE="Usage: tools/pr-screenshots.sh [--after-only] [--history] <pr> <page>...   e.g. tools/pr-screenshots.sh --history 139 reports"
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly SERVER_PORT="${PR_SCREENSHOTS_SERVER_PORT:-7020}"
 readonly WEB_PORT="${PR_SCREENSHOTS_WEB_PORT:-4220}"
@@ -31,6 +31,7 @@ source "$REPO_ROOT/tools/lib/console.sh"
 PULL_REQUEST=""
 PAGES=()
 IS_AFTER_ONLY=false
+SHOULD_SEED_HISTORY=false
 WORK_DIR=""
 HEAD_SHA=""
 BASE_SHA=""
@@ -63,10 +64,17 @@ main() {
 }
 
 parse_arguments() {
-  if [[ "${1:-}" == "--after-only" ]]; then
-    IS_AFTER_ONLY=true
+  while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+      --after-only) IS_AFTER_ONLY=true ;;
+      --history) SHOULD_SEED_HISTORY=true ;;
+      *)
+        echo "$USAGE" >&2
+        exit 2
+        ;;
+    esac
     shift
-  fi
+  done
   if [[ $# -lt 2 || ! "$1" =~ ^[0-9]+$ ]]; then
     echo "$USAGE" >&2
     exit 2
@@ -138,6 +146,9 @@ shoot_checkout() {
   start_server "$label"
   admit_simulated_nodes
   create_devices_on_simulated_pins
+  if $SHOULD_SEED_HISTORY; then
+    seed_runtime_history "$label"
+  fi
   wait_for_readings_and_rules_cycle
   start_web "$label"
   take_screenshots "$label"
@@ -244,6 +255,14 @@ create_devices_on_simulated_pins() {
       }
     })().catch((error) => { console.error(error.message); process.exit(1); });
   ' || fail "could not create the devices"
+}
+
+# From this checkout on both sides, since the base may predate the script.
+seed_runtime_history() {
+  local label=$1
+  say "Seeding $label with simulated runtime history"
+  node "$REPO_ROOT/tools/seed-runtime-history.mjs" "$DATABASE_NAME" >"$WORK_DIR/$label-history.log" 2>&1 ||
+    fail_with_log "seeding the runtime history failed" "$label-history.log"
 }
 
 have_all_simulated_nodes_said_hello() {
