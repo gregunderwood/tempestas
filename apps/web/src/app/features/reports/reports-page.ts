@@ -14,6 +14,7 @@ import { injectLiveSource } from '../../core/live-source';
 import { RealtimeService } from '../../core/realtime.service';
 import { openBrowserStorage } from '../../shared/arrange/card-order';
 import { EquipmentRuntimeCard } from './equipment-runtime-card';
+import { FreezeMarginCard } from './freeze-margin-card';
 import {
   labelPropaneUnit,
   PROPANE_UNITS,
@@ -21,17 +22,23 @@ import {
   writeSavedPropaneUnit,
   type PropaneUnit,
 } from './propane-units';
+import { ReportLoadStatus } from './report-load-status';
 
 const UPCOMING_REPORTS: readonly string[] = [
   'Time in range',
-  'Freeze margin',
   'CO2 enrichment',
   'Node health',
 ];
 
 @Component({
   selector: 'temp-reports-page',
-  imports: [MatButtonToggleModule, MatCardModule, EquipmentRuntimeCard],
+  imports: [
+    MatButtonToggleModule,
+    MatCardModule,
+    EquipmentRuntimeCard,
+    FreezeMarginCard,
+    ReportLoadStatus,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="equipment-runtime-heading">
@@ -55,22 +62,10 @@ const UPCOMING_REPORTS: readonly string[] = [
           }
         </mat-button-toggle-group>
       }
-      <div aria-live="polite">
-        @switch (runtimeState()) {
-          @case ('loading') {
-            <p class="temp-muted">Loading equipment runtime…</p>
-          }
-          @case ('failed') {
-            <p class="temp-alert">Could not load the equipment runtime.</p>
-          }
-          @case ('out-of-date') {
-            <p class="temp-alert">
-              Could not refresh the equipment runtime; the figures below may be
-              out of date.
-            </p>
-          }
-        }
-      </div>
+      <temp-report-load-status
+        [state]="runtimeState()"
+        subject="equipment runtime"
+      />
       @if (runtimeState() !== 'loading' && runtimeDevices().length === 0) {
         <p class="temp-muted">No devices yet.</p>
       }
@@ -80,6 +75,28 @@ const UPCOMING_REPORTS: readonly string[] = [
             [device]="device"
             [propaneUnit]="propaneUnit()"
           />
+        }
+      </div>
+    </section>
+    <section aria-labelledby="freeze-margin-heading" class="temp-freeze-margin">
+      <h2 id="freeze-margin-heading">Freeze margin</h2>
+      <p class="temp-muted">
+        Each night's coldest reading, whether the heat was on at that moment,
+        and the hours below the warning, for every zone with a heater or heat
+        tape.
+      </p>
+      <temp-report-load-status
+        [state]="freezeMarginState()"
+        subject="freeze margin"
+      />
+      @if (
+        freezeMarginState() !== 'loading' && freezeMarginZones().length === 0
+      ) {
+        <p class="temp-muted">No zone has a heater or heat tape yet.</p>
+      }
+      <div class="temp-runtime-cards">
+        @for (zone of freezeMarginZones(); track zone.zoneId) {
+          <temp-freeze-margin-card [zone]="zone" />
         }
       </div>
     </section>
@@ -106,15 +123,13 @@ const UPCOMING_REPORTS: readonly string[] = [
       grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
       gap: 1rem;
     }
+    .temp-freeze-margin,
     .temp-upcoming {
       margin-top: 1.5rem;
     }
     .temp-upcoming-reports {
       margin: 0;
       padding-left: 1.25rem;
-    }
-    .temp-alert {
-      color: var(--temp-gauge-red);
     }
     .temp-muted {
       opacity: 0.7;
@@ -128,6 +143,9 @@ export class ReportsPage {
   private readonly runtimeSource = injectLiveSource((options) =>
     this.api.fetchEquipmentRuntime({}, options),
   );
+  private readonly freezeMarginSource = injectLiveSource((options) =>
+    this.api.fetchFreezeMargin({}, options),
+  );
   private readonly browserStorage = openBrowserStorage();
 
   readonly upcomingReports = UPCOMING_REPORTS;
@@ -139,6 +157,11 @@ export class ReportsPage {
   protected readonly runtimeState = this.runtimeSource.sourceState;
   protected readonly runtimeDevices = computed(
     () => this.runtimeSource.latest()?.payload.devices ?? [],
+  );
+
+  protected readonly freezeMarginState = this.freezeMarginSource.sourceState;
+  protected readonly freezeMarginZones = computed(
+    () => this.freezeMarginSource.latest()?.payload.zones ?? [],
   );
 
   protected readonly hasPropaneEstimate = computed(() =>
@@ -162,7 +185,10 @@ export class ReportsPage {
         this.realtime.devicePushes() !== devicePushesAtStart;
       const hasNodePush = this.realtime.nodePushes() !== nodePushesAtStart;
       if (!hasDevicePush && !hasNodePush) return;
-      untracked(() => this.runtimeSource.refresh());
+      untracked(() => {
+        this.runtimeSource.refresh();
+        this.freezeMarginSource.refresh();
+      });
     });
   }
 }

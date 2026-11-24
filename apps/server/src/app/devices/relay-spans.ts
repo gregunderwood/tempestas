@@ -43,6 +43,15 @@ export function buildSpansByLine(
   );
 }
 
+// The later span wins at a shared boundary, so a reading taken as a relay switched sees its new state.
+export function findStateAt(spans: readonly Span[], atMs: number): RelayState {
+  const covering = spans.filter(
+    (span) => span.fromMs <= atMs && atMs <= span.toMs,
+  );
+  if (covering.length === 0) return 'unknown';
+  return covering[covering.length - 1].state;
+}
+
 function groupByLine(
   transitions: readonly RuntimeTransition[],
 ): Map<string, RuntimeTransition[]> {

@@ -25,7 +25,7 @@ sometimes with wet hands. Angular 20 standalone components, Angular Material M3,
 - [../apps/web/src/app/shared/arrange/card-order.ts](../apps/web/src/app/shared/arrange/card-order.ts) — card order: a drop or a move, merging a saved order, browser storage
 - [../apps/web/src/app/features/nodes/node-detail.ts](../apps/web/src/app/features/nodes/node-detail.ts) — one node, with its 24-hour statistics
 - [../apps/web/src/app/features/zones/zone-history-view.ts](../apps/web/src/app/features/zones/zone-history-view.ts) — a zone's last 24 hours as chart geometry, pure
-- [../apps/web/src/app/features/reports/reports-page.ts](../apps/web/src/app/features/reports/reports-page.ts) — the reports screen: equipment runtime, and the reports still to come
+- [../apps/web/src/app/features/reports/reports-page.ts](../apps/web/src/app/features/reports/reports-page.ts) — the reports screen: equipment runtime, freeze margin, and the reports still to come
 - [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme, the rail and hero tokens, and the gauge band colours
 - [../apps/web/proxy.conf.json](../apps/web/proxy.conf.json) — `/api` and `/socket.io` to `:7000` in dev
 
@@ -359,7 +359,10 @@ cold did it get?".
 `/reports` answers the questions a list of raw rows never did: was it a good night, is the heater
 working harder, did the pumphouse get close to freezing. Equipment runtime is the first report: a
 card per device with its hours on, starts, shortest run and unknown hours, a bar per day, and a
-day-by-day table. Below it, a card names the reports still to come — time in range, freeze margin,
+day-by-day table. Freeze margin follows: a card per zone with a heater or heat tape, a row per night
+with the coldest reading, the heat at that moment and the hours below the warning, and a red line
+under any night where the heat was off, unknown, or on and not keeping up. The latest week shows;
+earlier nights fold away. Below them, a card names the reports still to come — time in range,
 CO2 enrichment and node health — and loses a line as each lands.
 
 A report is fetched once and fetched again whenever a device switches or a node goes offline or

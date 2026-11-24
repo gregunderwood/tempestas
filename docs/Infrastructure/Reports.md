@@ -2,10 +2,11 @@
 
 ## What it is
 
-Summaries the raw tables never gave: how hard each device worked, and how it cycled. One server
-module, `apps/server/src/app/reports`, with one endpoint per report, the response types in
-`libs/domain/src/lib/reports`, and a card per report on the web Reports screen. Equipment runtime is
-the first; the next reports follow the same shape.
+Summaries the raw tables never gave: how hard each device worked, how it cycled, and how close the
+pumphouse came to freezing. One server module, `apps/server/src/app/reports`, with one endpoint per
+report, the response types in `libs/domain/src/lib/reports`, and a section per report on the web
+Reports screen. Equipment runtime was the first and freeze margin the second; the next reports
+follow the same shape.
 
 ## Key files
 
@@ -15,11 +16,16 @@ the first; the next reports follow the same shape.
 - [../../libs/domain/src/lib/reports/equipment-runtime.model.ts](../../libs/domain/src/lib/reports/equipment-runtime.model.ts) — the wire types
 - [../../apps/web/src/app/features/reports/equipment-runtime-card.ts](../../apps/web/src/app/features/reports/equipment-runtime-card.ts) — the card
 - [../../apps/web/src/app/features/reports/propane-units.ts](../../apps/web/src/app/features/reports/propane-units.ts) — litres to pounds, rounding, the remembered unit
+- [../../apps/server/src/app/reports/freeze-margin.ts](../../apps/server/src/app/reports/freeze-margin.ts) — a zone's nights to coldest moment, heat then, hours below and concern, pure
+- [../../apps/server/src/app/reports/heating-setpoints.ts](../../apps/server/src/app/reports/heating-setpoints.ts) — the warning temperature, borrowed from the zone's heat rules
+- [../../apps/server/src/app/reports/freeze-margin.service.ts](../../apps/server/src/app/reports/freeze-margin.service.ts) — finds the heated zones, their nights, readings and relay spans
+- [../../apps/web/src/app/features/reports/freeze-margin-card.ts](../../apps/web/src/app/features/reports/freeze-margin-card.ts) — the card, one per heated zone
 
 ## The API
 
 ```
 GET /api/reports/equipment-runtime?days=     per device per day; days defaults to 30, caps at 90
+GET /api/reports/freeze-margin?nights=       per heated zone per night; nights defaults to 30, caps at 90
 ```
 
 ## Equipment runtime
@@ -75,7 +81,38 @@ CO2 generator, but it is keyed on the rating, never on the role.
 
 Not here: cost. The price per litre changes through the year.
 
+## Freeze margin
+
+The pumphouse's job is to never freeze, and a heater that has quietly stopped working otherwise
+shows up as frozen pipes. For every zone with a `heater` or `heat_tape` device, one row per night,
+newest first, tonight included while it runs.
+
+- **A night is the zone's dark hours**, from its daylight window, the same periods as
+  `/api/readings/stats/day-night`. A zone with no window, like the pumphouse, uses the deployment
+  default of 06:30 to 18:30 in its own timezone.
+- **The coldest reading is the coldest probe in the zone**, any of the zone's nodes, because the
+  pumphouse heat runs on `min`. It is the exact reading, with its probe and time.
+- **The heat at that moment comes from the same `relay-spans.ts`** as equipment runtime. A device
+  with no span covering the moment is **unknown, never off**.
+- **The warning temperature is borrowed from the rules**: the highest heat on-setpoint among the
+  zone's heater and heat tape `thermostat` rules, since below it at least one heat source should
+  already be running. Without one it is `DEFAULT_FREEZE_WARNING_C`, 3 °C, and the card says which.
+  A `daylight-thermostat` is off at night by design, so it never lends a setpoint.
+- **Hours below** count the 10-minute stretches in which any of the zone's probes read below the
+  warning, from the same `bucketTemperatures` as the zones page's history. Hours with readings sit
+  beside them, so a gap in the readings is not read as hours above the warning.
+- **A concern flags a night**, judged against each device's own on-setpoint at the coldest moment:
+  - `heat-off-while-cold`: below a device's setpoint, and that device was known off.
+  - `heat-unknown-while-cold`: below a device's setpoint, and nothing was heard from it.
+  - `cold-despite-heat`: every device owed heat was on, and it still came within
+    `FREEZE_MARGIN_ALARM_C`, 1 °C, of freezing.
+- **A role pinned to one probe** is still judged against the coldest probe, so it can be flagged
+  for a cold corner its rule never reads. The pumphouse uses `min`, where the two agree.
+
+The CO2 generator doubles as the greenhouse's night heater, but it is not one of `HEATING_ROLES`, so
+the greenhouse is not in this report.
+
 ## When to update this file
 
 - A report is added, or a default or cap changes
-- The runtime rules above change
+- The runtime or freeze margin rules above change

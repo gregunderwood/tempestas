@@ -11,12 +11,10 @@ import {
   type ReadingStats,
   type ReadingsQuery,
   type SegmentStats,
-  ZONE_HISTORY_BUCKET_MINUTES,
-  ZONE_HISTORY_HOURS,
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
 import { roundTo } from '../common/rounding';
-import { MINUTES_PER_HOUR } from '../common/time-units';
+import { MILLISECONDS_PER_MINUTE } from '../common/time-units';
 import { ZoneEntity } from '../zones/models';
 import { NodeEntity } from '../nodes/models';
 import { SensorReadingEntity } from './models';
@@ -27,12 +25,13 @@ import {
 } from './daylight-segments';
 import { resolveReadingWindow, type ReadingWindow } from './reading-window';
 import { rememberSensorsSince } from './sensor-memory';
-import { parseZoneRulesConfig } from '../rules/rules-config';
+import {
+  DEFAULT_TIMEZONE,
+  resolveZoneDaylight,
+  type Daylight,
+} from './zone-daylight';
 
 const DEFAULT_LIMIT = 500;
-const DEFAULT_TIMEZONE = 'America/Vancouver';
-const DEFAULT_DAYLIGHT_START = '06:30';
-const DEFAULT_DAYLIGHT_END = '18:30';
 
 const CREATED_AT_DIRECTION: Record<ReadingOrder, SortDirection> = {
   [ReadingOrder.NewestFirst]: 'DESC',
@@ -41,7 +40,6 @@ const CREATED_AT_DIRECTION: Record<ReadingOrder, SortDirection> = {
 
 type SortDirection = 'ASC' | 'DESC';
 type Metric = 'temperature' | 'humidity' | 'co2';
-type Daylight = DayNightStats['daylight'];
 
 interface RawAverages {
   temperature: string | null;
@@ -57,10 +55,6 @@ interface MetricExtremes {
 const EXTREME_METRICS: readonly Metric[] = ['temperature', 'humidity', 'co2'];
 
 const MOST_PROBES_IN_A_HISTORY = 70;
-const BUCKETS_PER_HISTORY =
-  (ZONE_HISTORY_HOURS * MINUTES_PER_HOUR) / ZONE_HISTORY_BUCKET_MINUTES;
-const MAX_TEMPERATURE_BUCKET_ROWS =
-  BUCKETS_PER_HISTORY * MOST_PROBES_IN_A_HISTORY;
 const AVERAGE_DECIMALS = 2;
 
 export interface TemperatureBucketRow {
@@ -209,9 +203,24 @@ export class ReadingsService {
       .addGroupBy('reading.sensorId')
       .addGroupBy('"at"')
       .orderBy('"at"', 'DESC')
-      .limit(MAX_TEMPERATURE_BUCKET_ROWS)
+      .limit(countBucketRowsAllowed(window, bucketMinutes))
       .getRawMany<RawTemperatureBucket>();
     return rows.reverse().map(toTemperatureBucketRow);
+  }
+
+  // Ties go to the latest, as every other extreme here does.
+  async findColdestReading(
+    window: ReadingWindow,
+    nodeSlugs: readonly string[],
+  ): Promise<Reading | null> {
+    if (nodeSlugs.length === 0) return null;
+    const row = await this.queryWindow(window)
+      .andWhere('node.slug IN (:...nodeSlugs)', { nodeSlugs })
+      .orderBy('reading.temperature', 'ASC')
+      .addOrderBy('reading.createdAt', 'DESC')
+      .limit(1)
+      .getOne();
+    return row ? toReading(row) : null;
   }
 
   private async computeSegmentStats(
@@ -238,25 +247,14 @@ export class ReadingsService {
   private async resolveDaylightFor(
     nodeSlug: string | undefined,
   ): Promise<Daylight> {
-    const fallback: Daylight = {
-      startTime: DEFAULT_DAYLIGHT_START,
-      endTime: DEFAULT_DAYLIGHT_END,
-      timezone: this.defaultTimezone(),
-    };
-    if (!nodeSlug) return fallback;
-
+    if (!nodeSlug) return resolveZoneDaylight(null, this.defaultTimezone());
     const node = await this.nodes.findOne({
       where: { slug: nodeSlug },
       relations: { zone: true },
     });
     const rulesConfig = (node?.zone as ZoneEntity | null | undefined)
       ?.rulesConfig;
-    if (!rulesConfig) return fallback;
-    const parsed = parseZoneRulesConfig(rulesConfig);
-    if (parsed.ok === false) return fallback;
-    const { daylight, timezone } = parsed.config;
-    if (!daylight) return { ...fallback, timezone };
-    return { startTime: daylight.start, endTime: daylight.end, timezone };
+    return resolveZoneDaylight(rulesConfig, this.defaultTimezone());
   }
 
   private async findExtremes(
@@ -291,11 +289,7 @@ export class ReadingsService {
     query: ReadingsQuery,
     window: ReadingWindow,
   ): SelectQueryBuilder<SensorReadingEntity> {
-    const builder = this.readings
-      .createQueryBuilder('reading')
-      .innerJoinAndSelect('reading.node', 'node')
-      .where('reading.createdAt >= :from', { from: window.from })
-      .andWhere('reading.createdAt <= :to', { to: window.to });
+    const builder = this.queryWindow(window);
 
     if (query.nodeId) {
       builder.andWhere('node.slug = :slug', { slug: query.nodeId });
@@ -306,6 +300,16 @@ export class ReadingsService {
       });
     }
     return builder;
+  }
+
+  private queryWindow(
+    window: ReadingWindow,
+  ): SelectQueryBuilder<SensorReadingEntity> {
+    return this.readings
+      .createQueryBuilder('reading')
+      .innerJoinAndSelect('reading.node', 'node')
+      .where('reading.createdAt >= :from', { from: window.from })
+      .andWhere('reading.createdAt <= :to', { to: window.to });
   }
 
   // Never the host locale: that was the old DST bug.
@@ -354,6 +358,16 @@ function toTemperatureBucketRow(
     highestC: Number(raw.highestC),
     sampleCount: Number(raw.sampleCount),
   };
+}
+
+function countBucketRowsAllowed(
+  window: ReadingWindow,
+  bucketMinutes: number,
+): number {
+  const windowMinutes =
+    (window.to.getTime() - window.from.getTime()) / MILLISECONDS_PER_MINUTE;
+  const bucketCount = Math.ceil(windowMinutes / bucketMinutes);
+  return Math.max(bucketCount, 1) * MOST_PROBES_IN_A_HISTORY;
 }
 
 function compareNewestFirst(first: Reading, second: Reading): number {

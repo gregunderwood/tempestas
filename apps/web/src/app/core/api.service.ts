@@ -9,6 +9,8 @@ import type {
   Device,
   EquipmentRuntimeQuery,
   EquipmentRuntimeReport,
+  FreezeMarginQuery,
+  FreezeMarginReport,
   Node,
   NodeUpdateRequest,
   Reading,
@@ -23,7 +25,8 @@ import type {
 
 const API_ROOT = '/api';
 
-type QueryParameters = ReadingsQuery | EquipmentRuntimeQuery;
+type QueryParameters =
+  ReadingsQuery | EquipmentRuntimeQuery | FreezeMarginQuery;
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -112,6 +115,17 @@ export class ApiService {
   ): Observable<EquipmentRuntimeReport> {
     return this.getFromApi<EquipmentRuntimeReport>(
       '/reports/equipment-runtime',
+      options,
+      query,
+    );
+  }
+
+  fetchFreezeMargin(
+    query: FreezeMarginQuery = {},
+    options: RequestOptions = {},
+  ): Observable<FreezeMarginReport> {
+    return this.getFromApi<FreezeMarginReport>(
+      '/reports/freeze-margin',
       options,
       query,
     );

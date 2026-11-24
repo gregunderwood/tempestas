@@ -5,6 +5,8 @@ import {
   DeviceRole,
   type DeviceRuntime,
   type EquipmentRuntimeReport,
+  type FreezeMarginReport,
+  type ZoneFreezeMargin,
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
@@ -76,6 +78,55 @@ function report(devices: DeviceRuntime[]): EquipmentRuntimeReport {
   return { days: 2, generatedAt: '2026-09-09T19:00:00Z', devices };
 }
 
+function pumphouseFreezeMargin(): ZoneFreezeMargin {
+  return {
+    zoneId: 'pumphouse-zone',
+    zoneSlug: 'pumphouse',
+    zoneName: 'Pumphouse',
+    timezone: 'America/Edmonton',
+    warningBelowC: 3,
+    isWarningFromRules: true,
+    nights: [
+      {
+        from: '2026-09-09T00:30:00.000Z',
+        to: '2026-09-09T12:30:00.000Z',
+        inProgress: false,
+        coldest: {
+          temperatureC: 1.2,
+          at: '2026-09-09T11:00:00.000Z',
+          nodeId: 'patji',
+          sensorId: 'pipe',
+        },
+        heating: [
+          {
+            deviceId: 'heater',
+            deviceName: 'Heater',
+            role: DeviceRole.Heater,
+            state: 'off',
+            onBelowC: 3,
+          },
+        ],
+        hoursBelowWarning: 3,
+        hoursWithReadings: 12,
+        concern: 'heat-off-while-cold',
+      },
+    ],
+  };
+}
+
+function freezeMarginReport(zones: ZoneFreezeMargin[]): FreezeMarginReport {
+  return {
+    nights: 30,
+    generatedAt: '2026-09-09T19:00:00Z',
+    marginAlarmC: 1,
+    zones,
+  };
+}
+
+interface FreezeMarginAnswers {
+  freezeMargin?: Observable<FreezeMarginReport>[];
+}
+
 interface RenderedReportsPage {
   page: HTMLElement;
   requestCount(): number;
@@ -85,6 +136,7 @@ interface RenderedReportsPage {
 
 function renderReportsPage(
   answers: Observable<EquipmentRuntimeReport>[],
+  { freezeMargin = [] }: FreezeMarginAnswers = {},
 ): RenderedReportsPage {
   let requests = 0;
   const realtime = fakeRealtime();
@@ -99,6 +151,7 @@ function renderReportsPage(
             requests += 1;
             return answers.shift() ?? NEVER;
           },
+          fetchFreezeMargin: () => freezeMargin.shift() ?? NEVER,
         },
       },
       { provide: RealtimeService, useValue: realtime },
@@ -124,17 +177,12 @@ describe('ReportsPage', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it('lists the reports still to come, without equipment runtime', () => {
+  it('lists the reports still to come, without the ones already here', () => {
     const { page } = renderReportsPage([NEVER]);
     const listed = Array.from(page.querySelectorAll('li')).map((item) =>
       item.textContent?.trim(),
     );
-    expect(listed).toEqual([
-      'Time in range',
-      'Freeze margin',
-      'CO2 enrichment',
-      'Node health',
-    ]);
+    expect(listed).toEqual(['Time in range', 'CO2 enrichment', 'Node health']);
   });
 
   it('shows a card per device with its totals and shortest run', () => {
@@ -210,6 +258,59 @@ describe('ReportsPage', () => {
     pushNode(rendered.realtime, { ...node('elantris', null), online: false });
     rendered.render();
     expect(rendered.requestCount()).toBe(2);
+  });
+
+  describe('freeze margin', () => {
+    it('shows a card per heated zone with each night and its concern', () => {
+      const { page } = renderReportsPage([NEVER], {
+        freezeMargin: [of(freezeMarginReport([pumphouseFreezeMargin()]))],
+      });
+      const card = page.querySelector('temp-freeze-margin-card');
+      expect(card?.textContent).toContain('Pumphouse');
+      expect(card?.textContent).toContain('1 night needs a look.');
+      expect(card?.textContent).toContain('1.2 °C at 05:00');
+      expect(card?.textContent).toContain('Heater off');
+      expect(card?.textContent).toContain(
+        'Heat was off at the coldest moment, below its on-setpoint.',
+      );
+    });
+
+    it('keeps nights past the first week folded away', () => {
+      const zone = pumphouseFreezeMargin();
+      const tenNights = Array.from({ length: 10 }, (_, index) => ({
+        ...zone.nights[0],
+        from: `2026-09-${String(index + 1).padStart(2, '0')}T00:30:00.000Z`,
+      }));
+      const { page } = renderReportsPage([NEVER], {
+        freezeMargin: [
+          of(freezeMarginReport([{ ...zone, nights: tenNights }])),
+        ],
+      });
+      const tables = page.querySelectorAll('temp-freeze-night-table');
+      expect(tables).toHaveLength(2);
+      expect(tables[0].querySelectorAll('tbody th[scope="row"]')).toHaveLength(
+        7,
+      );
+      expect(
+        page.querySelectorAll('details temp-freeze-night-table tbody th'),
+      ).toHaveLength(3);
+    });
+
+    it('says so when no zone has heating', () => {
+      const { page } = renderReportsPage([NEVER], {
+        freezeMargin: [of(freezeMarginReport([]))],
+      });
+      expect(page.textContent).toContain(
+        'No zone has a heater or heat tape yet.',
+      );
+    });
+
+    it('says it could not load the freeze margin when the request fails', () => {
+      const { page } = renderReportsPage([NEVER], {
+        freezeMargin: [throwError(() => new Error('offline'))],
+      });
+      expect(page.textContent).toContain('Could not load the freeze margin.');
+    });
   });
 
   describe('propane used', () => {
