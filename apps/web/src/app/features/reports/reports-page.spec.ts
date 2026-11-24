@@ -271,7 +271,7 @@ describe('ReportsPage', () => {
       expect(card?.textContent).toContain('1.2 °C at 05:00');
       expect(card?.textContent).toContain('Heater off');
       expect(card?.textContent).toContain(
-        'Heat was off at the coldest moment, below its on-setpoint.',
+        'Heater was off at the coldest moment, below its 3 °C on-setpoint.',
       );
     });
 

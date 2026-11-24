@@ -1,8 +1,10 @@
 import {
   FREEZE_MARGIN_ALARM_C,
+  type ColdestReading,
   type FreezeConcern,
   type FreezeMarginNight,
   type HeatingAtColdest,
+  type RelayState,
   type ZoneFreezeMargin,
 } from '@tempestas/domain';
 import { buildClockFormatter, type ClockFormatter } from '../zones/time-axis';
@@ -18,14 +20,26 @@ export interface NightRow {
 }
 
 type DateFormatter = (instantMs: number) => string;
+type OwedHeatConcern = Exclude<FreezeConcern, 'cold-despite-heat'>;
 
-const CONCERN_DESCRIPTIONS: Record<FreezeConcern, string> = {
-  'heat-off-while-cold':
-    'Heat was off at the coldest moment, below its on-setpoint.',
-  'heat-unknown-while-cold':
-    'Below the on-setpoint, and nothing was heard from the heat at the coldest moment.',
-  'cold-despite-heat': `The heat was on and it still came within ${FREEZE_MARGIN_ALARM_C} °C of freezing.`,
+interface OwedHeatWording {
+  state: RelayState;
+  describe(device: HeatingAtColdest): string;
+}
+
+const OWED_HEAT_WORDING: Record<OwedHeatConcern, OwedHeatWording> = {
+  'heat-off-while-cold': {
+    state: 'off',
+    describe: (device) =>
+      `${device.deviceName} was off at the coldest moment, below its ${device.onBelowC} °C on-setpoint.`,
+  },
+  'heat-unknown-while-cold': {
+    state: 'unknown',
+    describe: (device) =>
+      `Nothing was heard from ${device.deviceName} at the coldest moment, below its ${device.onBelowC} °C on-setpoint.`,
+  },
 };
+const COLD_DESPITE_HEAT_WORDING = `The heat was on and it still came within ${FREEZE_MARGIN_ALARM_C} °C of freezing.`;
 const NIGHT_DATE_FORMAT: Intl.DateTimeFormatOptions = {
   weekday: 'short',
   day: 'numeric',
@@ -42,8 +56,7 @@ export function buildNightRows(zone: ZoneFreezeMargin): NightRow[] {
     heating: describeHeating(night.heating),
     hoursBelow:
       night.coldest === null ? '—' : formatHours(night.hoursBelowWarning),
-    concern:
-      night.concern === null ? null : CONCERN_DESCRIPTIONS[night.concern],
+    concern: describeConcern(night),
   }));
 }
 
@@ -56,6 +69,23 @@ export function describeWarning(zone: ZoneFreezeMargin): string {
   return zone.isWarningFromRules
     ? `${warning}, the highest heat on-setpoint in its rules`
     : `${warning}, a default: no heating rule here sets one`;
+}
+
+function describeConcern(night: FreezeMarginNight): string | null {
+  if (night.concern === null || night.coldest === null) return null;
+  if (night.concern === 'cold-despite-heat') return COLD_DESPITE_HEAT_WORDING;
+  const wording = OWED_HEAT_WORDING[night.concern];
+  return listOwedHeat(night.heating, night.coldest)
+    .filter((device) => device.state === wording.state)
+    .map((device) => wording.describe(device))
+    .join(' ');
+}
+
+function listOwedHeat(
+  heating: readonly HeatingAtColdest[],
+  coldest: ColdestReading,
+): HeatingAtColdest[] {
+  return heating.filter((device) => coldest.temperatureC < device.onBelowC);
 }
 
 function labelNight(

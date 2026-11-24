@@ -92,19 +92,34 @@ describe('buildNightRows', () => {
     });
   });
 
-  it('spells out each concern', () => {
-    const rows = buildNightRows(
+  it('names each heat source that was owed and off, or not heard from', () => {
+    const [heaterOff, tapeUnknown] = buildNightRows(
       pumphouse([
-        freezeNight({ concern: 'heat-off-while-cold' }),
+        freezeNight({
+          concern: 'heat-off-while-cold',
+          heating: [
+            { ...freezeNight().heating[0], state: 'off' },
+            freezeNight().heating[1],
+          ],
+        }),
         freezeNight({ concern: 'heat-unknown-while-cold' }),
-        freezeNight({ concern: 'cold-despite-heat' }),
       ]),
     );
-    expect(rows.map((row) => row.concern)).toEqual([
-      'Heat was off at the coldest moment, below its on-setpoint.',
-      'Below the on-setpoint, and nothing was heard from the heat at the coldest moment.',
+    expect(heaterOff.concern).toBe(
+      'Heater was off at the coldest moment, below its 3 °C on-setpoint.',
+    );
+    expect(tapeUnknown.concern).toBe(
+      'Nothing was heard from Heat tape at the coldest moment, below its 2 °C on-setpoint.',
+    );
+  });
+
+  it('says when the heat was on and still not keeping up', () => {
+    const [row] = buildNightRows(
+      pumphouse([freezeNight({ concern: 'cold-despite-heat' })]),
+    );
+    expect(row.concern).toBe(
       'The heat was on and it still came within 1 °C of freezing.',
-    ]);
+    );
   });
 
   it('falls back to UTC, and says so, for a zone name the browser does not know', () => {
