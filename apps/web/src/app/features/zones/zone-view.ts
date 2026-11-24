@@ -32,6 +32,7 @@ import {
   describeDispatch,
   describeSensorPolicy,
   describeStalePolicy,
+  formatDuration,
   formatHourMinute,
   labelRole,
   parseHourMinute,
@@ -142,6 +143,28 @@ export function buildZoneCards(input: ZonesInput): ZoneCard[] {
       return buildUndrawableZoneCard(zone, failure, error);
     }
   });
+}
+
+export function describeZoneSubtitle(
+  zone: ZoneCard,
+  isFollower: boolean,
+): string {
+  const localTime = zone.localTime
+    ? `${zone.localTime} ${zone.timezone}`
+    : null;
+  const rulesRan = isFollower
+    ? null
+    : describeRulesRan(zone.rulesRanAgoSeconds);
+  return [localTime, rulesRan].filter(isPresent).join(' · ');
+}
+
+function describeRulesRan(rulesRanAgoSeconds: number | null): string {
+  if (rulesRanAgoSeconds === null) return 'rules have not run yet';
+  return `rules ran ${formatDuration(rulesRanAgoSeconds)} ago`;
+}
+
+function isPresent(part: string | null): part is string {
+  return part !== null;
 }
 
 function buildZoneCard(

@@ -843,4 +843,15 @@ describe('Dashboard on a follower', () => {
     });
     expect(countFollowerMentions(rendered.text())).toBe(0);
   });
+
+  it('lets being offline outrank following, with no follower item to fall back on', () => {
+    const rendered = renderDashboard({
+      isConnected: false,
+      status: statusOf({ isLeading: false }),
+    });
+    expect(rendered.page.querySelector('.hero__state')?.textContent).toContain(
+      'Offline',
+    );
+    expect(countFollowerMentions(rendered.text())).toBe(0);
+  });
 });
