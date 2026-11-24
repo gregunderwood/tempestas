@@ -79,7 +79,11 @@ Raspbian ships.
    leaves `index.html` one deeper than it looks and every deep link 404s while
    `/` still works.
 
-4. **Agent environment**: `uv sync --extra gpio` in `apps/agent-linux`.
+4. **Agent**: first, on the host, `sudo apt install python3-lgpio python3-venv rsync`. The agent's
+   venv sees the distro's packages and takes `lgpio` from there, as armv6 cannot build it; without
+   it the agent cannot drive a relay. Then run `tools/deploy-agent-linux.sh HOST` from the
+   workstation. It builds the release and the venv, then prints the one-time unit install from
+   [Linux Agent](Linux%20Agent.md#once-per-host).
 
 5. **Secrets**, all `0600 root` under `/etc/tempestas/`: `db.env`,
    `server.env`, `agent.env`. Credentials never go in `agent.toml`, and the
@@ -98,7 +102,7 @@ Raspbian ships.
 
    Install them as they are in the repo, and never edit one on the box: an edit there is
    invisible from here. Check a box with
-   `diff /etc/systemd/system/tempestas-agent.service ~/tempestas/apps/agent-linux/systemd/tempestas-agent.service`.
+   `diff /etc/systemd/system/tempestas-agent.service ~/tempestas/agent-linux/current/systemd/tempestas-agent.service`.
    elantris once ran for two months without `EnvironmentFile=`, reading its broker login from
    `agent.toml`, and the repo's own unit would not have started there until that was put right.
 

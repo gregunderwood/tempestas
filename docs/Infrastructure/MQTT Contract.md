@@ -192,6 +192,10 @@ downloading → verifying → installing → restarting → healthy
 `rolled-back` means the new version was installed and did not come up healthy, so the previous one
 is running again. `failed` means it never got that far and nothing changed. Both carry a `reason`.
 
+`healthy`, `rolled-back` and `failed` are final: a node sends at most one of them per `id`, and
+never acts on that `id` again. That holds for a refusal that would pass, such as another update in
+progress, so the server retries with a new `id`.
+
 A node installs every file the manifest lists at its path, with one exception. A MicroPython bundle
 carries every board under `boards/`, and the node also installs `boards/<its board>.py` as
 `board.py`, which is what the code imports, as the hand deploy does. Without it, a fix to a board

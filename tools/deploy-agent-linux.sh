@@ -3,11 +3,18 @@
 
 set -euo pipefail
 
-REMOTE_AGENT="/home/gunderwood/tempestas/apps/agent-linux"
+REMOTE_AGENT_HOME="${TEMPESTAS_REMOTE_ROOT:-/home/gunderwood/tempestas}/agent-linux"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENT="$HERE/apps/agent-linux"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 SETTLE_SECONDS=5
+# Kept beside the venv; a deploy rebuilds only when it changes.
+REQUIREMENTS_FILE=requirements.txt
+# Before 254, OnFailure= fires only at the start limit, not on each run.
+MINIMUM_SYSTEMD_VERSION=254
+SWITCH_LOCK=update-state/switch.lock
+ROLLBACK_SCRIPT_DIR=/usr/local/lib/tempestas
+UNIT_DIR=/etc/systemd/system
 
 source "$HERE/tools/lib/console.sh"
 source "$HERE/apps/agent-linux/agent-files.sh"
@@ -20,30 +27,188 @@ say "Gate"
 (cd "$AGENT" && "$UV" run ruff check . && "$UV" run pytest -q)
 
 AGENT_VERSION="$("$HERE/tools/describe-agent-version.sh" "$AGENT")"
+REMOTE_RELEASE="$REMOTE_AGENT_HOME/releases/$AGENT_VERSION"
+# No gpio extra: hosts use the distro's lgpio, which armv6 cannot build.
+REQUIREMENTS="$(cd "$AGENT" && "$UV" export --frozen --no-dev --no-emit-project --no-hashes --quiet)"
 say "Deploying $AGENT_VERSION to ${HOSTS[*]}"
+
+# A warning, so a fix can still reach such a host.
+warn_unless_systemd_rolls_back() {
+  local host="$1" version
+  version="$(ssh "$host" "systemctl --version" | awk 'NR == 1 { print $2 }' || true)"
+  if ! [[ "$version" =~ ^[0-9]+$ ]]; then
+    echo "WARNING: could not read $host's systemd version; rolling back an update needs $MINIMUM_SYSTEMD_VERSION or later." >&2
+    return 0
+  fi
+  [ "$version" -ge "$MINIMUM_SYSTEMD_VERSION" ] && return 0
+  echo "WARNING: $host runs systemd $version; rolling back a failed update needs $MINIMUM_SYSTEMD_VERSION or later." >&2
+  echo "         Do not send it updates from the server until it is upgraded." >&2
+}
 
 # Every host first: stopping halfway would leave the fleet on two versions.
 for HOST in "${HOSTS[@]}"; do
   require_passwordless_systemctl "$HOST" "restart tempestas-agent.service"
+  warn_unless_systemd_rolls_back "$HOST"
 done
 
-for HOST in "${HOSTS[@]}"; do
-  say "$HOST: copying"
-  CHANGES="$(cd "$AGENT" && rsync -a --checksum --itemize-changes \
+copy_release() {
+  local host="$1"
+  local releases="$REMOTE_AGENT_HOME/releases"
+  local staging=".deploy-$AGENT_VERSION"
+  ssh "$host" "rm -rf $releases/$staging && mkdir -p $releases/$staging"
+  (cd "$AGENT" && rsync -a \
     --exclude '__pycache__' --exclude '.venv' --exclude "$(basename "$LINUX_AGENT_VERSION_STAMP")" \
-    "${LINUX_AGENT_PATHS[@]}" "$HOST:$REMOTE_AGENT/")"
-  echo "$(echo "$CHANGES" | grep -c '^<f' || true) files updated"
-  # The venv is an editable install, so new code needs no reinstall; new dependencies do.
-  if echo "$CHANGES" | grep -qE ' (pyproject\.toml|uv\.lock)$'; then
-    echo "Dependencies may have changed: run 'uv sync --extra gpio' in $REMOTE_AGENT on $HOST." >&2
-  fi
+    "${LINUX_AGENT_PATHS[@]}" "$host:$releases/$staging/")
   printf 'AGENT_VERSION = "%s"\n' "$AGENT_VERSION" |
-    ssh "$HOST" "cat > $REMOTE_AGENT/$LINUX_AGENT_VERSION_STAMP"
+    ssh "$host" "cat > $releases/$staging/$LINUX_AGENT_VERSION_STAMP"
+  ssh "$host" bash -s -- "$releases" "$staging" "$AGENT_VERSION" "$REMOTE_AGENT_HOME/$SWITCH_LOCK" <<'REMOTE'
+set -euo pipefail
+cd "$1"
+staging="$2" release="$3" switch_lock="$4"
+mkdir -p "$(dirname "$switch_lock")"
+exec {lock_descriptor}>"$switch_lock"
+flock "$lock_descriptor"
+if [ ! -e "$release" ]; then
+  mv -T "$staging" "$release"
+elif ! mv -T --exchange "$staging" "$release" 2>/dev/null; then
+  # coreutils before 9.5 cannot exchange, so `current` briefly points at nothing.
+  rm -rf "$staging-replaced"
+  mv -T "$release" "$staging-replaced"
+  mv -T "$staging" "$release"
+  mv -T "$staging-replaced" "$staging"
+fi
+# Unlocked first, so a slow delete never blocks a switch.
+exec {lock_descriptor}>&-
+rm -rf "$staging"
+REMOTE
+}
 
+build_venv_if_needed() {
+  local host="$1"
+  printf '%s\n' "$REQUIREMENTS" | ssh "$host" "mkdir -p $REMOTE_AGENT_HOME && cat > $REMOTE_AGENT_HOME/.$REQUIREMENTS_FILE"
+  ssh "$host" bash -s -- "$REMOTE_AGENT_HOME" "$REQUIREMENTS_FILE" <<'REMOTE'
+set -euo pipefail
+home="$1" requirements_file="$2"
+rm -rf "$home/.venv-building"
+if cmp -s "$home/.$requirements_file" "$home/venv/$requirements_file"; then
+  rm -f "$home/.$requirements_file"
+  echo "venv is up to date"
+  exit 0
+fi
+echo "building the venv; on a Pi Zero this takes a few minutes"
+python3 -m venv --system-site-packages "$home/.venv-building"
+"$home/.venv-building/bin/pip" install --quiet --disable-pip-version-check -r "$home/.$requirements_file"
+# Last, so only a finished build has this file.
+mv "$home/.$requirements_file" "$home/.venv-building/$requirements_file"
+REMOTE
+}
+
+swap_in_built_venv() {
+  local host="$1"
+  ssh "$host" bash -s -- "$REMOTE_AGENT_HOME" "$REQUIREMENTS_FILE" <<'REMOTE'
+set -euo pipefail
+home="$1" requirements_file="$2"
+# Kept unless replaced: after a failed restart it is the last good venv.
+[ -e "$home/.venv-building/$requirements_file" ] || exit 0
+rm -rf "$home/.venv-replaced"
+[ ! -e "$home/venv" ] || mv "$home/venv" "$home/.venv-replaced"
+mv "$home/.venv-building" "$home/venv"
+echo swapped
+REMOTE
+}
+
+swap_back_venv() {
+  local host="$1"
+  ssh "$host" "[ ! -e $REMOTE_AGENT_HOME/.venv-replaced ] || \
+    { rm -rf $REMOTE_AGENT_HOME/venv && mv $REMOTE_AGENT_HOME/.venv-replaced $REMOTE_AGENT_HOME/venv; }"
+}
+
+make_current_or_swap_back() {
+  local host="$1"
+  make_current "$host" && return 0
+  # A failure after the switch, say in pruning, keeps the new venv with the new code.
+  if is_current "$host"; then
+    echo "$host: $AGENT_VERSION is current but its deploy failed after the switch; the new venv stays" >&2
+    exit 1
+  fi
+  if [ "$HAS_SWAPPED_VENV" = swapped ]; then
+    echo "$host: could not make $AGENT_VERSION current, so its venv was put back" >&2
+    swap_back_venv "$host"
+  fi
+  exit 1
+}
+
+is_current() {
+  local host="$1"
+  [ "$(ssh "$host" "readlink $REMOTE_AGENT_HOME/current")" = "releases/$AGENT_VERSION" ]
+}
+
+remove_replaced_venv() {
+  local host="$1"
+  ssh "$host" "rm -rf $REMOTE_AGENT_HOME/.venv-replaced"
+}
+
+# The system python: the venv may not exist yet.
+make_current() {
+  local host="$1"
+  ssh "$host" "cd $REMOTE_RELEASE && TEMPESTAS_AGENT_HOME=$REMOTE_AGENT_HOME PYTHONPATH=$REMOTE_RELEASE/src \
+    python3 -m tempestas_agent.hand_deploy $AGENT_VERSION"
+}
+
+is_unit_on_release_layout() {
+  local host="$1"
+  ssh "$host" "systemctl cat tempestas-agent.service 2>/dev/null | grep -q '$REMOTE_AGENT_HOME/current'"
+}
+
+# The units are root-owned, so this only reports a difference.
+are_unit_files_current() {
+  local host="$1"
+  ssh "$host" "cmp -s $REMOTE_RELEASE/systemd/tempestas-agent-rollback.py $ROLLBACK_SCRIPT_DIR/tempestas-agent-rollback.py \
+    && cmp -s $REMOTE_RELEASE/systemd/tempestas-agent.service $UNIT_DIR/tempestas-agent.service \
+    && cmp -s $REMOTE_RELEASE/systemd/tempestas-agent-rollback.service $UNIT_DIR/tempestas-agent-rollback.service"
+}
+
+print_unit_install() {
+  local host="$1" reason="$2"
+  cat >&2 <<EOF
+$host: $reason
+On $host:
+  sudo install -d -m 0755 $ROLLBACK_SCRIPT_DIR
+  sudo install -m 0644 -o root -g root $REMOTE_RELEASE/systemd/tempestas-agent-rollback.py $ROLLBACK_SCRIPT_DIR/
+  sudo install -m 0644 -o root -g root $REMOTE_RELEASE/systemd/tempestas-agent.service \\
+    $REMOTE_RELEASE/systemd/tempestas-agent-rollback.service $UNIT_DIR/
+  sudo systemctl daemon-reload && sudo systemctl restart tempestas-agent
+EOF
+}
+
+for HOST in "${HOSTS[@]}"; do
+  say "$HOST: copying into $REMOTE_RELEASE"
+  # Venv first: a redeploy of the running version replaces live code.
+  build_venv_if_needed "$HOST"
+  copy_release "$HOST"
+
+  if ! is_unit_on_release_layout "$HOST"; then
+    HAS_SWAPPED_VENV="$(swap_in_built_venv "$HOST")"
+    make_current_or_swap_back "$HOST"
+    remove_replaced_venv "$HOST"
+    print_unit_install "$HOST" "its unit still runs the agent from before the release layout, so it was not restarted."
+    continue
+  fi
   say "$HOST: restarting (relays fail safe until the server drives them again)"
+  # Back to back, so no start pairs code with the wrong venv.
+  HAS_SWAPPED_VENV="$(swap_in_built_venv "$HOST")"
+  make_current_or_swap_back "$HOST"
   ssh "$HOST" "sudo -n systemctl restart tempestas-agent.service"
   sleep "$SETTLE_SECONDS"
-  ssh "$HOST" "systemctl is-active tempestas-agent && journalctl -u tempestas-agent -n 5 --no-pager"
+  if ! ssh "$HOST" "systemctl is-active tempestas-agent && journalctl -u tempestas-agent -n 5 --no-pager"; then
+    echo "$HOST: the agent is not running on $AGENT_VERSION; any venv it replaced is kept at" \
+      "$REMOTE_AGENT_HOME/.venv-replaced (journalctl -u tempestas-agent says why)" >&2
+    exit 1
+  fi
+  # Only once the agent runs, so a broken build can be swapped back.
+  remove_replaced_venv "$HOST"
+  are_unit_files_current "$HOST" ||
+    print_unit_install "$HOST" "the installed unit files or rollback script differ from this release's."
 done
 
 say "Done. The Nodes page shows $AGENT_VERSION once each agent has said hello."

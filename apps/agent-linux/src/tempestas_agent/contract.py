@@ -20,8 +20,8 @@ SCHEMAS = {
 }
 
 SUPPORTED_MAJOR = 1
-# Behind the TypeScript minor until this agent handles `update`; the minor says what it accepts.
-MQTT_CONTRACT_MINOR = 0
+# May trail the TypeScript minor, never lead it.
+MQTT_CONTRACT_MINOR = 1
 
 
 def build_node_root(node_id: str) -> str:
@@ -122,6 +122,11 @@ def read_schema_major(schema: object) -> int | None:
     if not isinstance(schema, str):
         return None
     parts = schema.split("/")
-    if len(parts) != 2 or not parts[1].isdigit():
+    if len(parts) != 2 or not is_ascii_number(parts[1]):
         return None
     return int(parts[1])
+
+
+def is_ascii_number(text: str) -> bool:
+    # isdigit alone accepts '²', which int() refuses.
+    return text.isascii() and text.isdigit()

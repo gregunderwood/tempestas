@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import json
 import logging
+import math
+import os
 import signal
 import sys
+import threading
 import time
 
 import paho.mqtt.client as mqtt
@@ -14,6 +18,7 @@ import paho.mqtt.client as mqtt
 from . import contract
 from .agent import Agent, build_backends
 from .config import AgentConfig, ConfigError, load
+from .release_layout import ReleaseLayout
 from .runtime import AlreadyRunning, SingleInstance, sd_notify
 
 log = logging.getLogger("tempestas.agent")
@@ -21,16 +26,24 @@ log = logging.getLogger("tempestas.agent")
 EXIT_OK = 0
 EXIT_BAD_CONFIG = 2
 EXIT_ALREADY_RUNNING = 3
+EXIT_RESTART_FOR_UPDATE = 75
 CONNECT_ACCEPTED = 0
 LOCK_PATH_TEMPLATE = "/run/tempestas/agent-{node_id}.lock"
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s %(message)s"
 # Gives the network loop time to send the offline status before it stops.
 OFFLINE_FLUSH_S = 0.2
+# A signal handler cannot safely set an Event, so the wait polls.
+STOP_CHECK_S = 1.0
+# systemd asks for a ping every half WatchdogSec.
+WATCHDOG_PING_SHARE = 0.5
+MICROSECONDS_PER_SECOND = 1_000_000
 
 
 def main() -> int:
     arguments = parse_arguments()
     configure_logging(arguments.log_level)
+    # The watchdog's SIGABRT then logs where the agent hung.
+    faulthandler.enable()
 
     try:
         config = load(arguments.config)
@@ -47,7 +60,12 @@ def main() -> int:
         return EXIT_ALREADY_RUNNING
 
     sensor, gpio = build_backends(config, simulated=arguments.simulated)
-    agent = Agent(config, client=None, sensor=sensor, gpio=gpio)
+    agent = Agent(
+        config, client=None, sensor=sensor, gpio=gpio, layout=ReleaseLayout.from_environment()
+    )
+    agent.settle_update()
+    # Before connecting, so it never removes this run's own download.
+    agent.remove_unfinished_downloads()
     client = build_client(agent)
     agent.client = client
     wire(agent, client)
@@ -56,9 +74,16 @@ def main() -> int:
     sd_notify("READY=1")
     try:
         run_until_signalled(agent, config)
+    except Exception:
+        # Once `current` has switched, a failure exit would roll the new release back.
+        if agent.has_current_moved_off_this_release():
+            agent.request_restart()
+        if not agent.restart_requested.is_set():
+            raise
+        log.exception("the agent failed after an update was installed; restarting into it")
     finally:
-        shut_down(agent, lock)
-    return EXIT_OK
+        shut_down_without_raising(agent, lock)
+    return EXIT_RESTART_FOR_UPDATE if agent.restart_requested.is_set() else EXIT_OK
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -108,6 +133,7 @@ def build_subscriptions(node_id: str) -> list[tuple[str, int]]:
         (contract.build_gpio_set_topic(node_id), contract.QOS["gpioSet"][0]),
         (contract.build_gpio_sync_topic(node_id), contract.QOS["gpioSync"][0]),
         (contract.build_heartbeat_topic(node_id), contract.QOS["heartbeat"][0]),
+        (contract.build_update_topic(node_id), contract.QOS["update"][0]),
         (contract.SERVER_STATUS_TOPIC, contract.QOS["serverStatus"][0]),
     ]
 
@@ -118,6 +144,7 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
         contract.build_heartbeat_topic(config.node_id): handle_heartbeat,
         contract.SERVER_STATUS_TOPIC: handle_server_status,
         contract.build_gpio_set_topic(config.node_id): handle_gpio_set,
+        contract.build_update_topic(config.node_id): handle_update,
     }
 
     def on_connect(_client, _userdata, _flags, reason_code, _properties=None):
@@ -125,15 +152,25 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
             log.error("connect refused: %s", reason_code)
             return
         log.info("connected to %s as %s", config.mqtt.url, config.node_id)
+        agent.on_connected()
         announce(agent)
         client.subscribe(build_subscriptions(config.node_id))
 
     def on_message(_client, _userdata, message):
         handler = handlers.get(message.topic)
-        if handler is not None:
+        if handler is None:
+            return
+        try:
             handler(agent, message)
+        except Exception:
+            # An exception here would kill paho's network thread.
+            log.exception("could not handle a message on %s", message.topic)
+
+    def on_disconnect(_client, _userdata, _flags, _reason_code, _properties=None):
+        agent.on_disconnected()
 
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
 
 
@@ -143,6 +180,7 @@ def announce(agent: Agent) -> None:
     agent.say_hello()
     # Retained, so a restarting controller would otherwise read the level from before our restart.
     agent.publish_gpio_state(agent.config.gpio.lines)
+    agent.report_settled_update()
 
 
 def handle_heartbeat(agent: Agent, message) -> None:
@@ -150,15 +188,19 @@ def handle_heartbeat(agent: Agent, message) -> None:
 
 
 def handle_gpio_set(agent: Agent, message) -> None:
-    result = agent.on_command(message.payload, retained=bool(message.retain))
+    result = agent.on_command(message.payload, is_retained=bool(message.retain))
     if result is None:
         return
     agent.publish("gpioResult", contract.build_gpio_result_topic(agent.config.node_id), result)
     agent.publish_gpio_state(line["pin"] for line in result["lines"])
 
 
+def handle_update(agent: Agent, message) -> None:
+    agent.on_update(message.payload, is_retained=bool(message.retain))
+
+
 def handle_server_status(agent: Agent, message) -> None:
-    agent.on_server_status(message.payload, retained=bool(message.retain))
+    agent.on_server_status(message.payload, is_retained=bool(message.retain))
 
 
 def start(agent: Agent, config: AgentConfig) -> None:
@@ -172,24 +214,80 @@ def start(agent: Agent, config: AgentConfig) -> None:
     )
     if not config.has_gpio:
         log.info("no GPIO lines configured: this agent cannot drive a pin at all")
-    agent.client.connect(config.mqtt.host, config.mqtt.port, keepalive=config.mqtt.keepalive_s)
+    # Async, so a broker that is down at start is retried, not fatal.
+    broker = config.mqtt
+    agent.client.connect_async(broker.host, broker.port, keepalive=broker.keepalive_s)
     agent.client.loop_start()
+    # paho drops its own reference once a callback raises.
+    agent.network_thread = getattr(agent.client, "_thread", None)
 
 
 def run_until_signalled(agent: Agent, config: AgentConfig) -> None:
-    should_stop = False
+    stop = StopRequest()
+    signal.signal(signal.SIGINT, stop.request)
+    signal.signal(signal.SIGTERM, stop.request)
+    ping_interval_s = read_watchdog_ping_interval_s()
 
-    def request_stop(_signal_number, _frame):
-        nonlocal should_stop
-        should_stop = True
-
-    signal.signal(signal.SIGINT, request_stop)
-    signal.signal(signal.SIGTERM, request_stop)
-
-    while not should_stop:
+    while not stop.is_requested and not agent.restart_requested.is_set():
+        require_network_loop_alive(agent.network_thread)
         publish_samples(agent)
         agent.check_deadman()
-        time.sleep(config.sensor.sample_interval_s)
+        agent.tend_update()
+        wait_for_next_tick(agent, config.sensor.sample_interval_s, ping_interval_s, stop)
+
+
+class NetworkLoopDied(RuntimeError):
+    pass
+
+
+def require_network_loop_alive(network_thread: threading.Thread | None) -> None:
+    if has_died(network_thread):
+        raise NetworkLoopDied("the MQTT network thread died, so this agent can no longer hear")
+
+
+def has_died(thread: threading.Thread | None) -> bool:
+    return thread is not None and not thread.is_alive()
+
+
+class StopRequest:
+    def __init__(self):
+        self.is_requested = False
+
+    def request(self, _signal_number=None, _frame=None) -> None:
+        self.is_requested = True
+
+
+def read_watchdog_ping_interval_s() -> float | None:
+    if is_watchdog_for_another_process():
+        return None
+    try:
+        timeout_microseconds = int(os.environ.get("WATCHDOG_USEC", ""))
+    except ValueError:
+        return None
+    if timeout_microseconds <= 0:
+        return None
+    return timeout_microseconds / MICROSECONDS_PER_SECOND * WATCHDOG_PING_SHARE
+
+
+def is_watchdog_for_another_process() -> bool:
+    watchdog_pid = os.environ.get("WATCHDOG_PID")
+    return bool(watchdog_pid) and watchdog_pid != str(os.getpid())
+
+
+def wait_for_next_tick(
+    agent: Agent, interval_s: float, ping_interval_s: float | None, stop: StopRequest
+) -> None:
+    deadline = time.monotonic() + interval_s
+    next_ping_at = time.monotonic() if ping_interval_s is not None else math.inf
+    while not agent.wake_main_loop.is_set() and not stop.is_requested:
+        now = time.monotonic()
+        if ping_interval_s is not None and now >= next_ping_at:
+            sd_notify("WATCHDOG=1")
+            next_ping_at = now + ping_interval_s
+        remaining_s = deadline - now
+        if remaining_s <= 0:
+            return
+        agent.wake_main_loop.wait(min(remaining_s, next_ping_at - now, STOP_CHECK_S))
 
 
 def publish_samples(agent: Agent) -> None:
@@ -202,8 +300,19 @@ def publish_samples(agent: Agent) -> None:
         )
 
 
+def shut_down_without_raising(agent: Agent, lock: SingleInstance) -> None:
+    # A requested restart must still exit 75, or it reads as a failed update.
+    try:
+        shut_down(agent, lock)
+    except Exception:
+        if not agent.restart_requested.is_set():
+            raise
+        log.exception("the agent did not shut down cleanly")
+
+
 def shut_down(agent: Agent, lock: SingleInstance) -> None:
     sd_notify("STOPPING=1")
+    agent.stop_updates()
     # MQTT suppresses the will on a graceful disconnect, so say it ourselves.
     agent.publish(
         "status",

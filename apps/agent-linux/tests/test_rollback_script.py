@@ -1,0 +1,122 @@
+"""The rollback unit's script: it switches back only from a pending update that cannot start."""
+
+from __future__ import annotations
+
+import importlib.util
+import shutil
+from pathlib import Path
+
+import pytest
+
+from release_fixtures import NEW_RELEASE, RUNNING_RELEASE, make_layout
+from tempestas_agent.release_layout import PendingUpdate
+from tempestas_agent.update_gate import settle_update_on_start
+
+ROLLBACK_SCRIPT = Path(__file__).resolve().parents[1] / "systemd/tempestas-agent-rollback.py"
+
+
+def load_rollback_script():
+    spec = importlib.util.spec_from_file_location("tempestas_agent_rollback", ROLLBACK_SCRIPT)
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    return script
+
+
+@pytest.fixture
+def layout(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEMPESTAS_AGENT_HOME", str(tmp_path))
+    return make_layout(tmp_path)
+
+
+def install_pending_update(layout) -> None:
+    layout.locate_release(NEW_RELEASE).mkdir()
+    layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
+    layout.switch_current_to(NEW_RELEASE)
+
+
+def test_switches_back_from_a_pending_update_and_leaves_it_to_be_reported(layout):
+    install_pending_update(layout)
+
+    assert load_rollback_script().main() == 0
+
+    assert layout.read_current_release() == RUNNING_RELEASE
+    settlement = settle_update_on_start(layout)
+    assert (
+        settlement.outcome.reason == f"{NEW_RELEASE} did not start, so {RUNNING_RELEASE} runs again"
+    )
+
+
+def test_does_nothing_when_no_update_is_pending(layout):
+    assert load_rollback_script().main() == 1
+    assert layout.read_current_release() == RUNNING_RELEASE
+
+
+def test_does_nothing_twice_so_a_failing_previous_release_is_not_restarted_forever(layout):
+    install_pending_update(layout)
+    script = load_rollback_script()
+
+    assert script.main() == 0
+    assert script.main() == 1
+    assert layout.read_current_release() == RUNNING_RELEASE
+
+
+def test_fails_the_unit_rather_than_skipping_it_when_the_switch_itself_fails(layout, monkeypatch):
+    install_pending_update(layout)
+    script = load_rollback_script()
+
+    def fail_replacing(*_paths):
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr(script.os, "replace", fail_replacing)
+
+    assert script.main() == script.EXIT_ROLLBACK_FAILED
+    assert layout.read_current_release() == NEW_RELEASE
+
+
+def test_fails_the_unit_rather_than_point_current_at_a_missing_release(layout):
+    install_pending_update(layout)
+    shutil.rmtree(layout.locate_release(RUNNING_RELEASE))
+
+    assert load_rollback_script().main() == load_rollback_script().EXIT_ROLLBACK_FAILED
+    assert layout.read_current_release() == NEW_RELEASE
+
+
+def test_fails_the_unit_when_it_does_not_know_where_the_agent_lives(monkeypatch):
+    monkeypatch.delenv("TEMPESTAS_AGENT_HOME", raising=False)
+    script = load_rollback_script()
+
+    assert script.main() == script.EXIT_ROLLBACK_FAILED
+
+
+def test_forgives_a_release_that_said_hello_two_failed_runs_and_rolls_back_on_the_third(layout):
+    install_pending_update(layout)
+    (layout.state / "started.json").write_text('{"command_id": "update-1"}')
+    script = load_rollback_script()
+
+    assert [script.main(), script.main()] == [1, 1]
+    assert layout.read_current_release() == NEW_RELEASE
+
+    assert script.main() == 0
+    assert layout.read_current_release() == RUNNING_RELEASE
+
+
+def test_a_hello_from_an_earlier_update_earns_no_forgiveness(layout):
+    install_pending_update(layout)
+    (layout.state / "started.json").write_text('{"command_id": "update-0"}')
+
+    assert load_rollback_script().main() == 0
+
+
+def test_does_nothing_when_the_pending_record_cannot_be_read(layout):
+    layout.state.mkdir()
+    (layout.state / "pending.json").write_text("{")
+
+    assert load_rollback_script().main() == 1
+    assert layout.read_current_release() == RUNNING_RELEASE
+
+
+def test_does_nothing_when_current_is_not_a_release_link(layout):
+    install_pending_update(layout)
+    layout.current_link.unlink()
+
+    assert load_rollback_script().main() == 1

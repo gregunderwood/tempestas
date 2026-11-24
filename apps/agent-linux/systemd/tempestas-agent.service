@@ -10,6 +10,8 @@ Wants=network-online.target
 # In [Unit], not [Service]: under [Service] systemd ignores them with "Unknown key".
 StartLimitIntervalSec=300
 StartLimitBurst=5
+# Runs on every failed run; it acts only on an update still on its gate.
+OnFailure=tempestas-agent-rollback.service
 
 # No ordering against the I2C bus: udev makes no .device unit for it, so the agent fails fast instead.
 
@@ -20,20 +22,30 @@ User=gunderwood
 Group=gunderwood
 SupplementaryGroups=i2c gpio
 
-WorkingDirectory=/home/gunderwood/tempestas/apps/agent-linux
+# Through `current`, so switching one link changes the code.
+WorkingDirectory=/home/gunderwood/tempestas/agent-linux/current
 # The venv interpreter by absolute path: systemd cannot see `uv run` or nvm.
-ExecStart=/home/gunderwood/tempestas/apps/agent-linux/.venv/bin/tempestas-agent \
+ExecStart=/home/gunderwood/tempestas/agent-linux/venv/bin/python -m tempestas_agent \
     --config /home/gunderwood/tempestas/etc/agent.toml
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/gunderwood/tempestas/agent-linux/current/src
+Environment=TEMPESTAS_AGENT_HOME=/home/gunderwood/tempestas/agent-linux
 # Required, not `-`: a node with no credential should fail here, not be refused by the broker forever.
 EnvironmentFile=/etc/tempestas/agent.env
 
 RuntimeDirectory=tempestas
 RuntimeDirectoryMode=0755
 
+# A hung loop fails the run, so a hung update is rolled back; 6x the longest pass.
+WatchdogSec=60
+
 # Never Restart=always; RestartSec is how long a killed agent leaves its pads unsupervised.
 Restart=on-failure
 RestartSec=5
+# Exit 75 after installing an update restarts onto the new release.
+RestartForceExitStatus=75
+# Else exit 75 is a failure, and OnFailure rolls the update back.
+SuccessExitStatus=75
 
 OOMScoreAdjust=-900
 MemoryMin=64M
