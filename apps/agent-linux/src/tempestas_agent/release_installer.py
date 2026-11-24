@@ -67,6 +67,7 @@ class ReleaseInstaller:
         """Leaves the new release current and pending its health gate, or raises UpdateFailed."""
         version = command["version"]
         running_release = self._require_running_release(version)
+        running_link_identity = self.layout.read_current_link_identity()
         staging = self.layout.locate_unfinished_release(version)
         try:
             report(contract.UpdateState.DOWNLOADING)
@@ -79,7 +80,7 @@ class ReleaseInstaller:
             shutil.rmtree(staging, ignore_errors=True)
             raise
         report(contract.UpdateState.INSTALLING)
-        return self._switch_to(staging, command, running_release)
+        return self._switch_to(staging, command, running_release, running_link_identity)
 
     def _require_running_release(self, version: str) -> str:
         running_release = self.layout.read_current_release()
@@ -118,9 +119,11 @@ class ReleaseInstaller:
                 "its dependencies differ from this node's, so it needs tools/deploy-agent-linux.sh"
             )
 
-    def _switch_to(self, staging: Path, command: dict, running_release: str) -> PendingUpdate:
+    def _switch_to(
+        self, staging: Path, command: dict, running_release: str, running_link_identity: int
+    ) -> PendingUpdate:
         with self.layout.hold_switch_lock():
-            if self.layout.read_current_release() != running_release:
+            if self.layout.read_current_link_identity() != running_link_identity:
                 shutil.rmtree(staging, ignore_errors=True)
                 raise UpdateFailed(HAND_DEPLOYED_DURING_DOWNLOAD)
             return self._switch_while_locked(staging, command, running_release)

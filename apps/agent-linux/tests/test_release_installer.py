@@ -248,6 +248,27 @@ def test_refuses_to_switch_when_a_hand_deploy_moved_current_during_the_download(
     assert not layout.locate_unfinished_release(NEW_RELEASE).exists()
 
 
+def test_refuses_to_switch_when_the_running_version_was_redeployed_during_the_download(
+    tmp_path,
+):
+    layout = make_layout(tmp_path)
+    server = FakeServer()
+    fetch = server.fetch
+
+    def redeploy_the_running_version_midway(url):
+        if url.endswith("uv.lock"):
+            layout.switch_current_to(RUNNING_RELEASE)
+        return fetch(url)
+
+    server.fetch = redeploy_the_running_version_midway
+
+    with pytest.raises(UpdateFailed, match="hand deploy"):
+        install(layout, server)
+
+    assert layout.read_current_release() == RUNNING_RELEASE
+    assert layout.read_pending() is None
+
+
 def test_a_pending_record_that_cannot_be_written_leaves_nothing_behind(tmp_path, monkeypatch):
     layout = make_layout(tmp_path)
 

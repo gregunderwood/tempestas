@@ -78,6 +78,10 @@ class ReleaseLayout:
         except OSError:
             return None
 
+    def read_current_link_identity(self) -> int:
+        """Changes with every switch, even back to the same release, as a hand deploy makes."""
+        return os.lstat(self.current_link).st_ino
+
     def locate_release(self, release: str) -> Path:
         return self.releases / release
 

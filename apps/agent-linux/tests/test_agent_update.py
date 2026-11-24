@@ -17,6 +17,7 @@ from release_fixtures import (
 )
 from tempestas_agent import contract
 from tempestas_agent.agent import (
+    ANOTHER_UPDATE_IN_PROGRESS,
     LAST_OUTCOME_UNDELIVERED,
     LAST_UPDATE_UNSETTLED,
     NOT_INSTALLED_FROM_A_RELEASE,
@@ -422,7 +423,9 @@ def test_ignores_a_repeat_of_an_update_whose_outcome_the_server_already_heard(tm
     assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
 
 
-def test_an_update_refused_for_a_passing_reason_can_be_retried_under_its_id(monkeypatch, tmp_path):
+def test_an_update_refused_for_a_passing_reason_is_final_so_a_retry_needs_a_new_id(
+    monkeypatch, tmp_path
+):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent._update_in_progress.acquire()
     agent.on_update(build_fresh_update(), is_retained=False)
@@ -430,7 +433,8 @@ def test_an_update_refused_for_a_passing_reason_can_be_retried_under_its_id(monk
 
     agent.on_update(build_fresh_update(), is_retained=False)
 
-    assert len(agent.installer.commands) == 1
+    assert agent.installer.commands == []
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, ANOTHER_UPDATE_IN_PROGRESS)]
 
 
 def test_a_failure_the_installer_recorded_is_reported_once_and_then_cleared(monkeypatch, tmp_path):

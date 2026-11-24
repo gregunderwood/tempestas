@@ -52,8 +52,10 @@ STOPPING = "the agent is stopping or restarting"
 ANOTHER_UPDATE_IN_PROGRESS = "another update is in progress"
 # Every holder of the switch lock lets go within this, well inside systemd's stop timeout.
 STOP_SWITCH_WAIT_S = 10.0
+# This module sits at <release>/src/tempestas_agent/agent.py.
+RELEASE_ROOT_ABOVE_MODULE = 2
 # Resolved on import, as the code was loaded: `current` may be switched under this process later.
-LOADED_RELEASE = Path(__file__).resolve().parents[2]
+LOADED_RELEASE = Path(__file__).resolve().parents[RELEASE_ROOT_ABOVE_MODULE]
 SWITCH_LOCK_RETRY_S = 0.1
 FINAL_UPDATE_STATES = frozenset(
     {contract.UpdateState.HEALTHY, contract.UpdateState.ROLLED_BACK, contract.UpdateState.FAILED}
@@ -183,7 +185,7 @@ class Agent:
         self.is_stopping = False
         self._installing_command_id: str | None = None
         self._update_claim_lock = threading.Lock()
-        # Ids this agent installed or reported on; a refusal stays open to a retry under its id.
+        # Ids that reached a final state here; `failed` is final, so a retry needs a new id.
         self._settled_command_ids: set[str] = set()
         self._held_until_exit = ExitStack()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
@@ -410,7 +412,7 @@ class Agent:
         with self._update_claim_lock:
             refusal = self._claim_update_or_explain_refusal(verdict.command_id)
         if refusal is not None:
-            self.publish_update_status(verdict.command_id, contract.UpdateState.FAILED, refusal)
+            self._report_install(verdict.command_id, contract.UpdateState.FAILED, refusal)
             return
         try:
             # Off the MQTT thread: a download must not hold up heartbeats or commands.
@@ -420,7 +422,7 @@ class Agent:
         except RuntimeError as error:
             self._installing_command_id = None
             self._update_in_progress.release()
-            self.publish_update_status(verdict.command_id, contract.UpdateState.FAILED, str(error))
+            self._report_install(verdict.command_id, contract.UpdateState.FAILED, str(error))
 
     def remove_unfinished_downloads(self) -> None:
         if self.layout is None:
@@ -769,9 +771,7 @@ class Agent:
             self.publish_alarm(verdict.alarm, SEVERITY_CRITICAL, verdict.reason)
         elif verdict.answer == ANSWER_FAILED_STATUS:
             log.error("refused an update: %s", verdict.reason)
-            self.publish_update_status(
-                verdict.command_id, contract.UpdateState.FAILED, verdict.reason
-            )
+            self._report_install(verdict.command_id, contract.UpdateState.FAILED, verdict.reason)
         else:
             log.info("ignored an update: %s", verdict.reason)
 
