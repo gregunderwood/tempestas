@@ -86,6 +86,17 @@ export interface FakeNodeSpec {
   sensorId: string | null;
 }
 
+export interface FakeStartingClimate {
+  co2Ppm: number;
+  /** Minutes the burner has already been alight, so a run can start past its warm-up. */
+  burnerMinutes: number;
+}
+
+export const DEFAULT_STARTING_CLIMATE: FakeStartingClimate = {
+  co2Ppm: START_CO2_PPM,
+  burnerMinutes: 0,
+};
+
 export const DEFAULT_FAKE_NODES: FakeNodeSpec[] = [
   {
     nodeId: SIM_PI_NODE_ID,
@@ -115,19 +126,22 @@ export class FakeHardwareService
   private timer: NodeJS.Timeout | null = null;
 
   private temperature = START_TEMPERATURE_DEG_C;
-  private co2 = START_CO2_PPM;
+  private co2: number;
   private humidity = START_HUMIDITY_PCT;
   /** Water in the air, hPa. Humidity is derived from this and temperature. */
   private vapourPressure = START_VAPOUR_PRESSURE_HPA;
   /** Consecutive minutes the burner has been alight, for the warm-up ramp. */
-  private burnerMinutes = 0;
+  private burnerMinutes: number;
   private minuteOfDay = START_MINUTE_OF_DAY;
 
   constructor(
     private readonly nodes: FakeNodeSpec[] = DEFAULT_FAKE_NODES,
     private readonly tickMs = DEFAULT_TICK_MS,
+    startingClimate: FakeStartingClimate = DEFAULT_STARTING_CLIMATE,
   ) {
     super();
+    this.co2 = startingClimate.co2Ppm;
+    this.burnerMinutes = startingClimate.burnerMinutes;
   }
 
   readonly samples$: Observable<SensorSample> = this.samples.asObservable();
