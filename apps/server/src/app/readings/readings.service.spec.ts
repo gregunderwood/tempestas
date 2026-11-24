@@ -85,3 +85,119 @@ describe('ReadingsService.findLatestPerSensor', () => {
     );
   });
 });
+
+describe('ReadingsService.bucketTemperatures', () => {
+  function makeServiceAnsweringBuckets(rawRows: unknown[]) {
+    const conditions: string[] = [];
+    const parameters: Record<string, unknown> = {};
+    const groupings: string[] = [];
+    const orderings: [string, string][] = [];
+    const recordCondition = (
+      condition: string,
+      conditionParameters: Record<string, unknown> = {},
+    ) => {
+      conditions.push(condition);
+      Object.assign(parameters, conditionParameters);
+      return builder;
+    };
+    const builder = {
+      innerJoin: () => builder,
+      select: () => builder,
+      addSelect: () => builder,
+      where: recordCondition,
+      andWhere: recordCondition,
+      setParameter: (name: string, value: unknown) => {
+        parameters[name] = value;
+        return builder;
+      },
+      groupBy: (grouping: string) => {
+        groupings.push(grouping);
+        return builder;
+      },
+      addGroupBy: (grouping: string) => {
+        groupings.push(grouping);
+        return builder;
+      },
+      orderBy: (ordering: string, direction: string) => {
+        orderings.push([ordering, direction]);
+        return builder;
+      },
+      limit: () => builder,
+      getRawMany: async () => rawRows,
+    };
+    const readings = {
+      createQueryBuilder: () => builder,
+    } as unknown as Repository<SensorReadingEntity>;
+    const service = new ReadingsService(
+      readings,
+      {} as Repository<NodeEntity>,
+      new SystemClock(),
+      {} as ConfigService,
+    );
+    return { service, conditions, parameters, groupings, orderings };
+  }
+
+  const WINDOW = {
+    from: new Date('2026-11-22T12:00:00Z'),
+    to: new Date('2026-11-23T12:00:00Z'),
+  };
+
+  it('buckets each sensor inside the window', async () => {
+    const { service, conditions, parameters, groupings } =
+      makeServiceAnsweringBuckets([]);
+    await service.bucketTemperatures(WINDOW, 5);
+    expect(conditions).toEqual([
+      'reading.createdAt >= :from',
+      'reading.createdAt <= :to',
+    ]);
+    expect(parameters).toMatchObject({ ...WINDOW, bucketMinutes: 5 });
+    expect(groupings).toEqual(['node.slug', 'reading.sensorId', '"at"']);
+  });
+
+  it('takes the newest buckets under the limit and hands them back oldest first', async () => {
+    const rawBucket = (at: string) => ({
+      nodeId: 'patji',
+      sensorId: 'pipes',
+      at: new Date(at),
+      averageC: '3',
+      lowestC: '3',
+      highestC: '3',
+      sampleCount: '1',
+    });
+    const { service, orderings } = makeServiceAnsweringBuckets([
+      rawBucket('2026-11-23T03:05:00Z'),
+      rawBucket('2026-11-23T03:00:00Z'),
+    ]);
+    const buckets = await service.bucketTemperatures(WINDOW, 5);
+    expect(orderings).toEqual([['"at"', 'DESC']]);
+    expect(buckets.map((bucket) => bucket.at.toISOString())).toEqual([
+      '2026-11-23T03:00:00.000Z',
+      '2026-11-23T03:05:00.000Z',
+    ]);
+  });
+
+  it('turns the strings Postgres returns for AVG and COUNT into numbers', async () => {
+    const { service } = makeServiceAnsweringBuckets([
+      {
+        nodeId: 'patji',
+        sensorId: 'pipes',
+        at: new Date('2026-11-23T03:00:00Z'),
+        averageC: '3.14159',
+        lowestC: '2.5',
+        highestC: '3.75',
+        sampleCount: '30',
+      },
+    ]);
+    expect(await service.bucketTemperatures(WINDOW, 5)).toEqual([
+      {
+        nodeId: 'patji',
+        sensorId: 'pipes',
+        at: new Date('2026-11-23T03:00:00Z'),
+        averageC: 3.14,
+        lowestC: 2.5,
+        highestC: 3.75,
+        sampleCount: 30,
+      },
+    ]);
+  });
+});

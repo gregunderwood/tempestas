@@ -1,5 +1,6 @@
 import {
   buildEmptyDayNightStats,
+  buildEmptyZoneHistory,
   buildNode,
   buildZone,
 } from '../fixtures/greenhouse';
@@ -15,6 +16,7 @@ export function stubApi(): void {
   cy.intercept('GET', '/api/nodes', [buildNode()]);
   cy.intercept('GET', '/api/devices', []);
   cy.intercept('GET', '/api/zones', [buildZone()]);
+  cy.intercept('GET', '/api/zone-history', buildEmptyZoneHistory());
   cy.intercept('GET', '/api/readings/latest', []);
   cy.intercept({ method: 'GET', pathname: '/api/readings' }, []);
   cy.intercept(

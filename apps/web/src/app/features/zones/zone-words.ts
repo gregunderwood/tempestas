@@ -103,13 +103,23 @@ export function describeSensorPolicy(policy: SensorPolicy): string {
 function describeSensorSource(source: string): string {
   const aggregateDescription = AGGREGATE_SOURCE_DESCRIPTIONS.get(source);
   if (aggregateDescription) return aggregateDescription;
-  if (source.startsWith(NODE_SOURCE_PREFIX)) {
-    return `the probes on ${source.slice(NODE_SOURCE_PREFIX.length)}`;
-  }
-  if (source.startsWith(SENSOR_SOURCE_PREFIX)) {
-    return `${source.slice(SENSOR_SOURCE_PREFIX.length)} only`;
-  }
+  const nodeSlug = readNodeSlug(source);
+  if (nodeSlug !== null) return `the probes on ${nodeSlug}`;
+  const sensorKey = readSingleSensorKey(source);
+  if (sensorKey !== null) return `${sensorKey} only`;
   return source;
+}
+
+export function readNodeSlug(source: string): string | null {
+  return readAfterPrefix(source, NODE_SOURCE_PREFIX);
+}
+
+export function readSingleSensorKey(source: string): string | null {
+  return readAfterPrefix(source, SENSOR_SOURCE_PREFIX);
+}
+
+function readAfterPrefix(source: string, prefix: string): string | null {
+  return source.startsWith(prefix) ? source.slice(prefix.length) : null;
 }
 
 export function describeDispatch(

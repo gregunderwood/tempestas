@@ -9,6 +9,7 @@ import {
   type RulesEvaluation,
   type ZoneFailure,
   type Zone,
+  type ZoneHistoryReport,
 } from '@tempestas/domain';
 import { MILLISECONDS_PER_SECOND } from '../../shared/time';
 
@@ -218,3 +219,60 @@ export const PUMPHOUSE_REFUSED = cycleOf(
   [],
   [{ zoneSlug: 'pumphouse', reason: 'invalid rules_config' }],
 );
+
+const SECONDS_PER_HOUR = 3_600;
+
+function hoursBeforeNow(hours: number): string {
+  return secondsBeforeNow(hours * SECONDS_PER_HOUR);
+}
+
+export function pumphouseHistory(): ZoneHistoryReport {
+  return {
+    from: hoursBeforeNow(24),
+    to: NOW.toISOString(),
+    zones: [
+      {
+        zoneId: 'z-pump',
+        probes: [
+          {
+            nodeId: 'patji',
+            sensorId: 'pipes',
+            buckets: [
+              {
+                at: hoursBeforeNow(10),
+                averageC: 3.2,
+                lowestC: 2.9,
+                highestC: 3.4,
+                sampleCount: 30,
+              },
+              {
+                at: hoursBeforeNow(9.9),
+                averageC: 3.6,
+                lowestC: 3.4,
+                highestC: 3.9,
+                sampleCount: 30,
+              },
+            ],
+          },
+        ],
+        devices: [
+          {
+            deviceId: 'd-heater',
+            deviceName: 'Heater',
+            role: DeviceRole.Heater,
+            nodeId: 'patji',
+            spans: [
+              {
+                state: 'unknown',
+                from: hoursBeforeNow(24),
+                to: hoursBeforeNow(20),
+              },
+              { state: 'on', from: hoursBeforeNow(20), to: hoursBeforeNow(18) },
+              { state: 'off', from: hoursBeforeNow(18), to: NOW.toISOString() },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}

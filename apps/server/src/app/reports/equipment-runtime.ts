@@ -3,21 +3,20 @@ import type {
   DeviceRole,
   DeviceRuntime,
   DeviceRuntimeDay,
+  RelayState,
 } from '@tempestas/domain';
 import {
   MILLISECONDS_PER_SECOND,
   MINUTES_PER_HOUR,
 } from '../common/time-units';
+import {
+  buildSpansByLine,
+  type NodeSighting,
+  type RuntimeTransition,
+  type Span,
+} from '../devices/relay-spans';
 
-export interface RuntimeTransition {
-  nodeId: string;
-  pin: number;
-  energised: boolean | null;
-  deviceId: string | null;
-  observedAt: Date;
-  /** Written when the node dropped, so whatever ran before it is cut at that moment. */
-  isNodeOffline: boolean;
-}
+export type { NodeSighting, RuntimeTransition } from '../devices/relay-spans';
 
 export interface RuntimeDevice {
   id: string;
@@ -29,12 +28,6 @@ export interface RuntimeDevice {
   addedAt: Date;
 }
 
-export interface NodeSighting {
-  isOnline: boolean;
-  /** The later of its last connection and its latest reading. */
-  lastHeardAt: Date | null;
-}
-
 export interface EquipmentRuntimeInput {
   devices: readonly RuntimeDevice[];
   /** Every line's rows in the window, plus the row in force when it opened; any order. */
@@ -42,17 +35,6 @@ export interface EquipmentRuntimeInput {
   sightingsByNode: ReadonlyMap<string, NodeSighting>;
   days: number;
   now: Date;
-}
-
-type RelayState = 'on' | 'off' | 'unknown';
-type SpanEnding = 'transition' | 'now' | 'last-seen';
-
-interface Span {
-  deviceId: string | null;
-  state: RelayState;
-  fromMs: number;
-  toMs: number;
-  ending: SpanEnding;
 }
 
 interface Run {
@@ -86,7 +68,11 @@ const MINUTE_DECIMALS = 1;
 export function summariseEquipmentRuntime(
   input: EquipmentRuntimeInput,
 ): DeviceRuntime[] {
-  const spansByLine = buildSpansByLine(input);
+  const spansByLine = buildSpansByLine(
+    input.transitions,
+    input.sightingsByNode,
+    input.now,
+  );
   const spans = spansByLine.flat();
   const runs = spansByLine.flatMap(findLineRuns);
   return input.devices.map((device) =>
@@ -97,113 +83,6 @@ export function summariseEquipmentRuntime(
       listLocalDays(input.now, device.timezone, input.days),
     ),
   );
-}
-
-function buildSpansByLine(input: EquipmentRuntimeInput): Span[][] {
-  return [...groupByLine(input.transitions).values()].map((rows) =>
-    mergeRepeatedStates(
-      buildLineSpans(
-        sortOldestFirst(rows),
-        input.sightingsByNode.get(rows[0].nodeId),
-        input.now.getTime(),
-      ),
-    ),
-  );
-}
-
-function groupByLine(
-  transitions: readonly RuntimeTransition[],
-): Map<string, RuntimeTransition[]> {
-  const byLine = new Map<string, RuntimeTransition[]>();
-  for (const transition of transitions) {
-    const lineKey = `${transition.nodeId}:${transition.pin}`;
-    const lineRows = byLine.get(lineKey);
-    if (lineRows) {
-      lineRows.push(transition);
-    } else {
-      byLine.set(lineKey, [transition]);
-    }
-  }
-  return byLine;
-}
-
-function sortOldestFirst(rows: RuntimeTransition[]): RuntimeTransition[] {
-  return [...rows].sort(
-    (first, second) => first.observedAt.getTime() - second.observedAt.getTime(),
-  );
-}
-
-function buildLineSpans(
-  rows: RuntimeTransition[],
-  sighting: NodeSighting | undefined,
-  nowMs: number,
-): Span[] {
-  return rows.map((row, index) => {
-    const fromMs = row.observedAt.getTime();
-    const next = rows[index + 1];
-    const end = next
-      ? resolveClosedEnd(next)
-      : resolveOpenEnd(fromMs, sighting, nowMs);
-    return {
-      deviceId: row.deviceId,
-      state: toRelayState(row.energised),
-      fromMs,
-      toMs: end.atMs,
-      ending: end.ending,
-    };
-  });
-}
-
-function resolveClosedEnd(next: RuntimeTransition): {
-  atMs: number;
-  ending: SpanEnding;
-} {
-  return {
-    atMs: next.observedAt.getTime(),
-    ending: next.isNodeOffline ? 'last-seen' : 'transition',
-  };
-}
-
-// An offline node sent no closing transition, so what it last did after it was last heard is unknown.
-function resolveOpenEnd(
-  fromMs: number,
-  sighting: NodeSighting | undefined,
-  nowMs: number,
-): { atMs: number; ending: SpanEnding } {
-  if (sighting?.isOnline) {
-    return { atMs: nowMs, ending: 'now' };
-  }
-  const lastHeardMs = sighting?.lastHeardAt?.getTime() ?? fromMs;
-  return {
-    atMs: Math.min(Math.max(lastHeardMs, fromMs), nowMs),
-    ending: 'last-seen',
-  };
-}
-
-function toRelayState(energised: boolean | null): RelayState {
-  if (energised === null) return 'unknown';
-  return energised ? 'on' : 'off';
-}
-
-function mergeRepeatedStates(spans: Span[]): Span[] {
-  const merged: Span[] = [];
-  for (const span of spans) {
-    const previous = merged[merged.length - 1];
-    if (previous && isSameStretch(previous, span)) {
-      merged[merged.length - 1] = {
-        ...previous,
-        toMs: span.toMs,
-        ending: span.ending,
-      };
-    } else {
-      merged.push(span);
-    }
-  }
-  return merged;
-}
-
-function isSameStretch(previous: Span, next: Span): boolean {
-  return previous.state === next.state && previous.deviceId === next.deviceId;
 }
 
 function findLineRuns(spans: Span[]): Run[] {

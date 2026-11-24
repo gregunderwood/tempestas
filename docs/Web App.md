@@ -24,6 +24,7 @@ sometimes with wet hands. Angular 20 standalone components, Angular Material M3,
 - [../apps/web/src/app/shared/pinboard/pinboard.ts](../apps/web/src/app/shared/pinboard/pinboard.ts) — the card board, with drag and drop and the move buttons
 - [../apps/web/src/app/shared/arrange/card-order.ts](../apps/web/src/app/shared/arrange/card-order.ts) — card order: a drop or a move, merging a saved order, browser storage
 - [../apps/web/src/app/features/nodes/node-detail.ts](../apps/web/src/app/features/nodes/node-detail.ts) — one node, with its 24-hour statistics
+- [../apps/web/src/app/features/zones/zone-history-view.ts](../apps/web/src/app/features/zones/zone-history-view.ts) — a zone's last 24 hours as chart geometry, pure
 - [../apps/web/src/app/features/reports/reports-page.ts](../apps/web/src/app/features/reports/reports-page.ts) — the reports screen: equipment runtime, and the reports still to come
 - [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme, the rail and hero tokens, and the gauge band colours
 - [../apps/web/proxy.conf.json](../apps/web/proxy.conf.json) — `/api` and `/socket.io` to `:7000` in dev
@@ -309,6 +310,37 @@ The order logic is plain functions in `shared/arrange/card-order.ts`, specced th
 The shell banner fires only when an **owned role** goes stale. A node can go quiet without that, so
 each card carries its own age and marks itself after two minutes. A confident number with nothing
 saying how old it is is how somebody trusts a reading from an hour ago.
+
+## The last 24 hours on a zone card
+
+Each zone card shows the last 24 hours: a line per probe, with the probes the rules are deciding
+on in blue, the low and high and roughly when, and under it a strip per device in the zone,
+coloured on, off or unknown. When the rules act on a value worked out from several probes (`mean`,
+`min`, `max` or `node:`), that value gets its own thick blue line, worked out bucket by bucket
+from the probes that reported, and its probes are drawn plain, unless another role reads one of
+them on its own through `sensor:`. It answers "how often did the heater run last night, and how
+cold did it get?".
+
+- **One request for every zone**, `GET /api/zone-history`. Readings come as five-minute buckets
+  (see [Readings](Infrastructure/Readings.md)); each device's runs come as contiguous spans built by
+  the same `relay-spans.ts` as the equipment runtime report, so the two agree on what unknown means.
+- **Unknown is drawn apart from off**: hatched, where off is a plain fill. No history, an
+  `energised = null` row and a node that was offline are all unknown. Time before a device was
+  added is left empty rather than unknown, as on the reports screen.
+- **A start follows a known off**, as in the report, so a node reappearing with the relay on is
+  not counted.
+- **Live, with no polling.** A pushed reading is added in the browser to the bucket the server
+  would put it in. Each probe keeps raw readings only for its newest bucket and folds the rest, no
+  further back than the window, so a page left open for days with nothing switching stays small.
+  A device switch or a node change fetches the history again, and a pushed switch is drawn on its
+  strip at once, from its `onAt` or `offAt`, in case the refetch reads the table before the
+  transition log has written it. The last span of each strip runs on to now, and the
+  window moves every 30 seconds.
+- The chart is inline SVG from a pure geometry function (`zone-history-view.ts`), with no charting
+  package. The text and strips are HTML, so they stay sharp at any width. Time labels are whole
+  local quarter-days in the zone's own timezone.
+- A history that fails to load says so on each card and leaves the rest of the card alone; it is
+  not one of the sources that hold the page back.
 
 ## The reports screen
 

@@ -14,6 +14,7 @@ import { FOLLOWER_NOTICE } from '../../shared/leadership';
 import {
   fakeRealtime,
   pushDevice,
+  pushNode,
   type FakeRealtime,
 } from '../../testing/fake-realtime';
 import { ZonesPage } from './zones-page';
@@ -27,12 +28,14 @@ import {
   node,
   probe,
   pumphouseEvaluation,
+  pumphouseHistory,
 } from './zone-fixtures';
 
 interface RenderedPage {
   page: HTMLElement;
   realtime: FakeRealtime;
   render(): void;
+  countHistoryFetches(): number;
 }
 
 interface RenderOptions {
@@ -48,7 +51,8 @@ type ApiRequest =
   | 'nodes'
   | 'devices'
   | 'latestReadings'
-  | 'fetchLatestRulesCycle';
+  | 'fetchLatestRulesCycle'
+  | 'fetchZoneHistory';
 
 function respondTo<Body>(
   request: ApiRequest,
@@ -67,6 +71,7 @@ function renderZonesPage(options: RenderOptions = {}): RenderedPage {
     (options.browserClockAheadSeconds ?? 0) * 1_000;
   vi.setSystemTime(NOW.getTime() + browserClockAheadMilliseconds);
   const realtime = fakeRealtime();
+  let historyFetches = 0;
   realtime.serverClockOffsetMilliseconds.set(-browserClockAheadMilliseconds);
   const firstCycle =
     options.firstCycle === undefined
@@ -91,6 +96,10 @@ function renderZonesPage(options: RenderOptions = {}): RenderedPage {
               probe('air', 19.4),
             ]),
           devices: () => respondTo('devices', options, [device(), heatTape()]),
+          fetchZoneHistory: () => {
+            historyFetches += 1;
+            return respondTo('fetchZoneHistory', options, pumphouseHistory());
+          },
         },
       },
       { provide: RealtimeService, useValue: realtime },
@@ -102,7 +111,12 @@ function renderZonesPage(options: RenderOptions = {}): RenderedPage {
     fixture.detectChanges();
   };
   render();
-  return { page: fixture.nativeElement as HTMLElement, realtime, render };
+  return {
+    page: fixture.nativeElement as HTMLElement,
+    realtime,
+    render,
+    countHistoryFetches: () => historyFetches,
+  };
 }
 
 function probeLabelsOf(page: HTMLElement): string[] {
@@ -203,6 +217,19 @@ describe('ZonesPage', () => {
     expect(page.textContent).toContain('Broken');
     expect(page.textContent).toContain("this zone's config cannot be drawn");
     expect(page.textContent).toContain('OFF · above setpoint');
+  });
+
+  it('keeps drawing the other zones when a config is missing its roles', () => {
+    const brokenZone = {
+      ...PUMPHOUSE,
+      id: 'z-broken',
+      slug: 'broken',
+      displayName: 'Broken',
+      rulesConfig: {},
+    } as unknown as Zone;
+    const { page } = renderZonesPage({ zones: [brokenZone, PUMPHOUSE] });
+    expect(page.textContent).toContain('Broken');
+    expect(page.textContent).toContain('Low 2.9 °C');
   });
 
   it('says the rules have stopped once a minute passes with no new cycle', () => {
@@ -398,6 +425,58 @@ describe('ZonesPage', () => {
     expect(page.querySelector('h2')?.textContent).toContain('Pumphouse');
     expect(
       [...page.querySelectorAll('h3')].map((heading) => heading.textContent),
-    ).toEqual(['Heater', 'Heat tape']);
+    ).toEqual(['Last 24 hours', 'Heater', 'Heat tape']);
+  });
+
+  it('shows the last 24 hours on the zone card, with unknown drawn apart from off', () => {
+    const { page } = renderZonesPage();
+    const history = page.querySelector('.zone .history');
+    expect(history?.querySelectorAll('.plot__line')).toHaveLength(1);
+    expect(history?.querySelector('.run__name')?.textContent).toContain(
+      'Heater',
+    );
+    expect(history?.querySelector('.run__summary')?.textContent).toContain(
+      'on 2 h 0 min · 0 starts · unknown 4 h 0 min',
+    );
+    expect(
+      history?.querySelectorAll('.run__strip .run__segment--unknown'),
+    ).toHaveLength(1);
+    expect(
+      history?.querySelectorAll('.run__strip .run__segment--off'),
+    ).toHaveLength(1);
+  });
+
+  it('keeps the rest of the card when the history cannot be loaded', () => {
+    const { page } = renderZonesPage({ failingRequests: ['fetchZoneHistory'] });
+    expect(page.textContent).toContain('Could not load the last 24 hours.');
+    expect(page.querySelectorAll('.device')).toHaveLength(2);
+    expect(page.textContent).not.toContain('Could not load the devices');
+  });
+
+  it('fetches the history again when a device switches or a node changes, not on a clock', () => {
+    const { realtime, render, countHistoryFetches } = renderZonesPage();
+    expect(countHistoryFetches()).toBe(1);
+    vi.advanceTimersByTime(10 * 60_000);
+    render();
+    expect(countHistoryFetches()).toBe(1);
+    pushDevice(realtime, device({ isOn: true, onAt: NOW.toISOString() }));
+    render();
+    expect(countHistoryFetches()).toBe(2);
+    pushNode(realtime, node('patji', 'z-pump'));
+    render();
+    expect(countHistoryFetches()).toBe(3);
+  });
+
+  it('draws a pushed switch on the strip even when the refetch has not caught up', () => {
+    const { page, realtime, render } = renderZonesPage();
+    vi.advanceTimersByTime(60_000);
+    pushDevice(
+      realtime,
+      device({ isOn: true, onAt: new Date(Date.now() - 1_000).toISOString() }),
+    );
+    render();
+    expect(page.querySelectorAll('.run__strip .run__segment--on')).toHaveLength(
+      2,
+    );
   });
 });

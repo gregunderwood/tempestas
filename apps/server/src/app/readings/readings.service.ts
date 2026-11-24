@@ -11,8 +11,12 @@ import {
   type ReadingStats,
   type ReadingsQuery,
   type SegmentStats,
+  ZONE_HISTORY_BUCKET_MINUTES,
+  ZONE_HISTORY_HOURS,
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
+import { roundTo } from '../common/rounding';
+import { MINUTES_PER_HOUR } from '../common/time-units';
 import { ZoneEntity } from '../zones/models';
 import { NodeEntity } from '../nodes/models';
 import { SensorReadingEntity } from './models';
@@ -51,6 +55,33 @@ interface MetricExtremes {
 }
 
 const EXTREME_METRICS: readonly Metric[] = ['temperature', 'humidity', 'co2'];
+
+const MOST_PROBES_IN_A_HISTORY = 70;
+const BUCKETS_PER_HISTORY =
+  (ZONE_HISTORY_HOURS * MINUTES_PER_HOUR) / ZONE_HISTORY_BUCKET_MINUTES;
+const MAX_TEMPERATURE_BUCKET_ROWS =
+  BUCKETS_PER_HISTORY * MOST_PROBES_IN_A_HISTORY;
+const AVERAGE_DECIMALS = 2;
+
+export interface TemperatureBucketRow {
+  nodeId: string;
+  sensorId: string;
+  at: Date;
+  averageC: number;
+  lowestC: number;
+  highestC: number;
+  sampleCount: number;
+}
+
+interface RawTemperatureBucket {
+  nodeId: string;
+  sensorId: string;
+  at: Date;
+  averageC: string;
+  lowestC: string;
+  highestC: string;
+  sampleCount: string;
+}
 
 @Injectable()
 export class ReadingsService {
@@ -151,6 +182,36 @@ export class ReadingsService {
       from: window.from.toISOString(),
       to: window.to.toISOString(),
     };
+  }
+
+  // Newest first under the limit, so a truncated answer loses the oldest end rather than now.
+  async bucketTemperatures(
+    window: ReadingWindow,
+    bucketMinutes: number,
+  ): Promise<TemperatureBucketRow[]> {
+    const rows = await this.readings
+      .createQueryBuilder('reading')
+      .innerJoin('reading.node', 'node')
+      .select('node.slug', 'nodeId')
+      .addSelect('reading.sensorId', 'sensorId')
+      .addSelect(
+        `date_bin(make_interval(mins => :bucketMinutes), reading.createdAt, TIMESTAMPTZ 'epoch')`,
+        'at',
+      )
+      .addSelect('AVG(reading.temperature)', 'averageC')
+      .addSelect('MIN(reading.temperature)', 'lowestC')
+      .addSelect('MAX(reading.temperature)', 'highestC')
+      .addSelect('COUNT(*)', 'sampleCount')
+      .where('reading.createdAt >= :from', { from: window.from })
+      .andWhere('reading.createdAt <= :to', { to: window.to })
+      .setParameter('bucketMinutes', bucketMinutes)
+      .groupBy('node.slug')
+      .addGroupBy('reading.sensorId')
+      .addGroupBy('"at"')
+      .orderBy('"at"', 'DESC')
+      .limit(MAX_TEMPERATURE_BUCKET_ROWS)
+      .getRawMany<RawTemperatureBucket>();
+    return rows.reverse().map(toTemperatureBucketRow);
   }
 
   private async computeSegmentStats(
@@ -280,6 +341,21 @@ function toReading(row: SensorReadingEntity): Reading {
   };
 }
 
+// Postgres returns AVG and COUNT as strings.
+function toTemperatureBucketRow(
+  raw: RawTemperatureBucket,
+): TemperatureBucketRow {
+  return {
+    nodeId: raw.nodeId,
+    sensorId: raw.sensorId,
+    at: new Date(raw.at),
+    averageC: roundTo(Number(raw.averageC), AVERAGE_DECIMALS),
+    lowestC: Number(raw.lowestC),
+    highestC: Number(raw.highestC),
+    sampleCount: Number(raw.sampleCount),
+  };
+}
+
 function compareNewestFirst(first: Reading, second: Reading): number {
   return second.createdAt.localeCompare(first.createdAt);
 }
@@ -295,5 +371,5 @@ function toAverages(raw: RawAverages | undefined): ReadingAverages {
 
 function roundToHundredths(value: string | null | undefined): number | null {
   if (value == null) return null;
-  return Math.round(Number(value) * 100) / 100;
+  return roundTo(Number(value), AVERAGE_DECIMALS);
 }
