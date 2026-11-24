@@ -74,6 +74,47 @@ npx nx e2e web-e2e     # starts nx serve web itself, runs headless, 15 to 40 s
 - **From a VS Code terminal, unset `ELECTRON_RUN_AS_NODE`.** VS Code exports it, and Cypress then
   fails to start with `bad option: --no-sandbox`. Use `env -u ELECTRON_RUN_AS_NODE npx nx e2e web-e2e`.
 
+### Screenshots on a PR
+
+A diff does not show what a page looks like on a phone, or what it looked like before. Any PR that
+changes what a page shows posts before-and-after screenshots at desktop and phone width before
+review, and the reviewer compares them:
+
+```bash
+tools/pr-screenshots.sh 138 dashboard nodes nodes/sim-pi       # <pr> then page paths
+tools/pr-screenshots.sh --after-only 138 reports/new-report    # a page that did not exist before
+```
+
+Run it from a checkout of the PR's branch, committed and pushed: it refuses if `HEAD` is not the
+PR's head commit or if tracked files have changes. It then:
+
+- **checks out the base** for "before": the merge-base of the PR with its base branch, in a
+  temporary worktree, so before and after differ only by this PR. `--after-only` skips it.
+- **starts a stack for each side in turn**: a fresh database `tempestas_pr_<pr>_before` or
+  `_after` in `tempestas-db`, migrated with that side's own migrations, the zones copied from the
+  dev database `tempestas`, the server with `HARDWARE_DRIVER=fake`, both simulated nodes admitted
+  and a device created on each relay pin with its zone's roles, so the rules switch them and the
+  pages show equipment, and `nx serve web` proxied to it.
+- **uses ports 7020 and 4220**, and refuses to start if anything listens on either. Other ports:
+  `PR_SCREENSHOTS_SERVER_PORT` and `PR_SCREENSHOTS_WEB_PORT`.
+- **takes each page at 1280 px and 390 px** with headless Chrome.
+- **adds a commit to the `pr-screenshots` branch** with the images in `<pr>/`, through a temporary
+  worktree, so no checkout changes branch. If another run pushed first, it replays its commit on
+  top and tries again.
+- **posts one "Screenshots" comment**, a Before and After table per page, or updates it on a rerun,
+  with each image pinned to that commit.
+- **tears everything down**, even on failure: the processes stopped, both databases dropped, both
+  temporary worktrees removed.
+
+**Never delete or force-push `pr-screenshots`.** Each comment links its images by commit, and a
+commit that is no longer reachable breaks the images on every old PR. Prune old folders with a
+new commit instead.
+
+A screenshot cannot show interaction, and the fake driver always leads. For a state reached by
+clicking (an open menu, a drag) or one the fake driver cannot produce (a follower), take the
+screenshots with Cypress against the e2e test's stubbed API and fake socket, on the base and on the
+branch, and add them to the same branch the same way.
+
 ### The rule that makes the important tests possible
 
 **No code in `rules/` or `device-state.ts` may call `new Date()`.** Time enters as an argument, and
@@ -211,4 +252,5 @@ And `mosquitto_pub -r` of a `gpio/set` **must** be dropped and alarmed.
 
 - A new coverage-enforced path is added
 - A new class of test appears (fault injection, contract, e2e)
+- `tools/pr-screenshots.sh` changes how it starts its stack or where it stores images
 - A porting landmine or boundary case is discovered that future work must not undo

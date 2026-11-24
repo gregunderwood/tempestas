@@ -76,6 +76,12 @@ Work is tracked on GitHub (`gregunderwood/tempestas`, private) with `gh`.
   - `## Verified locally`: the gate, plus anything run on real hardware.
   - `## After merge`: what still has to happen (deploys, hardware steps). Say what is
     deliberately left out, and which issue tracks it.
+- **A PR that changes what a page shows posts before-and-after screenshots before review**, at
+  desktop and phone width: `tools/pr-screenshots.sh <pr> <page>...` (e.g.
+  `tools/pr-screenshots.sh 138 dashboard nodes`), run from the PR's pushed branch. Before is the
+  PR's base, after is its head. Reviewers compare the two. A state the fake driver cannot produce,
+  such as a follower, is shot with the e2e test's stubbed API and fake socket instead. See
+  [docs/Testing.md](docs/Testing.md#screenshots-on-a-pr).
 - **Merging is the user's call.** Do not merge your own PR; do not push to `main`.
 - Deploying to elantris from a branch is fine for a bench test; say so in the PR, because the
   box is then running code `main` does not have.
