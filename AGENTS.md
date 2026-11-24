@@ -82,6 +82,16 @@ Work is tracked on GitHub (`gregunderwood/tempestas`, private) with `gh`.
   PR's base, after is its head. Reviewers compare the two. A state the fake driver cannot produce,
   such as a follower, is shot with the e2e test's stubbed API and fake socket instead. See
   [docs/Testing.md](docs/Testing.md#screenshots-on-a-pr).
+- **Review in rounds until only nits remain.** A reviewer who did not write the change posts one
+  comment headed `Review round N`, rating each finding **blocking** (wrong behaviour, a safety
+  regression, the issue not done, the gate failing), **important** (should be fixed before merge
+  but is not a bug, such as a missing spec for a real case) or **nit** (style or taste). The author
+  fixes every blocking and important finding or says why it is declined, runs the gate and pushes,
+  and the next round reviews afresh, up to three rounds.
+- **Once a round finds only nits, clean them up without another review.** Fix each nit that is
+  cheap and clearly right, run the gate, push, and post one comment headed `Nits addressed`
+  listing each nit as fixed or left, with why. A nit is left only if it was already declined for
+  a sound reason, would widen the PR's scope, or is wrong. The PR is then ready to merge.
 - **Merging is the user's call.** Do not merge your own PR; do not push to `main`.
 - Deploying to elantris from a branch is fine for a bench test; say so in the PR, because the
   box is then running code `main` does not have.
