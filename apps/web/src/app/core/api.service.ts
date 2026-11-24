@@ -15,6 +15,7 @@ import type {
   RulesEvaluation,
   RulesCycle,
   Zone,
+  ZoneHistoryReport,
 } from '@tempestas/domain';
 
 const API_ROOT = '/api';
@@ -99,6 +100,12 @@ export class ApiService {
 
   fetchZones(options: RequestOptions = {}): Observable<Zone[]> {
     return this.getFromApi<Zone[]>('/zones', options);
+  }
+
+  fetchZoneHistory(
+    options: RequestOptions = {},
+  ): Observable<ZoneHistoryReport> {
+    return this.getFromApi<ZoneHistoryReport>('/zone-history', options);
   }
 
   fetchLatestRulesCycle(

@@ -13,6 +13,7 @@ import { injectLiveSource, type SourceState } from '../../core/live-source';
 import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveReadings } from '../../core/live-readings';
 import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
+import { injectLiveZoneHistory } from '../../core/live-zone-history';
 import { RealtimeService } from '../../core/realtime.service';
 import { injectServerNow } from '../../core/server-now';
 import { injectCardArrangement } from '../../shared/arrange/card-arrangement';
@@ -24,8 +25,16 @@ import {
   type ZoneCard,
 } from './zone-view';
 import { formatDuration } from './zone-words';
+import { ZoneHistoryPanel } from './zone-history-panel';
+import {
+  buildZoneHistoryCharts,
+  type HistoryZone,
+  type ZoneHistoryChart,
+} from './zone-history-view';
 
 const CLOCK_TICK_MILLISECONDS = 1_000;
+// A minute is under a pixel on a phone-width day.
+const HISTORY_TICK_MILLISECONDS = 30_000;
 const ZONE_COLUMN_MINIMUM_REM = 24;
 const ZONE_COLUMN_MAXIMUM_REM = 36;
 export const ZONES_CARD_ORDER_KEY = 'tempestas.card-order.zones';
@@ -38,6 +47,23 @@ function nameZoneCard(zone: ZoneCard): string {
   return zone.name;
 }
 
+function toHistoryZone(zone: ZoneCard): HistoryZone {
+  return {
+    zoneId: zone.id,
+    timezone: zone.timezone,
+    decidingProbeKeys: zone.probes
+      .filter((probe) => probe.isTemperatureDeciding)
+      .map((probe) => probe.key),
+  };
+}
+
+function isSameHistoryZones(
+  first: readonly HistoryZone[],
+  second: readonly HistoryZone[],
+): boolean {
+  return JSON.stringify(first) === JSON.stringify(second);
+}
+
 interface NamedSource {
   name: string;
   sourceState: Signal<SourceState>;
@@ -45,7 +71,14 @@ interface NamedSource {
 
 @Component({
   selector: 'temp-zones-page',
-  imports: [MatCardModule, RouterLink, DatePipe, DecimalPipe, Pinboard],
+  imports: [
+    MatCardModule,
+    RouterLink,
+    DatePipe,
+    DecimalPipe,
+    Pinboard,
+    ZoneHistoryPanel,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page-status" aria-live="polite">
@@ -145,6 +178,14 @@ interface NamedSource {
                 }
               </ul>
             </section>
+
+            @if (historyCharts().get(zone.id); as chart) {
+              <temp-zone-history-panel [chart]="chart" />
+            } @else if (historyState() === 'failed') {
+              <p class="alert history-failed">
+                Could not load the last 24 hours.
+              </p>
+            }
 
             @if (zone.daylight; as daylight) {
               <section class="daylight" aria-label="Daylight window">
@@ -583,6 +624,8 @@ export class ZonesPage {
   private readonly readings = injectLiveReadings();
   private readonly devices = injectLiveDevices();
   private readonly now = injectServerNow(CLOCK_TICK_MILLISECONDS);
+  private readonly history = injectLiveZoneHistory();
+  private readonly historyNow = injectServerNow(HISTORY_TICK_MILLISECONDS);
   protected readonly cardArrangement =
     injectCardArrangement(ZONES_CARD_ORDER_KEY);
 
@@ -637,6 +680,39 @@ export class ZonesPage {
       identifyZoneCard,
     );
   });
+
+  protected readonly historyState = this.history.sourceState;
+
+  private readonly historyZones = computed(
+    () => this.cards().map(toHistoryZone),
+    { equal: isSameHistoryZones },
+  );
+
+  private readonly zoneIdByNodeSlug = computed(
+    () =>
+      new Map(
+        (this.nodes.latest()?.payload ?? []).flatMap((node) =>
+          node.zoneId ? [[node.slug, node.zoneId] as const] : [],
+        ),
+      ),
+  );
+
+  protected readonly historyCharts = computed(
+    (): Map<string, ZoneHistoryChart> => {
+      const report = this.history.report();
+      if (!report) return new Map();
+      return buildZoneHistoryCharts({
+        report,
+        zones: this.historyZones(),
+        pushedReadings: this.history.pushedReadings(),
+        zoneIdByNodeSlug: this.zoneIdByNodeSlug(),
+        pushedDevices: [...this.realtime.devicePushes().values()].map(
+          (push) => push.device,
+        ),
+        now: this.historyNow(),
+      });
+    },
+  );
 
   private nameSourcesIn(state: SourceState): string[] {
     return this.sources

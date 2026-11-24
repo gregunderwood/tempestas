@@ -61,6 +61,7 @@ describe('smoke', () => {
       findNavLink('Zones').click();
       shouldShowPage('Zones');
       cy.contains('.zone__name', ZONE_DISPLAY_NAME).should('be.visible');
+      cy.contains('.zone .history', 'Last 24 hours').should('be.visible');
 
       findNavLink('Nodes').click();
       shouldShowPage('Nodes');

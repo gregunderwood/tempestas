@@ -6,6 +6,7 @@ import {
   type Reading,
   type SystemStatus,
   type Zone,
+  type ZoneHistoryReport,
 } from '@tempestas/domain';
 
 export const NODE_SLUG = 'elantris';
@@ -95,5 +96,13 @@ export function buildEmptyDayNightStats(): DayNightStats {
       endTime: '18:30',
       timezone: 'America/Vancouver',
     },
+  };
+}
+
+export function buildEmptyZoneHistory(): ZoneHistoryReport {
+  return {
+    from: '2026-11-01T00:00:00.000Z',
+    to: '2026-11-02T00:00:00.000Z',
+    zones: [{ zoneId: buildZone().id, probes: [], devices: [] }],
   };
 }
