@@ -16,6 +16,7 @@ import {
   HISTORY_DAYS,
 } from './lib/history-window.mjs';
 import {
+  attachFirstRealReading,
   buildFindFirstRealReadingsSql,
   buildFindProbesSql,
   buildReplaceReadingsSql,
@@ -84,23 +85,7 @@ function readProbesWithRealReadings(databaseName, now) {
     databaseName,
     buildFindFirstRealReadingsSql(probeStarts),
   );
-  return probes.flatMap((probe) => {
-    const firstRealReading = firstRealReadings.find(
-      (reading) =>
-        reading.nodeUuid === probe.nodeUuid &&
-        reading.sensorId === probe.sensorId,
-    );
-    if (!firstRealReading) return [];
-    return [
-      {
-        ...probe,
-        firstRealReading: {
-          at: new Date(firstRealReading.at),
-          temperature: firstRealReading.temperature,
-        },
-      },
-    ];
-  });
+  return attachFirstRealReading(probes, firstRealReadings);
 }
 
 function describeWhatWasWritten(databaseName, probeReadings) {

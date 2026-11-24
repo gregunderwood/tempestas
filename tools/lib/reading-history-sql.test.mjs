@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  attachFirstRealReading,
   buildFindFirstRealReadingsSql,
   buildFindProbesSql,
   buildReplaceReadingsSql,
@@ -112,5 +113,53 @@ describe('buildFindFirstRealReadingsSql', () => {
       },
     ]);
     assert.match(sql, /'x''\); drop table nodes; --'/);
+  });
+});
+
+describe('attachFirstRealReading', () => {
+  const OTHER_PROBE = { ...PROBE, sensorId: 'ds18b20-1' };
+  const FIRST_REAL_AT = '2026-11-23T20:00:00+00:00';
+
+  it('pairs each probe with its own first real reading', () => {
+    const [attached] = attachFirstRealReading(
+      [PROBE],
+      [
+        {
+          nodeUuid: PROBE.nodeUuid,
+          sensorId: 'ds18b20-1',
+          at: CREATED_AT.toISOString(),
+          temperature: 2,
+        },
+        {
+          nodeUuid: PROBE.nodeUuid,
+          sensorId: PROBE.sensorId,
+          at: FIRST_REAL_AT,
+          temperature: 18,
+        },
+      ],
+    );
+    assert.deepEqual(attached.firstRealReading, {
+      at: new Date(FIRST_REAL_AT),
+      temperature: 18,
+    });
+    assert.equal(attached.nodeId, PROBE.nodeId);
+  });
+
+  it('skips a probe with no real reading in the window', () => {
+    const attached = attachFirstRealReading(
+      [PROBE, OTHER_PROBE],
+      [
+        {
+          nodeUuid: PROBE.nodeUuid,
+          sensorId: PROBE.sensorId,
+          at: FIRST_REAL_AT,
+          temperature: 18,
+        },
+      ],
+    );
+    assert.deepEqual(
+      attached.map((probe) => probe.sensorId),
+      [PROBE.sensorId],
+    );
   });
 });

@@ -41,6 +41,27 @@ export function buildFindFirstRealReadingsSql(probeStarts) {
      ) first_real`;
 }
 
+// A probe with no real reading in the window is dropped, so a long-dead sensor never looks alive.
+export function attachFirstRealReading(probes, firstRealReadings) {
+  return probes.flatMap((probe) => {
+    const firstRealReading = firstRealReadings.find(
+      (reading) =>
+        reading.nodeUuid === probe.nodeUuid &&
+        reading.sensorId === probe.sensorId,
+    );
+    if (!firstRealReading) return [];
+    return [
+      {
+        ...probe,
+        firstRealReading: {
+          at: new Date(firstRealReading.at),
+          temperature: firstRealReading.temperature,
+        },
+      },
+    ];
+  });
+}
+
 export function buildReplaceReadingsSql(probeReadings) {
   const statements = ['begin;'];
   for (const { probe } of probeReadings) {

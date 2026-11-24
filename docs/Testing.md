@@ -196,9 +196,10 @@ node tools/seed-runtime-history.mjs tempestas   # the everyday dev database
   uses the same container and database names but starts its container with `docker run`, so there
   `tempestas` is refused. It only ever reaches the `tempestas-db` container: no MQTT, no GPIO.
 - **Plausible, and the same every run.** Heating roles run mostly at night in the zone's timezone,
-  longest on the cold nights the readings seeder shows, fans and lights by day. Six days ago short-cycles from 10:00 to 14:00. Twelve days ago the first
-  node by slug drops out from 01:30 to 05:00: a `node-offline` row, unknown, as the server writes
-  it, then a known row when it returns. The pattern is seeded from each line and day, not random.
+  longest on the cold nights the readings seeder shows, fans and lights by day. Six days ago
+  short-cycles from 10:00 to 14:00. Twelve days ago the first node by slug drops out from 01:30 to
+  05:00: a `node-offline` row, unknown, as the server writes it, then a known row when it returns.
+  The pattern is seeded from each line and day, not random.
 - **Rerunnable.** It replaces each device pin's rows from local midnight 30 days back to now, ends
   on the state the pin is in now so the server carries on from it, and moves each device's
   `created_at` back to the start of that window, so the report counts all 30 days.
