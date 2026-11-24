@@ -1,7 +1,11 @@
 import { TestBed } from '@angular/core/testing';
-import { provideZonelessChangeDetection, signal } from '@angular/core';
+import {
+  ApplicationRef,
+  provideZonelessChangeDetection,
+  signal,
+} from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, type Observable } from 'rxjs';
 import type {
   DayNightStats,
   Device,
@@ -10,7 +14,7 @@ import type {
   ReadingStats,
   SegmentStats,
 } from '@tempestas/domain';
-import { NodeStatus } from '@tempestas/domain';
+import { NO_UPDATE_SUMMARY, NodeStatus } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
 import {
@@ -111,6 +115,8 @@ function node(overrides: Partial<Node> = {}): Node {
     kind: 'rpi',
     status: NodeStatus.Admitted,
     online: true,
+    availableUpdate: null,
+    updates: NO_UPDATE_SUMMARY,
     ...overrides,
   } as unknown as Node;
 }
@@ -145,6 +151,7 @@ function renderNodeDetail(
     devices?: Device[];
     node?: Node;
     slug?: string;
+    updateNode?: (id: string) => Observable<Node>;
   } = {},
 ): HTMLElement {
   statsRequestCount = 0;
@@ -166,6 +173,7 @@ function renderNodeDetail(
             return of(options.stats ?? dayNight());
           },
           devices: () => of(options.devices ?? []),
+          updateNode: options.updateNode,
         },
       },
       {
@@ -185,7 +193,29 @@ function firstBlockRows(page: HTMLElement): HTMLElement[] {
   return [...block.querySelectorAll<HTMLElement>('tr:not(.metric)')];
 }
 
+function clickButton(page: HTMLElement, label: string): void {
+  const button = [...page.querySelectorAll('button')].find((candidate) =>
+    candidate.textContent?.includes(label),
+  );
+  if (!button) throw new Error(`No "${label}" button on the page`);
+  button.click();
+}
+
 describe('NodeDetail', () => {
+  it('sends a confirmed update for this node', async () => {
+    const updateNode = vi.fn((nodeId: string) => of(node({ id: nodeId })));
+    const page = renderNodeDetail({
+      node: node({ availableUpdate: '1.1.1' }),
+      updateNode,
+    });
+
+    clickButton(page, 'Update to 1.1.1');
+    await TestBed.inject(ApplicationRef).whenStable();
+    clickButton(page, 'Update to 1.1.1');
+
+    expect(updateNode).toHaveBeenCalledWith('n1');
+  });
+
   it('names itself in the top bar, with its kind and whether it is online', () => {
     renderNodeDetail({
       node: node({ displayName: 'Greenhouse Pi', online: false }),

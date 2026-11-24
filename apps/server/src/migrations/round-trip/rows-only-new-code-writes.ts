@@ -1,6 +1,7 @@
 import {
   AddCo2DeadBand1789087500000,
   AddDeviceInputBtuPerHour1795488489699,
+  AddNodeUpdates1795546658688,
   AddHeatingRoles1794976900000,
   AddNodeAgentName1795330000000,
   AddNodeBootId1788923106173,
@@ -183,6 +184,26 @@ export const ROWS_ONLY_NEW_CODE_WRITES = new Map<string, RowsOnlyNewCodeWrites>(
           {
             sql: `UPDATE devices SET input_btu_per_hour = $1 WHERE id = $2`,
             parameters: [40_000, DEVICE_ID],
+          },
+        ],
+        revert: REVERTS,
+      },
+    ],
+    [
+      AddNodeUpdates1795546658688.name,
+      {
+        statements: [
+          {
+            sql: `INSERT INTO node_updates (id, node_id, app, to_version, is_roll_back, outcome, started_at)
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)`,
+            parameters: [
+              NODE_ID,
+              'agent-linux',
+              '1.1.2',
+              false,
+              'in-progress',
+              '2026-11-24T13:00:00Z',
+            ],
           },
         ],
         revert: REVERTS,

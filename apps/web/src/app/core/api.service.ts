@@ -38,6 +38,14 @@ export class ApiService {
     return this.postToApi<Node>(`/nodes/${id}/disable`);
   }
 
+  updateNode(id: string): Observable<Node> {
+    return this.postToApi<Node>(`/nodes/${id}/update`);
+  }
+
+  rollBackNode(id: string): Observable<Node> {
+    return this.postToApi<Node>(`/nodes/${id}/roll-back`);
+  }
+
   devices(options: RequestOptions = {}): Observable<Device[]> {
     return this.getFromApi<Device[]>('/devices', options);
   }

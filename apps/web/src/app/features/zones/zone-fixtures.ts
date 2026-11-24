@@ -10,6 +10,7 @@ import {
   type ZoneFailure,
   type Zone,
   type ZoneHistoryReport,
+  NO_UPDATE_SUMMARY,
 } from '@tempestas/domain';
 import { MILLISECONDS_PER_SECOND } from '../../shared/time';
 
@@ -100,6 +101,7 @@ export function node(slug: string, zoneId: string | null): Node {
     agentVersion: null,
     contractStanding: 'current',
     availableUpdate: null,
+    updates: NO_UPDATE_SUMMARY,
     capabilities: {
       contractVersion: 1,
       hasRtc: true,

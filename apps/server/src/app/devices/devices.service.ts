@@ -5,7 +5,6 @@ import {
   NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import { Subscription } from 'rxjs';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -20,10 +19,10 @@ import { acceptsCommands } from '../nodes/node-registry';
 import { NodeEntity } from '../nodes/models';
 import { Clock } from '../common/clock';
 import {
-  HardwareError,
   HardwareService,
   type PinStateReport,
 } from '../hardware/hardware.service';
+import { translateHardwareError } from '../hardware/hardware-http-error';
 import { toPinKey } from '../hardware/pin-key';
 import { DivergenceLog } from '../common/divergence-log';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -389,18 +388,4 @@ function stampTransition(
 
 function describeOnOff(isOnNow: boolean): string {
   return isOnNow ? 'ON' : 'OFF';
-}
-
-function translateHardwareError(error: unknown): unknown {
-  return error instanceof HardwareError ? toHttpError(error) : error;
-}
-
-// A dead transport is a 503: the server cannot act. Anything else is the physical world saying no.
-function toHttpError(
-  hardwareError: HardwareError,
-): ConflictException | ServiceUnavailableException {
-  const body = { code: hardwareError.code, message: hardwareError.message };
-  return hardwareError.code === ApiErrorCode.HardwareUnreachable
-    ? new ServiceUnavailableException(body)
-    : new ConflictException(body);
 }

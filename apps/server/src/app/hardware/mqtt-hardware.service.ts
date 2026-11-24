@@ -31,18 +31,22 @@ import {
   type PinStateReport,
   type PinCommand,
   type SensorSample,
+  type UpdateOrder,
+  type UpdateStatusReport,
 } from './hardware.service';
 import {
   EMPTY_PAYLOAD_REASON,
   buildGpioSet,
   buildGpioSync,
   buildStatus,
+  buildUpdate,
   decodeAlarm,
   decodeGpioState,
   decodeHello,
   decodeResult,
   decodeSample,
   decodeStatus,
+  decodeUpdateStatus,
   isCommandTopicKind,
   isEmptyPayload,
   parseJson,
@@ -58,6 +62,7 @@ import { isPinKeyOfNode, toPinKey } from './pin-key';
 const COMMAND_TIMEOUT_MS = 5_000;
 // Outlives the ack timeout, yet short enough that a queued or replayed command is refused.
 const COMMAND_TTL_MS = 15_000;
+const UPDATE_COMMAND_TTL_MS = 30_000;
 /** The node's dead-man counts these. Missing them is what makes it fail safe. */
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const WARN_THROTTLE_MS = 5 * 60 * 1000;
@@ -89,6 +94,7 @@ export class MqttHardwareService
   private readonly availability = new Subject<NodeAvailability>();
   private readonly hello = new Subject<NodeHello>();
   private readonly pinStates = new Subject<PinStateReport>();
+  private readonly updateStatuses = new Subject<UpdateStatusReport>();
 
   readonly samples$: Observable<SensorSample> = this.samples.asObservable();
   readonly pinStates$: Observable<PinStateReport> =
@@ -96,6 +102,8 @@ export class MqttHardwareService
   readonly availability$: Observable<NodeAvailability> =
     this.availability.asObservable();
   readonly hello$: Observable<NodeHello> = this.hello.asObservable();
+  readonly updateStatuses$: Observable<UpdateStatusReport> =
+    this.updateStatuses.asObservable();
 
   private client: MqttClient | null = null;
   private readonly pendingCommands = new Map<string, PendingCommand>();
@@ -177,6 +185,30 @@ export class MqttHardwareService
       JSON.stringify(payload),
       mqttQos.gpioSync,
     );
+  }
+
+  async sendUpdate(nodeId: NodeId, order: UpdateOrder): Promise<void> {
+    this.refuseIfFollower('update a node');
+    const client = this.requireClient();
+    this.refuseIfKnownOffline(nodeId);
+    const payload = buildUpdate(
+      { nodeId, now: this.clock.now() },
+      this.controllerId,
+      order,
+      UPDATE_COMMAND_TTL_MS,
+    );
+    try {
+      await client.publishAsync(
+        mqttTopics.update(nodeId),
+        JSON.stringify(payload),
+        mqttQos.update,
+      );
+    } catch (error: unknown) {
+      throw new HardwareError(
+        ApiErrorCode.HardwareUnreachable,
+        `Could not send the update to "${nodeId}": ${describeError(error)}`,
+      );
+    }
   }
 
   lastPinReport(nodeId: NodeId, pin: number): PinStateReport | null {
@@ -419,6 +451,8 @@ export class MqttHardwareService
         return this.receiveResult(nodeId, json.value);
       case 'alarm':
         return this.receiveAlarm(nodeId, json.value);
+      case 'update-status':
+        return this.receiveUpdateStatus(nodeId, json.value);
     }
   }
 
@@ -509,6 +543,24 @@ export class MqttHardwareService
     if (alarm) {
       this.logAlarm(nodeId, alarm.code, alarm.severity, alarm.message);
     }
+  }
+
+  private receiveUpdateStatus(
+    nodeId: NodeId,
+    raw: Record<string, unknown>,
+  ): void {
+    const status = this.unwrapOrWarn(
+      decodeUpdateStatus(raw),
+      `${nodeId}:update-status`,
+      `Rejected update/status from "${nodeId}"`,
+    );
+    if (!status) return;
+    this.updateStatuses.next({
+      nodeId,
+      id: status.id,
+      state: status.state,
+      reason: status.reason ?? null,
+    });
   }
 
   private unwrapOrWarn<T>(

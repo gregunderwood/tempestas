@@ -1,11 +1,16 @@
 import type { DataSource } from 'typeorm';
-import { AddPinTransitions1789170000000, InitialSchema1788917132521 } from '..';
+import {
+  AddNodeUpdates1795546658688,
+  AddPinTransitions1789170000000,
+  InitialSchema1788917132521,
+} from '..';
 
 export const ZONE_ID = '00000000-0000-4000-8000-000000000001';
 export const NODE_ID = '00000000-0000-4000-8000-000000000002';
 export const DEVICE_ID = '00000000-0000-4000-8000-000000000003';
 const READING_ID = '00000000-0000-4000-8000-000000000004';
 const PIN_TRANSITION_ID = '00000000-0000-4000-8000-000000000005';
+const NODE_UPDATE_ID = '00000000-0000-4000-8000-000000000006';
 
 // The greenhouse as it was before the CO2 dead band, so every later down can still express it.
 const GREENHOUSE_RULES_BEFORE_DEAD_BAND = {
@@ -102,6 +107,27 @@ export const ROWS_ADDED_AFTER = new Map<string, Statement[]>([
           'lights',
           'rules',
           '2026-01-10T12:00:00Z',
+        ],
+      },
+    ],
+  ],
+  [
+    AddNodeUpdates1795546658688.name,
+    [
+      {
+        sql: `INSERT INTO node_updates (id, node_id, app, from_version, to_version, is_roll_back, last_state, outcome, started_at, finished_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        parameters: [
+          NODE_UPDATE_ID,
+          NODE_ID,
+          'agent-linux',
+          '1.1.0',
+          '1.1.1',
+          false,
+          'healthy',
+          'healthy',
+          '2026-11-24T12:00:00Z',
+          '2026-11-24T12:01:00Z',
         ],
       },
     ],

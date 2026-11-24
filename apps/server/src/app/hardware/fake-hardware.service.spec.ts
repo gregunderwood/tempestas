@@ -1,10 +1,10 @@
 import { firstValueFrom, toArray, take } from 'rxjs';
-import { ApiErrorCode } from '@tempestas/domain';
+import { AgentApp, ApiErrorCode, UpdateState } from '@tempestas/domain';
 import {
   DEFAULT_FAKE_NODES,
   FakeHardwareService,
 } from './fake-hardware.service';
-import type { SensorSample } from './hardware.service';
+import type { NodeHello, SensorSample } from './hardware.service';
 
 // elantris's own wiring: BCM 5 is the CO2 generator. Active-LOW, so 0 is on.
 const BURNER = { pin: 5, level: 0 as const };
@@ -161,3 +161,35 @@ async function gainOverTicks(startCo2: number, ticks: number): Promise<number> {
   hardware.onModuleDestroy();
   return co2Of(after) - co2Of(before);
 }
+
+describe('FakeHardwareService updates', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('plays an update through to healthy, restarting on the new version', async () => {
+    const hardware = new FakeHardwareService(DEFAULT_FAKE_NODES, TICK_MS);
+    const states: UpdateState[] = [];
+    const hellos: NodeHello[] = [];
+    hardware.updateStatuses$.subscribe((status) => states.push(status.state));
+    hardware.hello$.subscribe((hello) => hellos.push(hello));
+
+    await hardware.sendUpdate('sim-pi', {
+      id: 'update-1',
+      app: AgentApp.Linux,
+      version: '1.1.1',
+      manifestUrl: 'http://localhost/manifest.json',
+      manifestSha256: 'c'.repeat(64),
+    });
+    await vi.runAllTimersAsync();
+
+    expect(states).toEqual([
+      UpdateState.Downloading,
+      UpdateState.Verifying,
+      UpdateState.Installing,
+      UpdateState.Restarting,
+      UpdateState.Healthy,
+    ]);
+    expect(hellos.map((hello) => hello.agentVersion)).toEqual(['1.1.1']);
+    hardware.onModuleDestroy();
+  });
+});

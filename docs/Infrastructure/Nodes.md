@@ -13,6 +13,8 @@ WiFi must not be able to inject a temperature reading that starts a combustion b
 - [../../apps/server/src/app/readings/readings-ingest.service.ts](../../apps/server/src/app/readings/readings-ingest.service.ts) — where the gate is enforced on inbound data
 - [../../apps/server/src/app/devices/devices.service.ts](../../apps/server/src/app/devices/devices.service.ts) — where it is enforced on outbound commands
 - [../../libs/domain/src/lib/nodes/node.model.ts](../../libs/domain/src/lib/nodes/node.model.ts) — `NodeKind`, `NodeStatus`, `NodeCapabilities`
+- [../../apps/server/src/app/nodes/node-update-rules.ts](../../apps/server/src/app/nodes/node-update-rules.ts) — when an update may be sent, and what a node's report does to it
+- [../../apps/server/src/app/nodes/node-updates.service.ts](../../apps/server/src/app/nodes/node-updates.service.ts) — sends updates and keeps each one in `node_updates`
 
 ## The lifecycle
 
@@ -107,17 +109,47 @@ file (ESPHome has native MQTT and built-in SCD4x support) rather than a code cha
 ## The API
 
 ```
-GET    /api/nodes                # includes deviceCount, latestReadingAt and availableUpdate
+GET    /api/nodes                # includes deviceCount, latestReadingAt, availableUpdate and updates
 GET    /api/nodes/:id
 PUT    /api/nodes/:id            # displayName, location, zoneId — nothing else
 POST   /api/nodes/:id/admit      # optional { zoneId, displayName, location }
 POST   /api/nodes/:id/disable
+POST   /api/nodes/:id/update     # sends the node its availableUpdate
+POST   /api/nodes/:id/roll-back  # sends the node updates.rollBackVersion
 DELETE /api/nodes/:id            # pending only
 ```
 
 `availableUpdate` is the newer agent version the server could send the node, or `null`. The
 bundles it comes from are listed at `GET /api/agent-releases`; see
 [Agent release bundles](Deploys.md#agent-release-bundles).
+
+## Updating a node from the web
+
+`POST /api/nodes/:id/update` sends the node an
+[`update` command](MQTT%20Contract.md#the-update-command) for its `availableUpdate`, and answers
+`202` once the broker has it. The node does the rest and reports each step on `update/status`.
+
+- **One node at a time.** The server refuses with `409 UPDATE_IN_PROGRESS` while any node's update
+  is still in progress, so a bad release cannot take out every node at once. Two quick presses are
+  queued, so the second sees the first.
+- **Only an admitted, online node, from the leader**, and only once `AGENT_RELEASES_URL` is set
+  (`409 UPDATES_NOT_CONFIGURED`): it is the address the node downloads the bundle from, as the
+  node sees the server. `updates.blockedBecause` says which of these stands in the way, so the page
+  disables the button and says why before anyone presses it.
+- **Every update is a row in `node_updates`**, keyed by the command's `id`: from and to versions,
+  whether it was a roll back, the last state the node reported, the outcome and its reason. A
+  status is matched by `id` and by the node it came from, so a node cannot report on another's
+  update. `updates.lastUpdate` is the newest row.
+- **Five minutes with no final state is `timed-out`**, with the last state heard as the reason, and
+  frees the next update. The node may still finish: a final state it sends later replaces the
+  time-out, since the node knows what happened and the server only stopped waiting.
+- **Roll back** sends the version the node ran before its last healthy update, while that bundle
+  is still offered. It is offered only straight after that update: once the node has moved on, or
+  for a roll back itself, there is nothing to undo. It is an ordinary update to an older version,
+  with the same checks and the same automatic rollback on the node.
+
+Each change republishes every node over `node:state`, because one node starting an update blocks
+the others.
 
 **There is no `POST /api/nodes`.** A node comes into existence by announcing itself; the only thing a
 human does is admit it. That asymmetry keeps the registry a record of what is actually on the

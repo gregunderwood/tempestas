@@ -1,5 +1,5 @@
 import { DeviceEntity, PinTransitionEntity } from './devices/models';
-import { NodeEntity } from './nodes/models';
+import { NodeEntity, NodeUpdateEntity } from './nodes/models';
 import { SensorReadingEntity } from './readings/models';
 import { ZoneEntity } from './zones/models';
 
@@ -7,6 +7,7 @@ import { ZoneEntity } from './zones/models';
 export const ENTITIES = [
   ZoneEntity,
   NodeEntity,
+  NodeUpdateEntity,
   DeviceEntity,
   PinTransitionEntity,
   SensorReadingEntity,

@@ -14,6 +14,7 @@ import {
   ApiErrorCode,
   describeAgent,
   NodeStatus,
+  NO_UPDATE_SUMMARY,
   type Node,
   type NodeCapabilities,
   type NodeId,
@@ -31,6 +32,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';
 import { NodeEntity } from './models';
+import { NodeUpdatesService } from './node-updates.service';
 import type { NodeOperatorFieldsDto } from './dto/node-operator-fields.dto';
 import type { AdmitNodeDto } from './dto/admit-node.dto';
 import type { UpdateNodeDto } from './dto/update-node.dto';
@@ -123,6 +125,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     private readonly realtime: RealtimeGateway,
     private readonly clock: Clock,
     private readonly agentReleases: AgentReleasesService,
+    private readonly nodeUpdates: NodeUpdatesService,
   ) {}
 
   onModuleInit(): void {
@@ -134,6 +137,11 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     this.subscriptions.add(
       this.hardware.availability$.subscribe((availability) =>
         this.enqueue(() => this.handleAvailability(availability)),
+      ),
+    );
+    this.subscriptions.add(
+      this.nodeUpdates.changes$.subscribe(() =>
+        this.enqueue(() => this.republishAll()),
       ),
     );
   }
@@ -408,6 +416,11 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     await this.publishNodeState(node);
   }
 
+  private async republishAll(): Promise<void> {
+    const entities = await this.nodes.find({ order: { slug: 'ASC' } });
+    for (const entity of entities) await this.publishNodeState(entity);
+  }
+
   private async applyOperatorFields(
     node: NodeEntity,
     fields: NodeOperatorFieldsDto,
@@ -436,6 +449,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     const ids = nodes.map((node) => node.id);
     const deviceCounts = await this.countDevicesByNode(ids);
     const latestReadings = await this.findLatestReadingByNode(ids);
+    const updateSummaries = await this.nodeUpdates.summarize(nodes);
     const now = this.clock.now();
 
     return nodes.map((node) => {
@@ -460,6 +474,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
         agentVersion: node.agentVersion,
         contractStanding: findContractStanding(node.capabilities),
         availableUpdate: this.agentReleases.findAvailableUpdate(node),
+        updates: updateSummaries.get(node.id) ?? NO_UPDATE_SUMMARY,
         capabilities: node.capabilities,
         zoneId: node.zoneId,
         deviceCount: deviceCounts.get(node.id) ?? 0,

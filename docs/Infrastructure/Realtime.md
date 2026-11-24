@@ -43,7 +43,9 @@ The timing is the interesting part, and it is the same discipline as everywhere 
   device count, latest reading and derived `online`, after the row is saved. `NodesService`
   publishes it for every `hello` (so a newly announced pending node, a reboot, an agent upgrade
   and changed capabilities all arrive), every retained `status` (online and offline), and every
-  admit, disable and operator edit. A refused admit publishes nothing. Deleting a pending node
+  admit, disable and operator edit. It also publishes every node whenever an update from the web
+  starts, reports a step or times out, since one node updating blocks the others. A refused admit
+  publishes nothing. Deleting a pending node
   publishes nothing either: the browser that deleted it refetches, and others see it go on their
   next reconnect or reload.
 - **Derived `online` also changes with no save**, because it lapses five minutes after the node

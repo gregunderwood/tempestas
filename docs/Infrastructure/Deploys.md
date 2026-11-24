@@ -122,6 +122,11 @@ The deploy also bundles each agent, for the server to offer the nodes through th
   count toward its patch too, so its patch cannot say which is newer. Only from contract
   1.1, which added `update`: a node before it never subscribes, and one that has never sent
   `agentName` needs a deploy by hand first.
+- **A node downloads from `AGENT_RELEASES_URL`**, set in `/etc/tempestas/server.env` to the
+  server's address as the nodes reach it, such as `http://192.168.2.70:7000`. The server cannot
+  work it out: behind a proxy or on a second interface, its own idea of its address is not the
+  nodes'. Until it is set, the node page disables the update button and says so. See
+  [Updating a node from the web](Nodes.md#updating-a-node-from-the-web).
 
 ### When the revert itself fails
 

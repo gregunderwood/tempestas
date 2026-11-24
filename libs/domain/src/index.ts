@@ -1,5 +1,6 @@
 // Types and constants only, no decorators: the browser bundle imports this library.
 export * from './lib/nodes/node.model';
+export * from './lib/nodes/node-update.model';
 export * from './lib/zones/zone.model';
 export * from './lib/zones/zone-history.model';
 export * from './lib/devices/device.model';
