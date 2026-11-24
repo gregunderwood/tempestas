@@ -1,5 +1,6 @@
 import type { Reading, RulesCycle, SystemStatus } from '@tempestas/domain';
 import { READING_QUIET_AFTER_SECONDS } from '../../shared/freshness';
+import { isFollowing } from '../../shared/leadership';
 import { secondsSince } from '../../shared/time';
 import {
   chooseDecisionTone,
@@ -45,7 +46,7 @@ function listConnectionProblems(facts: AttentionFacts): AttentionItem[] {
 }
 
 function listLeadershipProblems(status: SystemStatus | null): AttentionItem[] {
-  if (status?.isLeading !== false) return [];
+  if (!isFollowing(status)) return [];
   return [
     {
       key: 'follower',

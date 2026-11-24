@@ -1,5 +1,6 @@
 import { computed, inject, type Signal } from '@angular/core';
 import type { RulesCycle, SystemStatus } from '@tempestas/domain';
+import { isFollowing } from '../shared/leadership';
 import { ApiService } from './api.service';
 import { injectLiveSource, type SourceState } from './live-source';
 import { RealtimeService } from './realtime.service';
@@ -24,7 +25,7 @@ export function chooseCurrentCycle(
   socketCycle: RulesCycle | null,
   fetchedCycle: RulesCycle | null,
 ): RulesCycle | null {
-  if (status?.isLeading === false) return null;
+  if (isFollowing(status)) return null;
   return pickNewerCycle(socketCycle, fetchedCycle);
 }
 

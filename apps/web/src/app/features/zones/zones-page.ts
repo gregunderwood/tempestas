@@ -16,6 +16,7 @@ import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
 import { RealtimeService } from '../../core/realtime.service';
 import { injectServerNow } from '../../core/server-now';
 import { injectCardArrangement } from '../../shared/arrange/card-arrangement';
+import { FOLLOWER_NOTICE, isFollowing } from '../../shared/leadership';
 import { Pinboard } from '../../shared/pinboard/pinboard';
 import { buildZoneCards, type ZoneCard } from './zone-view';
 import { formatDuration } from './zone-words';
@@ -45,9 +46,7 @@ interface NamedSource {
   template: `
     <div class="page-status" aria-live="polite">
       @if (isFollower()) {
-        <p class="follower">
-          This controller is a follower; rules run on the leader.
-        </p>
+        <p class="follower">{{ followerNotice }}.</p>
       }
       @if (failedSources().length > 0) {
         <p class="alert">
@@ -86,7 +85,9 @@ interface NamedSource {
               @if (zone.localTime) {
                 {{ zone.localTime }} {{ zone.timezone }} ·
               }
-              @if (zone.rulesRanAgoSeconds === null) {
+              @if (isFollower()) {
+                {{ followerNotice }}
+              } @else if (zone.rulesRanAgoSeconds === null) {
                 rules have not run yet
               } @else {
                 rules ran {{ formatDuration(zone.rulesRanAgoSeconds) }} ago
@@ -600,8 +601,10 @@ export class ZonesPage {
 
   protected readonly formatDuration = formatDuration;
 
-  protected readonly isFollower = computed(
-    () => this.realtime.status()?.isLeading === false,
+  protected readonly followerNotice = FOLLOWER_NOTICE;
+
+  protected readonly isFollower = computed(() =>
+    isFollowing(this.realtime.status()),
   );
 
   protected readonly failedSources = computed(() =>
