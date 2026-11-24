@@ -43,6 +43,7 @@ interface FakeTables {
 interface RecordedCalls {
   coldestQueries: { window: ReadingWindow; nodeSlugs: readonly string[] }[];
   bucketWindows: ReadingWindow[];
+  bucketNodeSlugs: (readonly string[] | undefined)[];
 }
 
 const ZONES: Partial<ZoneEntity>[] = [
@@ -107,7 +108,11 @@ function makeService(tables: FakeTables): {
   service: FreezeMarginService;
   calls: RecordedCalls;
 } {
-  const calls: RecordedCalls = { coldestQueries: [], bucketWindows: [] };
+  const calls: RecordedCalls = {
+    coldestQueries: [],
+    bucketWindows: [],
+    bucketNodeSlugs: [],
+  };
   const zones = {
     find: async () => ZONES,
   } as unknown as Repository<ZoneEntity>;
@@ -134,8 +139,13 @@ function makeService(tables: FakeTables): {
       calls.coldestQueries.push({ window, nodeSlugs });
       return tables.coldest ?? null;
     },
-    bucketTemperatures: async (window: ReadingWindow) => {
+    bucketTemperatures: async (
+      window: ReadingWindow,
+      _bucketMinutes: number,
+      nodeSlugs?: readonly string[],
+    ) => {
       calls.bucketWindows.push(window);
+      calls.bucketNodeSlugs.push(nodeSlugs);
       return tables.buckets ?? [];
     },
   } as unknown as ReadingsService;
@@ -178,13 +188,15 @@ describe('FreezeMarginService.buildFreezeMargin', () => {
     ]);
   });
 
-  it('buckets readings from the start of the oldest night', async () => {
+  it("buckets the heated zones' readings from the start of the oldest night", async () => {
     const { service, calls } = makeService({});
     const report = await service.buildFreezeMargin({ nights: 2 });
     const oldestNight = report.zones[0].nights[1];
     expect(calls.bucketWindows).toEqual([
       { from: new Date(oldestNight.from), to: NOW },
     ]);
+    expect(calls.bucketNodeSlugs).toEqual([['patji']]);
+    expect(report.zones[0].nodeIds).toEqual(['patji']);
   });
 
   it("places the heater's recorded state at the coldest moment", async () => {

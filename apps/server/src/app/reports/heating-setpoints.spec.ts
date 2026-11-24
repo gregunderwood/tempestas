@@ -1,8 +1,11 @@
 import { DeviceRole } from '@tempestas/domain';
 import {
   DEFAULT_FREEZE_WARNING_C,
+  FALLBACK_SENSOR_SOURCE,
   findHeatOnBelowByRole,
   findOnBelowFor,
+  findSensorSourceByRole,
+  findSensorSourceFor,
   resolveFreezeWarning,
 } from './heating-setpoints';
 
@@ -91,6 +94,33 @@ describe('findOnBelowFor', () => {
     expect(findOnBelowFor(DeviceRole.Heater, byRole)).toBe(4);
     expect(findOnBelowFor(DeviceRole.HeatTape, byRole)).toBe(
       DEFAULT_FREEZE_WARNING_C,
+    );
+  });
+});
+
+describe('findSensorSourceByRole', () => {
+  it("takes each heating role's own sensor, or the zone default", () => {
+    expect(
+      findSensorSourceByRole(
+        rulesWith({
+          heater: { ...HEAT_THERMOSTAT, sensor: { source: 'mean' } },
+          heat_tape: HEAT_THERMOSTAT,
+        }),
+      ),
+    ).toEqual({ [DeviceRole.Heater]: 'mean', [DeviceRole.HeatTape]: 'min' });
+  });
+
+  it('finds nothing in rules that do not parse', () => {
+    expect(findSensorSourceByRole({ rules: 'typo' })).toEqual({});
+  });
+});
+
+describe('findSensorSourceFor', () => {
+  it("uses the role's source, or the coldest probe without one", () => {
+    const byRole = { [DeviceRole.Heater]: 'max' as const };
+    expect(findSensorSourceFor(DeviceRole.Heater, byRole)).toBe('max');
+    expect(findSensorSourceFor(DeviceRole.HeatTape, byRole)).toBe(
+      FALLBACK_SENSOR_SOURCE,
     );
   });
 });

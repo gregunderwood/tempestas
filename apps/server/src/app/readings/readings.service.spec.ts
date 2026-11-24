@@ -160,6 +160,14 @@ describe('ReadingsService.bucketTemperatures', () => {
     expect(groupings).toEqual(['node.slug', 'reading.sensorId', '"at"']);
   });
 
+  it('reads only the given nodes when asked, and nothing for none', async () => {
+    const { service, conditions, parameters } = makeServiceAnsweringBuckets([]);
+    await service.bucketTemperatures(WINDOW, 10, ['patji']);
+    expect(conditions).toContain('node.slug IN (:...nodeSlugs)');
+    expect(parameters).toMatchObject({ nodeSlugs: ['patji'] });
+    expect(await service.bucketTemperatures(WINDOW, 10, [])).toEqual([]);
+  });
+
   it('allows enough rows for every probe in every bucket of the window', async () => {
     const { service, limits } = makeServiceAnsweringBuckets([]);
     await service.bucketTemperatures(WINDOW, 5);

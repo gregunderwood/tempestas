@@ -3,7 +3,11 @@ import {
   type SensorPolicy,
   type ZoneRulesConfig,
 } from '@tempestas/domain';
-import { resolveClimate, type NodeSample } from './climate-resolver';
+import {
+  pickSourceTemperature,
+  resolveClimate,
+  type NodeSample,
+} from './climate-resolver';
 
 const NOW = new Date('2026-01-10T12:00:00Z');
 const FRESH = new Date('2026-01-10T11:59:30Z'); // 30s old
@@ -599,5 +603,25 @@ describe('several sensors on one node - the pumphouse', () => {
       temperatureC: 7,
       sourceSensorIds: ['pumphouse/air'],
     });
+  });
+});
+
+describe('pickSourceTemperature', () => {
+  const probes = [
+    { nodeId: 'patji', sensorId: 'pipe', temperatureC: 1 },
+    { nodeId: 'patji', sensorId: 'air', temperatureC: 3 },
+    { nodeId: 'braize', sensorId: 'air', temperatureC: 5 },
+  ];
+
+  it('picks the way the rules do for each source', () => {
+    expect(pickSourceTemperature(probes, 'min')).toBe(1);
+    expect(pickSourceTemperature(probes, 'max')).toBe(5);
+    expect(pickSourceTemperature(probes, 'mean')).toBe(3);
+    expect(pickSourceTemperature(probes, 'node:patji')).toBe(2);
+    expect(pickSourceTemperature(probes, 'sensor:braize/air')).toBe(5);
+  });
+
+  it('is null when the source names no probe given', () => {
+    expect(pickSourceTemperature(probes, 'node:elantris')).toBeNull();
   });
 });

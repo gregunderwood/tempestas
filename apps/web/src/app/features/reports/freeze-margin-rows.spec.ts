@@ -29,6 +29,7 @@ function freezeNight(
         role: DeviceRole.Heater,
         state: 'on',
         onBelowC: 3,
+        isHeatOwed: true,
       },
       {
         deviceId: 'tape',
@@ -36,6 +37,7 @@ function freezeNight(
         role: DeviceRole.HeatTape,
         state: 'unknown',
         onBelowC: 2,
+        isHeatOwed: true,
       },
     ],
     hoursBelowWarning: 2.5,
@@ -54,6 +56,7 @@ function pumphouse(
     zoneSlug: 'pumphouse',
     zoneName: 'Pumphouse',
     timezone: 'America/Regina',
+    nodeIds: ['patji'],
     warningBelowC: 3,
     isWarningFromRules: true,
     nights,
@@ -110,6 +113,23 @@ describe('buildNightRows', () => {
     );
     expect(tapeUnknown.concern).toBe(
       'Nothing was heard from Heat tape at the coldest moment, below its 2 °C on-setpoint.',
+    );
+  });
+
+  it('leaves out a heat source its own rule did not owe', () => {
+    const [row] = buildNightRows(
+      pumphouse([
+        freezeNight({
+          concern: 'heat-off-while-cold',
+          heating: [
+            { ...freezeNight().heating[0], state: 'off', isHeatOwed: false },
+            { ...freezeNight().heating[1], state: 'off' },
+          ],
+        }),
+      ]),
+    );
+    expect(row.concern).toBe(
+      'Heat tape was off at the coldest moment, below its 2 °C on-setpoint.',
     );
   });
 

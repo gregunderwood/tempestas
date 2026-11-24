@@ -1,12 +1,15 @@
 import {
   FREEZE_MARGIN_ALARM_C,
-  type ColdestReading,
   type FreezeConcern,
   type FreezeMarginNight,
   type HeatingAtColdest,
   type RelayState,
   type ZoneFreezeMargin,
 } from '@tempestas/domain';
+import {
+  buildZoneFormatter,
+  type InstantFormatter,
+} from '../../shared/zone-formatter';
 import { buildClockFormatter, type ClockFormatter } from '../zones/time-axis';
 import { formatHours } from './runtime-trend';
 
@@ -19,7 +22,6 @@ export interface NightRow {
   concern: string | null;
 }
 
-type DateFormatter = (instantMs: number) => string;
 type OwedHeatConcern = Exclude<FreezeConcern, 'cold-despite-heat'>;
 
 interface OwedHeatWording {
@@ -47,7 +49,7 @@ const NIGHT_DATE_FORMAT: Intl.DateTimeFormatOptions = {
 };
 
 export function buildNightRows(zone: ZoneFreezeMargin): NightRow[] {
-  const formatDate = buildDateFormatter(zone.timezone);
+  const formatDate = buildZoneFormatter(zone.timezone, NIGHT_DATE_FORMAT);
   const formatClock = buildClockFormatter(zone.timezone);
   return zone.nights.map((night) => ({
     from: night.from,
@@ -72,25 +74,18 @@ export function describeWarning(zone: ZoneFreezeMargin): string {
 }
 
 function describeConcern(night: FreezeMarginNight): string | null {
-  if (night.concern === null || night.coldest === null) return null;
+  if (night.concern === null) return null;
   if (night.concern === 'cold-despite-heat') return COLD_DESPITE_HEAT_WORDING;
   const wording = OWED_HEAT_WORDING[night.concern];
-  return listOwedHeat(night.heating, night.coldest)
-    .filter((device) => device.state === wording.state)
+  return night.heating
+    .filter((device) => device.isHeatOwed && device.state === wording.state)
     .map((device) => wording.describe(device))
     .join(' ');
 }
 
-function listOwedHeat(
-  heating: readonly HeatingAtColdest[],
-  coldest: ColdestReading,
-): HeatingAtColdest[] {
-  return heating.filter((device) => coldest.temperatureC < device.onBelowC);
-}
-
 function labelNight(
   night: FreezeMarginNight,
-  formatDate: DateFormatter,
+  formatDate: InstantFormatter,
 ): string {
   const date = formatDate(new Date(night.from).getTime());
   return night.inProgress ? `${date} (tonight)` : date;
@@ -110,21 +105,4 @@ function describeHeating(heating: readonly HeatingAtColdest[]): string {
   return heating
     .map((device) => `${device.deviceName} ${device.state}`)
     .join(', ');
-}
-
-// A bad zone name must not silently fall back to the browser's own zone.
-function buildDateFormatter(timezone: string): DateFormatter {
-  try {
-    const zoneFormat = new Intl.DateTimeFormat('en-GB', {
-      ...NIGHT_DATE_FORMAT,
-      timeZone: timezone,
-    });
-    return (instantMs) => zoneFormat.format(instantMs);
-  } catch {
-    const utcFormat = new Intl.DateTimeFormat('en-GB', {
-      ...NIGHT_DATE_FORMAT,
-      timeZone: 'UTC',
-    });
-    return (instantMs) => `${utcFormat.format(instantMs)} UTC`;
-  }
 }

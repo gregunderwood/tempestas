@@ -1,4 +1,9 @@
-import { resolveZoneDaylight } from './zone-daylight';
+import { ConfigService } from '@nestjs/config';
+import {
+  DEFAULT_TIMEZONE,
+  resolveDefaultTimezone,
+  resolveZoneDaylight,
+} from './zone-daylight';
 
 const FALLBACK_TIMEZONE = 'America/Toronto';
 const VALID_RULES = {
@@ -40,4 +45,17 @@ describe('resolveZoneDaylight', () => {
       });
     },
   );
+});
+
+describe('resolveDefaultTimezone', () => {
+  it('reads TEMPESTAS_TZ, or the default without it', () => {
+    expect(
+      resolveDefaultTimezone(
+        new ConfigService({ TEMPESTAS_TZ: 'America/Edmonton' }),
+      ),
+    ).toBe('America/Edmonton');
+    expect(resolveDefaultTimezone(new ConfigService({}))).toBe(
+      DEFAULT_TIMEZONE,
+    );
+  });
 });

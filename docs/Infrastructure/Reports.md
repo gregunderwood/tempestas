@@ -90,8 +90,8 @@ newest first, tonight included while it runs.
 - **A night is the zone's dark hours**, from its daylight window, the same periods as
   `/api/readings/stats/day-night`. A zone with no window, like the pumphouse, uses the deployment
   default of 06:30 to 18:30 in its own timezone.
-- **The coldest reading is the coldest probe in the zone**, any of the zone's nodes, because the
-  pumphouse heat runs on `min`. It is the exact reading, with its probe and time.
+- **The coldest reading is the coldest probe in the zone**, any of the zone's nodes. It is the exact
+  reading, with its probe and time.
 - **The heat at that moment comes from the same `relay-spans.ts`** as equipment runtime. A device
   with no span covering the moment is **unknown, never off**.
 - **The warning temperature is borrowed from the rules**: the highest heat on-setpoint among the
@@ -101,13 +101,16 @@ newest first, tonight included while it runs.
 - **Hours below** count the 10-minute stretches in which any of the zone's probes read below the
   warning, from the same `bucketTemperatures` as the zones page's history. Hours with readings sit
   beside them, so a gap in the readings is not read as hours above the warning.
-- **A concern flags a night**, judged against each device's own on-setpoint at the coldest moment:
-  - `heat-off-while-cold`: below a device's setpoint, and that device was known off.
-  - `heat-unknown-while-cold`: below a device's setpoint, and nothing was heard from it.
-  - `cold-despite-heat`: every device owed heat was on, and it still came within
+- **Heat is owed by the rule's own reading.** At the coldest moment each device is judged by its
+  rule's sensor source (`min`, `max`, `mean`, `node:` or `sensor:`), picked the way the climate
+  resolver picks it, against its own on-setpoint. Each probe counts at its lowest in that moment's
+  10-minute bucket, so a doubtful night leans towards a flag. A source with no probe reporting then
+  owes nothing. The wire carries the verdict as `isHeatOwed`.
+- **A concern flags a night**:
+  - `heat-off-while-cold`: heat was owed, and that device was known off.
+  - `heat-unknown-while-cold`: heat was owed, and nothing was heard from the device.
+  - `cold-despite-heat`: every device owed heat was on, and the coldest reading still came within
     `FREEZE_MARGIN_ALARM_C`, 1 °C, of freezing.
-- **A role pinned to one probe** is still judged against the coldest probe, so it can be flagged
-  for a cold corner its rule never reads. The pumphouse uses `min`, where the two agree.
 
 The CO2 generator doubles as the greenhouse's night heater, but it is not one of `HEATING_ROLES`, so
 the greenhouse is not in this report.

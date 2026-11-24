@@ -32,6 +32,8 @@ export interface HeatingAtColdest {
   state: RelayState;
   /** Its rule's heat on-setpoint, or the default warning temperature when the rule has none. */
   onBelowC: number;
+  /** Whether its rule's own sensor source read below `onBelowC` at the coldest moment. */
+  isHeatOwed: boolean;
 }
 
 export interface FreezeMarginNight {
@@ -53,6 +55,8 @@ export interface ZoneFreezeMargin {
   zoneSlug: string;
   zoneName: string;
   timezone: string;
+  /** The nodes whose probes the report reads. */
+  nodeIds: NodeId[];
   warningBelowC: number;
   /** False when no heating rule in the zone has a heat on-setpoint, so the default was used. */
   isWarningFromRules: boolean;
@@ -63,7 +67,6 @@ export interface ZoneFreezeMargin {
 export interface FreezeMarginReport {
   nights: number;
   generatedAt: string;
-  marginAlarmC: number;
   /** Only zones with a heater or heat tape. */
   zones: ZoneFreezeMargin[];
 }

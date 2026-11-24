@@ -366,7 +366,9 @@ earlier nights fold away. Below them, a card names the reports still to come —
 CO2 enrichment and node health — and loses a line as each lands.
 
 A report is fetched once and fetched again whenever a device switches or a node goes offline or
-comes back, so it follows the relays without polling. The server side, and the rules for unknown spans, midnight and offline nodes, are
+comes back, so it follows the relays without polling. Freeze margin is also fetched again when a
+heated zone's reading arrives at least one 10-minute bucket past what it last covered, because
+tonight's row drifts colder without any heat switching. The server side, and the rules for unknown spans, midnight and offline nodes, are
 in [Reports](Infrastructure/Reports.md).
 
 It replaced a Readings screen that listed the latest hundred rows, newest first. `/readings` still

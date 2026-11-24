@@ -26,7 +26,7 @@ import {
 import { resolveReadingWindow, type ReadingWindow } from './reading-window';
 import { rememberSensorsSince } from './sensor-memory';
 import {
-  DEFAULT_TIMEZONE,
+  resolveDefaultTimezone,
   resolveZoneDaylight,
   type Daylight,
 } from './zone-daylight';
@@ -182,8 +182,10 @@ export class ReadingsService {
   async bucketTemperatures(
     window: ReadingWindow,
     bucketMinutes: number,
+    nodeSlugs?: readonly string[],
   ): Promise<TemperatureBucketRow[]> {
-    const rows = await this.readings
+    if (nodeSlugs?.length === 0) return [];
+    const query = this.readings
       .createQueryBuilder('reading')
       .innerJoin('reading.node', 'node')
       .select('node.slug', 'nodeId')
@@ -197,7 +199,10 @@ export class ReadingsService {
       .addSelect('MAX(reading.temperature)', 'highestC')
       .addSelect('COUNT(*)', 'sampleCount')
       .where('reading.createdAt >= :from', { from: window.from })
-      .andWhere('reading.createdAt <= :to', { to: window.to })
+      .andWhere('reading.createdAt <= :to', { to: window.to });
+    if (nodeSlugs)
+      query.andWhere('node.slug IN (:...nodeSlugs)', { nodeSlugs });
+    const rows = await query
       .setParameter('bucketMinutes', bucketMinutes)
       .groupBy('node.slug')
       .addGroupBy('reading.sensorId')
@@ -247,14 +252,18 @@ export class ReadingsService {
   private async resolveDaylightFor(
     nodeSlug: string | undefined,
   ): Promise<Daylight> {
-    if (!nodeSlug) return resolveZoneDaylight(null, this.defaultTimezone());
+    if (!nodeSlug)
+      return resolveZoneDaylight(null, resolveDefaultTimezone(this.config));
     const node = await this.nodes.findOne({
       where: { slug: nodeSlug },
       relations: { zone: true },
     });
     const rulesConfig = (node?.zone as ZoneEntity | null | undefined)
       ?.rulesConfig;
-    return resolveZoneDaylight(rulesConfig, this.defaultTimezone());
+    return resolveZoneDaylight(
+      rulesConfig,
+      resolveDefaultTimezone(this.config),
+    );
   }
 
   private async findExtremes(
@@ -312,17 +321,12 @@ export class ReadingsService {
       .andWhere('reading.createdAt <= :to', { to: window.to });
   }
 
-  // Never the host locale: that was the old DST bug.
-  private defaultTimezone(): string {
-    return this.config.get<string>('TEMPESTAS_TZ', DEFAULT_TIMEZONE);
-  }
-
   private resolveWindow(query: ReadingsQuery): ReadingWindow {
     try {
       return resolveReadingWindow(
         query,
         this.clock.now(),
-        this.defaultTimezone(),
+        resolveDefaultTimezone(this.config),
       );
     } catch (error: unknown) {
       throw new BadRequestException({

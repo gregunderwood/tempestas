@@ -1,9 +1,11 @@
+import type { ConfigService } from '@nestjs/config';
 import type { DayNightStats } from '@tempestas/domain';
 import { parseZoneRulesConfig } from '../rules/rules-config';
 
 export type Daylight = DayNightStats['daylight'];
 
 export const DEFAULT_TIMEZONE = 'America/Vancouver';
+const DEFAULT_TIMEZONE_SETTING = 'TEMPESTAS_TZ';
 const DEFAULT_DAYLIGHT_START = '06:30';
 const DEFAULT_DAYLIGHT_END = '18:30';
 
@@ -23,4 +25,9 @@ export function resolveZoneDaylight(
   const { daylight, timezone } = parsed.config;
   if (!daylight) return { ...fallback, timezone };
   return { startTime: daylight.start, endTime: daylight.end, timezone };
+}
+
+// Never the host locale: that was the old DST bug.
+export function resolveDefaultTimezone(config: ConfigService): string {
+  return config.get<string>(DEFAULT_TIMEZONE_SETTING, DEFAULT_TIMEZONE);
 }

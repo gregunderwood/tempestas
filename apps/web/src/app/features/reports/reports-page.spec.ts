@@ -6,6 +6,7 @@ import {
   type DeviceRuntime,
   type EquipmentRuntimeReport,
   type FreezeMarginReport,
+  type Reading,
   type ZoneFreezeMargin,
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
@@ -84,6 +85,7 @@ function pumphouseFreezeMargin(): ZoneFreezeMargin {
     zoneSlug: 'pumphouse',
     zoneName: 'Pumphouse',
     timezone: 'America/Edmonton',
+    nodeIds: ['patji'],
     warningBelowC: 3,
     isWarningFromRules: true,
     nights: [
@@ -104,6 +106,7 @@ function pumphouseFreezeMargin(): ZoneFreezeMargin {
             role: DeviceRole.Heater,
             state: 'off',
             onBelowC: 3,
+            isHeatOwed: true,
           },
         ],
         hoursBelowWarning: 3,
@@ -118,8 +121,19 @@ function freezeMarginReport(zones: ZoneFreezeMargin[]): FreezeMarginReport {
   return {
     nights: 30,
     generatedAt: '2026-09-09T19:00:00Z',
-    marginAlarmC: 1,
     zones,
+  };
+}
+
+function latestReading(nodeId: string): Reading {
+  return {
+    id: `${nodeId}-reading`,
+    nodeId,
+    sensorId: 'pipe',
+    temperature: 1,
+    humidity: null,
+    co2: null,
+    createdAt: '2026-09-09T19:00:00Z',
   };
 }
 
@@ -130,6 +144,7 @@ interface FreezeMarginAnswers {
 interface RenderedReportsPage {
   page: HTMLElement;
   requestCount(): number;
+  freezeMarginRequestCount(): number;
   render(): void;
   realtime: ReturnType<typeof fakeRealtime>;
 }
@@ -139,6 +154,7 @@ function renderReportsPage(
   { freezeMargin = [] }: FreezeMarginAnswers = {},
 ): RenderedReportsPage {
   let requests = 0;
+  let freezeMarginRequests = 0;
   const realtime = fakeRealtime();
   TestBed.configureTestingModule({
     imports: [ReportsPage],
@@ -151,7 +167,10 @@ function renderReportsPage(
             requests += 1;
             return answers.shift() ?? NEVER;
           },
-          fetchFreezeMargin: () => freezeMargin.shift() ?? NEVER,
+          fetchFreezeMargin: () => {
+            freezeMarginRequests += 1;
+            return freezeMargin.shift() ?? NEVER;
+          },
         },
       },
       { provide: RealtimeService, useValue: realtime },
@@ -162,6 +181,7 @@ function renderReportsPage(
   return {
     page: fixture.nativeElement as HTMLElement,
     requestCount: () => requests,
+    freezeMarginRequestCount: () => freezeMarginRequests,
     render: () => {
       TestBed.tick();
       fixture.detectChanges();
@@ -294,6 +314,34 @@ describe('ReportsPage', () => {
       expect(
         page.querySelectorAll('details temp-freeze-night-table tbody th'),
       ).toHaveLength(3);
+    });
+
+    it("fetches again once a heated zone's readings are a bucket past the report", () => {
+      const rendered = renderReportsPage([NEVER], {
+        freezeMargin: [
+          of(freezeMarginReport([pumphouseFreezeMargin()])),
+          of(freezeMarginReport([pumphouseFreezeMargin()])),
+        ],
+      });
+      const pushReading = (nodeId: string, createdAt: string): void => {
+        rendered.realtime.readings.update((readings) => ({
+          ...readings,
+          [nodeId]: { ...latestReading(nodeId), createdAt },
+        }));
+        rendered.render();
+      };
+      rendered.render();
+      expect(rendered.freezeMarginRequestCount()).toBe(1);
+
+      pushReading('elantris', '2026-09-09T19:30:00Z');
+      pushReading('patji', '2026-09-09T19:05:00Z');
+      expect(rendered.freezeMarginRequestCount()).toBe(1);
+
+      pushReading('patji', '2026-09-09T19:11:00Z');
+      expect(rendered.freezeMarginRequestCount()).toBe(2);
+
+      pushReading('patji', '2026-09-09T19:15:00Z');
+      expect(rendered.freezeMarginRequestCount()).toBe(2);
     });
 
     it('says so when no zone has heating', () => {

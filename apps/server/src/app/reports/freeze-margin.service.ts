@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
-  FREEZE_MARGIN_ALARM_C,
   FREEZE_MARGIN_BUCKET_MINUTES,
   FREEZE_MARGIN_DEFAULT_NIGHTS,
   type DeviceRole,
@@ -25,7 +24,7 @@ import {
   type TemperatureBucketRow,
 } from '../readings/readings.service';
 import {
-  DEFAULT_TIMEZONE,
+  resolveDefaultTimezone,
   resolveZoneDaylight,
 } from '../readings/zone-daylight';
 import { ZoneEntity } from '../zones/models';
@@ -37,16 +36,18 @@ import {
 } from './freeze-margin';
 import {
   findHeatOnBelowByRole,
+  findSensorSourceByRole,
   HEATING_ROLES,
   type HeatOnBelowByRole,
+  type SensorSourceByRole,
 } from './heating-setpoints';
 import { listRecentNights, type NightWindow } from './night-windows';
 
 interface HeatedZone {
   zone: FreezeMarginZone;
   heatOnBelowByRole: HeatOnBelowByRole;
+  sensorSourceByRole: SensorSourceByRole;
   devices: HeatingDevice[];
-  nodeSlugs: string[];
   nights: NightWindow[];
 }
 
@@ -77,15 +78,12 @@ export class FreezeMarginService {
     const now = this.clock.now();
     const nodes = await this.nodes.findAll();
     const heatedZones = await this.findHeatedZones(nodes, now, nightCount);
-    const report = {
-      nights: nightCount,
-      generatedAt: now.toISOString(),
-      marginAlarmC: FREEZE_MARGIN_ALARM_C,
-    };
+    const report = { nights: nightCount, generatedAt: now.toISOString() };
     if (heatedZones.length === 0) return { ...report, zones: [] };
 
     const history = await this.findHistorySince(
       findEarliestNightStart(heatedZones, now),
+      heatedZones.flatMap((heatedZone) => heatedZone.zone.nodeIds),
       nodes,
       now,
     );
@@ -128,7 +126,7 @@ export class FreezeMarginService {
   ): HeatedZone {
     const daylight = resolveZoneDaylight(
       zone.rulesConfig,
-      this.defaultTimezone(),
+      resolveDefaultTimezone(this.config),
     );
     return {
       zone: {
@@ -136,12 +134,13 @@ export class FreezeMarginService {
         slug: zone.slug,
         displayName: zone.displayName,
         timezone: daylight.timezone,
+        nodeIds: nodes
+          .filter((node) => node.zoneId === zone.id)
+          .map((node) => node.slug),
       },
       heatOnBelowByRole: findHeatOnBelowByRole(zone.rulesConfig),
+      sensorSourceByRole: findSensorSourceByRole(zone.rulesConfig),
       devices,
-      nodeSlugs: nodes
-        .filter((node) => node.zoneId === zone.id)
-        .map((node) => node.slug),
       nights: listRecentNights(now, daylight, nightCount),
     };
   }
@@ -158,6 +157,7 @@ export class FreezeMarginService {
 
   private async findHistorySince(
     since: Date,
+    heatedNodeSlugs: readonly string[],
     nodes: readonly Node[],
     now: Date,
   ): Promise<ZoneHistory> {
@@ -166,6 +166,7 @@ export class FreezeMarginService {
       this.readings.bucketTemperatures(
         { from: since, to: now },
         FREEZE_MARGIN_BUCKET_MINUTES,
+        heatedNodeSlugs,
       ),
     ]);
     return {
@@ -185,10 +186,11 @@ export class FreezeMarginService {
     return summariseZoneFreezeMargin({
       zone: heatedZone.zone,
       heatOnBelowByRole: heatedZone.heatOnBelowByRole,
+      sensorSourceByRole: heatedZone.sensorSourceByRole,
       devices: heatedZone.devices,
       nights: await this.findColdestEachNight(heatedZone),
       temperatureBuckets: history.temperatureBuckets.filter((bucket) =>
-        heatedZone.nodeSlugs.includes(bucket.nodeId),
+        heatedZone.zone.nodeIds.includes(bucket.nodeId),
       ),
       bucketMinutes: FREEZE_MARGIN_BUCKET_MINUTES,
       spans: history.spans,
@@ -203,15 +205,10 @@ export class FreezeMarginService {
         ...night,
         coldest: await this.readings.findColdestReading(
           night,
-          heatedZone.nodeSlugs,
+          heatedZone.zone.nodeIds,
         ),
       })),
     );
-  }
-
-  // Never the host locale: that was the old DST bug.
-  private defaultTimezone(): string {
-    return this.config.get<string>('TEMPESTAS_TZ', DEFAULT_TIMEZONE);
   }
 }
 

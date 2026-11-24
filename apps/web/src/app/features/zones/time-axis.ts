@@ -1,4 +1,8 @@
 import { MILLISECONDS_PER_MINUTE } from '../../shared/time';
+import {
+  buildZoneFormatter,
+  type InstantFormatter,
+} from '../../shared/zone-formatter';
 
 const TIME_LABEL_EVERY_HOURS = 6;
 const TIME_LABEL_STEP_MILLISECONDS = 30 * MILLISECONDS_PER_MINUTE;
@@ -21,33 +25,10 @@ export interface PositionedLabel {
   atPercent: number;
 }
 
-export type ClockFormatter = (instantMs: number) => string;
+export type ClockFormatter = InstantFormatter;
 
 export function buildClockFormatter(timezone: string): ClockFormatter {
-  const zoneFormat = createZoneHourMinuteFormat(timezone);
-  if (zoneFormat) return (instantMs) => zoneFormat.format(instantMs);
-  const utcFormat = createUtcHourMinuteFormat();
-  return (instantMs) => `${utcFormat.format(instantMs)} UTC`;
-}
-
-function createZoneHourMinuteFormat(
-  timezone: string,
-): Intl.DateTimeFormat | null {
-  try {
-    return new Intl.DateTimeFormat('en-GB', {
-      ...HOUR_MINUTE_FORMAT,
-      timeZone: timezone,
-    });
-  } catch {
-    return null;
-  }
-}
-
-function createUtcHourMinuteFormat(): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat('en-GB', {
-    ...HOUR_MINUTE_FORMAT,
-    timeZone: 'UTC',
-  });
+  return buildZoneFormatter(timezone, HOUR_MINUTE_FORMAT);
 }
 
 // Stepping by half-hours so a zone offset by half an hour still lands on whole local hours.

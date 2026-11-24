@@ -78,8 +78,13 @@ function summarise(
       slug: 'pumphouse',
       displayName: 'Pumphouse',
       timezone: 'America/Edmonton',
+      nodeIds: ['patji'],
     },
     heatOnBelowByRole: { [DeviceRole.Heater]: 3, [DeviceRole.HeatTape]: 2 },
+    sensorSourceByRole: {
+      [DeviceRole.Heater]: 'min',
+      [DeviceRole.HeatTape]: 'min',
+    },
     devices: [HEATER, HEAT_TAPE],
     nights: [night(coldestReading(1.5))],
     temperatureBuckets: [],
@@ -119,6 +124,7 @@ describe('summariseZoneFreezeMargin', () => {
         role: DeviceRole.Heater,
         state: 'on',
         onBelowC: 3,
+        isHeatOwed: true,
       },
       {
         deviceId: HEAT_TAPE.id,
@@ -126,6 +132,7 @@ describe('summariseZoneFreezeMargin', () => {
         role: DeviceRole.HeatTape,
         state: 'on',
         onBelowC: 2,
+        isHeatOwed: true,
       },
     ]);
     expect(onlyNight.concern).toBeNull();
@@ -165,6 +172,47 @@ describe('summariseZoneFreezeMargin', () => {
         spanAcrossNight(HEAT_TAPE.id, 'off'),
       ],
     }).nights;
+    expect(onlyNight.concern).toBeNull();
+  });
+
+  it("judges heat by its rule's own sensor source, not the coldest probe", () => {
+    const [onlyNight] = summarise({
+      devices: [HEATER],
+      sensorSourceByRole: { [DeviceRole.Heater]: 'mean' },
+      nights: [night(coldestReading(1.5))],
+      temperatureBuckets: [
+        bucket('2026-11-23T12:00:00Z', 'pipe', 1.5),
+        bucket('2026-11-23T12:00:00Z', 'air', 5.5),
+      ],
+      spans: [spanAcrossNight(HEATER.id, 'off')],
+    }).nights;
+    expect(onlyNight.heating[0].isHeatOwed).toBe(false);
+    expect(onlyNight.concern).toBeNull();
+  });
+
+  it("flags heat whose rule's own sensor source was below its on-setpoint", () => {
+    const [onlyNight] = summarise({
+      devices: [HEATER],
+      sensorSourceByRole: { [DeviceRole.Heater]: 'mean' },
+      nights: [night(coldestReading(1.5))],
+      temperatureBuckets: [
+        bucket('2026-11-23T12:00:00Z', 'pipe', 1.5),
+        bucket('2026-11-23T12:00:00Z', 'air', 2.5),
+        bucket('2026-11-23T11:50:00Z', 'air', 9),
+      ],
+      spans: [spanAcrossNight(HEATER.id, 'off')],
+    }).nights;
+    expect(onlyNight.heating[0].isHeatOwed).toBe(true);
+    expect(onlyNight.concern).toBe('heat-off-while-cold');
+  });
+
+  it('owes no heat when the rule follows a probe that was silent at the coldest moment', () => {
+    const [onlyNight] = summarise({
+      devices: [HEATER],
+      sensorSourceByRole: { [DeviceRole.Heater]: 'node:braize' },
+      spans: [spanAcrossNight(HEATER.id, 'off')],
+    }).nights;
+    expect(onlyNight.heating[0].isHeatOwed).toBe(false);
     expect(onlyNight.concern).toBeNull();
   });
 

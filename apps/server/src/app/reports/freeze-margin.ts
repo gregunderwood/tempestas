@@ -16,9 +16,15 @@ import {
 import { findStateAt, type Span } from '../devices/relay-spans';
 import type { TemperatureBucketRow } from '../readings/readings.service';
 import {
+  pickSourceTemperature,
+  type ProbeTemperature,
+} from '../rules/climate-resolver';
+import {
   findOnBelowFor,
+  findSensorSourceFor,
   resolveFreezeWarning,
   type HeatOnBelowByRole,
+  type SensorSourceByRole,
 } from './heating-setpoints';
 import type { NightWindow } from './night-windows';
 
@@ -27,6 +33,7 @@ export interface FreezeMarginZone {
   slug: string;
   displayName: string;
   timezone: string;
+  nodeIds: string[];
 }
 
 export interface HeatingDevice {
@@ -43,6 +50,7 @@ export interface NightWithColdest extends NightWindow {
 export interface ZoneFreezeMarginInput {
   zone: FreezeMarginZone;
   heatOnBelowByRole: HeatOnBelowByRole;
+  sensorSourceByRole: SensorSourceByRole;
   /** This zone's heating devices only. */
   devices: readonly HeatingDevice[];
   /** Newest first. */
@@ -71,6 +79,7 @@ export function summariseZoneFreezeMargin(
     zoneSlug: input.zone.slug,
     zoneName: input.zone.displayName,
     timezone: input.zone.timezone,
+    nodeIds: input.zone.nodeIds,
     warningBelowC: warning.belowC,
     isWarningFromRules: warning.isFromRules,
     nights: input.nights.map((night) =>
@@ -107,7 +116,7 @@ function summariseNight(
   };
 }
 
-// The zone is as cold as its coldest probe, which is the probe the pumphouse heat runs on.
+// The zone is as cold as its coldest probe, whichever probe a rule follows.
 function findZoneLowestByBucket(
   buckets: readonly TemperatureBucketRow[],
 ): ZoneBucket[] {
@@ -125,16 +134,50 @@ function describeHeatingAt(
   input: ZoneFreezeMarginInput,
 ): HeatingAtColdest[] {
   const coldestMs = new Date(coldest.createdAt).getTime();
-  return input.devices.map((device) => ({
-    deviceId: device.id,
-    deviceName: device.name,
-    role: device.role,
-    state: findStateAt(
-      input.spans.filter((span) => span.deviceId === device.id),
-      coldestMs,
-    ),
-    onBelowC: findOnBelowFor(device.role, input.heatOnBelowByRole),
-  }));
+  const probes = findProbesAround(coldest, input);
+  return input.devices.map((device) => {
+    const onBelowC = findOnBelowFor(device.role, input.heatOnBelowByRole);
+    const ruleTemperatureC = pickSourceTemperature(
+      probes,
+      findSensorSourceFor(device.role, input.sensorSourceByRole),
+    );
+    return {
+      deviceId: device.id,
+      deviceName: device.name,
+      role: device.role,
+      state: findStateAt(
+        input.spans.filter((span) => span.deviceId === device.id),
+        coldestMs,
+      ),
+      onBelowC,
+      isHeatOwed: ruleTemperatureC !== null && ruleTemperatureC < onBelowC,
+    };
+  });
+}
+
+// Each probe at its lowest in the coldest moment's bucket, so a doubtful night leans towards a flag.
+function findProbesAround(
+  coldest: Reading,
+  input: ZoneFreezeMarginInput,
+): ProbeTemperature[] {
+  const bucketMs = input.bucketMinutes * MILLISECONDS_PER_MINUTE;
+  const coldestMs = new Date(coldest.createdAt).getTime();
+  const bucketStartMs = Math.floor(coldestMs / bucketMs) * bucketMs;
+  const probes = input.temperatureBuckets
+    .filter((bucket) => bucket.at.getTime() === bucketStartMs)
+    .map((bucket) => ({
+      nodeId: bucket.nodeId,
+      sensorId: bucket.sensorId,
+      temperatureC: bucket.lowestC,
+    }));
+  if (probes.length > 0) return probes;
+  return [
+    {
+      nodeId: coldest.nodeId,
+      sensorId: coldest.sensorId,
+      temperatureC: coldest.temperature,
+    },
+  ];
 }
 
 // Off beats unknown beats on: the worse explanation is the one to look at first.
@@ -142,14 +185,14 @@ function findConcern(
   coldestC: number,
   heating: readonly HeatingAtColdest[],
 ): FreezeConcern | null {
-  const calledFor = heating.filter((device) => coldestC < device.onBelowC);
-  if (calledFor.some((device) => device.state === 'off')) {
+  const owed = heating.filter((device) => device.isHeatOwed);
+  if (owed.some((device) => device.state === 'off')) {
     return 'heat-off-while-cold';
   }
-  if (calledFor.some((device) => device.state === 'unknown')) {
+  if (owed.some((device) => device.state === 'unknown')) {
     return 'heat-unknown-while-cold';
   }
-  if (calledFor.length > 0 && isNearFreezing(coldestC)) {
+  if (owed.length > 0 && isNearFreezing(coldestC)) {
     return 'cold-despite-heat';
   }
   return null;

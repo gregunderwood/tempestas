@@ -15,6 +15,7 @@ import { RealtimeService } from '../../core/realtime.service';
 import { openBrowserStorage } from '../../shared/arrange/card-order';
 import { EquipmentRuntimeCard } from './equipment-runtime-card';
 import { FreezeMarginCard } from './freeze-margin-card';
+import { findReadingDueARefresh } from './freeze-margin-refresh';
 import {
   labelPropaneUnit,
   PROPANE_UNITS,
@@ -170,6 +171,7 @@ export class ReportsPage {
 
   constructor() {
     this.refreshWhenADeviceSwitchesOrANodeComesAndGoes();
+    this.refreshFreezeMarginAsHeatedZonesReport();
   }
 
   protected choosePropaneUnit(unit: PropaneUnit): void {
@@ -189,6 +191,23 @@ export class ReportsPage {
         this.runtimeSource.refresh();
         this.freezeMarginSource.refresh();
       });
+    });
+  }
+
+  // Tonight's row drifts colder without any heat switching, so readings refresh it too.
+  private refreshFreezeMarginAsHeatedZonesReport(): void {
+    let refreshedForReadingAtMs = 0;
+    effect(() => {
+      const report = this.freezeMarginSource.latest()?.payload;
+      if (!report) return;
+      const dueReadingMs = findReadingDueARefresh(
+        report,
+        Object.values(this.realtime.readings()),
+        refreshedForReadingAtMs,
+      );
+      if (dueReadingMs === null) return;
+      refreshedForReadingAtMs = dueReadingMs;
+      untracked(() => this.freezeMarginSource.refresh());
     });
   }
 }
