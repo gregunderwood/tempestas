@@ -39,6 +39,10 @@ npx nx test server                     # one project
 npx nx test server -- device-state     # one file, by substring
 ```
 
+`tools/` is an Nx project too, where it sits: `tools:test` runs the `node:test` specs in
+`tools/lib/`, and `tools:lint` runs eslint over its `.mjs` and `.cjs` scripts. The shell and Python
+scripts there are not checked.
+
 `migration-round-trip` needs Docker: it runs every migration against a throwaway Postgres. Its
 config is [../apps/server/vitest.round-trip.config.ts](../apps/server/vitest.round-trip.config.ts),
 named so the workspace does not pick it up as part of `test`.
@@ -135,8 +139,9 @@ node tools/seed-runtime-history.mjs tempestas   # the everyday dev database
 - **Rerunnable.** It replaces each device pin's rows from local midnight 30 days back to now, ends
   on the state the pin is in now so the server carries on from it, and moves each device's
   `created_at` back to the start of that window, so the report counts all 30 days.
-- **Its specs** run with `node --test tools/lib/*.test.mjs`. They are not in the gate: `tools/` is
-  not an Nx project.
+- **Its specs** run in the gate as `tools:test` (`npx nx test tools`, which runs
+  `node --test tools/lib/*.test.mjs`). They need no Docker and no database: the refusal specs stop
+  before any `psql`, and a missing `docker` only makes `tempestas` refused too.
 
 A screenshot cannot show interaction, and the fake driver always leads. For a state reached by
 clicking (an open menu, a drag) or one the fake driver cannot produce (a follower), take the
