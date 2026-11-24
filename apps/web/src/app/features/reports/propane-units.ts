@@ -9,7 +9,7 @@ export const DEFAULT_PROPANE_UNIT: PropaneUnit = 'litres';
 
 export const PROPANE_UNIT_KEY = 'tempestas.propane-unit.reports';
 
-// Liquid propane at 15 °C weighs about 0.51 kg per litre.
+// NIST Chemistry WebBook gives liquid propane at 15 °C about 507 kg/m³, so about 0.51 kg per litre.
 const PROPANE_KILOGRAMS_PER_LITRE = 0.51;
 const POUNDS_PER_KILOGRAM = 2.20462;
 export const PROPANE_POUNDS_PER_LITRE =

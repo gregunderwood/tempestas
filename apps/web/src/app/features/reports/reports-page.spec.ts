@@ -256,6 +256,36 @@ describe('ReportsPage', () => {
       expect(localStorage.getItem(PROPANE_UNIT_KEY)).toBe('pounds');
     });
 
+    it('converts only the rated card when a rated and an unrated device share the page', () => {
+      const unratedHeatTape = burnerRuntime({
+        deviceId: 'heat-tape',
+        deviceName: 'Heat tape',
+      });
+      const rendered = renderReportsPage([
+        of(report([ratedBurnerRuntime(), unratedHeatTape])),
+      ]);
+      const [ratedCard, unratedCard] = Array.from(
+        rendered.page.querySelectorAll<HTMLElement>(
+          'temp-equipment-runtime-card',
+        ),
+      );
+      const unratedCardText = unratedCard.textContent;
+      expect(propaneUnitToggles(rendered.page)).toHaveLength(2);
+      expect(unratedCardText).not.toContain('Propane');
+      expect(unratedCard.querySelector('.runtime-propane')).toBeNull();
+      expect(unratedCard.querySelector('.runtime-propane-note')).toBeNull();
+
+      const pounds = propaneUnitToggles(rendered.page).find((toggle) =>
+        toggle.textContent?.includes('Pounds'),
+      );
+      pounds?.click();
+      rendered.render();
+      expect(
+        ratedCard.querySelector('.runtime-propane')?.textContent?.trim(),
+      ).toBe('7.5 lb');
+      expect(unratedCard.textContent).toBe(unratedCardText);
+    });
+
     it('opens on the unit chosen last time', () => {
       localStorage.setItem(PROPANE_UNIT_KEY, 'pounds');
       const { page } = renderReportsPage([of(report([ratedBurnerRuntime()]))]);

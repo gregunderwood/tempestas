@@ -64,9 +64,9 @@ interface DayDurations {
 const MILLISECONDS_PER_MINUTE = 60 * MILLISECONDS_PER_SECOND;
 const MILLISECONDS_PER_HOUR = MINUTES_PER_HOUR * MILLISECONDS_PER_MINUTE;
 const HOUR_DECIMALS = 2;
+const MINUTE_DECIMALS = 1;
 // Natural Resources Canada gives propane 25.31 MJ/L, about 23,990 BTU per litre.
 export const PROPANE_BTU_PER_LITRE = 24_000;
-const MINUTE_DECIMALS = 1;
 
 export function summariseEquipmentRuntime(
   input: EquipmentRuntimeInput,
