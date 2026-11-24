@@ -201,7 +201,8 @@ actually in effect with `systemctl show tempestas-agent -p StartLimitIntervalUSe
   it ever runs. The end-to-end run caught exactly that.
 - **`OnFailure=tempestas-agent-rollback.service`.** It fires on every failed run, not only once the
   start limit gives up, so the script decides. It switches back only when the release that failed
-  is an update still waiting on its gate. Otherwise it exits 1 and changes nothing, and as an
+  is an update still waiting on its gate, and only on its third failed run if it had said `hello`.
+  Otherwise it exits 1 and changes nothing, and as an
   `ExecCondition=` that skips the unit rather than marking it failed after every ordinary crash.
   A rollback that itself fails exits 255, which does mark the unit failed.
 - **No ordering against the I²C bus.** systemd only creates `.device` units for devices udev tags
@@ -249,7 +250,8 @@ An accepted update runs on a worker thread, so samples and heartbeats carry on m
 
 1. **`downloading`.** The node fetches the manifest and checks it against the command's
    `manifestSha256`. Then it downloads every listed file into `releases/.<version>`, a dot-name a
-   crash leaves unfinished rather than half-installed.
+   crash leaves unfinished rather than half-installed. Each fetch has 120 s in all, so a server
+   that trickles bytes cannot hold the update open forever.
 2. **`verifying`.** Every file's sha256 must match the manifest, and its `uv.lock` must match the
    running release's (see [the venv](#the-venv)).
 3. **`installing`.** It renames the release into place, writes `pending.json`, then switches
@@ -280,16 +282,23 @@ It shows as offline on the Nodes page, and `tools/deploy-agent-linux.sh` replace
   and a hand deploy all take `update-state/switch.lock` around every read-then-switch of
   `current`, so none can undo another.
 
-An outcome stays in `outcome.json` until the broker has acknowledged it, and every connect sends it
-again until then, so a dropped connection or a crash cannot lose it. Until then the node refuses a
-new update, since installing one clears the record. Only the main loop acts on
-the gate; the MQTT callbacks just note the `hello` and the heartbeat, so a heartbeat arriving at
-the deadline cannot both pass and fail it.
-
 - **Cannot start at all**: the release never gets to judge itself. The unit fails,
   `tempestas-agent-rollback.service` runs the root-owned script, which switches back and starts the
   agent again, and the previous release reports `rolled-back`: "<v> did not start, so <prev> runs
   again".
+- **Crashes after its `hello`**: the agent records the `hello` in `update-state/started.json`, and
+  the script forgives such a release two failed runs, counted in `failed-runs.json`, before it
+  switches back on the third. A reboot inside the gate, where the agent fails fast until I²C is
+  ready, does not roll back a release that works. A release that never said `hello` is switched back
+  on its first failure.
+
+An outcome stays in `outcome.json` until the broker has acknowledged it while the server was
+online. It is sent again on every connect and whenever the server comes back, so neither a dropped
+connection, a server deploy nor a crash can lose it. Until then the node refuses a new update, since
+installing one clears the record. It also refuses one while it cannot read the last update's state
+at all. Only the main loop acts on the gate; the MQTT callbacks just note the `hello`, the
+heartbeat and the server's comings and goings, so a heartbeat arriving at the deadline cannot both
+pass and fail it.
 
 The script lives in `/usr/local/lib/tempestas`, outside every release, so an update can never
 change the code that rescues it from itself. It imports nothing from the agent, for the same

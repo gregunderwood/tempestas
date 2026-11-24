@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass
 
 from . import contract
-from .release_layout import PendingUpdate, ReleaseLayout, UpdateOutcome
+from .release_layout import PendingUpdate, ReleaseLayout, StartedUpdate, UpdateOutcome
 
 GATE_SECONDS = 120
 
@@ -26,6 +26,7 @@ class HealthGate:
         self.pending = pending
         self.has_said_hello = False
         self.has_heard_heartbeat = False
+        self.is_start_recorded = False
         self._watched_seconds = 0.0
         self._watching_since: float | None = None
         self._clock_lock = threading.Lock()
@@ -115,8 +116,13 @@ def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> None:
     )
 
 
+def record_start(layout: ReleaseLayout, gate: HealthGate) -> None:
+    layout.write_started(StartedUpdate(gate.pending.command_id))
+
+
 def record_outcome(layout: ReleaseLayout, outcome: UpdateOutcome) -> UpdateOutcome:
     # The outcome before the pending record goes, so a crash between them still reports.
     layout.write_outcome(outcome)
     layout.clear_pending()
+    layout.clear_start_records()
     return outcome

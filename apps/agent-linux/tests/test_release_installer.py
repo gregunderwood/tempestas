@@ -17,7 +17,13 @@ from release_fixtures import (
     make_layout,
 )
 from tempestas_agent import contract
-from tempestas_agent.release_installer import ReleaseInstaller, UpdateFailed, build_file_url
+from tempestas_agent.release_installer import (
+    FETCH_DEADLINE_S,
+    ReleaseInstaller,
+    UpdateFailed,
+    build_file_url,
+    read_within,
+)
 from tempestas_agent.release_layout import PendingUpdate
 
 
@@ -209,3 +215,20 @@ def test_a_pending_record_that_cannot_be_written_leaves_nothing_behind(tmp_path,
         install(layout, FakeServer())
 
     assert_unchanged(layout)
+
+
+class TricklingResponse:
+    def __init__(self, clock):
+        self.clock = clock
+
+    def read(self, _size):
+        self.clock.append(self.clock[-1] + 30)
+        return b"x"
+
+
+def test_gives_up_on_a_server_that_trickles_bytes_past_the_deadline():
+    clock = [0.0]
+    response = TricklingResponse(clock)
+
+    with pytest.raises(UpdateFailed, match="took longer"):
+        read_within(response, "http://elantris/slow", FETCH_DEADLINE_S, lambda: clock[-1])

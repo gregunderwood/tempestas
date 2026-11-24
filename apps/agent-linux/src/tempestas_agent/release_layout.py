@@ -18,6 +18,9 @@ CURRENT_LINK = "current"
 STATE_DIRECTORY = "update-state"
 PENDING_FILE = "pending.json"
 OUTCOME_FILE = "outcome.json"
+# Read by the rollback script, which forgives a release that said hello a few failed runs.
+STARTED_FILE = "started.json"
+FAILED_RUNS_FILE = "failed-runs.json"
 SWITCH_LOCK_FILE = "switch.lock"
 # A release still arriving or being replaced: never run, and never counted as one to keep.
 UNFINISHED_PREFIX = "."
@@ -31,6 +34,11 @@ class PendingUpdate:
     command_id: str
     version: str
     previous_release: str
+
+
+@dataclass
+class StartedUpdate:
+    command_id: str
 
 
 @dataclass
@@ -88,6 +96,13 @@ class ReleaseLayout:
 
     def clear_pending(self) -> None:
         (self.state / PENDING_FILE).unlink(missing_ok=True)
+
+    def write_started(self, started: StartedUpdate) -> None:
+        write_record(self.state / STARTED_FILE, started)
+
+    def clear_start_records(self) -> None:
+        (self.state / STARTED_FILE).unlink(missing_ok=True)
+        (self.state / FAILED_RUNS_FILE).unlink(missing_ok=True)
 
     def read_outcome(self) -> UpdateOutcome | None:
         return read_record(self.state / OUTCOME_FILE, UpdateOutcome)

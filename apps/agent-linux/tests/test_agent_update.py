@@ -12,7 +12,11 @@ from release_fixtures import (
     make_layout,
 )
 from tempestas_agent import contract
-from tempestas_agent.agent import LAST_OUTCOME_UNDELIVERED, NOT_INSTALLED_FROM_A_RELEASE
+from tempestas_agent.agent import (
+    LAST_OUTCOME_UNDELIVERED,
+    LAST_UPDATE_UNSETTLED,
+    NOT_INSTALLED_FROM_A_RELEASE,
+)
 from tempestas_agent.release_installer import ReleaseInstaller, UpdateFailed
 from tempestas_agent.release_layout import PendingUpdate, UpdateOutcome
 from tempestas_agent.update_gate import GATE_SECONDS
@@ -56,6 +60,7 @@ def make_updating_agent(monkeypatch, tmp_path, installer=None):
     agent, clock = make_agent()
     agent.layout = make_layout(tmp_path)
     agent.installer = installer or InlineInstaller()
+    agent.settle_update()
     agent.on_heartbeat(HEARTBEAT)
     return agent, clock
 
@@ -191,6 +196,7 @@ def test_a_heartbeat_noted_before_the_deadline_passes_even_if_tended_after_it(tm
 
 
 SERVER_OFFLINE = json.dumps({"state": "offline"}).encode()
+SERVER_ONLINE_AGAIN = json.dumps({"state": "online"}).encode()
 
 
 def test_a_server_that_goes_offline_pauses_the_gate_instead_of_failing_the_release(tmp_path):
@@ -258,7 +264,42 @@ def roll_back_before_this_start(tmp_path):
     reason = f"{NEW_RELEASE} heard no heartbeat in {GATE_SECONDS}s with the server online"
     agent.layout.write_outcome(UpdateOutcome("update-1", contract.UpdateState.ROLLED_BACK, reason))
     agent.settle_update()
+    agent.is_server_online = True
     return agent, reason
+
+
+def test_an_outcome_sent_while_the_server_was_away_is_sent_again_when_it_returns(tmp_path):
+    agent, reason = roll_back_before_this_start(tmp_path)
+    agent.is_server_online = False
+
+    agent.report_settled_update()
+    agent.tend_update()
+    assert agent.layout.read_outcome() is not None
+
+    agent.on_server_status(SERVER_ONLINE_AGAIN, retained=False)
+    agent.tend_update()
+
+    assert update_statuses(agent) == [(contract.UpdateState.ROLLED_BACK, reason)] * 2
+    assert agent.layout.read_outcome() is None
+
+
+def test_refuses_an_update_while_the_last_one_could_not_be_settled(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent._is_update_settled = False
+
+    agent.on_update(build_fresh_update(), retained=False)
+
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, LAST_UPDATE_UNSETTLED)]
+
+
+def test_records_that_the_gated_release_said_hello_for_the_rollback_script(tmp_path):
+    agent, _ = start_new_release_on_its_gate(tmp_path)
+
+    agent.say_hello()
+    agent.tend_update()
+
+    started = json.loads((agent.layout.state / "started.json").read_text())
+    assert started == {"command_id": "update-1"}
 
 
 def test_the_previous_release_reports_the_rollback_once_it_connects(tmp_path):
@@ -303,6 +344,7 @@ def test_takes_a_new_update_once_the_last_result_is_delivered_even_before_tidyin
 ):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent.outcome_to_report = UpdateOutcome("update-0", contract.UpdateState.HEALTHY)
+    agent.is_server_online = True
     agent.report_settled_update()
 
     agent.on_update(build_fresh_update(), retained=False)

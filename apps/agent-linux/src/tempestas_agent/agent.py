@@ -25,6 +25,7 @@ from .update_gate import (
     is_still_pending,
     pass_gate,
     prune_after_update,
+    record_start,
     roll_back_gate,
     settle_update_on_start,
 )
@@ -41,6 +42,7 @@ SCD4X_METRICS = ("temperature", "humidity", "co2")
 SERVER_ONLINE = "online"
 SERVER_OFFLINE = "offline"
 LAST_OUTCOME_UNDELIVERED = "the last update's result has not reached the server yet"
+LAST_UPDATE_UNSETTLED = "the last update is not settled yet, as its state cannot be read"
 NOT_INSTALLED_FROM_A_RELEASE = (
     "this agent was not installed from a release, so it cannot update itself; "
     "run tools/deploy-agent-linux.sh"
@@ -156,7 +158,10 @@ class Agent:
         self.outcome_to_report = None
         self._outcome_delivery = None
         self._is_update_settled = False
+        self._has_logged_settle_failure = False
+        self._was_server_online_at_report = False
         self.is_connected = False
+        self.is_server_online = False
         self.restart_requested = threading.Event()
         self._update_in_progress = threading.Lock()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
@@ -276,10 +281,16 @@ class Agent:
         except (ValueError, UnicodeDecodeError):
             return
         state = body.get("state") if isinstance(body, dict) else None
+        if state == SERVER_ONLINE:
+            self.is_server_online = True
         if is_server_back_online(state, retained):
             log.info("the server came back online - saying hello again")
             self.say_hello()
+        if state == SERVER_ONLINE and not self._was_server_online_at_report:
+            # Sent while the server was away, the broker took it and nobody was listening.
+            self.report_settled_update()
         elif state == SERVER_OFFLINE:
+            self.is_server_online = False
             self._stop_watching_the_gate()
             # A deploy restarts the server too; the dead-man decides whether it is really gone.
             log.warning(
@@ -300,6 +311,7 @@ class Agent:
 
     def on_disconnected(self) -> None:
         self.is_connected = False
+        self.is_server_online = False
         self._stop_watching_the_gate()
 
     def settle_update(self) -> None:
@@ -307,8 +319,12 @@ class Agent:
             settlement = settle_update_on_start(self.layout)
         except OSError as error:
             # A full or read-only card must not keep the dead-man from ever starting.
-            log.error("could not settle the last update yet: %s", error)
+            if not self._has_logged_settle_failure:
+                log.error("could not settle the last update; trying again each tick: %s", error)
+                self._has_logged_settle_failure = True
             return
+        if self._has_logged_settle_failure:
+            log.info("settled the last update after all")
         self._is_update_settled = True
         self.update_gate = settlement.gate
         self.outcome_to_report = settlement.outcome
@@ -318,10 +334,11 @@ class Agent:
             self.report_settled_update()
 
     def report_settled_update(self) -> None:
-        """Sent on every connect until the broker has it; tend_update then forgets it."""
+        """Sent until the broker has it with the server online; tend_update then forgets it."""
         outcome = self.outcome_to_report
         if outcome is None:
             return
+        self._was_server_online_at_report = self.is_server_online
         self._outcome_delivery = self.publish_update_status(
             outcome.command_id, outcome.state, outcome.reason
         )
@@ -340,6 +357,11 @@ class Agent:
         if self.installer is None:
             self.publish_update_status(
                 verdict.command_id, contract.UpdateState.FAILED, NOT_INSTALLED_FROM_A_RELEASE
+            )
+            return
+        if not self._is_update_settled:
+            self.publish_update_status(
+                verdict.command_id, contract.UpdateState.FAILED, LAST_UPDATE_UNSETTLED
             )
             return
         if self._has_undelivered_outcome():
@@ -363,6 +385,7 @@ class Agent:
         if not self._is_update_settled:
             # A pending update left unsettled would read as a failed start at the next crash.
             self.settle_update()
+        self._record_start_of_gated_release()
         self._settle_update_gate()
         self._forget_delivered_outcome()
 
@@ -478,13 +501,26 @@ class Agent:
 
     def _has_undelivered_outcome(self) -> bool:
         delivery = self._outcome_delivery
-        return self.outcome_to_report is not None and (
-            delivery is None or not is_delivered(delivery)
+        has_server_heard_it = (
+            delivery is not None and is_delivered(delivery) and self._was_server_online_at_report
         )
+        return self.outcome_to_report is not None and not has_server_heard_it
+
+    def _record_start_of_gated_release(self) -> None:
+        gate = self.update_gate
+        if gate is None or gate.is_start_recorded or not gate.has_said_hello:
+            return
+        try:
+            with self.layout.hold_switch_lock():
+                if is_still_pending(self.layout, gate):
+                    record_start(self.layout, gate)
+        except OSError as error:
+            log.error("could not record that %s started: %s", gate.pending.version, error)
+            return
+        gate.is_start_recorded = True
 
     def _forget_delivered_outcome(self) -> None:
-        delivery = self._outcome_delivery
-        if delivery is None or not is_delivered(delivery):
+        if self.outcome_to_report is None or self._has_undelivered_outcome():
             return
         try:
             with self.layout.hold_switch_lock():

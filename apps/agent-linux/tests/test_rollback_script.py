@@ -79,6 +79,25 @@ def test_fails_the_unit_when_it_does_not_know_where_the_agent_lives(monkeypatch)
     assert script.main() == script.EXIT_ROLLBACK_FAILED
 
 
+def test_forgives_a_release_that_said_hello_two_failed_runs_and_rolls_back_on_the_third(layout):
+    install_pending_update(layout)
+    (layout.state / "started.json").write_text('{"command_id": "update-1"}')
+    script = load_rollback_script()
+
+    assert [script.main(), script.main()] == [1, 1]
+    assert layout.read_current_release() == NEW_RELEASE
+
+    assert script.main() == 0
+    assert layout.read_current_release() == RUNNING_RELEASE
+
+
+def test_a_hello_from_an_earlier_update_earns_no_forgiveness(layout):
+    install_pending_update(layout)
+    (layout.state / "started.json").write_text('{"command_id": "update-0"}')
+
+    assert load_rollback_script().main() == 0
+
+
 def test_does_nothing_when_the_pending_record_cannot_be_read(layout):
     layout.state.mkdir()
     (layout.state / "pending.json").write_text("{")

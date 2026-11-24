@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import shutil
+import time
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
@@ -23,6 +24,9 @@ HAND_DEPLOYED_DURING_DOWNLOAD = "a hand deploy changed the running release durin
 BUNDLE_FILES_DIRECTORY = "files"
 DEPENDENCY_LOCK = "uv.lock"
 FETCH_TIMEOUT_S = 30
+# The socket timeout is per read, so a trickling server would otherwise hold an update forever.
+FETCH_DEADLINE_S = 120
+FETCH_CHUNK_BYTES = 64 * 1024
 MAX_FILE_BYTES = 20 * 1024 * 1024
 
 
@@ -30,15 +34,24 @@ class UpdateFailed(Exception):
     """Why an update went nowhere; the node still runs what it ran before."""
 
 
-def fetch_over_http(url: str) -> bytes:
+def fetch_over_http(url: str, clock: Callable[[], float] = time.monotonic) -> bytes:
+    deadline = clock() + FETCH_DEADLINE_S
     try:
         with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_S) as response:
-            body = response.read(MAX_FILE_BYTES + 1)
+            return read_within(response, url, deadline, clock)
     except OSError as error:
         raise UpdateFailed(f"could not fetch {url}: {error}") from error
-    if len(body) > MAX_FILE_BYTES:
-        raise UpdateFailed(f"{url} is larger than {MAX_FILE_BYTES} bytes")
-    return body
+
+
+def read_within(response, url: str, deadline: float, clock: Callable[[], float]) -> bytes:
+    body = bytearray()
+    while chunk := response.read(FETCH_CHUNK_BYTES):
+        body += chunk
+        if len(body) > MAX_FILE_BYTES:
+            raise UpdateFailed(f"{url} is larger than {MAX_FILE_BYTES} bytes")
+        if clock() > deadline:
+            raise UpdateFailed(f"{url} took longer than {FETCH_DEADLINE_S}s to download")
+    return bytes(body)
 
 
 class ReleaseInstaller:
@@ -117,6 +130,7 @@ class ReleaseInstaller:
         pending = PendingUpdate(command["id"], version, running_release)
         try:
             # Before the switch: a crash between the two reads as a failed start, never as none.
+            self.layout.clear_start_records()
             self.layout.write_pending(pending)
             self.layout.clear_outcome()
             self.layout.switch_current_to(version)
