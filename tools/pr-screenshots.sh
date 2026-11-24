@@ -215,8 +215,8 @@ admit_simulated_nodes() {
 # Each zone's enabled roles go to its node's pins in order, so the rules switch them and reports have runs.
 create_devices_on_simulated_pins() {
   say "Creating a device on each simulated relay pin"
-  SERVER_PORT="$SERVER_PORT" node -e '
-    const api = `http://127.0.0.1:${process.env.SERVER_PORT}/api`;
+  env PR_SCREENSHOTS_API_PORT="$SERVER_PORT" node -e '
+    const api = `http://127.0.0.1:${process.env.PR_SCREENSHOTS_API_PORT}/api`;
     const fetchJson = async (path) => (await fetch(`${api}/${path}`)).json();
     (async () => {
       const zones = await fetchJson("zones");
