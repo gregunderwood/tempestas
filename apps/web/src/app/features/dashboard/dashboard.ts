@@ -13,7 +13,7 @@ import { injectLiveReadings } from '../../core/live-readings';
 import { injectLiveRulesCycle } from '../../core/live-rules-cycle';
 import { RealtimeService } from '../../core/realtime.service';
 import { injectServerNow } from '../../core/server-now';
-import { FOLLOWER_NOTICE, isFollowing } from '../../shared/leadership';
+import { isFollowing } from '../../shared/leadership';
 import { secondsSince } from '../../shared/time';
 import { formatDuration } from '../zones/zone-words';
 import { ActivityLog } from './activity-log';
@@ -163,7 +163,9 @@ export class Dashboard {
   );
 
   protected readonly systemFacts = computed(() =>
-    [this.describeRulesAge(), this.describeNodesOnline()].join(' · '),
+    [this.describeRulesAge(), this.describeNodesOnline()]
+      .filter((fact) => fact !== null)
+      .join(' · '),
   );
 
   protected readonly zoneTiles = computed(() =>
@@ -202,8 +204,8 @@ export class Dashboard {
     this.api.nodes().subscribe((nodes) => this.nodes.set(nodes));
   }
 
-  private describeRulesAge(): string {
-    if (this.isFollower()) return FOLLOWER_NOTICE;
+  private describeRulesAge(): string | null {
+    if (this.isFollower()) return null;
     const ranAt = this.cycle()?.at;
     if (!ranAt) return 'Rules have not run yet';
     return `Rules ran ${formatDuration(secondsSince(ranAt, this.now()))} ago`;

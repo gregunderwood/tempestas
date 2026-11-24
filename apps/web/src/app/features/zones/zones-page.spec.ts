@@ -131,6 +131,10 @@ function zoneSubtitleText(page: HTMLElement): string {
   ).replace(/\s+/g, ' ');
 }
 
+function countFollowerNotices(page: HTMLElement): number {
+  return (page.textContent ?? '').split(FOLLOWER_NOTICE).length - 1;
+}
+
 function alertText(page: HTMLElement): string | undefined {
   return page.querySelector('[role="alert"]')?.textContent ?? undefined;
 }
@@ -253,12 +257,34 @@ describe('ZonesPage', () => {
     expect(alertText(page)).toContain('Rules have not run for over a minute.');
   });
 
-  it("says on a follower's zone card that rules run on the leader", () => {
+  it("leaves the follower notice off a follower's zone card", () => {
     const { page, realtime, render } = renderZonesPage({ firstCycle: null });
     realtime.status.set(statusWhile(false));
     render();
-    expect(zoneSubtitleText(page)).toContain(FOLLOWER_NOTICE);
+    expect(zoneSubtitleText(page)).not.toContain(FOLLOWER_NOTICE);
     expect(zoneSubtitleText(page)).not.toContain('rules have not run yet');
+    expect(zoneSubtitleText(page)).not.toContain('·');
+  });
+
+  it('says a follower is following exactly once, however many zones it shows', () => {
+    const { page, realtime, render } = renderZonesPage({
+      zones: [
+        PUMPHOUSE,
+        { ...PUMPHOUSE, id: 'z-cellar', slug: 'cellar', displayName: 'Cellar' },
+      ],
+    });
+    realtime.status.set(statusWhile(false));
+    render();
+    expect(page.querySelectorAll('.zone')).toHaveLength(2);
+    expect(countFollowerNotices(page)).toBe(1);
+  });
+
+  it("keeps how long ago the rules ran on the leader's zone card", () => {
+    const { page, realtime, render } = renderZonesPage();
+    realtime.status.set(statusWhile(true));
+    render();
+    expect(zoneSubtitleText(page)).toContain('· rules ran 3 s ago');
+    expect(countFollowerNotices(page)).toBe(0);
   });
 
   it("says on the leader's zone card that rules have not run yet before the first cycle", () => {

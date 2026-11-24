@@ -2,7 +2,6 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { RouterLink } from '@angular/router';
-import { FOLLOWER_NOTICE } from '../../shared/leadership';
 import { ACTIVITY_KIND_LABELS, type ActivityEntry } from './activity-log';
 import type { AttentionItem } from './attention';
 
@@ -73,15 +72,15 @@ export class AttentionPanel {
     <mat-card appearance="outlined">
       <mat-card-header>
         <mat-card-title>Activity</mat-card-title>
-        <mat-card-subtitle>
-          @if (isFollower()) {
-            {{ followerNotice }}
-          } @else if (rulesRanAt(); as ranAt) {
-            Rules last ran at {{ ranAt | date: 'HH:mm:ss' }}
-          } @else {
-            Rules have not run yet
-          }
-        </mat-card-subtitle>
+        @if (!isFollower()) {
+          <mat-card-subtitle>
+            @if (rulesRanAt(); as ranAt) {
+              Rules last ran at {{ ranAt | date: 'HH:mm:ss' }}
+            } @else {
+              Rules have not run yet
+            }
+          </mat-card-subtitle>
+        }
       </mat-card-header>
       <mat-card-content>
         @if (entries().length === 0) {
@@ -131,8 +130,6 @@ export class ActivityPanel {
   readonly entries = input.required<readonly ActivityEntry[]>();
   readonly rulesRanAt = input.required<string | null>();
   readonly isFollower = input.required<boolean>();
-
-  protected readonly followerNotice = FOLLOWER_NOTICE;
 
   protected readonly kindLabels = ACTIVITY_KIND_LABELS;
 }

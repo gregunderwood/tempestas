@@ -83,14 +83,17 @@ interface NamedSource {
             <h2 mat-card-title class="zone__name">{{ zone.name }}</h2>
             <mat-card-subtitle>
               @if (zone.localTime) {
-                {{ zone.localTime }} {{ zone.timezone }} ·
+                {{ zone.localTime }} {{ zone.timezone }}
               }
-              @if (isFollower()) {
-                {{ followerNotice }}
-              } @else if (zone.rulesRanAgoSeconds === null) {
-                rules have not run yet
-              } @else {
-                rules ran {{ formatDuration(zone.rulesRanAgoSeconds) }} ago
+              @if (!isFollower()) {
+                @if (zone.localTime) {
+                  ·
+                }
+                @if (zone.rulesRanAgoSeconds === null) {
+                  rules have not run yet
+                } @else {
+                  rules ran {{ formatDuration(zone.rulesRanAgoSeconds) }} ago
+                }
               }
             </mat-card-subtitle>
           </mat-card-header>

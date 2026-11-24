@@ -238,6 +238,10 @@ function textsOf(page: HTMLElement, selector: string): string[] {
   return [...page.querySelectorAll(selector)].map(readAloud);
 }
 
+function countFollowerMentions(text: string): number {
+  return text.match(/follow(er|ing)/gi)?.length ?? 0;
+}
+
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
@@ -341,13 +345,22 @@ describe('Dashboard hero', () => {
     );
   });
 
-  it('says on a follower that rules run on the leader, not that they have not run', () => {
+  it('leaves the follower notice to the headline, not the facts beneath it', () => {
     const { page } = renderDashboard({
       status: statusOf({ isLeading: false }),
     });
-    const facts = page.querySelector('.hero__facts')?.textContent ?? '';
-    expect(facts).toContain(FOLLOWER_NOTICE);
-    expect(facts).not.toContain('Rules have not run yet');
+    expect(page.querySelector('.hero__facts')?.textContent?.trim()).toBe(
+      '2 of 3 nodes online',
+    );
+  });
+
+  it('shows on the leader how long ago the rules ran beside the nodes online', () => {
+    const { page } = renderDashboard({
+      cycle: cycleOf([pumphouseEvaluation()]),
+    });
+    expect(page.querySelector('.hero__facts')?.textContent?.trim()).toBe(
+      'Rules ran 0 s ago · 2 of 3 nodes online',
+    );
   });
 
   it('says on the leader that rules have not run yet before the first cycle', () => {
@@ -690,11 +703,12 @@ describe('Dashboard attention panel', () => {
     ).toBe('/nodes');
   });
 
-  it('lists a follower that is not leading', () => {
+  it('leaves a follower to the headline rather than listing it as a problem', () => {
     const rendered = renderDashboard({
       status: statusOf({ isLeading: false }),
     });
-    expect(attentionOf(rendered)[0]).toContain('follower');
+    expect(attentionOf(rendered)).toEqual([]);
+    expect(rendered.text()).toContain('Nothing needs you.');
   });
 
   it('lists a probe that has gone quiet', () => {
@@ -806,12 +820,27 @@ describe('Dashboard activity panel', () => {
     expect(subtitle).not.toContain(FOLLOWER_NOTICE);
   });
 
-  it('says on a follower that rules run on the leader, not that they have not run', () => {
+  it('shows no rules subtitle on a follower', () => {
     const rendered = renderDashboard({
       status: statusOf({ isLeading: false }),
     });
-    const subtitle = activitySubtitleOf(rendered);
-    expect(subtitle).toContain(FOLLOWER_NOTICE);
-    expect(subtitle).not.toContain('Rules have not run yet');
+    expect(activitySubtitleOf(rendered)).toBeUndefined();
+  });
+});
+
+describe('Dashboard on a follower', () => {
+  it('says it is following exactly once on the page', () => {
+    const rendered = renderDashboard({
+      status: statusOf({ isLeading: false }),
+    });
+    expect(countFollowerMentions(rendered.text())).toBe(1);
+    expect(rendered.text()).not.toContain('Rules have not run yet');
+  });
+
+  it('says nothing of following on the leader', () => {
+    const rendered = renderDashboard({
+      cycle: cycleOf([pumphouseEvaluation()]),
+    });
+    expect(countFollowerMentions(rendered.text())).toBe(0);
   });
 });
