@@ -292,7 +292,12 @@ class Agent:
             gate.note_hello()
 
     def settle_update(self) -> None:
-        settlement = settle_update_on_start(self.layout, self._clock())
+        try:
+            settlement = settle_update_on_start(self.layout, self._clock())
+        except OSError as error:
+            # A full or read-only card must not keep the dead-man from ever starting.
+            log.error("could not settle the last update, so none is gated or reported: %s", error)
+            return
         self.update_gate = settlement.gate
         self.outcome_to_report = settlement.outcome
 
@@ -419,7 +424,6 @@ class Agent:
         has_passed = gate.is_passed()
         if not has_passed and not gate.is_overdue(self._clock()):
             return
-        self.update_gate = None
         try:
             with self.layout.hold_switch_lock():
                 if not is_still_pending(self.layout, gate):
@@ -429,14 +433,19 @@ class Agent:
                 else:
                     self._fail_update_gate(gate)
         except OSError as error:
-            # Housekeeping that fails must never stop sampling or the dead-man.
+            # Kept, so the next tick tries again; failing here must never stop the dead-man.
             log.error("could not settle the update to %s: %s", gate.pending.version, error)
+            return
+        self.update_gate = None
 
     def _pass_update_gate(self, gate: HealthGate) -> None:
         log.info("update to %s passed its health gate", gate.pending.version)
         self.outcome_to_report = pass_gate(self.layout, gate)
         self.report_settled_update()
-        prune_after_update(self.layout, gate.pending)
+        try:
+            prune_after_update(self.layout, gate.pending)
+        except OSError as error:
+            log.error("could not prune old releases: %s", error)
 
     def _fail_update_gate(self, gate: HealthGate) -> None:
         log.error("update gate failed: %s - rolling back", gate.describe_failure())

@@ -111,8 +111,8 @@ tools/deploy-agent-linux.sh [host ...]   # elantris and patji when none are name
 It runs the agent's lint and tests, then on each host:
 
 1. Copies the code under a dot-name, stamps the version, and renames it into
-   `~/tempestas/agent-linux/releases/<version>` in one step, so a redeploy of the running version
-   never edits the tree the agent is running from.
+   `~/tempestas/agent-linux/releases/<version>` in one step, exchanged with one already there. A
+   redeploy of the running version never edits the tree the agent is running from.
 2. Builds the venv again only when its requirements changed (see [the venv](#the-venv)), and swaps
    it in just before the restart.
 3. Makes that release `current` and prunes old releases. An update still waiting on its gate is
@@ -203,6 +203,7 @@ actually in effect with `systemctl show tempestas-agent -p StartLimitIntervalUSe
   start limit gives up, so the script decides. It switches back only when the release that failed
   is an update still waiting on its gate. Otherwise it exits 1 and changes nothing, and as an
   `ExecCondition=` that skips the unit rather than marking it failed after every ordinary crash.
+  A rollback that itself fails exits 255, which does mark the unit failed.
 - **No ordering against the I²C bus.** systemd only creates `.device` units for devices udev tags
   for it, and i2c is not one, so `After=dev-i2c\x2d1.device` looks like ordering while doing
   nothing. The agent opens the bus, fails fast, and the restart retries.
@@ -269,9 +270,9 @@ credentials and the server's view of the node all work.
 - **Not passed**: it switches `current` back, records `rolled-back` with the reason, and exits 75.
   The previous release reports the outcome once it connects.
 - **Replaced by a hand deploy**: the gate is dropped without passing or rolling back, and the
-  deploy's restart starts the release it copied. The agent, the installer and a hand deploy take
-  `update-state/switch.lock` around every read-then-switch of `current`, so neither can undo the
-  other.
+  deploy's restart starts the release it copied. The agent, the installer, the rollback script
+  and a hand deploy all take `update-state/switch.lock` around every read-then-switch of
+  `current`, so none can undo another.
 
 An outcome stays in `outcome.json` until the broker has acknowledged it, and every connect sends it
 again until then, so a dropped connection or a crash cannot lose it. Until then the node refuses a

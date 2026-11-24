@@ -125,6 +125,24 @@ def test_a_passed_gate_keeps_the_newest_releases_and_both_ends_of_the_update(tmp
     assert layout.read_outcome() == UpdateOutcome("update-1", contract.UpdateState.HEALTHY)
 
 
+def test_a_prune_skips_a_release_another_prune_removed_first(tmp_path, monkeypatch):
+    layout = make_layout(tmp_path)
+    older_releases = [f"1.0.{patch}" for patch in range(KEPT_RELEASES + 1)]
+    for release in older_releases:
+        layout.release_path(release).mkdir()
+    vanished = layout.release_path(older_releases[0])
+    real_stat = type(vanished).stat
+
+    def stat_after_another_prune(path, *arguments, **options):
+        if path == vanished:
+            raise FileNotFoundError(path)
+        return real_stat(path, *arguments, **options)
+
+    monkeypatch.setattr(type(vanished), "stat", stat_after_another_prune)
+
+    layout.prune_releases(protected={RUNNING_RELEASE})
+
+
 def test_an_unreadable_pending_record_is_dropped_rather_than_stopping_the_start(tmp_path):
     layout = make_layout(tmp_path)
     layout.state.mkdir()

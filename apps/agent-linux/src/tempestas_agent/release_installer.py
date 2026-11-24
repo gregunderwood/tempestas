@@ -189,8 +189,8 @@ def build_file_url(manifest_url: str, path: str) -> str:
     return urljoin(manifest_url, f"{BUNDLE_FILES_DIRECTORY}/{quote(path)}")
 
 
-def hash_sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def hash_sha256(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
 
 
 def hash_file(path: Path) -> str:

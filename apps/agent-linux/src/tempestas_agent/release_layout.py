@@ -104,12 +104,20 @@ class ReleaseLayout:
             for entry in self.releases.iterdir()
             if entry.is_dir() and not entry.name.startswith(UNFINISHED_PREFIX)
         ]
-        newest_first = sorted(finished, key=lambda entry: entry.stat().st_mtime, reverse=True)
+        newest_first = sorted(finished, key=read_modified_time, reverse=True)
         kept = {entry.name for entry in newest_first[:KEPT_RELEASES]} | protected
         removed = [entry.name for entry in newest_first if entry.name not in kept]
         for release in removed:
-            shutil.rmtree(self.release_path(release))
+            # Another prune may be removing the same release at the same moment.
+            shutil.rmtree(self.release_path(release), ignore_errors=True)
         return removed
+
+
+def read_modified_time(entry: Path) -> float:
+    try:
+        return entry.stat().st_mtime
+    except FileNotFoundError:
+        return 0.0
 
 
 def read_record(path: Path, record_type):

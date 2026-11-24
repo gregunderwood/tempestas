@@ -28,8 +28,8 @@ def make_layout(home: Path, running: str = RUNNING_RELEASE, lock: bytes = LOCK) 
     return layout
 
 
-def hash_sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def hash_sha256(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
 
 
 def build_manifest(version: str = NEW_RELEASE, files: dict[str, bytes] = BUNDLE_FILES) -> bytes:
@@ -39,7 +39,9 @@ def build_manifest(version: str = NEW_RELEASE, files: dict[str, bytes] = BUNDLE_
             "version": version,
             "contractMajor": 1,
             "contractMinor": 1,
-            "files": [{"path": path, "sha256": hash_sha256(data)} for path, data in files.items()],
+            "files": [
+                {"path": path, "sha256": hash_sha256(content)} for path, content in files.items()
+            ],
         }
     ).encode()
 

@@ -47,8 +47,8 @@ def test_installs_beside_the_running_release_and_switches_to_it(tmp_path):
     assert layout.read_current_release() == NEW_RELEASE
     assert pending == PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE)
     assert layout.read_pending() == pending
-    for path, data in BUNDLE_FILES.items():
-        assert (layout.release_path(NEW_RELEASE) / path).read_bytes() == data
+    for path, content in BUNDLE_FILES.items():
+        assert (layout.release_path(NEW_RELEASE) / path).read_bytes() == content
     assert (layout.release_path(RUNNING_RELEASE) / "uv.lock").exists()
 
 
@@ -84,7 +84,7 @@ def test_refuses_a_bundle_whose_dependencies_differ_from_the_nodes(tmp_path):
 
 def test_refuses_a_bundle_with_no_dependency_lock(tmp_path):
     layout = make_layout(tmp_path)
-    files = {path: data for path, data in BUNDLE_FILES.items() if path != "uv.lock"}
+    files = {path: content for path, content in BUNDLE_FILES.items() if path != "uv.lock"}
 
     with pytest.raises(UpdateFailed, match="has no uv.lock"):
         install(layout, FakeServer(files=files))

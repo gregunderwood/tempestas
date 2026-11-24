@@ -28,7 +28,7 @@ def make_current(layout: ReleaseLayout, release: str) -> list[str]:
                     f"replaced by a hand deploy of {release} before its health gate passed",
                 ),
             )
-    return layout.prune_releases({release, previous_release} - {None})
+        return layout.prune_releases({release, previous_release} - {None})
 
 
 def main(arguments: list[str]) -> int:

@@ -32,19 +32,20 @@ for HOST in "${HOSTS[@]}"; do
   require_passwordless_systemctl "$HOST" "restart tempestas-agent.service"
 done
 
-# Copied under a dot-name and renamed in whole, so a redeploy never edits the tree the agent runs.
+# Copied under its own dot-name, apart from an update's download of the same version, then put in
+# place whole: exchanged with a release already there, so `current` never points at nothing.
 copy_release() {
   local host="$1"
   local releases="$REMOTE_AGENT_HOME/releases"
-  ssh "$host" "rm -rf $releases/.$AGENT_VERSION && mkdir -p $releases/.$AGENT_VERSION"
+  local staging=".deploy-$AGENT_VERSION"
+  ssh "$host" "rm -rf $releases/$staging && mkdir -p $releases/$staging"
   (cd "$AGENT" && rsync -a \
     --exclude '__pycache__' --exclude '.venv' --exclude "$(basename "$LINUX_AGENT_VERSION_STAMP")" \
-    "${LINUX_AGENT_PATHS[@]}" "$host:$releases/.$AGENT_VERSION/")
+    "${LINUX_AGENT_PATHS[@]}" "$host:$releases/$staging/")
   printf 'AGENT_VERSION = "%s"\n' "$AGENT_VERSION" |
-    ssh "$host" "cat > $releases/.$AGENT_VERSION/$LINUX_AGENT_VERSION_STAMP"
-  ssh "$host" "cd $releases && rm -rf .$AGENT_VERSION-replaced && \
-    { [ ! -e $AGENT_VERSION ] || mv -T $AGENT_VERSION .$AGENT_VERSION-replaced; } && \
-    mv -T .$AGENT_VERSION $AGENT_VERSION && rm -rf .$AGENT_VERSION-replaced"
+    ssh "$host" "cat > $releases/$staging/$LINUX_AGENT_VERSION_STAMP"
+  ssh "$host" "cd $releases && if [ -e $AGENT_VERSION ]; then mv -T --exchange $staging $AGENT_VERSION; \
+    else mv -T $staging $AGENT_VERSION; fi && rm -rf $staging"
 }
 
 # Built beside the running venv, which the agent keeps using until swap_in_built_venv.

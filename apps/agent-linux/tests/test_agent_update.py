@@ -261,9 +261,12 @@ def test_takes_a_new_update_once_the_last_result_is_delivered_even_before_tidyin
     assert len(agent.installer.commands) == 1
 
 
-def test_a_gate_that_cannot_be_settled_is_logged_and_the_agent_carries_on(tmp_path, monkeypatch):
+def test_a_gate_that_cannot_be_settled_is_kept_and_tried_again_on_the_next_tick(
+    tmp_path, monkeypatch
+):
     agent, clock = start_new_release_on_its_gate(tmp_path)
     agent.say_hello()
+    switch_current_to = agent.layout.switch_current_to
 
     def fail_switching(_release):
         raise OSError("read-only file system")
@@ -271,9 +274,29 @@ def test_a_gate_that_cannot_be_settled_is_logged_and_the_agent_carries_on(tmp_pa
     monkeypatch.setattr(agent.layout, "switch_current_to", fail_switching)
     clock.advance(GATE_SECONDS)
     agent.tend_update()
+    assert agent.update_gate is not None
+    assert not agent.restart_requested.is_set()
+
+    monkeypatch.setattr(agent.layout, "switch_current_to", switch_current_to)
+    agent.tend_update()
+
+    assert agent.layout.read_current_release() == RUNNING_RELEASE
+    assert agent.restart_requested.is_set()
+
+
+def test_starts_without_a_gate_when_the_update_state_cannot_be_written(tmp_path, monkeypatch):
+    agent, _ = make_agent()
+    agent.layout = make_layout(tmp_path)
+    agent.layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
+
+    def fail_writing(_outcome):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(agent.layout, "write_outcome", fail_writing)
+    agent.settle_update()
 
     assert agent.update_gate is None
-    assert not agent.restart_requested.is_set()
+    assert agent.outcome_to_report is None
 
 
 def test_keeps_an_outcome_a_hand_deploy_recorded_after_the_last_one_was_sent(tmp_path):

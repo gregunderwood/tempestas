@@ -59,6 +59,26 @@ def test_does_nothing_twice_so_a_failing_previous_release_is_not_restarted_forev
     assert layout.read_current_release() == RUNNING_RELEASE
 
 
+def test_fails_the_unit_rather_than_skipping_it_when_the_switch_itself_fails(layout, monkeypatch):
+    install_pending_update(layout)
+    script = load_rollback_script()
+
+    def fail_replacing(*_paths):
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr(script.os, "replace", fail_replacing)
+
+    assert script.main() == script.EXIT_ROLLBACK_FAILED
+    assert layout.read_current_release() == NEW_RELEASE
+
+
+def test_fails_the_unit_when_it_does_not_know_where_the_agent_lives(monkeypatch):
+    monkeypatch.delenv("TEMPESTAS_AGENT_HOME", raising=False)
+    script = load_rollback_script()
+
+    assert script.main() == script.EXIT_ROLLBACK_FAILED
+
+
 def test_does_nothing_when_the_pending_record_cannot_be_read(layout):
     layout.state.mkdir()
     (layout.state / "pending.json").write_text("{")
