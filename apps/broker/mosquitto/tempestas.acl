@@ -17,6 +17,7 @@ topic read tempestas/v1/node/+/alarm
 topic read tempestas/v1/node/+/update/status
 
 # Nodes write only their own subtree, never gpio/set or update; server/status lets them fail safe on its will.
+# A block per node, not a `pattern`: a pattern gives every user, server and observer included, a node subtree.
 user elantris
 topic write tempestas/v1/node/elantris/hello
 topic write tempestas/v1/node/elantris/status
