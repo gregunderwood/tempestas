@@ -160,9 +160,7 @@ def test_refuses_an_update_while_a_restart_is_on_its_way(monkeypatch, tmp_path):
     assert update_statuses(agent) == [(contract.UpdateState.FAILED, STOPPING)]
 
 
-def test_stopping_mid_install_holds_the_switch_lock_so_no_switch_is_cut_off(
-    monkeypatch, tmp_path
-):
+def test_stopping_mid_install_holds_the_switch_lock_so_no_switch_is_cut_off(monkeypatch, tmp_path):
     agent, _ = make_updating_agent(monkeypatch, tmp_path)
     agent._installing_command_id = "update-1"
 
@@ -184,7 +182,7 @@ def test_stopping_with_no_install_leaves_the_switch_lock_to_others(monkeypatch, 
 def test_a_release_restarts_when_current_was_switched_off_it_before_it_settled(tmp_path):
     agent, _ = make_agent()
     agent.layout = make_layout(tmp_path)
-    agent.agent_version = NEW_RELEASE
+    agent.loaded_release = agent.layout.locate_release(NEW_RELEASE).resolve()
     agent.layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
 
     agent.settle_update()
@@ -192,6 +190,28 @@ def test_a_release_restarts_when_current_was_switched_off_it_before_it_settled(t
     assert agent.restart_requested.is_set()
     assert agent.layout.read_pending() is not None
     assert update_statuses(agent) == []
+
+
+def test_a_release_on_current_settles_without_restarting(tmp_path):
+    agent, _ = make_agent()
+    agent.layout = make_layout(tmp_path)
+    agent.loaded_release = agent.layout.locate_release(RUNNING_RELEASE).resolve()
+
+    agent.settle_update()
+
+    assert not agent.restart_requested.is_set()
+
+
+def test_a_stop_reports_the_failure_an_install_recorded_rather_than_the_stop(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent._installing_command_id = "update-1"
+    agent.layout.write_outcome(
+        UpdateOutcome("update-1", contract.UpdateState.FAILED, "no space left on device")
+    )
+
+    agent.stop_updates()
+
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, "no space left on device")]
 
 
 def start_new_release_on_its_gate(tmp_path):
@@ -287,6 +307,25 @@ def test_a_failed_install_that_left_current_switched_restarts_into_it(monkeypatc
             raise OSError("read-only file system")
 
     agent, _ = make_updating_agent(monkeypatch, tmp_path, SwitchStuckInstaller())
+
+    agent.on_update(build_fresh_update(), is_retained=False)
+
+    assert agent.restart_requested.is_set()
+    assert update_statuses(agent) == [(contract.UpdateState.RESTARTING, None)]
+
+
+def test_a_failed_switch_that_left_its_pending_record_is_left_to_the_next_start(
+    monkeypatch, tmp_path
+):
+    class PendingLeftInstaller(InlineInstaller):
+        def install(self, command, report):
+            self.commands.append(command)
+            agent.layout.write_pending(
+                PendingUpdate(command["id"], command["version"], RUNNING_RELEASE)
+            )
+            raise OSError("input/output error")
+
+    agent, _ = make_updating_agent(monkeypatch, tmp_path, PendingLeftInstaller())
 
     agent.on_update(build_fresh_update(), is_retained=False)
 

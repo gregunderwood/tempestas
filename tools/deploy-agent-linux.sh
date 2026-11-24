@@ -36,7 +36,7 @@ say "Deploying $AGENT_VERSION to ${HOSTS[*]}"
 # A warning, not a refusal: a hand deploy must still reach such a host with a fix.
 warn_unless_systemd_rolls_back() {
   local host="$1" version
-  version="$(ssh "$host" "systemctl --version" | awk 'NR == 1 { print $2 }')"
+  version="$(ssh "$host" "systemctl --version" | awk 'NR == 1 { print $2 }' || true)"
   if ! [[ "$version" =~ ^[0-9]+$ ]]; then
     echo "WARNING: could not read $host's systemd version; rolling back an update needs $MINIMUM_SYSTEMD_VERSION or later." >&2
     return 0

@@ -16,7 +16,7 @@ ANSWER_ALARM = "alarm"
 ANSWER_FAILED_STATUS = "failed-status"
 AGENT_APPS = ("agent-linux", "agent-micropython")
 
-AGENT_VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.+-]+)?")
+AGENT_VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.+-]+)?", re.ASCII)
 SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 MANIFEST_URL_SCHEMES = ("http", "https")
 

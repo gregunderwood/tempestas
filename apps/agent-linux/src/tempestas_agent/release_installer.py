@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import logging
 import os
@@ -41,7 +42,7 @@ def fetch_over_http(url: str, clock: Callable[[], float] = time.monotonic) -> by
     try:
         with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_S) as response:
             return read_within(response, url, deadline, clock)
-    except OSError as error:
+    except (OSError, http.client.HTTPException) as error:
         raise UpdateFailed(f"could not fetch {url}: {error}") from error
 
 

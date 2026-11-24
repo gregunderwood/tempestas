@@ -6,7 +6,9 @@ import re
 from datetime import datetime
 
 # Stricter than fromisoformat, like the reference; an offset too, as a naive time cannot compare.
-ISO_8601_INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")
+ISO_8601_INSTANT = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})", re.ASCII
+)
 
 
 def parse_instant(text: str) -> datetime | None:

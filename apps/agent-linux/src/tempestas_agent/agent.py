@@ -10,6 +10,7 @@ import uuid
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 from paho.mqtt.enums import MQTTErrorCode
 
@@ -32,7 +33,7 @@ from .update_gate import (
     roll_back_gate,
     settle_update_on_start,
 )
-from .version import AGENT_NAME, UNSTAMPED_VERSION, read_agent_version
+from .version import AGENT_NAME, read_agent_version
 from .world_client import WorldClient
 
 log = logging.getLogger("tempestas.agent")
@@ -184,6 +185,8 @@ class Agent:
         self._held_until_exit = ExitStack()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
         self.agent_version = read_agent_version()
+        # Resolved now: `current` may be switched under this process once it runs.
+        self.loaded_release = Path(__file__).resolve().parents[2]
         self.sample_sequence = 0
         self.bound_controller: str | None = None
         self.last_heartbeat_at: float | None = None
@@ -349,7 +352,7 @@ class Agent:
         if self._is_running_another_release():
             log.warning(
                 "`current` moved off %s after this process loaded it - restarting into it",
-                self.agent_version,
+                self.loaded_release.name,
             )
             self.request_restart()
             return
@@ -460,7 +463,7 @@ class Agent:
         if pending is not None and pending.command_id == command_id:
             return
         # Its thread now waits on the lock this process holds until it exits.
-        self._report_install(command_id, contract.UpdateState.FAILED, STOPPING)
+        self._report_failed_install(command_id, STOPPING)
 
     def request_restart(self) -> None:
         self.restart_requested.set()
@@ -697,9 +700,9 @@ class Agent:
             )
         except Exception as error:  # noqa: BLE001 - reported to the server, never swallowed
             log.error("update to %s failed: %s", command.get("version"), error)
-            if self._is_switch_left_in_place(command_id, command["version"]):
+            if self._is_left_for_the_next_start(command_id):
                 log.error(
-                    "could not undo the switch to %s - restarting into it", command["version"]
+                    "could not undo the switch to %s - restarting to settle it", command["version"]
                 )
                 self._report_restart_into(command_id)
                 return
@@ -722,19 +725,21 @@ class Agent:
 
     def _is_running_another_release(self) -> bool:
         """True when a rollback switched `current` after systemd had already restarted this code."""
-        if self.layout is None or self.agent_version == UNSTAMPED_VERSION:
+        if self.layout is None or not self._is_loaded_from_a_release():
             return False
         current_release = self.layout.read_current_release()
-        return current_release is not None and current_release != self.agent_version
+        return current_release is not None and current_release != self.loaded_release.name
 
-    def _is_switch_left_in_place(self, command_id: str, version: str) -> bool:
-        """True when this install switched and could not switch back: its gate must judge it."""
+    def _is_loaded_from_a_release(self) -> bool:
+        return self.loaded_release.parent == self.layout.releases.resolve()
+
+    def _is_left_for_the_next_start(self, command_id: str) -> bool:
+        """True when a failed switch left its pending record: the next start settles it, once."""
         try:
             pending = self.layout.read_pending()
-            is_this_install_pending = pending is not None and pending.command_id == command_id
-            return is_this_install_pending and self.layout.read_current_release() == version
         except OSError:
             return False
+        return pending is not None and pending.command_id == command_id
 
     def _report_failed_install(self, command_id: str, reason: str) -> None:
         recorded = self._read_recorded_outcome(command_id)
