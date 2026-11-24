@@ -10,6 +10,10 @@ UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 SETTLE_SECONDS=5
 # Written by the venv build beside the venv, so a deploy rebuilds it only when they change.
 REQUIREMENTS_FILE=requirements.txt
+# Older systemd reaches `failed` only at the start limit, so OnFailure= cannot judge each run.
+MINIMUM_SYSTEMD_VERSION=254
+ROLLBACK_SCRIPT_DIR=/usr/local/lib/tempestas
+UNIT_DIR=/etc/systemd/system
 
 source "$HERE/tools/lib/console.sh"
 source "$HERE/apps/agent-linux/agent-files.sh"
@@ -27,9 +31,18 @@ REMOTE_RELEASE="$REMOTE_AGENT_HOME/releases/$AGENT_VERSION"
 REQUIREMENTS="$(cd "$AGENT" && "$UV" export --frozen --no-dev --no-emit-project --no-hashes --quiet)"
 say "Deploying $AGENT_VERSION to ${HOSTS[*]}"
 
+require_systemd_that_rolls_back() {
+  local host="$1" version
+  version="$(ssh "$host" "systemctl --version" | awk 'NR == 1 { print $2 }')"
+  [ "$version" -ge "$MINIMUM_SYSTEMD_VERSION" ] && return 0
+  echo "$host runs systemd $version; rolling back an update needs $MINIMUM_SYSTEMD_VERSION or later" >&2
+  exit 1
+}
+
 # Every host first: stopping halfway would leave the fleet on two versions.
 for HOST in "${HOSTS[@]}"; do
   require_passwordless_systemctl "$HOST" "restart tempestas-agent.service"
+  require_systemd_that_rolls_back "$HOST"
 done
 
 # Staged apart from an update's download of the same version, then put in place in one step.
@@ -112,15 +125,23 @@ is_unit_on_release_layout() {
   ssh "$host" "systemctl cat tempestas-agent.service 2>/dev/null | grep -q '$REMOTE_AGENT_HOME/current'"
 }
 
-print_unit_install() {
+# Root-owned, so a deploy cannot install them itself; it says when they differ from the release's.
+are_unit_files_current() {
   local host="$1"
+  ssh "$host" "cmp -s $REMOTE_RELEASE/systemd/tempestas-agent-rollback.py $ROLLBACK_SCRIPT_DIR/tempestas-agent-rollback.py \
+    && cmp -s $REMOTE_RELEASE/systemd/tempestas-agent.service $UNIT_DIR/tempestas-agent.service \
+    && cmp -s $REMOTE_RELEASE/systemd/tempestas-agent-rollback.service $UNIT_DIR/tempestas-agent-rollback.service"
+}
+
+print_unit_install() {
+  local host="$1" reason="$2"
   cat >&2 <<EOF
-$host's unit still runs the agent from before the release layout, so it was not restarted.
-Once, on $host:
-  sudo install -d -m 0755 /usr/local/lib/tempestas
-  sudo install -m 0644 -o root -g root $REMOTE_RELEASE/systemd/tempestas-agent-rollback.py /usr/local/lib/tempestas/
+$host: $reason
+On $host:
+  sudo install -d -m 0755 $ROLLBACK_SCRIPT_DIR
+  sudo install -m 0644 -o root -g root $REMOTE_RELEASE/systemd/tempestas-agent-rollback.py $ROLLBACK_SCRIPT_DIR/
   sudo install -m 0644 -o root -g root $REMOTE_RELEASE/systemd/tempestas-agent.service \\
-    $REMOTE_RELEASE/systemd/tempestas-agent-rollback.service /etc/systemd/system/
+    $REMOTE_RELEASE/systemd/tempestas-agent-rollback.service $UNIT_DIR/
   sudo systemctl daemon-reload && sudo systemctl restart tempestas-agent
 EOF
 }
@@ -134,7 +155,7 @@ for HOST in "${HOSTS[@]}"; do
   if ! is_unit_on_release_layout "$HOST"; then
     swap_in_built_venv "$HOST"
     remove_replaced_venv "$HOST"
-    print_unit_install "$HOST"
+    print_unit_install "$HOST" "its unit still runs the agent from before the release layout, so it was not restarted."
     continue
   fi
   say "$HOST: restarting (relays fail safe until the server drives them again)"
@@ -143,6 +164,8 @@ for HOST in "${HOSTS[@]}"; do
   remove_replaced_venv "$HOST"
   sleep "$SETTLE_SECONDS"
   ssh "$HOST" "systemctl is-active tempestas-agent && journalctl -u tempestas-agent -n 5 --no-pager"
+  are_unit_files_current "$HOST" ||
+    print_unit_install "$HOST" "the installed unit files or rollback script differ from this release's."
 done
 
 say "Done. The Nodes page shows $AGENT_VERSION once each agent has said hello."

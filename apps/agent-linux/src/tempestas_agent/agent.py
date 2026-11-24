@@ -168,6 +168,7 @@ class Agent:
         self.restart_requested = threading.Event()
         self._update_in_progress = threading.Lock()
         self.is_stopping = False
+        self._installing_command_id: str | None = None
         self._held_until_exit = ExitStack()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
         self.agent_version = read_agent_version()
@@ -362,6 +363,10 @@ class Agent:
         if not verdict.is_accepted:
             self._report_update_refusal(verdict)
             return
+        if self._is_known_update(verdict.command_id):
+            # A redelivery: answering it would contradict what that update already reported.
+            log.info("ignored a repeat of update %s", verdict.command_id)
+            return
         if self.installer is None:
             self.publish_update_status(
                 verdict.command_id, contract.UpdateState.FAILED, NOT_INSTALLED_FROM_A_RELEASE
@@ -386,12 +391,14 @@ class Agent:
                 verdict.command_id, contract.UpdateState.FAILED, ANOTHER_UPDATE_IN_PROGRESS
             )
             return
+        self._installing_command_id = verdict.command_id
         try:
             # Off the MQTT thread: a download must not hold up heartbeats or commands.
             threading.Thread(
                 target=self._install_update, args=(verdict.command,), name="update", daemon=True
             ).start()
         except RuntimeError as error:
+            self._installing_command_id = None
             self._update_in_progress.release()
             self.publish_update_status(verdict.command_id, contract.UpdateState.FAILED, str(error))
 
@@ -554,6 +561,15 @@ class Agent:
         if gate is not None:
             gate.stop_watching(self._clock())
 
+    def _is_known_update(self, command_id: str) -> bool:
+        gate, outcome = self.update_gate, self.outcome_to_report
+        known_ids = {
+            self._installing_command_id,
+            gate.pending.command_id if gate is not None else None,
+            outcome.command_id if outcome is not None else None,
+        }
+        return command_id in known_ids
+
     def _has_undelivered_outcome(self) -> bool:
         delivery = self._outcome_delivery
         has_server_heard_it = (
@@ -603,11 +619,13 @@ class Agent:
             try:
                 self.publish_update_status(command_id, contract.UpdateState.FAILED, str(error))
             finally:
+                self._installing_command_id = None
                 self._update_in_progress.release()
             return
         log.warning("installed %s - restarting into it", command["version"])
-        self.publish_update_status(command_id, contract.UpdateState.RESTARTING)
+        # Before the publish: `current` already points at the new release, whatever happens next.
         self.restart_requested.set()
+        self.publish_update_status(command_id, contract.UpdateState.RESTARTING)
 
     def _report_update_refusal(self, verdict: UpdateVerdict) -> None:
         if verdict.answer == ANSWER_ALARM:

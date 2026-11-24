@@ -200,8 +200,9 @@ actually in effect with `systemctl show tempestas-agent -p StartLimitIntervalUSe
   the first: without it, exit 75 counts as a failure, and `OnFailure=` rolls the update back before
   it ever runs. The end-to-end run caught exactly that.
 - **`OnFailure=tempestas-agent-rollback.service`.** It fires on every failed run, not only once the
-  start limit gives up, so the script decides. That is verified on systemd 257, which every host
-  runs on trixie; systemd before 254 may reach `failed` only at the start limit, so needs a check. It switches back only when the release that failed
+  start limit gives up, so the script decides. That needs systemd 254 or later, where a restarting
+  unit passes through `failed`; before it, the unit reached `failed` only at the start limit. Every
+  host runs 257 on trixie, and the deploy script refuses a host with less. It switches back only when the release that failed
   is an update still waiting on its gate, and only on its third failed run if it had said `hello`.
   Otherwise it exits 1 and changes nothing, and as an
   `ExecCondition=` that skips the unit rather than marking it failed after every ordinary crash.
@@ -323,7 +324,9 @@ sudo systemctl daemon-reload && sudo systemctl restart tempestas-agent
 
 Do it after the first deploy with this layout, which builds the release and the venv but leaves
 the old agent running and prints these lines. The old checkout in `~/tempestas/apps/agent-linux`
-is unused after that and can be removed.
+is unused after that and can be removed. Later deploys compare the installed copies with the
+release's and print these lines again whenever they differ; an update over MQTT cannot install
+them, so a change to the units or the script needs a deploy, or these lines by hand.
 
 ### Verified end to end
 

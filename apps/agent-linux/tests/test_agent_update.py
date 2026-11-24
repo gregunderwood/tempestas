@@ -258,6 +258,26 @@ def test_an_update_thread_that_cannot_start_frees_the_next_update(monkeypatch, t
     assert agent._update_in_progress.acquire(blocking=False)
 
 
+def test_ignores_a_repeat_of_the_update_it_is_installing(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent._installing_command_id = "update-1"
+    agent._update_in_progress.acquire()
+
+    agent.on_update(build_fresh_update(id="update-1"), retained=False)
+
+    assert update_statuses(agent) == []
+
+
+def test_ignores_a_repeat_of_the_update_on_its_gate(tmp_path):
+    agent, _ = start_new_release_on_its_gate(tmp_path)
+    agent.installer = InlineInstaller()
+
+    agent.on_update(build_fresh_update(id=agent.update_gate.pending.command_id), retained=False)
+
+    assert update_statuses(agent) == []
+    assert agent.installer.commands == []
+
+
 SERVER_OFFLINE = json.dumps({"state": "offline"}).encode()
 SERVER_ONLINE_AGAIN = json.dumps({"state": "online"}).encode()
 

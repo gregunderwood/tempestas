@@ -65,6 +65,18 @@ def test_redeploying_the_version_on_its_gate_leaves_the_gate_to_judge_it(tmp_pat
     assert layout.read_outcome() is None
 
 
+def test_redeploying_the_version_on_its_gate_keeps_the_release_it_would_roll_back_to(tmp_path):
+    layout = make_layout(tmp_path)
+    layout.write_pending(PendingUpdate("update-3", NEW_RELEASE, RUNNING_RELEASE))
+    for failed_update in ("1.1.7", "1.1.8", NEW_RELEASE):
+        layout.locate_release(failed_update).mkdir()
+    layout.switch_current_to(NEW_RELEASE)
+
+    make_current(layout, NEW_RELEASE)
+
+    assert layout.locate_release(RUNNING_RELEASE).is_dir()
+
+
 def test_refuses_a_release_that_was_never_copied(tmp_path, monkeypatch):
     monkeypatch.setenv("TEMPESTAS_AGENT_HOME", str(tmp_path))
     make_layout(tmp_path)
