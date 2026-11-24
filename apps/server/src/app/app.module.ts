@@ -11,16 +11,13 @@ import { AgentReleasesModule } from './agent-releases/agent-releases.module';
 import { CommonModule } from './common/common.module';
 import { postgresConnectionOptions } from './common/postgres-connection';
 import { DevicesModule } from './devices/devices.module';
-import { DeviceEntity, PinTransitionEntity } from './devices/models';
+import { ENTITIES } from './entities';
 import { HardwareModule } from './hardware/hardware.module';
 import { NodesModule } from './nodes/nodes.module';
-import { NodeEntity } from './nodes/models';
 import { ReadingsModule } from './readings/readings.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { ReportsModule } from './reports/reports.module';
 import { RulesModule } from './rules/rules.module';
-import { SensorReadingEntity } from './readings/models';
-import { ZoneEntity } from './zones/models';
 import { ZonesModule } from './zones/zones.module';
 import { ZoneHistoryModule } from './zone-history/zone-history.module';
 import { HealthModule } from './health/health.module';
@@ -29,15 +26,6 @@ const WEB_BUNDLE_DIRECTORY = join(__dirname, '..', 'web');
 
 // Sized for a runaway client loop, the failure that actually happens on a home LAN.
 const RUNAWAY_CLIENT_LIMIT = { ttl: 60_000, limit: 300 };
-
-// Listed rather than globbed: a webpack bundle has no directory to scan.
-const ENTITIES = [
-  ZoneEntity,
-  NodeEntity,
-  DeviceEntity,
-  PinTransitionEntity,
-  SensorReadingEntity,
-];
 
 @Module({
   imports: [

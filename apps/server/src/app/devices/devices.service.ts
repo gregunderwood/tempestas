@@ -10,7 +10,12 @@ import {
 import { Subscription } from 'rxjs';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ApiErrorCode, type Device, type GpioLevel } from '@tempestas/domain';
+import {
+  ApiErrorCode,
+  type Device,
+  type DeviceRole,
+  type GpioLevel,
+} from '@tempestas/domain';
 import { acceptsCommands } from '../nodes/node-registry';
 import { NodeEntity } from '../nodes/models';
 import { Clock } from '../common/clock';
@@ -96,9 +101,9 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     return this.toDto(await this.findOneEntity(id));
   }
 
-  async findByRole(zoneId: string, role: string): Promise<DeviceEntity[]> {
+  async findByRole(zoneId: string, role: DeviceRole): Promise<DeviceEntity[]> {
     return this.devices.find({
-      where: { zoneId, role: role as never },
+      where: { zoneId, role },
       relations: { node: true },
     });
   }

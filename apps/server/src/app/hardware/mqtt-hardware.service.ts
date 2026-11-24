@@ -14,7 +14,6 @@ import {
   MQTT_SCHEMAS,
   mqttQos,
   mqttTopics,
-  type GpioLevel,
   type GpioResultPayload,
   type NodeId,
 } from '@tempestas/domain';
@@ -46,7 +45,6 @@ import {
   decodeStatus,
   isCommandTopicKind,
   isEmptyPayload,
-  isGpioLevel,
   parseJson,
   parseNodeTopic,
   readCommandIssuer,
@@ -80,15 +78,6 @@ interface PendingCommand {
   timer: NodeJS.Timeout;
 }
 
-interface PinLevel {
-  level: GpioLevel | null;
-  known: boolean;
-}
-
-function unknownPinLevel(): PinLevel {
-  return { level: null, known: false };
-}
-
 // The only importer of `mqtt`. Its safety properties are in docs/Infrastructure/MQTT Contract.md.
 @Injectable()
 export class MqttHardwareService
@@ -110,7 +99,6 @@ export class MqttHardwareService
 
   private client: MqttClient | null = null;
   private readonly pendingCommands = new Map<string, PendingCommand>();
-  private readonly pinLevels = new Map<string, PinLevel>();
   private readonly lastReports = new Map<string, PinStateReport>();
   private readonly isOnlineByNode = new Map<NodeId, boolean>();
   private readonly knownNodes = new Set<NodeId>();
@@ -189,11 +177,6 @@ export class MqttHardwareService
       JSON.stringify(payload),
       mqttQos.gpioSync,
     );
-  }
-
-  /** Last known level per pin. `known: false` means unknown, NOT off. */
-  pinState(nodeId: NodeId, pin: number): PinLevel {
-    return this.pinLevels.get(toPinKey(nodeId, pin)) ?? unknownPinLevel();
   }
 
   lastPinReport(nodeId: NodeId, pin: number): PinStateReport | null {
@@ -465,7 +448,7 @@ export class MqttHardwareService
     if (!availability) return;
     this.isOnlineByNode.set(nodeId, availability.online);
     // Stale is not off: a dropped node's pins become unknown.
-    if (!availability.online) this.forgetPins(nodeId);
+    if (!availability.online) this.forgetLastReports(nodeId);
     this.availability.next(availability);
   }
 
@@ -496,7 +479,6 @@ export class MqttHardwareService
     );
     if (!state) return;
     const pinKey = toPinKey(nodeId, state.pin);
-    this.pinLevels.set(pinKey, { level: state.level, known: state.known });
     const report: PinStateReport = {
       nodeId,
       pin: state.pin,
@@ -550,13 +532,6 @@ export class MqttHardwareService
     }
     clearTimeout(command.timer);
     this.pendingCommands.delete(result.id);
-
-    for (const line of result.lines) {
-      this.pinLevels.set(toPinKey(nodeId, line.pin), {
-        level: line.readback,
-        known: isGpioLevel(line.readback),
-      });
-    }
 
     const mismatch = verifyResult(result, command.commands);
     if (mismatch) {
@@ -637,12 +612,7 @@ export class MqttHardwareService
     return true;
   }
 
-  private forgetPins(nodeId: NodeId): void {
-    for (const pinKey of this.pinLevels.keys()) {
-      if (isPinKeyOfNode(pinKey, nodeId)) {
-        this.pinLevels.set(pinKey, unknownPinLevel());
-      }
-    }
+  private forgetLastReports(nodeId: NodeId): void {
     // A relay may have failed safe since, so seeding a new device from it would be a guess.
     for (const pinKey of this.lastReports.keys()) {
       if (isPinKeyOfNode(pinKey, nodeId)) this.lastReports.delete(pinKey);

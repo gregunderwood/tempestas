@@ -5,8 +5,10 @@ import {
   EXIT_IRREVERSIBLE_MIGRATIONS_PENDING,
   EXIT_MIGRATIONS_APPLIED_BUT_NOT_RECORDED,
   EXIT_MIGRATIONS_PENDING,
+  createMigrationDataSource,
   runMigrationCommand,
 } from './migrate';
+import { ENTITIES } from './app/entities';
 import { IrreversibleMigration } from './migrations/irreversible-migration';
 
 class DropsLegacyReadings1800000000000 extends IrreversibleMigration {
@@ -31,6 +33,7 @@ vi.mock('typeorm', async (importOriginal) => {
   const typeorm = await importOriginal<typeof import('typeorm')>();
   class FakeDataSource {
     migrations = [{ name: 'AddA1', down: async () => undefined }];
+    constructor(readonly options: object) {}
     async initialize() {
       return this;
     }
@@ -241,4 +244,9 @@ describe('migrate:revert-applied', () => {
 
 it('refuses a command it does not know, before connecting', async () => {
   expect(await runMigrationCommand('drop-everything')).toBe(2);
+});
+
+it('maps the same entities as the running app', () => {
+  const source = createMigrationDataSource(() => undefined);
+  expect(source.options.entities).toBe(ENTITIES);
 });
