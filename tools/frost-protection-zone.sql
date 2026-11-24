@@ -1,9 +1,18 @@
--- The crawlspace zone. Re-run to change a setpoint; how and why are in docs/Crawlspace.md.
+-- A frost-protected zone: heater and heat tape that fail on. Run it as
+--   psql -v ON_ERROR_STOP=1 -v slug=pumphouse -v display_name=Pumphouse -f tools/frost-protection-zone.sql
+-- Re-run to change a setpoint; why is in docs/Pumphouse.md and docs/Crawlspace.md.
+-- An invalid rule refuses the zone rather than running, so check GET /api/health `problems` after.
+
+SELECT :{?slug} AND :{?display_name} AS has_zone_variables \gset
+\if :has_zone_variables
+\else
+  DO $$ BEGIN RAISE EXCEPTION 'name the zone: psql -v slug=... -v display_name=...'; END $$;
+\endif
 
 INSERT INTO zones (slug, display_name, rules_config)
 VALUES (
-  'crawlspace',
-  'Crawlspace',
+  :'slug',
+  :'display_name',
   $${
     "enabledRoles": ["heater", "heat_tape"],
     "sensorPolicy": { "default": { "source": "min", "maxAgeMs": 120000 } },
@@ -27,4 +36,4 @@ ON CONFLICT (slug) DO UPDATE
       rules_config = EXCLUDED.rules_config,
       updated_at   = now();
 
-SELECT slug, rules_config FROM zones WHERE slug = 'crawlspace';
+SELECT slug, display_name, rules_config FROM zones WHERE slug = :'slug';

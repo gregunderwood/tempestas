@@ -240,7 +240,7 @@ sensor-only one. The credential was generated on elantris and is kept at
 It was verified with MQTT v5: own topics RC:0, another node's sample and its own `gpio/set`
 RC:135. (For one day the identity was called `pumphouse`; on 2026-11-18 it was renamed back
 to `patji`, with the password unchanged, and `pumphouse` is now refused.) The
-zone came from [tools/pumphouse-zone.sql](../tools/pumphouse-zone.sql) and evaluates as
+zone came from [tools/frost-protection-zone.sql](../tools/frost-protection-zone.sql) and evaluates as
 `no-sensor` until the node exists.
 
 Two things were found on the way. `tools/deploy.sh` refused to deploy because a browser tab
@@ -263,10 +263,13 @@ refuses to start with until they are read off the bus. The plan as written follo
 - Pumphouse zone, via SQL in a script under `tools/`. There is no zones API, and data for one
   installation does not belong in a migration every dev database runs. It is idempotent:
   re-running it on elantris resets the rules, which is how a setpoint is changed, by review
-  rather than through a form.
+  rather than through a form. The crawlspace runs the same script with its own slug, so a changed
+  setpoint applies to both zones: re-run it for each, or split the script once the two need to
+  differ.
 
   ```bash
-  sudo -u postgres psql -d tempestas -v ON_ERROR_STOP=1 -f tools/pumphouse-zone.sql
+  sudo -u postgres psql -d tempestas -v ON_ERROR_STOP=1 \
+    -v slug=pumphouse -v display_name=Pumphouse -f tools/frost-protection-zone.sql
   ```
 
   ```

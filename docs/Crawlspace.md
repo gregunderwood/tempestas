@@ -65,7 +65,7 @@ the ACL and the zone script over from here first:
 
 ```bash
 scp apps/broker/mosquitto/tempestas.acl elantris:tempestas/apps/broker/mosquitto/
-scp tools/crawlspace-zone.sql elantris:tempestas/tools/
+scp tools/frost-protection-zone.sql elantris:tempestas/tools/
 ```
 
 The `braize` block is in [tempestas.acl](../apps/broker/mosquitto/tempestas.acl). Install the
@@ -105,9 +105,12 @@ The zone script is data for one installation, so it is not a migration. It is id
 re-running it resets the rules, which is how a setpoint is changed, by review rather than through
 a form. The server checks it on its next evaluation and names a refused zone in `/api/health`
 `problems`; the gate also runs every `tools/*-zone.sql` through the same parser.
+The pumphouse runs the same script with its own slug, so a changed setpoint applies to both
+zones: re-run it for each, or split the script once the two need to differ.
 
 ```bash
-sudo -u postgres psql -d tempestas -v ON_ERROR_STOP=1 -f tools/crawlspace-zone.sql
+sudo -u postgres psql -d tempestas -v ON_ERROR_STOP=1 \
+  -v slug=crawlspace -v display_name=Crawlspace -f tools/frost-protection-zone.sql
 curl -s http://192.168.2.70:7000/api/health          # the zone is not in `problems`
 
 API=http://192.168.2.70:7000/api
