@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from dataclasses import asdict, dataclass
@@ -17,6 +18,8 @@ OUTCOME_FILE = "outcome.json"
 # A release still arriving or being replaced: never run, and never counted as one to keep.
 UNFINISHED_PREFIX = "."
 KEPT_RELEASES = 3
+
+log = logging.getLogger("tempestas.agent")
 
 
 @dataclass
@@ -63,6 +66,7 @@ class ReleaseLayout:
         staged_link.unlink(missing_ok=True)
         staged_link.symlink_to(Path(RELEASES_DIRECTORY) / release)
         os.replace(staged_link, self.current_link)
+        sync_directory(self.home)
 
     def read_pending(self) -> PendingUpdate | None:
         return read_record(self.state / PENDING_FILE, PendingUpdate)
@@ -101,10 +105,28 @@ def read_record(path: Path, record_type):
         return record_type(**json.loads(path.read_text()))
     except FileNotFoundError:
         return None
+    except (ValueError, TypeError, UnicodeDecodeError) as error:
+        # A record that cannot be read must never keep the agent from starting.
+        log.error("dropped unreadable %s: %s", path, error)
+        path.unlink(missing_ok=True)
+        return None
 
 
 def write_record(path: Path, record) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     staged = path.with_name(f"{UNFINISHED_PREFIX}{path.name}")
-    staged.write_text(json.dumps(asdict(record)))
+    with staged.open("w") as staged_file:
+        staged_file.write(json.dumps(asdict(record)))
+        staged_file.flush()
+        os.fsync(staged_file.fileno())
     os.replace(staged, path)
+    sync_directory(path.parent)
+
+
+def sync_directory(directory: Path) -> None:
+    # Without it a power cut can undo a rename that already returned.
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)

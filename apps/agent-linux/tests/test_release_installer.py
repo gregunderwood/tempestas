@@ -155,3 +155,36 @@ def test_fetches_each_file_beside_the_manifest():
     assert build_file_url(MANIFEST_URL, "src/tempestas_agent/agent.py") == (
         "http://elantris:7000/api/agent-releases/agent-linux/1.1.4/files/src/tempestas_agent/agent.py"
     )
+
+
+def test_a_switch_that_fails_leaves_the_running_release_and_no_pending_update(
+    tmp_path, monkeypatch
+):
+    layout = make_layout(tmp_path)
+    switch_current_to = layout.switch_current_to
+
+    def fail_switching_to_the_new_release(release):
+        if release == NEW_RELEASE:
+            raise OSError("read-only file system")
+        switch_current_to(release)
+
+    monkeypatch.setattr(layout, "switch_current_to", fail_switching_to_the_new_release)
+
+    with pytest.raises(OSError):
+        install(layout, FakeServer())
+
+    assert_unchanged(layout)
+
+
+def test_a_pending_record_that_cannot_be_written_leaves_nothing_behind(tmp_path, monkeypatch):
+    layout = make_layout(tmp_path)
+
+    def fail_writing(_pending):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(layout, "write_pending", fail_writing)
+
+    with pytest.raises(OSError, match="no space"):
+        install(layout, FakeServer())
+
+    assert_unchanged(layout)

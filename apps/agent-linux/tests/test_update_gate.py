@@ -120,3 +120,13 @@ def test_a_passed_gate_keeps_the_newest_releases_and_both_ends_of_the_update(tmp
     assert NEW_RELEASE in kept and RUNNING_RELEASE in kept
     assert kept == sorted([NEW_RELEASE, RUNNING_RELEASE, older_releases[-1]])
     assert layout.read_pending() is None
+    assert layout.read_outcome() == UpdateOutcome("update-1", contract.UpdateState.HEALTHY)
+
+
+def test_an_unreadable_pending_record_is_dropped_rather_than_stopping_the_start(tmp_path):
+    layout = make_layout(tmp_path)
+    layout.state.mkdir()
+    (layout.state / "pending.json").write_text("")
+
+    assert settle_update_on_start(layout, now=0.0).gate is None
+    assert not (layout.state / "pending.json").exists()

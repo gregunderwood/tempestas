@@ -66,9 +66,18 @@ def settle_update_on_start(layout: ReleaseLayout | None, now: float) -> UpdateSe
     return settlement
 
 
-def pass_gate(layout: ReleaseLayout, gate: HealthGate) -> None:
-    layout.clear_pending()
+def is_still_pending(layout: ReleaseLayout, gate: HealthGate) -> bool:
+    """False once a hand deploy has replaced the update this gate is judging."""
+    return layout.read_pending() == gate.pending
+
+
+def pass_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
+    # Recorded, not just published, so a lost publish or a crash still tells the server.
+    outcome = record_outcome(
+        layout, UpdateOutcome(gate.pending.command_id, contract.UpdateState.HEALTHY)
+    )
     layout.prune_releases(protected={gate.pending.version, gate.pending.previous_release})
+    return outcome
 
 
 def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> None:

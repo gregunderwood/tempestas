@@ -197,7 +197,8 @@ actually in effect with `systemctl show tempestas-agent -p StartLimitIntervalUSe
   it ever runs. The end-to-end run caught exactly that.
 - **`OnFailure=tempestas-agent-rollback.service`.** It fires on every failed run, not only once the
   start limit gives up, so the script decides. It switches back only when the release that failed
-  is an update still waiting on its gate. Otherwise it exits 1 and changes nothing.
+  is an update still waiting on its gate. Otherwise it exits 1 and changes nothing, and as an
+  `ExecCondition=` that skips the unit rather than marking it failed after every ordinary crash.
 - **No ordering against the I²C bus.** systemd only creates `.device` units for devices udev tags
   for it, and i2c is not one, so `After=dev-i2c\x2d1.device` looks like ordering while doing
   nothing. The agent opens the bus, fails fast, and the restart retries.
@@ -260,9 +261,17 @@ The new release finds `pending.json` naming itself and has `GATE_SECONDS`, 120, 
 a `hello`, then a heartbeat from the server after that `hello`. A heartbeat means the broker, the
 credentials and the server's view of the node all work.
 
-- **Passed**: it publishes `healthy`, clears pending, and prunes old releases.
+- **Passed**: it records `healthy`, clears pending, prunes old releases, and reports.
 - **Not passed**: it switches `current` back, records `rolled-back` with the reason, and exits 75.
   The previous release reports the outcome once it connects.
+- **Replaced by a hand deploy**: the gate is dropped without passing or rolling back, and the
+  deploy's restart starts the release it copied.
+
+An outcome stays in `outcome.json` until the broker has acknowledged it, and every connect sends it
+again until then, so a dropped connection or a crash cannot lose it. Only the main loop acts on
+the gate; the MQTT callbacks just note the `hello` and the heartbeat, so a heartbeat arriving at
+the deadline cannot both pass and fail it.
+
 - **Cannot start at all**: the release never gets to judge itself. The unit fails,
   `tempestas-agent-rollback.service` runs the root-owned script, which switches back and starts the
   agent again, and the previous release reports `rolled-back`: "<v> did not start, so <prev> runs

@@ -19,6 +19,20 @@ def test_makes_the_copied_release_current_and_drops_a_waiting_update(tmp_path):
     assert layout.release_path(RUNNING_RELEASE).is_dir()
 
 
+def test_keeps_the_release_a_waiting_update_would_roll_back_to(tmp_path):
+    layout = make_layout(tmp_path)
+    layout.release_path(NEW_RELEASE).mkdir()
+    layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
+    layout.switch_current_to(NEW_RELEASE)
+    for release in ["1.0.1", "1.0.2", "1.0.3"]:
+        layout.release_path(release).mkdir()
+
+    make_current(layout, "1.0.3")
+
+    assert layout.release_path(RUNNING_RELEASE).is_dir()
+    assert layout.release_path(NEW_RELEASE).is_dir()
+
+
 def test_refuses_a_release_that_was_never_copied(tmp_path, monkeypatch):
     monkeypatch.setenv("TEMPESTAS_AGENT_HOME", str(tmp_path))
     make_layout(tmp_path)

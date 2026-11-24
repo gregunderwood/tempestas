@@ -54,6 +54,11 @@ def test_ignores_an_empty_payload_without_alarming_since_that_is_a_retained_clea
     assert (verdict.is_accepted, verdict.answer) == (False, ANSWER_LOG)
 
 
+def test_logs_an_expiry_shaped_like_a_date_that_is_not_one():
+    verdict = judge(build_update(expiresAt="2026-13-45T25:61:00Z"))
+    assert (verdict.is_accepted, verdict.answer) == (False, ANSWER_LOG)
+
+
 def test_drops_a_retained_update_and_alarms():
     verdict = judge(build_update(), retained=True)
     assert verdict.answer == ANSWER_ALARM

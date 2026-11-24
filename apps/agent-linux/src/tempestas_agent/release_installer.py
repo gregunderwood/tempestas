@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import shutil
 import urllib.request
 from collections.abc import Callable
@@ -14,6 +15,8 @@ from . import contract
 from .release_layout import PendingUpdate, ReleaseLayout
 from .update_command import SHA256_HEX
 from .version import AGENT_NAME
+
+log = logging.getLogger("tempestas.agent")
 
 BUNDLE_FILES_DIRECTORY = "files"
 DEPENDENCY_LOCK = "uv.lock"
@@ -101,11 +104,26 @@ class ReleaseInstaller:
         shutil.rmtree(destination, ignore_errors=True)
         staging.rename(destination)
         pending = PendingUpdate(command["id"], version, running_release)
-        # Before the switch: a crash between the two reads as a failed start, never as no update.
-        self.layout.write_pending(pending)
-        self.layout.clear_outcome()
-        self.layout.switch_current_to(version)
+        try:
+            # Before the switch: a crash between the two reads as a failed start, never as none.
+            self.layout.write_pending(pending)
+            self.layout.clear_outcome()
+            self.layout.switch_current_to(version)
+        except BaseException:
+            self._abandon_switch(destination, running_release)
+            raise
         return pending
+
+    def _abandon_switch(self, destination: Path, running_release: str) -> None:
+        """Reported as failed, so it must not also read as a rollback, or keep a release slot."""
+        try:
+            self.layout.switch_current_to(running_release)
+            self.layout.clear_pending()
+        except OSError as error:
+            # The error that stopped the switch is the one worth raising, so this one is logged.
+            log.error("could not undo the switch to %s: %s", destination.name, error)
+            return
+        shutil.rmtree(destination, ignore_errors=True)
 
 
 def parse_manifest(manifest_bytes: bytes) -> dict:

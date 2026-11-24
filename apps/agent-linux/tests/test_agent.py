@@ -17,13 +17,30 @@ from tempestas_agent.sensor import (
     SingleSensor,
 )
 
+PUBLISH_QUEUED = 0
+PUBLISH_NO_CONNECTION = 4
+
+
+class FakeDelivery:
+    def __init__(self, is_delivered: bool, rc: int = PUBLISH_QUEUED):
+        self.is_delivered = is_delivered
+        self.rc = rc
+
+    def is_published(self) -> bool:
+        if self.rc != PUBLISH_QUEUED:
+            raise RuntimeError("Message publish failed")
+        return self.is_delivered
+
 
 class FakeClient:
     def __init__(self):
         self.published: list[tuple[str, dict, int, bool]] = []
+        self.is_delivering = True
+        self.publish_rc = PUBLISH_QUEUED
 
     def publish(self, topic, payload, qos=0, retain=False):
         self.published.append((topic, json.loads(payload), qos, retain))
+        return FakeDelivery(self.is_delivering, self.publish_rc)
 
     def topics(self):
         return [topic for topic, _, _, _ in self.published]

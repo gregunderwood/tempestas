@@ -57,3 +57,18 @@ def test_does_nothing_twice_so_a_failing_previous_release_is_not_restarted_forev
     assert script.main() == 0
     assert script.main() == 1
     assert layout.read_current_release() == RUNNING_RELEASE
+
+
+def test_does_nothing_when_the_pending_record_cannot_be_read(layout):
+    layout.state.mkdir()
+    (layout.state / "pending.json").write_text("{")
+
+    assert load_rollback_script().main() == 1
+    assert layout.read_current_release() == RUNNING_RELEASE
+
+
+def test_does_nothing_when_current_is_not_a_release_link(layout):
+    install_pending_update(layout)
+    layout.current_link.unlink()
+
+    assert load_rollback_script().main() == 1

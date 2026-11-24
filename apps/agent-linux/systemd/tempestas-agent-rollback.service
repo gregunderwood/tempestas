@@ -10,10 +10,11 @@ User=gunderwood
 Group=gunderwood
 Environment=TEMPESTAS_AGENT_HOME=/home/gunderwood/tempestas/agent-linux
 # Root-owned and outside the releases, so an update can never change what runs here.
-ExecStart=/usr/bin/python3 /usr/local/lib/tempestas/tempestas-agent-rollback.py
+# A condition, so "nothing to roll back" (exit 1) ends the unit cleanly instead of as failed.
+ExecCondition=/usr/bin/python3 /usr/local/lib/tempestas/tempestas-agent-rollback.py
 # Only after a switch: a failure with no pending update must not restart a crash loop.
-ExecStartPost=+/usr/bin/systemctl reset-failed tempestas-agent.service
-ExecStartPost=+/usr/bin/systemctl start --no-block tempestas-agent.service
+ExecStart=+/usr/bin/systemctl reset-failed tempestas-agent.service
+ExecStart=+/usr/bin/systemctl start --no-block tempestas-agent.service
 
 ProtectSystem=strict
 ProtectHome=read-only

@@ -92,7 +92,11 @@ def judge_expiry(expires_at, now: datetime) -> UpdateVerdict | None:
         return log_only("update has no expiresAt")
     if not ISO_8601_INSTANT.fullmatch(expires_at):
         return log_only(f'unparseable expiresAt "{expires_at}"')
-    deadline = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    try:
+        deadline = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        # The pattern checks the shape only, so a month 13 still reaches here.
+        return log_only(f'unparseable expiresAt "{expires_at}"')
     if deadline < now:
         return alarm("update expired", contract.AlarmCode.COMMAND_EXPIRED)
     return None

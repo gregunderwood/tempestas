@@ -16,7 +16,7 @@ from tempestas_agent.agent import NOT_INSTALLED_FROM_A_RELEASE
 from tempestas_agent.release_installer import ReleaseInstaller, UpdateFailed
 from tempestas_agent.release_layout import PendingUpdate, UpdateOutcome
 from tempestas_agent.update_gate import GATE_SECONDS
-from test_agent import make_agent
+from test_agent import PUBLISH_NO_CONNECTION, make_agent
 from test_update_command import SERVER, build_update
 
 UPDATE_STATUS_TOPIC = contract.build_update_status_topic("bench")
@@ -131,51 +131,123 @@ def test_refuses_a_second_update_while_one_is_in_progress(monkeypatch, tmp_path)
     ]
 
 
-def test_a_new_release_reports_healthy_once_it_has_said_hello_and_heard_a_heartbeat(tmp_path):
-    agent, _ = make_agent()
-    agent.layout = make_layout(tmp_path)
-    agent.layout.release_path(NEW_RELEASE).mkdir()
-    agent.layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
-    agent.layout.switch_current_to(NEW_RELEASE)
-    agent.settle_update()
-
-    agent.say_hello()
-    agent.on_heartbeat(HEARTBEAT)
-
-    assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
-    assert agent.layout.read_pending() is None
-    assert agent.update_gate is None
-
-
-def test_a_new_release_that_hears_no_heartbeat_rolls_back_and_restarts(tmp_path):
+def start_new_release_on_its_gate(tmp_path):
     agent, clock = make_agent()
     agent.layout = make_layout(tmp_path)
     agent.layout.release_path(NEW_RELEASE).mkdir()
     agent.layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
     agent.layout.switch_current_to(NEW_RELEASE)
     agent.settle_update()
+    return agent, clock
+
+
+def test_a_new_release_reports_healthy_once_it_has_said_hello_and_heard_a_heartbeat(tmp_path):
+    agent, _ = start_new_release_on_its_gate(tmp_path)
+
+    agent.say_hello()
+    agent.on_heartbeat(HEARTBEAT)
+    assert update_statuses(agent) == []
+    agent.tend_update()
+
+    assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
+    assert agent.layout.read_pending() is None
+    assert agent.update_gate is None
+
+
+def test_a_healthy_update_is_kept_until_the_broker_has_it(tmp_path):
+    agent, _ = start_new_release_on_its_gate(tmp_path)
+    agent.client.is_delivering = False
+    agent.say_hello()
+    agent.on_heartbeat(HEARTBEAT)
+
+    agent.tend_update()
+
+    assert agent.layout.read_outcome().state == contract.UpdateState.HEALTHY
+
+
+def test_a_gate_replaced_by_a_hand_deploy_neither_passes_nor_rolls_back(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.layout.clear_pending()
+
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert agent.layout.read_current_release() == NEW_RELEASE
+    assert not agent.restart_requested.is_set()
+    assert update_statuses(agent) == []
+
+
+def test_a_heartbeat_noted_before_the_deadline_passes_even_if_tended_after_it(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+    agent.on_heartbeat(HEARTBEAT)
+
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
+    assert agent.layout.read_current_release() == NEW_RELEASE
+    assert not agent.restart_requested.is_set()
+
+
+def test_a_new_release_that_hears_no_heartbeat_rolls_back_and_restarts(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
     agent.say_hello()
 
     clock.advance(GATE_SECONDS)
-    agent.check_update_gate()
+    agent.tend_update()
 
     assert agent.layout.read_current_release() == RUNNING_RELEASE
     assert agent.restart_requested.is_set()
     assert agent.layout.read_outcome().state == contract.UpdateState.ROLLED_BACK
+    assert update_statuses(agent) == []
 
 
-def test_the_previous_release_reports_the_rollback_once_it_connects(tmp_path):
+def roll_back_before_this_start(tmp_path):
     agent, _ = make_agent()
     agent.layout = make_layout(tmp_path)
     reason = f"{NEW_RELEASE} sent no heartbeat within {GATE_SECONDS}s"
     agent.layout.write_outcome(UpdateOutcome("update-1", contract.UpdateState.ROLLED_BACK, reason))
     agent.settle_update()
+    return agent, reason
+
+
+def test_the_previous_release_reports_the_rollback_once_it_connects(tmp_path):
+    agent, reason = roll_back_before_this_start(tmp_path)
 
     agent.report_settled_update()
+    agent.tend_update()
     agent.report_settled_update()
 
     assert update_statuses(agent) == [(contract.UpdateState.ROLLED_BACK, reason)]
     assert agent.layout.read_outcome() is None
+
+
+def test_keeps_the_rollback_until_the_broker_has_it_and_sends_it_again_on_reconnect(tmp_path):
+    agent, reason = roll_back_before_this_start(tmp_path)
+    agent.client.is_delivering = False
+
+    agent.report_settled_update()
+    agent.tend_update()
+    assert agent.layout.read_outcome() is not None
+
+    agent.client.is_delivering = True
+    agent.report_settled_update()
+    agent.tend_update()
+
+    assert update_statuses(agent) == [(contract.UpdateState.ROLLED_BACK, reason)] * 2
+    assert agent.layout.read_outcome() is None
+
+
+def test_a_publish_made_while_disconnected_is_kept_for_the_next_connect(tmp_path):
+    agent, _ = roll_back_before_this_start(tmp_path)
+    agent.client.publish_rc = PUBLISH_NO_CONNECTION
+
+    agent.report_settled_update()
+    agent.tend_update()
+
+    assert agent.outcome_to_report is not None
+    assert agent.layout.read_outcome() is not None
 
 
 def test_installs_a_real_bundle_end_to_end(monkeypatch, tmp_path):

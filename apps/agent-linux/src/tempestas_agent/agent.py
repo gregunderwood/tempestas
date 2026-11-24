@@ -10,6 +10,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from paho.mqtt.enums import MQTTErrorCode
+
 from . import contract
 from . import gpio as gpio_backends
 from . import sensor as sensor_backends
@@ -18,7 +20,7 @@ from .ds18b20 import Ds18b20Sensors, Probe
 from .release_installer import ReleaseInstaller
 from .release_layout import ReleaseLayout
 from .update_command import ANSWER_ALARM, ANSWER_FAILED_STATUS, UpdateVerdict, judge_update_command
-from .update_gate import pass_gate, roll_back_gate, settle_update_on_start
+from .update_gate import is_still_pending, pass_gate, roll_back_gate, settle_update_on_start
 from .version import AGENT_NAME, read_agent_version
 from .world_client import WorldClient
 
@@ -119,6 +121,11 @@ def judge_expiry(expires_at, now: datetime) -> CommandVerdict | None:
     return None
 
 
+def is_delivered(delivery) -> bool:
+    # paho raises from is_published() for a publish that never left; the next connect resends it.
+    return delivery.rc == MQTTErrorCode.MQTT_ERR_SUCCESS and delivery.is_published()
+
+
 class Agent:
     def __init__(
         self,
@@ -139,6 +146,7 @@ class Agent:
         self.installer = installer or (ReleaseInstaller(layout) if layout else None)
         self.update_gate = None
         self.outcome_to_report = None
+        self._outcome_delivery = None
         self.restart_requested = threading.Event()
         self._update_in_progress = threading.Lock()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
@@ -248,7 +256,9 @@ class Agent:
             self.publish_alarm(
                 contract.AlarmCode.DEADMAN_CLEARED, SEVERITY_INFO, "heartbeats resumed"
             )
-        self._settle_gate_on_heartbeat()
+        gate = self.update_gate
+        if gate is not None:
+            gate.note_heartbeat()
 
     def on_server_status(self, payload: bytes, retained: bool) -> None:
         try:
@@ -268,8 +278,10 @@ class Agent:
 
     def say_hello(self) -> None:
         self.publish("hello", contract.build_hello_topic(self.config.node_id), self.hello_payload())
-        if self.update_gate is not None:
-            self.update_gate.note_hello()
+        # Read once: the main loop may drop the gate between a check and a use.
+        gate = self.update_gate
+        if gate is not None:
+            gate.note_hello()
 
     def settle_update(self) -> None:
         settlement = settle_update_on_start(self.layout, self._clock())
@@ -277,12 +289,13 @@ class Agent:
         self.outcome_to_report = settlement.outcome
 
     def report_settled_update(self) -> None:
+        """Sent on every connect until the broker has it; tend_update then forgets it."""
         outcome = self.outcome_to_report
         if outcome is None:
             return
-        self.publish_update_status(outcome.command_id, outcome.state, outcome.reason)
-        self.layout.clear_outcome()
-        self.outcome_to_report = None
+        self._outcome_delivery = self.publish_update_status(
+            outcome.command_id, outcome.state, outcome.reason
+        )
 
     def on_update(self, payload: bytes, retained: bool) -> None:
         verdict = judge_update_command(
@@ -310,20 +323,16 @@ class Agent:
             target=self._install_update, args=(verdict.command,), name="update", daemon=True
         ).start()
 
-    def check_update_gate(self) -> None:
-        gate = self.update_gate
-        if gate is None or not gate.is_overdue(self._clock()):
-            return
-        self.update_gate = None
-        log.error("update gate failed: %s - rolling back", gate.describe_failure())
-        roll_back_gate(self.layout, gate)
-        self.restart_requested.set()
+    def tend_update(self) -> None:
+        """Main loop only: the MQTT callbacks note what happened, and this alone acts on it."""
+        self._settle_update_gate()
+        self._forget_delivered_outcome()
 
-    def publish_update_status(self, command_id: str, state: str, reason: str | None = None) -> None:
+    def publish_update_status(self, command_id: str, state: str, reason: str | None = None):
         payload = {**self._envelope("updateStatus"), "id": command_id, "state": state}
         if reason is not None:
             payload["reason"] = reason
-        self.publish(
+        return self.publish(
             "updateStatus", contract.build_update_status_topic(self.config.node_id), payload
         )
 
@@ -348,9 +357,9 @@ class Agent:
         )
         return True
 
-    def publish(self, message_kind: str, topic: str, payload: dict) -> None:
+    def publish(self, message_kind: str, topic: str, payload: dict):
         qos, retain = contract.QOS[message_kind]
-        self.client.publish(topic, json.dumps(payload), qos=qos, retain=retain)
+        return self.client.publish(topic, json.dumps(payload), qos=qos, retain=retain)
 
     def publish_gpio_state(self, pins) -> None:
         for pin in pins:
@@ -389,17 +398,33 @@ class Agent:
         else:
             log.debug("ignored a command: %s", verdict.reason)
 
-    def _settle_gate_on_heartbeat(self) -> None:
+    def _settle_update_gate(self) -> None:
         gate = self.update_gate
         if gate is None:
             return
-        gate.note_heartbeat()
-        if not gate.is_passed():
+        has_passed = gate.is_passed()
+        if not has_passed and not gate.is_overdue(self._clock()):
             return
         self.update_gate = None
-        pass_gate(self.layout, gate)
-        log.info("update to %s passed its health gate", gate.pending.version)
-        self.publish_update_status(gate.pending.command_id, contract.UpdateState.HEALTHY)
+        if not is_still_pending(self.layout, gate):
+            log.warning("update to %s was replaced by a hand deploy", gate.pending.version)
+            return
+        if has_passed:
+            log.info("update to %s passed its health gate", gate.pending.version)
+            self.outcome_to_report = pass_gate(self.layout, gate)
+            self.report_settled_update()
+            return
+        log.error("update gate failed: %s - rolling back", gate.describe_failure())
+        roll_back_gate(self.layout, gate)
+        self.restart_requested.set()
+
+    def _forget_delivered_outcome(self) -> None:
+        delivery = self._outcome_delivery
+        if delivery is None or not is_delivered(delivery):
+            return
+        self.layout.clear_outcome()
+        self.outcome_to_report = None
+        self._outcome_delivery = None
 
     def _install_update(self, command: dict) -> None:
         command_id = command["id"]

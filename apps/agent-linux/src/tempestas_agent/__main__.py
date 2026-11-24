@@ -202,7 +202,7 @@ def run_until_signalled(agent: Agent, config: AgentConfig) -> None:
     while not should_stop and not agent.restart_requested.is_set():
         publish_samples(agent)
         agent.check_deadman()
-        agent.check_update_gate()
+        agent.tend_update()
         agent.restart_requested.wait(config.sensor.sample_interval_s)
 
 
