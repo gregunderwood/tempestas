@@ -8,9 +8,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENT="$HERE/apps/agent-linux"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 SETTLE_SECONDS=5
-# Written by the venv build beside the venv, so a deploy rebuilds it only when they change.
+# Kept beside the venv; a deploy rebuilds only when it changes.
 REQUIREMENTS_FILE=requirements.txt
-# Older systemd reaches `failed` only at the start limit, so OnFailure= cannot judge each run.
+# Before 254, OnFailure= fires only at the start limit, not on each run.
 MINIMUM_SYSTEMD_VERSION=254
 SWITCH_LOCK=update-state/switch.lock
 ROLLBACK_SCRIPT_DIR=/usr/local/lib/tempestas
@@ -28,11 +28,11 @@ say "Gate"
 
 AGENT_VERSION="$("$HERE/tools/describe-agent-version.sh" "$AGENT")"
 REMOTE_RELEASE="$REMOTE_AGENT_HOME/releases/$AGENT_VERSION"
-# Without the gpio extra: every host runs the distro's lgpio, which armv6 could not build anyway.
+# No gpio extra: hosts use the distro's lgpio, which armv6 cannot build.
 REQUIREMENTS="$(cd "$AGENT" && "$UV" export --frozen --no-dev --no-emit-project --no-hashes --quiet)"
 say "Deploying $AGENT_VERSION to ${HOSTS[*]}"
 
-# A warning, not a refusal: a hand deploy must still reach such a host with a fix.
+# A warning, so a fix can still reach such a host.
 warn_unless_systemd_rolls_back() {
   local host="$1" version
   version="$(ssh "$host" "systemctl --version" | awk 'NR == 1 { print $2 }' || true)"
@@ -71,13 +71,13 @@ flock "$lock_descriptor"
 if [ ! -e "$release" ]; then
   mv -T "$staging" "$release"
 elif ! mv -T --exchange "$staging" "$release" 2>/dev/null; then
-  # coreutils before 9.5 cannot exchange, so `current` points at nothing for a moment.
+  # coreutils before 9.5 cannot exchange, so `current` briefly points at nothing.
   rm -rf "$staging-replaced"
   mv -T "$release" "$staging-replaced"
   mv -T "$staging" "$release"
   mv -T "$staging-replaced" "$staging"
 fi
-# Released first: deleting the replaced tree on a slow card must not hold up a switch.
+# Unlocked first, so a slow delete never blocks a switch.
 exec {lock_descriptor}>&-
 rm -rf "$staging"
 REMOTE
@@ -98,7 +98,7 @@ fi
 echo "building the venv; on a Pi Zero this takes a few minutes"
 python3 -m venv --system-site-packages "$home/.venv-building"
 "$home/.venv-building/bin/pip" install --quiet --disable-pip-version-check -r "$home/.$requirements_file"
-# Last, so only a finished build carries the file swap_in_built_venv looks for.
+# Last, so only a finished build has this file.
 mv "$home/.$requirements_file" "$home/.venv-building/$requirements_file"
 REMOTE
 }
@@ -108,7 +108,7 @@ swap_in_built_venv() {
   ssh "$host" bash -s -- "$REMOTE_AGENT_HOME" "$REQUIREMENTS_FILE" <<'REMOTE'
 set -euo pipefail
 home="$1" requirements_file="$2"
-# Kept unless replaced: after a failed restart it is the last venv known to work.
+# Kept unless replaced: after a failed restart it is the last good venv.
 [ -e "$home/.venv-building/$requirements_file" ] || exit 0
 rm -rf "$home/.venv-replaced"
 [ ! -e "$home/venv" ] || mv "$home/venv" "$home/.venv-replaced"
@@ -126,7 +126,7 @@ swap_back_venv() {
 make_current_or_swap_back() {
   local host="$1"
   make_current "$host" && return 0
-  # It may have failed after switching, say while pruning; then the new venv belongs to `current`.
+  # A failure after the switch, say in pruning, keeps the new venv with the new code.
   if is_current "$host"; then
     echo "$host: $AGENT_VERSION is current but its deploy failed after the switch; the new venv stays" >&2
     exit 1
@@ -148,7 +148,7 @@ remove_replaced_venv() {
   ssh "$host" "rm -rf $REMOTE_AGENT_HOME/.venv-replaced"
 }
 
-# The system python: hand_deploy needs only the standard library, and the venv may not exist yet.
+# The system python: the venv may not exist yet.
 make_current() {
   local host="$1"
   ssh "$host" "cd $REMOTE_RELEASE && TEMPESTAS_AGENT_HOME=$REMOTE_AGENT_HOME PYTHONPATH=$REMOTE_RELEASE/src \
@@ -160,7 +160,7 @@ is_unit_on_release_layout() {
   ssh "$host" "systemctl cat tempestas-agent.service 2>/dev/null | grep -q '$REMOTE_AGENT_HOME/current'"
 }
 
-# Root-owned, so a deploy cannot install them itself; it says when they differ from the release's.
+# The units are root-owned, so this only reports a difference.
 are_unit_files_current() {
   local host="$1"
   ssh "$host" "cmp -s $REMOTE_RELEASE/systemd/tempestas-agent-rollback.py $ROLLBACK_SCRIPT_DIR/tempestas-agent-rollback.py \
@@ -183,7 +183,7 @@ EOF
 
 for HOST in "${HOSTS[@]}"; do
   say "$HOST: copying into $REMOTE_RELEASE"
-  # The venv first: a redeploy of the running version replaces the code `current` already runs.
+  # Venv first: a redeploy of the running version replaces live code.
   build_venv_if_needed "$HOST"
   copy_release "$HOST"
 
@@ -195,7 +195,7 @@ for HOST in "${HOSTS[@]}"; do
     continue
   fi
   say "$HOST: restarting (relays fail safe until the server drives them again)"
-  # Back to back, then restarted: any start between them would pair code with the wrong venv.
+  # Back to back, so no start pairs code with the wrong venv.
   HAS_SWAPPED_VENV="$(swap_in_built_venv "$HOST")"
   make_current_or_swap_back "$HOST"
   ssh "$HOST" "sudo -n systemctl restart tempestas-agent.service"
@@ -205,7 +205,7 @@ for HOST in "${HOSTS[@]}"; do
       "$REMOTE_AGENT_HOME/.venv-replaced (journalctl -u tempestas-agent says why)" >&2
     exit 1
   fi
-  # Only once the agent runs on the new venv, so a broken build leaves the old one to swap back.
+  # Only once the agent runs, so a broken build can be swapped back.
   remove_replaced_venv "$HOST"
   are_unit_files_current "$HOST" ||
     print_unit_install "$HOST" "the installed unit files or rollback script differ from this release's."

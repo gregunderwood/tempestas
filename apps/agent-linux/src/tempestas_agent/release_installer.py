@@ -27,7 +27,7 @@ HAND_DEPLOYED_DURING_DOWNLOAD = "a hand deploy changed the running release durin
 BUNDLE_FILES_DIRECTORY = "files"
 DEPENDENCY_LOCK = "uv.lock"
 FETCH_TIMEOUT_S = 30
-# The socket timeout is per read, so a trickling server would otherwise hold an update forever.
+# The socket timeout is per read, so a trickle needs its own deadline.
 FETCH_DEADLINE_S = 120
 FETCH_CHUNK_BYTES = 64 * 1024
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -47,13 +47,13 @@ def fetch_over_http(url: str, clock: Callable[[], float] = time.monotonic) -> by
 
 
 def describe_without_query(url: str) -> str:
-    # The query may carry a signature, and the reason goes to every updateStatus subscriber.
+    # The query may hold a signature, and reasons are published.
     return urlparse(url)._replace(query="").geturl()
 
 
 def read_within(response, url: str, deadline: float, clock: Callable[[], float]) -> bytes:
     body = bytearray()
-    # read1, not read: read waits to fill the chunk, so a trickle would never reach the check.
+    # read1: read blocks to fill the chunk, past the deadline.
     while chunk := response.read1(FETCH_CHUNK_BYTES):
         body += chunk
         if len(body) > MAX_FILE_BYTES:
@@ -145,7 +145,7 @@ class ReleaseInstaller:
             shutil.rmtree(destination, ignore_errors=True)
             staging.rename(destination)
             sync_directory(self.layout.releases)
-            # Before the switch: a crash between the two reads as a failed start, never as none.
+            # Before the switch, so a crash between reads as a failed start.
             self.layout.clear_start_records()
             self.layout.write_pending(pending)
             self.layout.clear_outcome()
@@ -167,13 +167,13 @@ class ReleaseInstaller:
         try:
             self.layout.switch_current_to(running_release)
         except OSError as error:
-            # The error that stopped the switch is the one worth raising, so this one is logged.
+            # Logged: the error that stopped the switch is the one to raise.
             log.error("could not undo the switch to %s: %s", destination.name, error)
         if self.layout.read_current_release() != running_release:
-            # Kept pending: the next start then judges the release `current` really points at.
+            # Kept pending, so the next start judges whatever `current` is.
             return
         try:
-            # Recorded, not just cleared: a pending record left behind would read as a rollback.
+            # Recorded, or a leftover pending record would read as a rollback.
             failure = UpdateOutcome(pending.command_id, contract.UpdateState.FAILED, str(cause))
             record_outcome(self.layout, failure)
         except OSError as record_error:
@@ -191,7 +191,7 @@ class ReleaseInstaller:
 
 
 def write_durably(path: Path, content: bytes) -> None:
-    # Synced before `current` can point at it: a power cut must not leave a truncated release.
+    # Synced, so a power cut cannot leave a truncated release current.
     with open(path, "wb") as file:
         file.write(content)
         file.flush()
@@ -199,7 +199,7 @@ def write_durably(path: Path, content: bytes) -> None:
 
 
 def sync_directories_under(root: Path) -> None:
-    # The entries, not just the files: a power cut must not lose a file the switch relies on.
+    # Directories too, or a power cut can lose a file the switch needs.
     for directory in [root, *(path for path in root.rglob("*") if path.is_dir())]:
         sync_directory(directory)
 
@@ -252,7 +252,7 @@ def verify_files(files: list[dict], staging: Path) -> None:
 
 
 def build_file_url(manifest_url: str, path: str) -> str:
-    # The manifest's query, a signature say, must reach every file too; urljoin drops it.
+    # urljoin drops the manifest's query, which every file needs too.
     query = urlparse(manifest_url).query
     file_url = urljoin(manifest_url, f"{BUNDLE_FILES_DIRECTORY}/{quote(path)}")
     return f"{file_url}?{query}" if query else file_url

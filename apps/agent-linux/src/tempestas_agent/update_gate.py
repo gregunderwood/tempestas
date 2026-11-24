@@ -20,7 +20,7 @@ class UpdateSettlement:
 
 
 class HealthGate:
-    """Counts only time with the broker connected and the server online: an outage is no verdict."""
+    """Counts only time with the server online: an outage is no verdict."""
 
     def __init__(self, pending: PendingUpdate):
         self.pending = pending
@@ -51,7 +51,7 @@ class HealthGate:
             return self._watched_seconds + running
 
     def note_heartbeat(self) -> None:
-        # A heartbeat before our hello proves the broker, not that the server knows this release.
+        # Before our hello, a heartbeat proves only the broker.
         if self.has_said_hello:
             self.has_heard_heartbeat = True
 
@@ -72,7 +72,7 @@ def settle_update_on_start(
     if layout is None:
         return UpdateSettlement()
     with layout.hold_switch_lock(should_wait=False):
-        # Under the lock: a rollback switching after the check would leave this code running.
+        # Under the lock, so a rollback cannot slip in after the check.
         if is_running_another_release(layout, loaded_release):
             return UpdateSettlement(should_restart=True)
         return settle_while_locked(layout)
@@ -91,7 +91,7 @@ def settle_while_locked(layout: ReleaseLayout) -> UpdateSettlement:
     if pending is None:
         return settlement
     if is_already_settled(settlement.outcome, pending):
-        # A crash between recording the outcome and clearing the pending record; finish it.
+        # A crash came between recording the outcome and clearing pending.
         record_outcome(layout, settlement.outcome)
         return settlement
     if layout.read_current_release() == pending.version:
@@ -130,7 +130,7 @@ def is_still_current(layout: ReleaseLayout, gate: HealthGate) -> bool:
 
 
 def pass_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
-    # Recorded, not just published, so a lost publish or a crash still tells the server.
+    # Recorded, so a lost publish or a crash still reports it.
     return record_outcome(
         layout, UpdateOutcome(gate.pending.command_id, contract.UpdateState.HEALTHY)
     )
@@ -145,7 +145,7 @@ def prune_after_update(layout: ReleaseLayout, pending: PendingUpdate) -> list[st
 def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
     pending = gate.pending
     if not layout.locate_release(pending.previous_release).is_dir():
-        # `current` pointing at nothing could never start again; a failing release at least runs.
+        # Better a failing release than `current` pointing at nothing.
         return record_outcome(
             layout,
             UpdateOutcome(
@@ -155,7 +155,7 @@ def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
                 " is missing, so it stays",
             ),
         )
-    # Switched first: a crash before the outcome is written reads as a failed start, which it was.
+    # Switched first, so a crash before the outcome reads as a failed start.
     layout.switch_current_to(pending.previous_release)
     return record_outcome(
         layout,
@@ -170,7 +170,7 @@ def record_start(layout: ReleaseLayout, gate: HealthGate) -> None:
 
 
 def record_outcome(layout: ReleaseLayout, outcome: UpdateOutcome) -> UpdateOutcome:
-    # The pending record goes last, so a crash before it still reports and retries the step.
+    # Pending last, so a crash before it retries the whole step.
     layout.write_outcome(outcome)
     layout.clear_start_records()
     layout.clear_pending()

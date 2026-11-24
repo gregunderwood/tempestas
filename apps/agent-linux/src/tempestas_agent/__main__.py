@@ -32,9 +32,9 @@ LOCK_PATH_TEMPLATE = "/run/tempestas/agent-{node_id}.lock"
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s %(message)s"
 # Gives the network loop time to send the offline status before it stops.
 OFFLINE_FLUSH_S = 0.2
-# A signal handler cannot safely wake an Event, so a stop is noticed within this.
+# A signal handler cannot safely set an Event, so the wait polls.
 STOP_CHECK_S = 1.0
-# systemd asks for a ping at least every half of WatchdogSec.
+# systemd asks for a ping every half WatchdogSec.
 WATCHDOG_PING_SHARE = 0.5
 MICROSECONDS_PER_SECOND = 1_000_000
 
@@ -42,7 +42,7 @@ MICROSECONDS_PER_SECOND = 1_000_000
 def main() -> int:
     arguments = parse_arguments()
     configure_logging(arguments.log_level)
-    # The watchdog kills a hung agent with SIGABRT; this writes where it hung to the journal.
+    # The watchdog's SIGABRT then logs where the agent hung.
     faulthandler.enable()
 
     try:
@@ -64,7 +64,7 @@ def main() -> int:
         config, client=None, sensor=sensor, gpio=gpio, layout=ReleaseLayout.from_environment()
     )
     agent.settle_update()
-    # Before connecting, so no download of this run can be mistaken for an abandoned one.
+    # Before connecting, so it never removes this run's own download.
     agent.remove_unfinished_downloads()
     client = build_client(agent)
     agent.client = client
@@ -75,7 +75,7 @@ def main() -> int:
     try:
         run_until_signalled(agent, config)
     except Exception:
-        # After an update switched `current`, any other exit reads as the new release failing.
+        # Once `current` has switched, a failure exit would roll the new release back.
         if agent.has_current_moved_off_this_release():
             agent.request_restart()
         if not agent.restart_requested.is_set():
@@ -163,7 +163,7 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
         try:
             handler(agent, message)
         except Exception:
-            # Raised here it would end the network thread, and every later command with it.
+            # An exception here would kill paho's network thread.
             log.exception("could not handle a message on %s", message.topic)
 
     def on_disconnect(_client, _userdata, _flags, _reason_code, _properties=None):
@@ -214,11 +214,11 @@ def start(agent: Agent, config: AgentConfig) -> None:
     )
     if not config.has_gpio:
         log.info("no GPIO lines configured: this agent cannot drive a pin at all")
-    # Async, so a broker down at start is retried rather than failing a new release before hello.
+    # Async, so a broker that is down at start is retried, not fatal.
     broker = config.mqtt
     agent.client.connect_async(broker.host, broker.port, keepalive=broker.keepalive_s)
     agent.client.loop_start()
-    # Kept here: paho keeps it private, and forgets it once a raising callback has ended it.
+    # paho drops its own reference once a callback raises.
     agent.network_thread = getattr(agent.client, "_thread", None)
 
 
@@ -301,7 +301,7 @@ def publish_samples(agent: Agent) -> None:
 
 
 def shut_down_without_raising(agent: Agent, lock: SingleInstance) -> None:
-    # A requested restart must still exit 75, or the rollback unit reads it as the update failing.
+    # A requested restart must still exit 75, or it reads as a failed update.
     try:
         shut_down(agent, lock)
     except Exception:

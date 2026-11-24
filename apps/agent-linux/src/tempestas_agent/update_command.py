@@ -1,4 +1,4 @@
-"""The node's half of `update`, judged like `gpio/set`; mirrors judgeUpdateCommand in TypeScript."""
+"""The node's half of `update`; mirrors judgeUpdateCommand in TypeScript."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def judge_update_command(
     now: datetime,
 ) -> UpdateVerdict:
     if payload.strip() == b"":
-        # Reacting to a clear, even by alarming, risks a loop against whoever cleared it.
+        # Reacting to a clear, even with an alarm, risks a loop.
         return build_log_only_verdict("empty payload (a retained clear)")
     if is_retained:
         return build_alarm_verdict(
@@ -61,7 +61,7 @@ def judge_update_command(
     has_id = isinstance(command_id, str) and command_id != ""
     expiry_refusal = judge_expiry(body.get("expiresAt"), now)
     if expiry_refusal is not None:
-        # With its id, so an expired repeat of a known update is ignored, not alarmed on.
+        # The id lets an expired repeat of a known update be ignored.
         return replace(expiry_refusal, command_id=command_id if has_id else None)
     if not has_id:
         return build_log_only_verdict("update has no id")
@@ -78,7 +78,7 @@ def read_version_major(version: str) -> int | None:
 
 
 def judge_ownership(issued_by, bound_controller: str | None) -> UpdateVerdict | None:
-    # Stricter than gpio/set: replacing code can wait the seconds until the first heartbeat binds.
+    # Stricter than gpio/set: an update can wait for the first heartbeat.
     if bound_controller is None:
         return build_log_only_verdict("no controller is bound yet")
     if issued_by != bound_controller:

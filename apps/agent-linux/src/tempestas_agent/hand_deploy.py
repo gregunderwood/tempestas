@@ -17,17 +17,17 @@ def make_current(layout: ReleaseLayout, release: str) -> list[str]:
     with layout.hold_switch_lock():
         previous_release = layout.read_current_release()
         pending = layout.read_pending()
-        # Redeploying the version on its gate leaves the gate to judge it after the restart.
+        # A redeploy of the gated version leaves the gate to judge it.
         is_replacing_an_update = pending is not None and not (
             release == pending.version == previous_release
         )
         if is_replacing_an_update:
-            # Before the switch, so a crash between them cannot read as the update failing to start.
+            # Before the switch, so a crash between cannot read as a failed start.
             record_outcome(
                 layout, describe_replaced_update(layout, pending, previous_release, release)
             )
         layout.switch_current_to(release)
-    # Outside the lock: deleting releases on a slow card must not hold up the agent.
+    # Outside the lock, so a slow prune never blocks the agent.
     protected = {release, previous_release}
     is_gate_left_running = pending is not None and not is_replacing_an_update
     if is_gate_left_running:
@@ -39,7 +39,7 @@ def describe_replaced_update(
     layout: ReleaseLayout, pending: PendingUpdate, running_release: str | None, release: str
 ) -> UpdateOutcome:
     if running_release != pending.version:
-        # The rollback unit already switched back; the agent just has not said so yet.
+        # Already rolled back; the agent has not reported it yet.
         return describe_finished_rollback(layout, pending)
     return UpdateOutcome(
         pending.command_id,

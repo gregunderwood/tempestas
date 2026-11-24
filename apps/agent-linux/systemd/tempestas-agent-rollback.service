@@ -9,9 +9,9 @@ Type=oneshot
 User=gunderwood
 Group=gunderwood
 Environment=TEMPESTAS_AGENT_HOME=/home/gunderwood/tempestas/agent-linux
-# A condition, so exit 1 (nothing to roll back) skips the unit rather than failing it.
+# A condition, so exit 1 skips the unit instead of failing it.
 ExecCondition=/usr/bin/python3 /usr/local/lib/tempestas/tempestas-agent-rollback.py
-# Only after a switch: a failure with no pending update must not restart a crash loop.
+# Only after a switch, or a crash loop would be restarted forever.
 ExecStart=+/usr/bin/systemctl reset-failed tempestas-agent.service
 ExecStart=+/usr/bin/systemctl start --no-block tempestas-agent.service
 

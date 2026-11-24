@@ -20,7 +20,7 @@ SCHEMAS = {
 }
 
 SUPPORTED_MAJOR = 1
-# What this agent accepts, which may sit behind the TypeScript minor but never ahead of it.
+# May trail the TypeScript minor, never lead it.
 MQTT_CONTRACT_MINOR = 1
 
 
@@ -128,5 +128,5 @@ def read_schema_major(schema: object) -> int | None:
 
 
 def is_ascii_number(text: str) -> bool:
-    # isdigit alone accepts '²', which int() then refuses.
+    # isdigit alone accepts '²', which int() refuses.
     return text.isascii() and text.isdigit()

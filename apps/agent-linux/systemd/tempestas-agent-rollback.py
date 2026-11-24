@@ -1,6 +1,6 @@
 """Put the previous release back when an updated agent cannot start; see docs/Infrastructure."""
 
-# Standalone: it runs when the release it rolls back from is broken, so it imports none of it.
+# Imports nothing from a release: the release may be what is broken.
 
 import fcntl
 import json
@@ -12,7 +12,7 @@ from pathlib import Path
 
 EXIT_ROLLED_BACK = 0
 EXIT_NOTHING_TO_ROLL_BACK = 1
-# Run as ExecCondition, where 1-254 quietly skips the unit; 255 marks it failed, as it should.
+# As ExecCondition, 1-254 skips the unit and 255 fails it.
 EXIT_ROLLBACK_FAILED = 255
 HOME_ENVIRONMENT_VARIABLE = "TEMPESTAS_AGENT_HOME"
 RELEASES_DIRECTORY = "releases"
@@ -23,7 +23,7 @@ PENDING_FILE = "pending.json"
 STARTED_FILE = "started.json"
 FAILED_RUNS_FILE = "failed-runs.json"
 SWITCH_LOCK_FILE = "switch.lock"
-# A release that said hello can start, so a crash such as I2C after a reboot is forgiven.
+# A release that said hello is forgiven a few crashes, such as I2C after a reboot.
 FAILED_RUNS_BEFORE_ROLLBACK = 3
 
 
@@ -66,7 +66,7 @@ def roll_back_a_pending_update(home: Path) -> int:
             return EXIT_NOTHING_TO_ROLL_BACK
 
     switch_current_to(home, previous_release)
-    # pending.json stays: the previous release reads it on start and reports the rollback.
+    # pending.json stays: the previous release reports the rollback from it.
     print(f"{pending_version} did not start; switched back to {previous_release}")
     return EXIT_ROLLED_BACK
 
@@ -86,7 +86,7 @@ def count_failed_run(home: Path, command_id: str) -> int:
 
 
 def write_record(path: Path, record: dict) -> None:
-    # Atomic and synced: a power cut must not reset the count and keep a crashing release forever.
+    # Atomic and synced, so a power cut cannot reset the count.
     staged = path.with_name(f".{path.name}.staged")
     with open(staged, "w") as staged_file:
         staged_file.write(json.dumps(record))
@@ -114,7 +114,7 @@ def hold_switch_lock(home: Path) -> Iterator[None]:
 
 
 def switch_current_to(home: Path, release: str) -> None:
-    # A `current` pointing at nothing could never start again, and nothing would roll it back.
+    # Never point `current` at nothing: nothing would roll that back.
     if not (home / RELEASES_DIRECTORY / release).is_dir():
         raise FileNotFoundError(f"release {release} is missing, so `current` stays put")
     staged_link = home / STAGED_CURRENT_LINK

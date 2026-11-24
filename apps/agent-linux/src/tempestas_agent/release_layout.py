@@ -1,4 +1,4 @@
-"""Where releases live on a node, which one runs, and what an update in flight owes the server."""
+"""Where releases live on a node, and the update state kept beside them."""
 
 from __future__ import annotations
 
@@ -18,14 +18,11 @@ CURRENT_LINK = "current"
 STATE_DIRECTORY = "update-state"
 PENDING_FILE = "pending.json"
 OUTCOME_FILE = "outcome.json"
-# Read by the rollback script, which forgives a release that said hello a few failed runs.
 STARTED_FILE = "started.json"
 FAILED_RUNS_FILE = "failed-runs.json"
 SWITCH_LOCK_FILE = "switch.lock"
 UNFINISHED_PREFIX = "."
-# tools/deploy-agent-linux.sh stages here and cleans up itself, perhaps while the agent starts.
 HAND_DEPLOY_STAGING_PREFIX = ".deploy-"
-# Left behind only by an interrupted prune, so the start's sweep removes it like a download.
 PRUNING_PREFIX = ".pruning-"
 KEPT_RELEASES = 3
 
@@ -77,9 +74,9 @@ class ReleaseLayout:
             return None
 
     def read_current_link_identity(self) -> tuple[int, int]:
-        """Changes with every switch, even back to the same release, as a hand deploy makes."""
+        """Changes with every switch, even to the same release."""
         link = os.lstat(self.current_link)
-        # The creation time too: a freed inode is often handed to the very next new link.
+        # ctime too: ext4 often reuses a freed inode for the next link.
         return link.st_ino, link.st_ctime_ns
 
     def locate_release(self, release: str) -> Path:
@@ -89,7 +86,7 @@ class ReleaseLayout:
         return self.releases / f"{UNFINISHED_PREFIX}{release}"
 
     def switch_current_to(self, release: str) -> None:
-        # A new link renamed over the old one, so `current` is never missing, even for a moment.
+        # Renamed over the old link, so `current` is never missing.
         staged_link = self.home / f"{UNFINISHED_PREFIX}{CURRENT_LINK}"
         staged_link.unlink(missing_ok=True)
         staged_link.symlink_to(Path(RELEASES_DIRECTORY) / release)
@@ -125,11 +122,11 @@ class ReleaseLayout:
         (self.state / OUTCOME_FILE).unlink(missing_ok=True)
 
     def prune_releases(self, protected: set[str], should_wait: bool = True) -> list[str]:
-        # Chosen and moved aside under the lock, so no switch can make one current meanwhile.
+        # Moved aside under the lock, so no switch can pick one meanwhile.
         with self.hold_switch_lock(should_wait=should_wait):
             removed = self._choose_releases_to_prune(protected)
             doomed = [self._move_aside_for_pruning(release) for release in removed]
-        # Deleted outside it: removing trees on a slow card must not hold up a switch.
+        # Deleted outside the lock, so a slow card never blocks a switch.
         for path in doomed:
             shutil.rmtree(path, ignore_errors=True)
         return removed
@@ -152,7 +149,7 @@ class ReleaseLayout:
         return aside
 
     def remove_unfinished_downloads(self) -> list[str]:
-        """Only at start: a download cut off by a restart leaves its staging behind for good."""
+        """Only at start: a restart mid-download leaves its staging behind."""
         unfinished = [entry for entry in self.releases.iterdir() if is_unfinished_download(entry)]
         for entry in unfinished:
             shutil.rmtree(entry, ignore_errors=True)
@@ -181,7 +178,7 @@ def read_record(path: Path, record_type):
     except FileNotFoundError:
         return None
     except (ValueError, TypeError, UnicodeDecodeError) as error:
-        # A record that cannot be read must never keep the agent from starting.
+        # An unreadable record must never stop the agent starting.
         log.error("dropped unreadable %s: %s", path, error)
         path.unlink(missing_ok=True)
         return None
@@ -199,7 +196,7 @@ def write_record(path: Path, record) -> None:
 
 
 def sync_directory(directory: Path) -> None:
-    # Without it a power cut can undo a rename that already returned.
+    # Or a power cut can undo a rename that returned.
     descriptor = os.open(directory, os.O_RDONLY)
     try:
         os.fsync(descriptor)
