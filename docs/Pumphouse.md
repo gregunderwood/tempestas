@@ -263,7 +263,9 @@ refuses to start with until they are read off the bus. The plan as written follo
 - Pumphouse zone, via SQL in a script under `tools/`. There is no zones API, and data for one
   installation does not belong in a migration every dev database runs. It is idempotent:
   re-running it on elantris resets the rules, which is how a setpoint is changed, by review
-  rather than through a form.
+  rather than through a form. The crawlspace runs the same script with its own slug, so a changed
+  setpoint applies to both zones: re-run it for each, or split the script once the two need to
+  differ.
 
   ```bash
   sudo -u postgres psql -d tempestas -v ON_ERROR_STOP=1 \

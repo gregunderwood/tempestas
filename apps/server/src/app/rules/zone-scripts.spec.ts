@@ -29,13 +29,14 @@ describe('zone scripts in tools/', () => {
     );
   });
 
-  it('names each zone from psql variables, so one script serves every zone', () => {
-    for (const fileName of listZoneScripts()) {
+  it.each(listZoneScripts())(
+    '%s names its zone from psql variables, so one script serves every zone',
+    (fileName) => {
       const script = readFileSync(join(TOOLS_DIRECTORY, fileName), 'utf8');
       expect(script).toContain(":'slug'");
       expect(script).toContain(":'display_name'");
-    }
-  });
+    },
+  );
 
   it.each(listZoneScripts())(
     '%s holds rules the server accepts',
