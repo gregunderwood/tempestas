@@ -5,7 +5,7 @@ import { parseZoneRulesConfig } from './rules-config';
 
 const TOOLS_DIRECTORY = resolve(__dirname, '../../../../../tools');
 const ZONE_SCRIPT_SUFFIX = '-zone.sql';
-const DOLLAR_QUOTED_JSON = /\$\$(?<json>[\s\S]*?)\$\$::jsonb/;
+const DOLLAR_QUOTED_JSON = /\$\$(?<json>\{[\s\S]*?\})\$\$::jsonb/;
 
 function listZoneScripts(): string[] {
   return readdirSync(TOOLS_DIRECTORY).filter((fileName) =>
@@ -25,8 +25,16 @@ function readRulesConfig(fileName: string): unknown {
 describe('zone scripts in tools/', () => {
   it('finds the zone scripts', () => {
     expect(listZoneScripts()).toEqual(
-      expect.arrayContaining(['crawlspace-zone.sql', 'pumphouse-zone.sql']),
+      expect.arrayContaining(['frost-protection-zone.sql']),
     );
+  });
+
+  it('names each zone from psql variables, so one script serves every zone', () => {
+    for (const fileName of listZoneScripts()) {
+      const script = readFileSync(join(TOOLS_DIRECTORY, fileName), 'utf8');
+      expect(script).toContain(":'slug'");
+      expect(script).toContain(":'display_name'");
+    }
   });
 
   it.each(listZoneScripts())(
