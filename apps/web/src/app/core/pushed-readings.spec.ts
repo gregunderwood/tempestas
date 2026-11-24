@@ -1,3 +1,4 @@
+import { MILLISECONDS_PER_MINUTE } from '../shared/time';
 import type { Reading } from '@tempestas/domain';
 import {
   addPushedReadings,
@@ -8,7 +9,6 @@ import {
 
 const FETCHED_TO = '2026-11-20T21:00:00.000Z';
 const FETCHED_TO_MS = Date.parse(FETCHED_TO);
-const MILLISECONDS_PER_MINUTE = 60_000;
 const BUCKETS_PER_DAY = 288;
 
 function reading(createdAt: string, temperature = 4): Reading {

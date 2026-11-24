@@ -26,10 +26,10 @@ import {
 } from './zone-view';
 import { formatDuration } from './zone-words';
 import { ZoneHistoryPanel } from './zone-history-panel';
-import type { SensorSource, Zone } from '@tempestas/domain';
+import type { SensorSource, Zone, ZoneRulesConfig } from '@tempestas/domain';
+import { findControllingSources } from './temperature-lines';
 import {
   buildZoneHistoryCharts,
-  findControllingSources,
   type HistoryZone,
   type ZoneHistoryChart,
 } from './zone-history-view';
@@ -64,12 +64,18 @@ function toHistoryZone(card: ZoneCard, zone: Zone | undefined): HistoryZone {
 function findDrawableControllingSources(
   zone: Zone | undefined,
 ): SensorSource[] {
-  if (!zone?.rulesConfig) return [];
-  try {
-    return findControllingSources(zone.rulesConfig);
-  } catch {
-    return [];
-  }
+  const config = zone?.rulesConfig;
+  return hasReadableSensorPolicy(config) ? findControllingSources(config) : [];
+}
+
+function hasReadableSensorPolicy(
+  config: Partial<ZoneRulesConfig> | undefined,
+): config is ZoneRulesConfig {
+  return (
+    Array.isArray(config?.enabledRoles) &&
+    config.rules !== undefined &&
+    config.sensorPolicy?.default !== undefined
+  );
 }
 
 function isSameHistoryZones(

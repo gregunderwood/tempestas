@@ -1,9 +1,10 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import {
+  NO_TEMPERATURE_READINGS,
   PLOT_HEIGHT,
   PLOT_WIDTH,
-  type ZoneHistoryChart,
-} from './zone-history-view';
+} from './temperature-lines';
+import type { ZoneHistoryChart } from './zone-history-view';
 
 @Component({
   selector: 'temp-zone-history-panel',
@@ -60,7 +61,7 @@ import {
           </ul>
         }
       } @else {
-        <p class="muted">No temperature readings in the last 24 hours.</p>
+        <p class="muted">{{ noTemperatureReadings }}</p>
       }
 
       @for (strip of chart().strips; track strip.deviceId) {
@@ -264,4 +265,5 @@ import {
 export class ZoneHistoryPanel {
   readonly chart = input.required<ZoneHistoryChart>();
   protected readonly viewBox = `0 0 ${PLOT_WIDTH} ${PLOT_HEIGHT}`;
+  protected readonly noTemperatureReadings = NO_TEMPERATURE_READINGS;
 }

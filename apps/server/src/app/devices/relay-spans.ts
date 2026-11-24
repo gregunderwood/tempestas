@@ -1,4 +1,5 @@
 import type { RelayState } from '@tempestas/domain';
+import { sortOldestFirst } from '../common/sort-oldest-first';
 
 export interface RuntimeTransition {
   nodeId: string;
@@ -26,7 +27,6 @@ export interface Span {
   ending: SpanEnding;
 }
 
-/** One list per relay line, oldest first, with repeated states merged into one stretch. */
 export function buildSpansByLine(
   transitions: readonly RuntimeTransition[],
   sightingsByNode: ReadonlyMap<string, NodeSighting>,
@@ -35,7 +35,7 @@ export function buildSpansByLine(
   return [...groupByLine(transitions).values()].map((rows) =>
     mergeRepeatedStates(
       buildLineSpans(
-        sortOldestFirst(rows),
+        sortOldestFirst(rows, (row) => row.observedAt),
         sightingsByNode.get(rows[0].nodeId),
         now.getTime(),
       ),
@@ -57,12 +57,6 @@ function groupByLine(
     }
   }
   return byLine;
-}
-
-function sortOldestFirst(rows: RuntimeTransition[]): RuntimeTransition[] {
-  return [...rows].sort(
-    (first, second) => first.observedAt.getTime() - second.observedAt.getTime(),
-  );
 }
 
 function buildLineSpans(

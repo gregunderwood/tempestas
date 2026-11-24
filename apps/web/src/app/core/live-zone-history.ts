@@ -18,12 +18,10 @@ import { RealtimeService } from './realtime.service';
 
 export interface LiveZoneHistory {
   report: Signal<ZoneHistoryReport | null>;
-  /** Readings pushed since the last fetch, which the chart adds to what it returned. */
   pushedReadings: Signal<PushedReadings>;
   sourceState: Signal<SourceState>;
 }
 
-// Readings arrive every few seconds and are added in the browser; only a switch or a node change refetches.
 export function injectLiveZoneHistory(): LiveZoneHistory {
   const api = inject(ApiService);
   const realtime = inject(RealtimeService);

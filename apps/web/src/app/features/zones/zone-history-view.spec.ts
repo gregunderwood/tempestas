@@ -1,3 +1,4 @@
+import { MILLISECONDS_PER_MINUTE } from '../../shared/time';
 import { DeviceRole } from '@tempestas/domain';
 import type {
   DeviceRunHistory,
@@ -5,13 +6,15 @@ import type {
   TemperatureBucket,
   ZoneHistoryReport,
 } from '@tempestas/domain';
+import { buildRunStrip } from './run-strips';
 import {
   buildLinePath,
-  buildRunStrip,
-  buildTimeLabels,
-  buildZoneHistoryCharts,
   findControllingSources,
   mergePushedReadings,
+} from './temperature-lines';
+import { buildTimeLabels } from './time-axis';
+import {
+  buildZoneHistoryCharts,
   type HistoryZone,
   type ZoneHistoryChartsInput,
 } from './zone-history-view';
@@ -28,7 +31,6 @@ import {
   type PushedReadings,
 } from '../../core/pushed-readings';
 
-const MILLISECONDS_PER_MINUTE = 60_000;
 const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE;
 const NOW_MS = NOW.getTime();
 const WINDOW = { fromMs: NOW_MS - 24 * MILLISECONDS_PER_HOUR, toMs: NOW_MS };

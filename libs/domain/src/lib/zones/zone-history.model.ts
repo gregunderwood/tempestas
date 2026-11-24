@@ -9,7 +9,6 @@ export const ZONE_HISTORY_BUCKET_MINUTES = 5;
 export type RelayState = 'on' | 'off' | 'unknown';
 
 export interface TemperatureBucket {
-  /** ISO-8601 start of the bucket. */
   at: string;
   averageC: number;
   lowestC: number;

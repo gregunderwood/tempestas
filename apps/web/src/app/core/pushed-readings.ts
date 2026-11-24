@@ -5,13 +5,7 @@ import {
   type Reading,
   type TemperatureBucket,
 } from '@tempestas/domain';
-import {
-  MILLISECONDS_PER_SECOND,
-  MINUTES_PER_HOUR,
-  SECONDS_PER_MINUTE,
-} from '../shared/time';
-
-const MILLISECONDS_PER_MINUTE = SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
+import { MILLISECONDS_PER_MINUTE, MINUTES_PER_HOUR } from '../shared/time';
 export const BUCKET_MILLISECONDS =
   ZONE_HISTORY_BUCKET_MINUTES * MILLISECONDS_PER_MINUTE;
 export const WINDOW_MILLISECONDS =
@@ -20,18 +14,15 @@ export const WINDOW_MILLISECONDS =
 export interface PushedProbe {
   nodeId: string;
   sensorId: string;
-  /** Buckets the probe has moved past, oldest first, only as far back as the window reaches. */
   closedBuckets: readonly TemperatureBucket[];
   /** The newest bucket's readings, kept apart because a refetch can land part way through it. */
   openReadings: readonly Reading[];
 }
 
-/** Keyed by `sensorKey`. */
 export type PushedReadings = ReadonlyMap<string, PushedProbe>;
 
 export const NO_PUSHED_READINGS: PushedReadings = new Map();
 
-// Folding as they arrive keeps at most a window of buckets per probe, however long the page stays open.
 export function addPushedReadings(
   pushed: PushedReadings,
   latestBySensor: readonly Reading[],
@@ -47,7 +38,7 @@ export function addPushedReadings(
   return updated;
 }
 
-// A closed bucket that began before the fetch's end is in the fetch already, whole or in part.
+// A closed bucket that began before the fetch ended is already in the fetch, whole or in part.
 export function dropWhatTheFetchCovered(
   pushed: PushedReadings,
   fetchedTo: string | null,

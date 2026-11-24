@@ -11,8 +11,12 @@ import {
   type ReadingStats,
   type ReadingsQuery,
   type SegmentStats,
+  ZONE_HISTORY_BUCKET_MINUTES,
+  ZONE_HISTORY_HOURS,
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
+import { roundTo } from '../common/rounding';
+import { MINUTES_PER_HOUR } from '../common/time-units';
 import { ZoneEntity } from '../zones/models';
 import { NodeEntity } from '../nodes/models';
 import { SensorReadingEntity } from './models';
@@ -52,10 +56,13 @@ interface MetricExtremes {
 
 const EXTREME_METRICS: readonly Metric[] = ['temperature', 'humidity', 'co2'];
 
-// Bounded like every readings query: a day of five-minute buckets for seventy probes.
-const MAX_TEMPERATURE_BUCKET_ROWS = 20_000;
+const MOST_PROBES_IN_A_HISTORY = 70;
+const BUCKETS_PER_HISTORY =
+  (ZONE_HISTORY_HOURS * MINUTES_PER_HOUR) / ZONE_HISTORY_BUCKET_MINUTES;
+const MAX_TEMPERATURE_BUCKET_ROWS =
+  BUCKETS_PER_HISTORY * MOST_PROBES_IN_A_HISTORY;
+const AVERAGE_DECIMALS = 2;
 
-/** One bucket of one sensor's temperatures; `nodeId` is the node slug. */
 export interface TemperatureBucketRow {
   nodeId: string;
   sensorId: string;
@@ -177,7 +184,6 @@ export class ReadingsService {
     };
   }
 
-  // Buckets start on whole multiples since the epoch, so a client can bucket a pushed reading to match.
   // Newest first under the limit, so a truncated answer loses the oldest end rather than now.
   async bucketTemperatures(
     window: ReadingWindow,
@@ -343,7 +349,7 @@ function toTemperatureBucketRow(
     nodeId: raw.nodeId,
     sensorId: raw.sensorId,
     at: new Date(raw.at),
-    averageC: Math.round(Number(raw.averageC) * 100) / 100,
+    averageC: roundTo(Number(raw.averageC), AVERAGE_DECIMALS),
     lowestC: Number(raw.lowestC),
     highestC: Number(raw.highestC),
     sampleCount: Number(raw.sampleCount),
@@ -365,5 +371,5 @@ function toAverages(raw: RawAverages | undefined): ReadingAverages {
 
 function roundToHundredths(value: string | null | undefined): number | null {
   if (value == null) return null;
-  return Math.round(Number(value) * 100) / 100;
+  return roundTo(Number(value), AVERAGE_DECIMALS);
 }

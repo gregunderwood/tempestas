@@ -15,6 +15,7 @@ import {
   type RuntimeTransition,
   type Span,
 } from '../devices/relay-spans';
+import { sortOldestFirst } from '../common/sort-oldest-first';
 import type { TemperatureBucketRow } from '../readings/readings.service';
 
 export interface HistoryDevice {
@@ -35,7 +36,6 @@ export interface ZoneHistoryInput {
   zoneIds: readonly string[];
   nodes: readonly HistoryNode[];
   devices: readonly HistoryDevice[];
-  /** Every line's rows in the window, plus the row in force when it opened; any order. */
   transitions: readonly RuntimeTransition[];
   sightingsByNode: ReadonlyMap<string, NodeSighting>;
   temperatureBuckets: readonly TemperatureBucketRow[];
@@ -93,7 +93,7 @@ function buildProbeHistories(
   buckets: readonly TemperatureBucketRow[],
 ): ProbeHistory[] {
   const byProbe = new Map<string, ProbeHistory>();
-  for (const bucket of sortOldestFirst(buckets)) {
+  for (const bucket of sortOldestFirst(buckets, (row) => row.at)) {
     const probeKey = sensorKey(bucket);
     const probe = byProbe.get(probeKey) ?? {
       nodeId: bucket.nodeId,
@@ -106,14 +106,6 @@ function buildProbeHistories(
   return [...byProbe.entries()]
     .sort(([firstKey], [secondKey]) => firstKey.localeCompare(secondKey))
     .map(([, probe]) => probe);
-}
-
-function sortOldestFirst(
-  buckets: readonly TemperatureBucketRow[],
-): TemperatureBucketRow[] {
-  return [...buckets].sort(
-    (first, second) => first.at.getTime() - second.at.getTime(),
-  );
 }
 
 function toTemperatureBucket(row: TemperatureBucketRow): TemperatureBucket {
@@ -131,7 +123,6 @@ function buildDeviceRunHistory(
   spans: readonly Span[],
   input: ZoneHistoryInput,
 ): DeviceRunHistory {
-  // Before a device existed there is nothing to know, so that time is left out rather than unknown.
   const startMs = Math.max(input.from.getTime(), device.addedAt.getTime());
   const ownSpans = spans.filter((span) => span.deviceId === device.id);
   return {
@@ -143,7 +134,6 @@ function buildDeviceRunHistory(
   };
 }
 
-// Unknown fills every gap, so a stretch with no history is never drawn as off.
 function coverWindow(
   spans: readonly Span[],
   startMs: number,
