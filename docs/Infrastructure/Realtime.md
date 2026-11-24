@@ -18,7 +18,7 @@ needs both, which is the whole reason for socket.io here.
 | Event            | Payload        | Emitted when                                              |
 | ---------------- | -------------- | --------------------------------------------------------- |
 | `reading:latest` | `Reading`      | a sample is **persisted** — roughly every 10 s per node   |
-| `device:state`   | `Device`       | a relay write succeeded, or `rulesEnabled` changed        |
+| `device:state`   | `Device`       | a relay write succeeded, or a device was added or edited  |
 | `node:state`     | `Node`         | a node is **saved**, or its derived `online` flips        |
 | `system:status`  | `SystemStatus` | once per rules evaluation cycle, and at a follower's boot |
 | `rules:cycle`    | `RulesCycle`   | once per rules evaluation cycle, on the leader only       |
@@ -96,7 +96,9 @@ loaded, because each one is complete; pushed readings do not, because each cover
 
 The client keeps the newest push **per device**, with when it arrived (`RealtimeService.devicePushes`).
 `injectLiveDevices` applies every push received after its request was sent, so two devices switched
-back to back both show, and a response never overwrites a newer push. `injectLiveReadings` keeps
+back to back both show, and a response never overwrites a newer push. A push for a device the list
+does not have yet (one just added elsewhere) is not shown from the push alone: it fetches the list
+again, once per push. `injectLiveReadings` keeps
 whichever reading per sensor is newer by `createdAt`, so a push cached before the socket dropped
 never hides a fresher fetch.
 

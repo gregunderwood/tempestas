@@ -1,12 +1,18 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
+import { MatDialog } from '@angular/material/dialog';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { ApiService } from '../../core/api.service';
 import { refreshAfterSuccess } from '../../core/refresh-after-success';
 import { injectLiveDevices } from '../../core/live-devices';
 import type { Device } from '@tempestas/domain';
 import { isHeldOffByInterlock } from './device-hold';
+import {
+  DEVICE_FORM_DIALOG_SIZE,
+  DeviceFormDialog,
+  type DeviceFormDialogData,
+} from './device-form-dialog';
 
 // No force-on here: it bypasses the burner's anti-short-cycle interlock.
 @Component({
@@ -14,6 +20,9 @@ import { isHeldOffByInterlock } from './device-hold';
   imports: [MatCardModule, MatButtonModule, MatSlideToggleModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <div class="temp-toolbar">
+      <button mat-flat-button (click)="openForm(null)">Add device</button>
+    </div>
     <div aria-live="polite">
       @switch (sourceState()) {
         @case ('failed') {
@@ -66,12 +75,18 @@ import { isHeldOffByInterlock } from './device-hold';
             >
               Turn off
             </button>
+            <button mat-button (click)="openForm(device)">Edit</button>
           </mat-card-actions>
         </mat-card>
       }
     </div>
   `,
   styles: `
+    .temp-toolbar {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 1rem;
+    }
     .temp-cards {
       display: flex;
       flex-wrap: wrap;
@@ -88,6 +103,7 @@ import { isHeldOffByInterlock } from './device-hold';
 })
 export class DevicesPage {
   private readonly api = inject(ApiService);
+  private readonly dialog = inject(MatDialog);
   private readonly liveDevices = injectLiveDevices();
   readonly devices = this.liveDevices.devices;
   protected readonly sourceState = this.liveDevices.sourceState;
@@ -105,6 +121,19 @@ export class DevicesPage {
     this.api
       .setRulesEnabled(device.id, rulesEnabled)
       .subscribe({ next: () => this.refresh(), error: () => this.refresh() });
+  }
+
+  openForm(device: Device | null): void {
+    const data: DeviceFormDialogData = { device, devices: this.devices() };
+    this.dialog
+      .open<DeviceFormDialog, DeviceFormDialogData, Device>(DeviceFormDialog, {
+        ...DEVICE_FORM_DIALOG_SIZE,
+        data,
+      })
+      .afterClosed()
+      .subscribe((saved) => {
+        if (saved) this.refresh();
+      });
   }
 
   private refresh(): void {

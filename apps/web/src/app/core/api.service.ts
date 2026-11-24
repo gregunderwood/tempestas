@@ -4,6 +4,7 @@ import { Observable, map } from 'rxjs';
 import { buildRequestContext, type RequestOptions } from './background-request';
 import type {
   AdmitNodePayload,
+  CreateDevicePayload,
   DayNightStats,
   Device,
   EquipmentRuntimeQuery,
@@ -15,6 +16,7 @@ import type {
   ReadingsQuery,
   RulesEvaluation,
   RulesCycle,
+  UpdateDevicePayload,
   Zone,
   ZoneHistoryReport,
 } from '@tempestas/domain';
@@ -49,6 +51,14 @@ export class ApiService {
 
   devices(options: RequestOptions = {}): Observable<Device[]> {
     return this.getFromApi<Device[]>('/devices', options);
+  }
+
+  createDevice(payload: CreateDevicePayload): Observable<Device> {
+    return this.postToApi<Device>('/devices', payload);
+  }
+
+  updateDevice(id: string, payload: UpdateDevicePayload): Observable<Device> {
+    return this.http.put<Device>(`${API_ROOT}/devices/${id}`, payload);
   }
 
   turnOn(id: string): Observable<Device> {
