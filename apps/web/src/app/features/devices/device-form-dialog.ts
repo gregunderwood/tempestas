@@ -113,6 +113,9 @@ export const DEVICE_FORM_DIALOG_SIZE = {
               <mat-option [value]="zone.id">{{ zone.displayName }}</mat-option>
             }
           </mat-select>
+          @if (!editedDevice) {
+            <mat-hint>Left blank, it takes the node's zone.</mat-hint>
+          }
         </mat-form-field>
 
         <mat-form-field>
@@ -178,9 +181,7 @@ export const DEVICE_FORM_DIALOG_SIZE = {
             formControlName="onDelayDuration"
             [min]="minOnDelaySeconds"
           />
-          <mat-hint
-            >The shortest time it stays off before turning on again.</mat-hint
-          >
+          <mat-hint>Shortest time off between runs.</mat-hint>
           <mat-error>A whole number of seconds, 0 or more.</mat-error>
         </mat-form-field>
 
