@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 import uuid
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -43,6 +44,7 @@ SERVER_ONLINE = "online"
 SERVER_OFFLINE = "offline"
 LAST_OUTCOME_UNDELIVERED = "the last update's result has not reached the server yet"
 LAST_UPDATE_UNSETTLED = "the last update is not settled yet, as its state cannot be read"
+STOPPING = "the agent is stopping or restarting"
 NOT_INSTALLED_FROM_A_RELEASE = (
     "this agent was not installed from a release, so it cannot update itself; "
     "run tools/deploy-agent-linux.sh"
@@ -164,6 +166,8 @@ class Agent:
         self.is_server_online = False
         self.restart_requested = threading.Event()
         self._update_in_progress = threading.Lock()
+        self.is_stopping = False
+        self._held_until_exit = ExitStack()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
         self.agent_version = read_agent_version()
         self.sample_sequence = 0
@@ -327,9 +331,10 @@ class Agent:
             return
         if self._has_logged_settle_failure:
             log.info("settled the last update after all")
-        self._is_update_settled = True
         self.update_gate = settlement.gate
         self.outcome_to_report = settlement.outcome
+        # Last: on_update reads the flag and then trusts the gate and the outcome.
+        self._is_update_settled = True
         if self.is_connected:
             # Settled after this connection announced itself, so the gate has heard no hello yet.
             self.say_hello()
@@ -361,6 +366,9 @@ class Agent:
                 verdict.command_id, contract.UpdateState.FAILED, NOT_INSTALLED_FROM_A_RELEASE
             )
             return
+        if self.is_stopping or self.restart_requested.is_set():
+            self.publish_update_status(verdict.command_id, contract.UpdateState.FAILED, STOPPING)
+            return
         if not self._is_update_settled:
             self.publish_update_status(
                 verdict.command_id, contract.UpdateState.FAILED, LAST_UPDATE_UNSETTLED
@@ -381,6 +389,16 @@ class Agent:
         threading.Thread(
             target=self._install_update, args=(verdict.command,), name="update", daemon=True
         ).start()
+
+    def stop_updates(self) -> None:
+        """Holds the switch lock until exit, so the process never ends halfway through a switch."""
+        self.is_stopping = True
+        if self.layout is None:
+            return
+        try:
+            self._held_until_exit.enter_context(self.layout.hold_switch_lock())
+        except OSError as error:
+            log.error("could not hold the switch lock while stopping: %s", error)
 
     def tend_update(self) -> None:
         """Main loop only, and never waits for the switch lock: a busy one is tried next tick."""
@@ -496,7 +514,8 @@ class Agent:
     def _fail_update_gate(self, gate: HealthGate) -> None:
         log.error("update gate failed: %s - rolling back", gate.describe_failure())
         try:
-            roll_back_gate(self.layout, gate)
+            # Kept unsent: the previous release reports it after the restart.
+            self.outcome_to_report = roll_back_gate(self.layout, gate)
         finally:
             # Once `current` points back, run it even if the outcome could not be recorded.
             if self.layout.read_current_release() == gate.pending.previous_release:

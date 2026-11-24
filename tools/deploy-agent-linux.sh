@@ -51,7 +51,10 @@ if [ ! -e "$release" ]; then
   mv -T "$staging" "$release"
 elif ! mv -T --exchange "$staging" "$release" 2>/dev/null; then
   # coreutils before 9.5 cannot exchange, so `current` points at nothing for a moment.
-  mv -T "$release" "$staging-replaced" && mv -T "$staging" "$release" && mv -T "$staging-replaced" "$staging"
+  rm -rf "$staging-replaced"
+  mv -T "$release" "$staging-replaced"
+  mv -T "$staging" "$release"
+  mv -T "$staging-replaced" "$staging"
 fi
 rm -rf "$staging"
 REMOTE

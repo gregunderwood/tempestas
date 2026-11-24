@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from release_fixtures import (
     NEW_RELEASE,
     RUNNING_RELEASE,
@@ -16,6 +18,7 @@ from tempestas_agent.agent import (
     LAST_OUTCOME_UNDELIVERED,
     LAST_UPDATE_UNSETTLED,
     NOT_INSTALLED_FROM_A_RELEASE,
+    STOPPING,
 )
 from tempestas_agent.release_installer import ReleaseInstaller, UpdateFailed
 from tempestas_agent.release_layout import PendingUpdate, UpdateOutcome
@@ -134,6 +137,34 @@ def test_refuses_a_second_update_while_one_is_in_progress(monkeypatch, tmp_path)
     assert update_statuses(agent) == [
         (contract.UpdateState.FAILED, "another update is in progress")
     ]
+
+
+def test_refuses_an_update_once_the_agent_is_stopping(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent.stop_updates()
+
+    agent.on_update(build_fresh_update(), retained=False)
+
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, STOPPING)]
+    assert agent.installer.commands == []
+
+
+def test_refuses_an_update_while_a_restart_is_on_its_way(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent.restart_requested.set()
+
+    agent.on_update(build_fresh_update(), retained=False)
+
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, STOPPING)]
+
+
+def test_stopping_holds_the_switch_lock_so_no_switch_is_cut_off(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+
+    agent.stop_updates()
+
+    with pytest.raises(BlockingIOError), agent.layout.hold_switch_lock(should_wait=False):
+        pass
 
 
 def start_new_release_on_its_gate(tmp_path):
@@ -302,6 +333,7 @@ def test_a_new_release_that_hears_no_heartbeat_rolls_back_and_restarts(tmp_path)
     assert agent.restart_requested.is_set()
     assert agent.layout.read_outcome().state == contract.UpdateState.ROLLED_BACK
     assert update_statuses(agent) == []
+    assert agent.outcome_to_report == agent.layout.read_outcome()
 
 
 def roll_back_before_this_start(tmp_path):

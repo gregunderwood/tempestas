@@ -271,7 +271,9 @@ credentials and the server's view of the node all work.
 The 120 s count only while the broker is connected and the server is online. The clock runs once
 the node has said `hello` and the server is known to be online, and stops when the server reports
 itself offline or the connection drops. So a server deploy or a broker restart during the gate is no
-verdict, and a good release is not rolled back for it. The cost is that a release that never reaches the broker at all waits rather than rolling back.
+verdict, and a good release is not rolled back for it. A broker that is down when the new release
+starts is retried too, rather than failing the start. The cost is that a release that never reaches
+the broker at all waits rather than rolling back.
 It shows as offline on the Nodes page, and `tools/deploy-agent-linux.sh` replaces it.
 
 - **Passed**: it records `healthy`, clears pending, prunes old releases, and reports.

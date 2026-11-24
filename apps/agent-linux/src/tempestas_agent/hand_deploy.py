@@ -5,8 +5,8 @@ from __future__ import annotations
 import sys
 
 from . import contract
-from .release_layout import ReleaseLayout, UpdateOutcome
-from .update_gate import record_outcome
+from .release_layout import PendingUpdate, ReleaseLayout, UpdateOutcome
+from .update_gate import build_did_not_start_outcome, record_outcome
 
 EXIT_DEPLOYED = 0
 EXIT_NO_SUCH_RELEASE = 1
@@ -19,17 +19,23 @@ def make_current(layout: ReleaseLayout, release: str) -> list[str]:
         pending = layout.read_pending()
         if pending is not None:
             # Before the switch, so a crash between them cannot read as the update failing to start.
-            record_outcome(
-                layout,
-                UpdateOutcome(
-                    pending.command_id,
-                    contract.UpdateState.FAILED,
-                    f"replaced by a hand deploy of {release} before its health gate passed",
-                ),
-            )
+            record_outcome(layout, describe_replaced_update(pending, previous_release, release))
         layout.switch_current_to(release)
     # Outside the lock: deleting releases on a slow card must not hold up the agent.
     return layout.prune_releases({release, previous_release} - {None})
+
+
+def describe_replaced_update(
+    pending: PendingUpdate, running_release: str | None, release: str
+) -> UpdateOutcome:
+    if running_release != pending.version:
+        # The rollback unit already switched back; the agent just has not said so yet.
+        return build_did_not_start_outcome(pending)
+    return UpdateOutcome(
+        pending.command_id,
+        contract.UpdateState.FAILED,
+        f"replaced by a hand deploy of {release} before its health gate passed",
+    )
 
 
 def main(arguments: list[str]) -> int:

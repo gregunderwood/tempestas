@@ -77,15 +77,16 @@ def settle_update_on_start(layout: ReleaseLayout | None) -> UpdateSettlement:
         settlement.gate = HealthGate(pending)
         return settlement
     # The rollback unit switched back because the new release could not even start.
-    settlement.outcome = record_outcome(
-        layout,
-        UpdateOutcome(
-            pending.command_id,
-            contract.UpdateState.ROLLED_BACK,
-            f"{pending.version} did not start, so {pending.previous_release} runs again",
-        ),
-    )
+    settlement.outcome = record_outcome(layout, build_did_not_start_outcome(pending))
     return settlement
+
+
+def build_did_not_start_outcome(pending: PendingUpdate) -> UpdateOutcome:
+    return UpdateOutcome(
+        pending.command_id,
+        contract.UpdateState.ROLLED_BACK,
+        f"{pending.version} did not start, so {pending.previous_release} runs again",
+    )
 
 
 def is_still_pending(layout: ReleaseLayout, gate: HealthGate) -> bool:
@@ -104,11 +105,11 @@ def prune_after_update(layout: ReleaseLayout, pending: PendingUpdate) -> list[st
     return layout.prune_releases(protected={pending.version, pending.previous_release})
 
 
-def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> None:
+def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
     pending = gate.pending
     # Switched first: a crash before the outcome is written reads as a failed start, which it was.
     layout.switch_current_to(pending.previous_release)
-    record_outcome(
+    return record_outcome(
         layout,
         UpdateOutcome(
             pending.command_id, contract.UpdateState.ROLLED_BACK, gate.describe_failure()

@@ -195,7 +195,9 @@ def start(agent: Agent, config: AgentConfig) -> None:
     )
     if not config.has_gpio:
         log.info("no GPIO lines configured: this agent cannot drive a pin at all")
-    agent.client.connect(config.mqtt.host, config.mqtt.port, keepalive=config.mqtt.keepalive_s)
+    # Async, so a broker down at start is retried rather than failing a new release before hello.
+    broker = config.mqtt
+    agent.client.connect_async(broker.host, broker.port, keepalive=broker.keepalive_s)
     agent.client.loop_start()
 
 
@@ -238,6 +240,7 @@ def shut_down_without_raising(agent: Agent, lock: SingleInstance) -> None:
 
 def shut_down(agent: Agent, lock: SingleInstance) -> None:
     sd_notify("STOPPING=1")
+    agent.stop_updates()
     # MQTT suppresses the will on a graceful disconnect, so say it ourselves.
     agent.publish(
         "status",

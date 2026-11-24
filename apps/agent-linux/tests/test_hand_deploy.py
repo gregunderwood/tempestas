@@ -37,6 +37,21 @@ def test_tells_the_server_that_the_update_it_replaced_ended(tmp_path):
     )
 
 
+def test_keeps_saying_an_update_did_not_start_once_it_was_rolled_back(tmp_path):
+    layout = make_layout(tmp_path)
+    layout.locate_release(NEW_RELEASE).mkdir()
+    layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
+    layout.locate_release("1.1.5").mkdir()
+
+    make_current(layout, "1.1.5")
+
+    assert layout.read_outcome() == UpdateOutcome(
+        "update-1",
+        contract.UpdateState.ROLLED_BACK,
+        f"{NEW_RELEASE} did not start, so {RUNNING_RELEASE} runs again",
+    )
+
+
 def test_refuses_a_release_that_was_never_copied(tmp_path, monkeypatch):
     monkeypatch.setenv("TEMPESTAS_AGENT_HOME", str(tmp_path))
     make_layout(tmp_path)

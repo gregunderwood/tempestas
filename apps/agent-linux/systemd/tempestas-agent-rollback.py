@@ -82,8 +82,19 @@ def count_failed_run(home: Path, command_id: str) -> int:
     record = read_record(path)
     earlier_runs = record.get("count", 0) if record.get("command_id") == command_id else 0
     failed_runs = (earlier_runs if isinstance(earlier_runs, int) else 0) + 1
-    path.write_text(json.dumps({"command_id": command_id, "count": failed_runs}))
+    write_record(path, {"command_id": command_id, "count": failed_runs})
     return failed_runs
+
+
+def write_record(path: Path, record: dict) -> None:
+    # Atomic and synced: a power cut must not reset the count and keep a crashing release forever.
+    staged = path.with_name(f".{path.name}.staged")
+    with open(staged, "w") as staged_file:
+        staged_file.write(json.dumps(record))
+        staged_file.flush()
+        os.fsync(staged_file.fileno())
+    os.replace(staged, path)
+    sync_directory(path.parent)
 
 
 def read_record(path: Path) -> dict:
