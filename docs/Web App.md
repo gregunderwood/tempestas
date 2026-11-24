@@ -24,7 +24,7 @@ sometimes with wet hands. Angular 20 standalone components, Angular Material M3,
 - [../apps/web/src/app/shared/pinboard/pinboard.ts](../apps/web/src/app/shared/pinboard/pinboard.ts) — the card board, with drag and drop and the move buttons
 - [../apps/web/src/app/shared/arrange/card-order.ts](../apps/web/src/app/shared/arrange/card-order.ts) — card order: a drop or a move, merging a saved order, browser storage
 - [../apps/web/src/app/features/nodes/node-detail.ts](../apps/web/src/app/features/nodes/node-detail.ts) — one node, with its 24-hour statistics
-- [../apps/web/src/app/features/reports/reports-page.ts](../apps/web/src/app/features/reports/reports-page.ts) — the reports screen, a placeholder naming the reports to come
+- [../apps/web/src/app/features/reports/reports-page.ts](../apps/web/src/app/features/reports/reports-page.ts) — the reports screen: equipment runtime, and the reports still to come
 - [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme, the rail and hero tokens, and the gauge band colours
 - [../apps/web/proxy.conf.json](../apps/web/proxy.conf.json) — `/api` and `/socket.io` to `:7000` in dev
 
@@ -313,9 +313,14 @@ saying how old it is is how somebody trusts a reading from an hour ago.
 ## The reports screen
 
 `/reports` answers the questions a list of raw rows never did: was it a good night, is the heater
-working harder, did the pumphouse get close to freezing. For now it is a placeholder naming the
-reports to come — time in range, equipment runtime, freeze margin, CO2 enrichment and node health —
-so its nav slot does not move again when they land.
+working harder, did the pumphouse get close to freezing. Equipment runtime is the first report: a
+card per device with its hours on, starts, shortest run and unknown hours, a bar per day, and a
+day-by-day table. Below it, a card names the reports still to come — time in range, freeze margin,
+CO2 enrichment and node health — and loses a line as each lands.
+
+A report is fetched once and fetched again whenever a device switches, so it follows the relays
+without polling. The server side, and the rules for unknown spans, midnight and offline nodes, are
+in [Reports](Infrastructure/Reports.md).
 
 It replaced a Readings screen that listed the latest hundred rows, newest first. `/readings` still
 redirects here so an old bookmark does not land on the dashboard by way of the catch-all. The
