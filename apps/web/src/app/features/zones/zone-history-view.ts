@@ -22,7 +22,11 @@ import {
   type PushedReadings,
 } from '../../core/pushed-readings';
 import { MILLISECONDS_PER_SECOND, SECONDS_PER_MINUTE } from '../../shared/time';
-import { formatDuration } from './zone-words';
+import {
+  formatDuration,
+  readNodeSlug,
+  readSingleSensorKey,
+} from './zone-words';
 
 export const PLOT_WIDTH = 1000;
 export const PLOT_HEIGHT = 100;
@@ -40,8 +44,6 @@ const FULL_PERCENT = 100;
 const PERCENT_DECIMALS = 3;
 const COORDINATE_SCALE = 10;
 const LONE_POINT_TICK = 'h4';
-const NODE_SOURCE_PREFIX = 'node:';
-const SENSOR_SOURCE_PREFIX = 'sensor:';
 const AGGREGATE_LABELS = new Map<string, string>([
   ['mean', 'average'],
   ['min', 'coldest'],
@@ -332,16 +334,12 @@ export function findControllingSources(
   return [...new Set(sources)];
 }
 
-function isSingleSensorSource(source: SensorSource): boolean {
-  return source.startsWith(SENSOR_SOURCE_PREFIX);
-}
-
 // A probe a role reads on its own stays deciding, even when another role averages it.
 function findSingleSensorKeys(sources: readonly SensorSource[]): Set<string> {
   return new Set(
     sources
-      .filter(isSingleSensorSource)
-      .map((source) => source.slice(SENSOR_SOURCE_PREFIX.length)),
+      .map(readSingleSensorKey)
+      .filter((sensorKey): sensorKey is string => sensorKey !== null),
   );
 }
 
@@ -352,7 +350,7 @@ function buildControllingLines(
   timeWindow: TimeWindow,
 ): ControllingLine[] {
   return sources.flatMap((source): ControllingLine[] => {
-    if (isSingleSensorSource(source)) return [];
+    if (readSingleSensorKey(source) !== null) return [];
     const selected = selectSourceProbes(series, source);
     if (selected.length < 2) return [];
     return [
@@ -379,15 +377,15 @@ function selectSourceProbes(
   series: readonly ProbeSeries[],
   source: SensorSource,
 ): ProbeSeries[] {
-  if (!source.startsWith(NODE_SOURCE_PREFIX)) return [...series];
-  const nodeSlug = source.slice(NODE_SOURCE_PREFIX.length);
+  const nodeSlug = readNodeSlug(source);
+  if (nodeSlug === null) return [...series];
   return series.filter((probe) => probe.nodeId === nodeSlug);
 }
 
 function labelControllingSource(source: SensorSource): string {
   return (
     AGGREGATE_LABELS.get(source) ??
-    `average on ${source.slice(NODE_SOURCE_PREFIX.length)}`
+    `average on ${readNodeSlug(source) ?? source}`
   );
 }
 

@@ -60,7 +60,7 @@ function toHistoryZone(card: ZoneCard, zone: Zone | undefined): HistoryZone {
   };
 }
 
-// A config the card cannot draw gets a problem on its card, so the chart just leaves its sources out.
+// One unreadable zone config must not take down the other zones' charts.
 function findDrawableControllingSources(
   zone: Zone | undefined,
 ): SensorSource[] {

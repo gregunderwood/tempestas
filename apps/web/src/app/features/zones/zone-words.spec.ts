@@ -8,6 +8,8 @@ import {
   formatDuration,
   formatHourMinute,
   parseHourMinute,
+  readNodeSlug,
+  readSingleSensorKey,
 } from './zone-words';
 
 describe('chooseDecisionTone', () => {
@@ -75,5 +77,17 @@ describe('hour and minute', () => {
     expect(parseHourMinute('7:00am')).toBeNull();
     expect(parseHourMinute('24:00')).toBeNull();
     expect(parseHourMinute(700)).toBeNull();
+  });
+});
+
+describe('reading a sensor source', () => {
+  it('reads the node slug from a node source', () => {
+    expect(readNodeSlug('node:patji')).toBe('patji');
+    expect(readNodeSlug('sensor:patji/pipes')).toBeNull();
+  });
+
+  it('reads the probe key from a single-sensor source', () => {
+    expect(readSingleSensorKey('sensor:patji/pipes')).toBe('patji/pipes');
+    expect(readSingleSensorKey('mean')).toBeNull();
   });
 });
