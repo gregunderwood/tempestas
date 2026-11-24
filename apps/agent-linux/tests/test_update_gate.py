@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import shutil
+
+import pytest
 
 from release_fixtures import NEW_RELEASE, RUNNING_RELEASE, make_layout
 from tempestas_agent import contract
@@ -104,6 +107,18 @@ def test_a_start_removes_abandoned_downloads_but_not_a_hand_deploy_in_progress(t
     assert removed == [f".{NEW_RELEASE}"]
     assert hand_deploy_staging.is_dir()
     assert layout.locate_release(RUNNING_RELEASE).is_dir()
+
+
+def test_a_failed_gate_never_points_current_at_a_missing_release(tmp_path):
+    layout = make_layout(tmp_path)
+    install_new_release(layout)
+    shutil.rmtree(layout.locate_release(RUNNING_RELEASE))
+
+    with pytest.raises(FileNotFoundError):
+        roll_back_gate(layout, HealthGate(PENDING))
+
+    assert layout.read_current_release() == NEW_RELEASE
+    assert layout.read_pending() == PENDING
 
 
 def test_an_outcome_left_by_the_last_run_is_still_owed(tmp_path):

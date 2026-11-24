@@ -12,6 +12,8 @@ SETTLE_SECONDS=5
 REQUIREMENTS_FILE=requirements.txt
 # Older systemd reaches `failed` only at the start limit, so OnFailure= cannot judge each run.
 MINIMUM_SYSTEMD_VERSION=254
+# The lock the agent's installer holds while it replaces a release of the same name.
+SWITCH_LOCK=update-state/switch.lock
 ROLLBACK_SCRIPT_DIR=/usr/local/lib/tempestas
 UNIT_DIR=/etc/systemd/system
 
@@ -31,18 +33,19 @@ REMOTE_RELEASE="$REMOTE_AGENT_HOME/releases/$AGENT_VERSION"
 REQUIREMENTS="$(cd "$AGENT" && "$UV" export --frozen --no-dev --no-emit-project --no-hashes --quiet)"
 say "Deploying $AGENT_VERSION to ${HOSTS[*]}"
 
-require_systemd_that_rolls_back() {
+# A warning, not a refusal: a hand deploy must still reach such a host with a fix.
+warn_unless_systemd_rolls_back() {
   local host="$1" version
   version="$(ssh "$host" "systemctl --version" | awk 'NR == 1 { print $2 }')"
   [ "$version" -ge "$MINIMUM_SYSTEMD_VERSION" ] && return 0
-  echo "$host runs systemd $version; rolling back an update needs $MINIMUM_SYSTEMD_VERSION or later" >&2
-  exit 1
+  echo "WARNING: $host runs systemd $version; rolling back a failed update needs $MINIMUM_SYSTEMD_VERSION or later." >&2
+  echo "         Do not send it updates from the server until it is upgraded." >&2
 }
 
 # Every host first: stopping halfway would leave the fleet on two versions.
 for HOST in "${HOSTS[@]}"; do
   require_passwordless_systemctl "$HOST" "restart tempestas-agent.service"
-  require_systemd_that_rolls_back "$HOST"
+  warn_unless_systemd_rolls_back "$HOST"
 done
 
 # Staged apart from an update's download of the same version, then put in place in one step.
@@ -56,10 +59,13 @@ copy_release() {
     "${LINUX_AGENT_PATHS[@]}" "$host:$releases/$staging/")
   printf 'AGENT_VERSION = "%s"\n' "$AGENT_VERSION" |
     ssh "$host" "cat > $releases/$staging/$LINUX_AGENT_VERSION_STAMP"
-  ssh "$host" bash -s -- "$releases" "$staging" "$AGENT_VERSION" <<'REMOTE'
+  ssh "$host" bash -s -- "$releases" "$staging" "$AGENT_VERSION" "$REMOTE_AGENT_HOME/$SWITCH_LOCK" <<'REMOTE'
 set -euo pipefail
 cd "$1"
-staging="$2" release="$3"
+staging="$2" release="$3" switch_lock="$4"
+mkdir -p "$(dirname "$switch_lock")"
+exec {lock_descriptor}>"$switch_lock"
+flock "$lock_descriptor"
 if [ ! -e "$release" ]; then
   mv -T "$staging" "$release"
 elif ! mv -T --exchange "$staging" "$release" 2>/dev/null; then

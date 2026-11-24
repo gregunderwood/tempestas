@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,14 @@ def test_fails_the_unit_rather_than_skipping_it_when_the_switch_itself_fails(lay
     monkeypatch.setattr(script.os, "replace", fail_replacing)
 
     assert script.main() == script.EXIT_ROLLBACK_FAILED
+    assert layout.read_current_release() == NEW_RELEASE
+
+
+def test_fails_the_unit_rather_than_point_current_at_a_missing_release(layout):
+    install_pending_update(layout)
+    shutil.rmtree(layout.locate_release(RUNNING_RELEASE))
+
+    assert load_rollback_script().main() == load_rollback_script().EXIT_ROLLBACK_FAILED
     assert layout.read_current_release() == NEW_RELEASE
 
 

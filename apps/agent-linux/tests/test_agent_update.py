@@ -278,6 +278,53 @@ def test_ignores_a_repeat_of_the_update_on_its_gate(tmp_path):
     assert agent.installer.commands == []
 
 
+def test_ignores_a_repeat_of_an_update_whose_outcome_the_server_already_heard(tmp_path):
+    agent, _ = start_new_release_on_its_gate(tmp_path)
+    command_id = agent.update_gate.pending.command_id
+    agent.say_hello()
+    agent.on_heartbeat(HEARTBEAT)
+    agent.tend_update()
+    agent.tend_update()
+    agent.installer = InlineInstaller()
+
+    agent.on_update(build_fresh_update(id=command_id), retained=False)
+
+    assert agent.outcome_to_report is None
+    assert agent.installer.commands == []
+    assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
+
+
+def test_stopping_fails_an_install_that_can_no_longer_switch(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent._installing_command_id = "update-7"
+
+    agent.stop_updates()
+
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, STOPPING)]
+
+
+def test_stopping_leaves_an_install_that_already_switched_to_restart(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path)
+    agent._installing_command_id = "update-7"
+    agent.layout.write_pending(PendingUpdate("update-7", NEW_RELEASE, RUNNING_RELEASE))
+
+    agent.stop_updates()
+
+    assert update_statuses(agent) == []
+
+
+def test_settling_waits_for_a_switch_another_process_is_making(monkeypatch, tmp_path):
+    agent, _ = make_agent()
+    agent.layout = make_layout(tmp_path)
+
+    with agent.layout.hold_switch_lock():
+        agent.settle_update()
+        assert not agent._is_update_settled
+
+    agent.settle_update()
+    assert agent._is_update_settled
+
+
 SERVER_OFFLINE = json.dumps({"state": "offline"}).encode()
 SERVER_ONLINE_AGAIN = json.dumps({"state": "online"}).encode()
 

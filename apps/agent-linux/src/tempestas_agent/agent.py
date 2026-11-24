@@ -169,6 +169,9 @@ class Agent:
         self._update_in_progress = threading.Lock()
         self.is_stopping = False
         self._installing_command_id: str | None = None
+        self._update_claim_lock = threading.Lock()
+        # Kept for the life of the process: a redelivery must not be answered after its outcome.
+        self._settled_command_ids: set[str] = set()
         self._held_until_exit = ExitStack()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
         self.agent_version = read_agent_version()
@@ -325,6 +328,9 @@ class Agent:
     def settle_update(self) -> None:
         try:
             settlement = settle_update_on_start(self.layout)
+        except BlockingIOError:
+            # A deploy or the installer holds the switch lock; the next tick tries again.
+            return
         except OSError as error:
             # A full or read-only card must not keep the dead-man from ever starting.
             if not self._has_logged_settle_failure:
@@ -367,31 +373,12 @@ class Agent:
             # A redelivery: answering it would contradict what that update already reported.
             log.info("ignored a repeat of update %s", verdict.command_id)
             return
-        if self.installer is None:
-            self.publish_update_status(
-                verdict.command_id, contract.UpdateState.FAILED, NOT_INSTALLED_FROM_A_RELEASE
-            )
+        # One lock with stop_updates, so an update is never claimed after the agent began stopping.
+        with self._update_claim_lock:
+            refusal = self._claim_update_or_explain_refusal(verdict.command_id)
+        if refusal is not None:
+            self.publish_update_status(verdict.command_id, contract.UpdateState.FAILED, refusal)
             return
-        if self.is_stopping or self.restart_requested.is_set():
-            self.publish_update_status(verdict.command_id, contract.UpdateState.FAILED, STOPPING)
-            return
-        if not self._is_update_settled:
-            self.publish_update_status(
-                verdict.command_id, contract.UpdateState.FAILED, LAST_UPDATE_UNSETTLED
-            )
-            return
-        if self._has_undelivered_outcome():
-            # Installing clears the recorded outcome, which the server would then never hear.
-            self.publish_update_status(
-                verdict.command_id, contract.UpdateState.FAILED, LAST_OUTCOME_UNDELIVERED
-            )
-            return
-        if self.update_gate is not None or not self._update_in_progress.acquire(blocking=False):
-            self.publish_update_status(
-                verdict.command_id, contract.UpdateState.FAILED, ANOTHER_UPDATE_IN_PROGRESS
-            )
-            return
-        self._installing_command_id = verdict.command_id
         try:
             # Off the MQTT thread: a download must not hold up heartbeats or commands.
             threading.Thread(
@@ -415,13 +402,25 @@ class Agent:
 
     def stop_updates(self) -> None:
         """Holds the switch lock until exit, so the process never ends halfway through a switch."""
-        self.is_stopping = True
+        with self._update_claim_lock:
+            self.is_stopping = True
+            installing_command_id = self._installing_command_id
         if self.layout is None:
             return
         try:
             self._held_until_exit.enter_context(self.layout.hold_switch_lock())
+            self._fail_an_install_that_cannot_switch(installing_command_id)
         except OSError as error:
             log.error("could not hold the switch lock while stopping: %s", error)
+
+    def _fail_an_install_that_cannot_switch(self, command_id: str | None) -> None:
+        if command_id is None:
+            return
+        pending = self.layout.read_pending()
+        if pending is not None and pending.command_id == command_id:
+            return
+        # Its thread now waits on the lock this process holds until it exits.
+        self.publish_update_status(command_id, contract.UpdateState.FAILED, STOPPING)
 
     def tend_update(self) -> None:
         """Main loop only, and never waits for the switch lock: a busy one is tried next tick."""
@@ -561,6 +560,21 @@ class Agent:
         if gate is not None:
             gate.stop_watching(self._clock())
 
+    def _claim_update_or_explain_refusal(self, command_id: str) -> str | None:
+        if self.installer is None:
+            return NOT_INSTALLED_FROM_A_RELEASE
+        if self.is_stopping or self.restart_requested.is_set():
+            return STOPPING
+        if not self._is_update_settled:
+            return LAST_UPDATE_UNSETTLED
+        if self._has_undelivered_outcome():
+            # Installing clears the recorded outcome, which the server would then never hear.
+            return LAST_OUTCOME_UNDELIVERED
+        if self.update_gate is not None or not self._update_in_progress.acquire(blocking=False):
+            return ANOTHER_UPDATE_IN_PROGRESS
+        self._installing_command_id = command_id
+        return None
+
     def _is_known_update(self, command_id: str) -> bool:
         gate, outcome = self.update_gate, self.outcome_to_report
         known_ids = {
@@ -568,7 +582,7 @@ class Agent:
             gate.pending.command_id if gate is not None else None,
             outcome.command_id if outcome is not None else None,
         }
-        return command_id in known_ids
+        return command_id in known_ids or command_id in self._settled_command_ids
 
     def _has_undelivered_outcome(self) -> bool:
         delivery = self._outcome_delivery
@@ -605,6 +619,7 @@ class Agent:
         except OSError as error:
             log.error("could not forget a delivered update outcome: %s", error)
             return
+        self._settled_command_ids.add(self.outcome_to_report.command_id)
         self.outcome_to_report = None
         self._outcome_delivery = None
 

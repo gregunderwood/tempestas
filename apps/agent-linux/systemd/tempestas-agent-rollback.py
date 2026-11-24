@@ -116,6 +116,9 @@ def hold_switch_lock(home: Path) -> Iterator[None]:
 
 
 def switch_current_to(home: Path, release: str) -> None:
+    # A `current` pointing at nothing could never start again, and nothing would roll it back.
+    if not (home / RELEASES_DIRECTORY / release).is_dir():
+        raise FileNotFoundError(f"release {release} is missing, so `current` stays put")
     staged_link = home / STAGED_CURRENT_LINK
     staged_link.unlink(missing_ok=True)
     staged_link.symlink_to(Path(RELEASES_DIRECTORY) / release)

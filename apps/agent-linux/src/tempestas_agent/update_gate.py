@@ -67,8 +67,14 @@ class HealthGate:
 
 
 def settle_update_on_start(layout: ReleaseLayout | None) -> UpdateSettlement:
+    """Raises BlockingIOError rather than wait while another process switches `current`."""
     if layout is None:
         return UpdateSettlement()
+    with layout.hold_switch_lock(should_wait=False):
+        return settle_while_locked(layout)
+
+
+def settle_while_locked(layout: ReleaseLayout) -> UpdateSettlement:
     settlement = UpdateSettlement(outcome=layout.read_outcome())
     pending = layout.read_pending()
     if pending is None:
@@ -116,7 +122,7 @@ def prune_after_update(layout: ReleaseLayout, pending: PendingUpdate) -> list[st
 def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
     pending = gate.pending
     # Switched first: a crash before the outcome is written reads as a failed start, which it was.
-    layout.switch_current_to(pending.previous_release)
+    layout.switch_to_existing_release(pending.previous_release)
     return record_outcome(
         layout,
         UpdateOutcome(

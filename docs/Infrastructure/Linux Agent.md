@@ -202,7 +202,8 @@ actually in effect with `systemctl show tempestas-agent -p StartLimitIntervalUSe
 - **`OnFailure=tempestas-agent-rollback.service`.** It fires on every failed run, not only once the
   start limit gives up, so the script decides. That needs systemd 254 or later, where a restarting
   unit passes through `failed`; before it, the unit reached `failed` only at the start limit. Every
-  host runs 257 on trixie, and the deploy script refuses a host with less. It switches back only when the release that failed
+  host runs 257 on trixie. The deploy script warns about a host with less but still deploys to it,
+  so a fix can reach it; do not send such a host updates from the server. It switches back only when the release that failed
   is an update still waiting on its gate, and only on its third failed run if it had said `hello`.
   Otherwise it exits 1 and changes nothing, and as an
   `ExecCondition=` that skips the unit rather than marking it failed after every ordinary crash.
@@ -284,7 +285,8 @@ It shows as offline on the Nodes page, and `tools/deploy-agent-linux.sh` replace
 - **Replaced by a hand deploy**: the gate is dropped without passing or rolling back, and the
   deploy's restart starts the release it copied. The agent, the installer, the rollback script
   and a hand deploy all take `update-state/switch.lock` around every read-then-switch of
-  `current`, so none can undo another.
+  `current`, so none can undo another. The deploy also holds it while it puts a copied release in
+  place, and nothing ever points `current` at a release directory that is missing.
 
 - **Cannot start at all**: the release never gets to judge itself. The unit fails,
   `tempestas-agent-rollback.service` runs the root-owned script, which switches back and starts the
