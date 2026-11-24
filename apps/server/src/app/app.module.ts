@@ -17,6 +17,7 @@ import { NodesModule } from './nodes/nodes.module';
 import { NodeEntity } from './nodes/models';
 import { ReadingsModule } from './readings/readings.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { ReportsModule } from './reports/reports.module';
 import { RulesModule } from './rules/rules.module';
 import { SensorReadingEntity } from './readings/models';
 import { ZoneEntity } from './zones/models';
@@ -60,6 +61,7 @@ const ENTITIES = [
     NodesModule,
     DevicesModule,
     ReadingsModule,
+    ReportsModule,
     RulesModule,
     ZonesModule,
     HealthModule,
