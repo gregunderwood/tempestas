@@ -115,13 +115,14 @@ database_name_for() {
 }
 
 # The merge-base, not main's tip, so "before" differs from "after" only by this PR.
+# Beside the repo, not in /tmp: node_modules is hard-linked, which needs the same filesystem.
 check_out_base() {
   local base_branch
   base_branch="$(gh pr view "$PULL_REQUEST" --json baseRefName --jq .baseRefName)"
   git -C "$REPO_ROOT" fetch --quiet origin "$base_branch"
   BASE_SHA="$(git -C "$REPO_ROOT" merge-base HEAD "origin/$base_branch")"
   say "Checking out the base, ${BASE_SHA:0:7}, for the before screenshots"
-  BASE_CHECKOUT="$WORK_DIR/base"
+  BASE_CHECKOUT="$(mktemp -d "$(dirname "$REPO_ROOT")/.pr-screenshots-base.XXXXXX")"
   git -C "$REPO_ROOT" worktree add --quiet --detach "$BASE_CHECKOUT" "$BASE_SHA"
   cp -al "$REPO_ROOT/node_modules" "$BASE_CHECKOUT/node_modules"
 }
@@ -433,6 +434,7 @@ remove_worktree() {
   local worktree=$1
   [[ -n "$worktree" ]] || return 0
   git -C "$REPO_ROOT" worktree remove --force "$worktree" || true
+  rm -rf "$worktree"
 }
 
 warn_if_still_listening() {
