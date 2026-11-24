@@ -121,8 +121,19 @@ def prune_after_update(layout: ReleaseLayout, pending: PendingUpdate) -> list[st
 
 def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
     pending = gate.pending
+    if not layout.locate_release(pending.previous_release).is_dir():
+        # `current` pointing at nothing could never start again; a failing release at least runs.
+        return record_outcome(
+            layout,
+            UpdateOutcome(
+                pending.command_id,
+                contract.UpdateState.FAILED,
+                f"{gate.describe_failure()}, and {pending.previous_release} to roll back to"
+                " is missing, so it stays",
+            ),
+        )
     # Switched first: a crash before the outcome is written reads as a failed start, which it was.
-    layout.switch_to_existing_release(pending.previous_release)
+    layout.switch_current_to(pending.previous_release)
     return record_outcome(
         layout,
         UpdateOutcome(

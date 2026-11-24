@@ -293,7 +293,8 @@ It shows as offline on the Nodes page, and `tools/deploy-agent-linux.sh` replace
   deploy's restart starts the release it copied. The agent, the installer, the rollback script
   and a hand deploy all take `update-state/switch.lock` around every read-then-switch of
   `current`, so none can undo another. The deploy also holds it while it puts a copied release in
-  place, and nothing ever points `current` at a release directory that is missing.
+  place, and nothing ever points `current` at a release directory that is missing: a gate that
+  fails with nothing to roll back to reports `failed` and keeps the release it has.
 
 - **Cannot start at all**: the release never gets to judge itself. The unit fails,
   `tempestas-agent-rollback.service` runs the root-owned script, which switches back and starts the

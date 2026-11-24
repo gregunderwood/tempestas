@@ -216,6 +216,7 @@ def run_until_signalled(agent: Agent, config: AgentConfig) -> None:
     def request_stop(_signal_number, _frame):
         nonlocal should_stop
         should_stop = True
+        agent.wake_main_loop.set()
 
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
@@ -243,15 +244,15 @@ def read_watchdog_ping_interval_s() -> float | None:
 def wait_for_next_tick(agent: Agent, interval_s: float, ping_interval_s: float | None) -> None:
     """Pings the watchdog through the wait, so only a pass of the loop that hangs trips it."""
     if ping_interval_s is None:
-        agent.restart_requested.wait(interval_s)
+        agent.wake_main_loop.wait(interval_s)
         return
     deadline = time.monotonic() + interval_s
-    while not agent.restart_requested.is_set():
+    while not agent.wake_main_loop.is_set():
         sd_notify("WATCHDOG=1")
         remaining_s = deadline - time.monotonic()
         if remaining_s <= 0:
             return
-        agent.restart_requested.wait(min(remaining_s, ping_interval_s))
+        agent.wake_main_loop.wait(min(remaining_s, ping_interval_s))
 
 
 def publish_samples(agent: Agent) -> None:

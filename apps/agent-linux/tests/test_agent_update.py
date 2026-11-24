@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 
 import pytest
 
@@ -292,6 +293,29 @@ def test_ignores_a_repeat_of_an_update_whose_outcome_the_server_already_heard(tm
     assert agent.outcome_to_report is None
     assert agent.installer.commands == []
     assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
+
+
+def test_ignores_a_repeat_of_an_update_that_already_failed(monkeypatch, tmp_path):
+    agent, _ = make_updating_agent(monkeypatch, tmp_path, InlineInstaller(failure="no space"))
+    agent.on_update(build_fresh_update(), retained=False)
+
+    agent.on_update(build_fresh_update(), retained=False)
+
+    assert len(agent.installer.commands) == 1
+    assert update_statuses(agent)[-1] == (contract.UpdateState.FAILED, "no space")
+
+
+def test_a_gate_with_nothing_to_roll_back_to_stays_and_reports_at_once(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    shutil.rmtree(agent.layout.locate_release(RUNNING_RELEASE))
+    agent.say_hello()
+
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert agent.update_gate is None
+    assert not agent.restart_requested.is_set()
+    assert update_statuses(agent)[-1][0] == contract.UpdateState.FAILED
 
 
 def test_stopping_fails_an_install_that_can_no_longer_switch(monkeypatch, tmp_path):

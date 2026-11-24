@@ -90,12 +90,6 @@ class ReleaseLayout:
         os.replace(staged_link, self.current_link)
         sync_directory(self.home)
 
-    def switch_to_existing_release(self, release: str) -> None:
-        # A `current` pointing at nothing could never start again, and nothing would roll it back.
-        if not self.locate_release(release).is_dir():
-            raise FileNotFoundError(f"release {release} is missing, so `current` stays put")
-        self.switch_current_to(release)
-
     def read_pending(self) -> PendingUpdate | None:
         return read_record(self.state / PENDING_FILE, PendingUpdate)
 

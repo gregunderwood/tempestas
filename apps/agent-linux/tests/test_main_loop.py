@@ -13,7 +13,7 @@ WATCHDOG_USEC_FOR_A_MINUTE = "60000000"
 
 
 def make_waiting_agent():
-    return SimpleNamespace(restart_requested=threading.Event())
+    return SimpleNamespace(wake_main_loop=threading.Event())
 
 
 def record_pings(monkeypatch) -> list[str]:
@@ -59,9 +59,9 @@ def test_a_wait_without_a_watchdog_never_pings(monkeypatch):
     assert pings == []
 
 
-def test_a_requested_restart_ends_the_wait_at_once(monkeypatch):
+def test_a_restart_or_a_stop_ends_the_wait_at_once(monkeypatch):
     record_pings(monkeypatch)
     agent = make_waiting_agent()
-    agent.restart_requested.set()
+    agent.wake_main_loop.set()
 
     wait_for_next_tick(agent, interval_s=60, ping_interval_s=30)

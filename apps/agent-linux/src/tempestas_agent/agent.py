@@ -46,6 +46,9 @@ LAST_OUTCOME_UNDELIVERED = "the last update's result has not reached the server 
 LAST_UPDATE_UNSETTLED = "the last update is not settled yet, as its state cannot be read"
 STOPPING = "the agent is stopping or restarting"
 ANOTHER_UPDATE_IN_PROGRESS = "another update is in progress"
+FINAL_UPDATE_STATES = frozenset(
+    {contract.UpdateState.HEALTHY, contract.UpdateState.ROLLED_BACK, contract.UpdateState.FAILED}
+)
 NOT_INSTALLED_FROM_A_RELEASE = (
     "this agent was not installed from a release, so it cannot update itself; "
     "run tools/deploy-agent-linux.sh"
@@ -166,11 +169,14 @@ class Agent:
         self.is_connected = False
         self.is_server_online = False
         self.restart_requested = threading.Event()
+        # Set by a restart request or a stop, so the main loop's wait ends at once.
+        self.wake_main_loop = threading.Event()
         self._update_in_progress = threading.Lock()
         self.is_stopping = False
         self._installing_command_id: str | None = None
         self._update_claim_lock = threading.Lock()
-        # Kept for the life of the process: a redelivery must not be answered after its outcome.
+        # Every id answered with a final state, kept for the life of the process: a redelivery
+        # must not be answered again after its outcome.
         self._settled_command_ids: set[str] = set()
         self._held_until_exit = ExitStack()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
@@ -422,6 +428,10 @@ class Agent:
         # Its thread now waits on the lock this process holds until it exits.
         self.publish_update_status(command_id, contract.UpdateState.FAILED, STOPPING)
 
+    def request_restart(self) -> None:
+        self.restart_requested.set()
+        self.wake_main_loop.set()
+
     def tend_update(self) -> None:
         """Main loop only, and never waits for the switch lock: a busy one is tried next tick."""
         if not self._is_update_settled:
@@ -432,6 +442,8 @@ class Agent:
         self._forget_delivered_outcome()
 
     def publish_update_status(self, command_id: str, state: str, reason: str | None = None):
+        if state in FINAL_UPDATE_STATES:
+            self._settled_command_ids.add(command_id)
         payload = {**self._envelope("updateStatus"), "id": command_id, "state": state}
         if reason is not None:
             payload["reason"] = reason
@@ -543,12 +555,15 @@ class Agent:
     def _fail_update_gate(self, gate: HealthGate) -> None:
         log.error("update gate failed: %s - rolling back", gate.describe_failure())
         try:
-            # Kept unsent: the previous release reports it after the restart.
+            # Kept unsent when it restarts: the previous release reports it then.
             self.outcome_to_report = roll_back_gate(self.layout, gate)
         finally:
             # Once `current` points back, run it even if the outcome could not be recorded.
             if self.layout.read_current_release() == gate.pending.previous_release:
-                self.restart_requested.set()
+                self.request_restart()
+        if not self.restart_requested.is_set():
+            # Nothing to roll back to, so this release stays and says so now.
+            self.report_settled_update()
 
     def _start_watching_the_gate(self) -> None:
         gate = self.update_gate
@@ -619,7 +634,6 @@ class Agent:
         except OSError as error:
             log.error("could not forget a delivered update outcome: %s", error)
             return
-        self._settled_command_ids.add(self.outcome_to_report.command_id)
         self.outcome_to_report = None
         self._outcome_delivery = None
 
@@ -639,7 +653,7 @@ class Agent:
             return
         log.warning("installed %s - restarting into it", command["version"])
         # Before the publish: `current` already points at the new release, whatever happens next.
-        self.restart_requested.set()
+        self.request_restart()
         self.publish_update_status(command_id, contract.UpdateState.RESTARTING)
 
     def _report_update_refusal(self, verdict: UpdateVerdict) -> None:
