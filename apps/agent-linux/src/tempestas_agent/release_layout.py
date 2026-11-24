@@ -66,10 +66,10 @@ class ReleaseLayout:
         except OSError:
             return None
 
-    def release_path(self, release: str) -> Path:
+    def locate_release(self, release: str) -> Path:
         return self.releases / release
 
-    def unfinished_path(self, release: str) -> Path:
+    def locate_unfinished_release(self, release: str) -> Path:
         return self.releases / f"{UNFINISHED_PREFIX}{release}"
 
     def switch_current_to(self, release: str) -> None:
@@ -109,7 +109,7 @@ class ReleaseLayout:
         removed = [entry.name for entry in newest_first if entry.name not in kept]
         for release in removed:
             # Another prune may be removing the same release at the same moment.
-            shutil.rmtree(self.release_path(release), ignore_errors=True)
+            shutil.rmtree(self.locate_release(release), ignore_errors=True)
         return removed
 
 

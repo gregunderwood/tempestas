@@ -42,15 +42,17 @@ def judge_update_command(
 ) -> UpdateVerdict:
     if payload.strip() == b"":
         # Reacting to a clear, even by alarming, risks a loop against whoever cleared it.
-        return log_only("empty payload (a retained clear)")
+        return build_log_only_verdict("empty payload (a retained clear)")
     if retained:
-        return alarm("update carried the retain flag", contract.AlarmCode.RETAINED_COMMAND_DROPPED)
+        return build_alarm_verdict(
+            "update carried the retain flag", contract.AlarmCode.RETAINED_COMMAND_DROPPED
+        )
 
     body = parse_json_object(payload)
     if body is None:
-        return log_only("payload is not a JSON object")
+        return build_log_only_verdict("payload is not a JSON object")
     if contract.read_schema_major(body.get("schema")) != contract.SUPPORTED_MAJOR:
-        return log_only(f"unsupported schema {body.get('schema')}")
+        return build_log_only_verdict(f"unsupported schema {body.get('schema')}")
 
     ownership_refusal = judge_ownership(body.get("issuedBy"), bound_controller)
     if ownership_refusal is not None:
@@ -62,7 +64,7 @@ def judge_update_command(
 
     command_id = body.get("id")
     if not isinstance(command_id, str) or command_id == "":
-        return log_only("update has no id")
+        return build_log_only_verdict("update has no id")
 
     target_problem = describe_target_problem(body, running_app)
     if target_problem is not None:
@@ -78,9 +80,9 @@ def read_version_major(version: str) -> int | None:
 def judge_ownership(issued_by, bound_controller: str | None) -> UpdateVerdict | None:
     # Stricter than gpio/set: replacing code can wait the seconds until the first heartbeat binds.
     if bound_controller is None:
-        return log_only("no controller is bound yet")
+        return build_log_only_verdict("no controller is bound yet")
     if issued_by != bound_controller:
-        return alarm(
+        return build_alarm_verdict(
             f'issuedBy {json.dumps(issued_by)} is not the bound controller "{bound_controller}"',
             contract.AlarmCode.CONTROLLER_CONFLICT,
         )
@@ -89,16 +91,16 @@ def judge_ownership(issued_by, bound_controller: str | None) -> UpdateVerdict | 
 
 def judge_expiry(expires_at, now: datetime) -> UpdateVerdict | None:
     if not isinstance(expires_at, str):
-        return log_only("update has no expiresAt")
+        return build_log_only_verdict("update has no expiresAt")
     if not ISO_8601_INSTANT.fullmatch(expires_at):
-        return log_only(f'unparseable expiresAt "{expires_at}"')
+        return build_log_only_verdict(f'unparseable expiresAt "{expires_at}"')
     try:
         deadline = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
     except ValueError:
         # The pattern checks the shape only, so a month 13 still reaches here.
-        return log_only(f'unparseable expiresAt "{expires_at}"')
+        return build_log_only_verdict(f'unparseable expiresAt "{expires_at}"')
     if deadline < now:
-        return alarm("update expired", contract.AlarmCode.COMMAND_EXPIRED)
+        return build_alarm_verdict("update expired", contract.AlarmCode.COMMAND_EXPIRED)
     return None
 
 
@@ -140,9 +142,9 @@ def parse_json_object(payload: bytes) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
-def log_only(reason: str) -> UpdateVerdict:
+def build_log_only_verdict(reason: str) -> UpdateVerdict:
     return UpdateVerdict(False, ANSWER_LOG, reason)
 
 
-def alarm(reason: str, code: str) -> UpdateVerdict:
+def build_alarm_verdict(reason: str, code: str) -> UpdateVerdict:
     return UpdateVerdict(False, ANSWER_ALARM, reason, alarm=code)

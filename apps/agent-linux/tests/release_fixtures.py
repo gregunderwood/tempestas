@@ -21,7 +21,7 @@ BUNDLE_FILES = {
 
 def make_layout(home: Path, running: str = RUNNING_RELEASE, lock: bytes = LOCK) -> ReleaseLayout:
     layout = ReleaseLayout(home)
-    release = layout.release_path(running)
+    release = layout.locate_release(running)
     release.mkdir(parents=True)
     (release / "uv.lock").write_bytes(lock)
     layout.switch_current_to(running)

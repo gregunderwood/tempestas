@@ -37,7 +37,7 @@ def main(arguments: list[str]) -> int:
         print("usage: TEMPESTAS_AGENT_HOME=<home> python -m tempestas_agent.hand_deploy <release>")
         return EXIT_USAGE
     release = arguments[0]
-    if not layout.release_path(release).is_dir():
+    if not layout.locate_release(release).is_dir():
         print(f"no release {release} under {layout.releases}")
         return EXIT_NO_SUCH_RELEASE
     for pruned in make_current(layout, release):

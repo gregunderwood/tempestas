@@ -63,7 +63,7 @@ def main() -> int:
     try:
         run_until_signalled(agent, config)
     finally:
-        shut_down(agent, lock)
+        shut_down_without_raising(agent, lock)
     return EXIT_RESTART_FOR_UPDATE if agent.restart_requested.is_set() else EXIT_OK
 
 
@@ -133,6 +133,7 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
             log.error("connect refused: %s", reason_code)
             return
         log.info("connected to %s as %s", config.mqtt.url, config.node_id)
+        agent.on_connected()
         announce(agent)
         client.subscribe(build_subscriptions(config.node_id))
 
@@ -141,7 +142,11 @@ def wire(agent: Agent, client: mqtt.Client) -> None:
         if handler is not None:
             handler(agent, message)
 
+    def on_disconnect(_client, _userdata, _flags, _reason_code, _properties=None):
+        agent.on_disconnected()
+
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
 
 
@@ -214,6 +219,14 @@ def publish_samples(agent: Agent) -> None:
             contract.build_sample_topic(node_id, sensor_id),
             agent.sample_payload(sensor_id, reading),
         )
+
+
+def shut_down_without_raising(agent: Agent, lock: SingleInstance) -> None:
+    # A requested restart must still exit 75, or the rollback unit reads it as the update failing.
+    try:
+        shut_down(agent, lock)
+    except Exception:  # noqa: BLE001 - logged; the exit code must stay what was asked for
+        log.exception("the agent did not shut down cleanly")
 
 
 def shut_down(agent: Agent, lock: SingleInstance) -> None:

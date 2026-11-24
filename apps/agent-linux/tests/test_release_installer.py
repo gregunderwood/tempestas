@@ -48,8 +48,8 @@ def test_installs_beside_the_running_release_and_switches_to_it(tmp_path):
     assert pending == PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE)
     assert layout.read_pending() == pending
     for path, content in BUNDLE_FILES.items():
-        assert (layout.release_path(NEW_RELEASE) / path).read_bytes() == content
-    assert (layout.release_path(RUNNING_RELEASE) / "uv.lock").exists()
+        assert (layout.locate_release(NEW_RELEASE) / path).read_bytes() == content
+    assert (layout.locate_release(RUNNING_RELEASE) / "uv.lock").exists()
 
 
 def test_refuses_a_manifest_that_is_not_the_one_the_command_pins(tmp_path):
@@ -141,13 +141,13 @@ def test_refuses_when_the_node_does_not_run_from_a_release(tmp_path):
 
 def test_replaces_a_leftover_partial_download(tmp_path):
     layout = make_layout(tmp_path)
-    leftover = layout.unfinished_path(NEW_RELEASE)
+    leftover = layout.locate_unfinished_release(NEW_RELEASE)
     leftover.mkdir()
     (leftover / "stray.py").write_text("left from a crash\n")
 
     install(layout, FakeServer())
 
-    assert not (layout.release_path(NEW_RELEASE) / "stray.py").exists()
+    assert not (layout.locate_release(NEW_RELEASE) / "stray.py").exists()
     assert not leftover.exists()
 
 
@@ -183,7 +183,7 @@ def test_refuses_to_switch_when_a_hand_deploy_moved_current_during_the_download(
 
     def hand_deploy_midway(url):
         if url.endswith("uv.lock"):
-            layout.release_path("1.1.5").mkdir(exist_ok=True)
+            layout.locate_release("1.1.5").mkdir(exist_ok=True)
             layout.switch_current_to("1.1.5")
         return fetch(url)
 
@@ -194,7 +194,7 @@ def test_refuses_to_switch_when_a_hand_deploy_moved_current_during_the_download(
 
     assert layout.read_current_release() == "1.1.5"
     assert layout.read_pending() is None
-    assert not layout.unfinished_path(NEW_RELEASE).exists()
+    assert not layout.locate_unfinished_release(NEW_RELEASE).exists()
 
 
 def test_a_pending_record_that_cannot_be_written_leaves_nothing_behind(tmp_path, monkeypatch):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 
 from . import contract
@@ -19,14 +20,34 @@ class UpdateSettlement:
 
 
 class HealthGate:
-    def __init__(self, pending: PendingUpdate, started_at: float):
+    """Counts only time with the broker connected and the server online: an outage is no verdict."""
+
+    def __init__(self, pending: PendingUpdate):
         self.pending = pending
-        self.deadline = started_at + GATE_SECONDS
         self.has_said_hello = False
         self.has_heard_heartbeat = False
+        self._watched_seconds = 0.0
+        self._watching_since: float | None = None
+        self._clock_lock = threading.Lock()
 
     def note_hello(self) -> None:
         self.has_said_hello = True
+
+    def start_watching(self, now: float) -> None:
+        with self._clock_lock:
+            if self._watching_since is None:
+                self._watching_since = now
+
+    def stop_watching(self, now: float) -> None:
+        with self._clock_lock:
+            if self._watching_since is not None:
+                self._watched_seconds += now - self._watching_since
+                self._watching_since = None
+
+    def read_watched_seconds(self, now: float) -> float:
+        with self._clock_lock:
+            running = 0.0 if self._watching_since is None else now - self._watching_since
+            return self._watched_seconds + running
 
     def note_heartbeat(self) -> None:
         # A heartbeat before our hello proves the broker, not that the server knows this release.
@@ -37,14 +58,14 @@ class HealthGate:
         return self.has_said_hello and self.has_heard_heartbeat
 
     def is_overdue(self, now: float) -> bool:
-        return not self.is_passed() and now >= self.deadline
+        return not self.is_passed() and self.read_watched_seconds(now) >= GATE_SECONDS
 
     def describe_failure(self) -> str:
-        missing = "hello" if not self.has_said_hello else "heartbeat"
-        return f"{self.pending.version} sent no {missing} within {GATE_SECONDS}s"
+        version = self.pending.version
+        return f"{version} heard no heartbeat in {GATE_SECONDS}s with the server online"
 
 
-def settle_update_on_start(layout: ReleaseLayout | None, now: float) -> UpdateSettlement:
+def settle_update_on_start(layout: ReleaseLayout | None) -> UpdateSettlement:
     if layout is None:
         return UpdateSettlement()
     settlement = UpdateSettlement(outcome=layout.read_outcome())
@@ -52,7 +73,7 @@ def settle_update_on_start(layout: ReleaseLayout | None, now: float) -> UpdateSe
     if pending is None:
         return settlement
     if layout.read_current_release() == pending.version:
-        settlement.gate = HealthGate(pending, now)
+        settlement.gate = HealthGate(pending)
         return settlement
     # The rollback unit switched back because the new release could not even start.
     settlement.outcome = record_outcome(

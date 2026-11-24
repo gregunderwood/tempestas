@@ -10,22 +10,22 @@ from tempestas_agent.release_layout import PendingUpdate, UpdateOutcome
 
 def test_makes_the_copied_release_current_and_drops_a_waiting_update(tmp_path):
     layout = make_layout(tmp_path)
-    layout.release_path(NEW_RELEASE).mkdir()
+    layout.locate_release(NEW_RELEASE).mkdir()
     layout.write_pending(PendingUpdate("update-1", "1.1.9", RUNNING_RELEASE))
 
     make_current(layout, NEW_RELEASE)
 
     assert layout.read_current_release() == NEW_RELEASE
     assert layout.read_pending() is None
-    assert layout.release_path(RUNNING_RELEASE).is_dir()
+    assert layout.locate_release(RUNNING_RELEASE).is_dir()
 
 
 def test_tells_the_server_that_the_update_it_replaced_ended(tmp_path):
     layout = make_layout(tmp_path)
-    layout.release_path(NEW_RELEASE).mkdir()
+    layout.locate_release(NEW_RELEASE).mkdir()
     layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
     layout.switch_current_to(NEW_RELEASE)
-    layout.release_path("1.1.5").mkdir()
+    layout.locate_release("1.1.5").mkdir()
 
     make_current(layout, "1.1.5")
 

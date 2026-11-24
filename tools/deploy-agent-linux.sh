@@ -32,8 +32,7 @@ for HOST in "${HOSTS[@]}"; do
   require_passwordless_systemctl "$HOST" "restart tempestas-agent.service"
 done
 
-# Copied under its own dot-name, apart from an update's download of the same version, then put in
-# place whole: exchanged with a release already there, so `current` never points at nothing.
+# Staged apart from an update's download of the same version, then put in place in one step.
 copy_release() {
   local host="$1"
   local releases="$REMOTE_AGENT_HOME/releases"
@@ -44,8 +43,18 @@ copy_release() {
     "${LINUX_AGENT_PATHS[@]}" "$host:$releases/$staging/")
   printf 'AGENT_VERSION = "%s"\n' "$AGENT_VERSION" |
     ssh "$host" "cat > $releases/$staging/$LINUX_AGENT_VERSION_STAMP"
-  ssh "$host" "cd $releases && if [ -e $AGENT_VERSION ]; then mv -T --exchange $staging $AGENT_VERSION; \
-    else mv -T $staging $AGENT_VERSION; fi && rm -rf $staging"
+  ssh "$host" bash -s -- "$releases" "$staging" "$AGENT_VERSION" <<'REMOTE'
+set -euo pipefail
+cd "$1"
+staging="$2" release="$3"
+if [ ! -e "$release" ]; then
+  mv -T "$staging" "$release"
+elif ! mv -T --exchange "$staging" "$release" 2>/dev/null; then
+  # coreutils before 9.5 cannot exchange, so `current` points at nothing for a moment.
+  mv -T "$release" "$staging-replaced" && mv -T "$staging" "$release" && mv -T "$staging-replaced" "$staging"
+fi
+rm -rf "$staging"
+REMOTE
 }
 
 # Built beside the running venv, which the agent keeps using until swap_in_built_venv.
@@ -79,8 +88,13 @@ home="$1" requirements_file="$2"
 rm -rf "$home/.venv-replaced"
 [ ! -e "$home/venv" ] || mv "$home/venv" "$home/.venv-replaced"
 mv "$home/.venv-building" "$home/venv"
-rm -rf "$home/.venv-replaced"
 REMOTE
+}
+
+# Only once the agent has restarted onto the new venv, as the old one ran from it until then.
+remove_replaced_venv() {
+  local host="$1"
+  ssh "$host" "rm -rf $REMOTE_AGENT_HOME/.venv-replaced"
 }
 
 # The system python: hand_deploy needs only the standard library, and the venv may not exist yet.
@@ -112,15 +126,18 @@ for HOST in "${HOSTS[@]}"; do
   say "$HOST: copying into $REMOTE_RELEASE"
   copy_release "$HOST"
   build_venv_if_needed "$HOST"
-  swap_in_built_venv "$HOST"
   make_current "$HOST"
 
   if ! is_unit_on_release_layout "$HOST"; then
+    swap_in_built_venv "$HOST"
+    remove_replaced_venv "$HOST"
     print_unit_install "$HOST"
     continue
   fi
   say "$HOST: restarting (relays fail safe until the server drives them again)"
+  swap_in_built_venv "$HOST"
   ssh "$HOST" "sudo -n systemctl restart tempestas-agent.service"
+  remove_replaced_venv "$HOST"
   sleep "$SETTLE_SECONDS"
   ssh "$HOST" "systemctl is-active tempestas-agent && journalctl -u tempestas-agent -n 5 --no-pager"
 done

@@ -134,7 +134,7 @@ def test_refuses_a_second_update_while_one_is_in_progress(monkeypatch, tmp_path)
 def start_new_release_on_its_gate(tmp_path):
     agent, clock = make_agent()
     agent.layout = make_layout(tmp_path)
-    agent.layout.release_path(NEW_RELEASE).mkdir()
+    agent.layout.locate_release(NEW_RELEASE).mkdir()
     agent.layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
     agent.layout.switch_current_to(NEW_RELEASE)
     agent.settle_update()
@@ -190,6 +190,55 @@ def test_a_heartbeat_noted_before_the_deadline_passes_even_if_tended_after_it(tm
     assert not agent.restart_requested.is_set()
 
 
+SERVER_OFFLINE = json.dumps({"state": "offline"}).encode()
+
+
+def test_a_server_that_goes_offline_pauses_the_gate_instead_of_failing_the_release(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    agent.on_server_status(SERVER_OFFLINE, retained=False)
+    clock.advance(10 * GATE_SECONDS)
+    agent.tend_update()
+
+    assert agent.update_gate is not None
+    assert not agent.restart_requested.is_set()
+
+
+def test_a_lost_broker_connection_pauses_the_gate(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    agent.on_disconnected()
+    clock.advance(10 * GATE_SECONDS)
+    agent.tend_update()
+
+    assert not agent.restart_requested.is_set()
+
+
+def test_a_settlement_that_failed_at_start_is_tried_again_and_announced(tmp_path, monkeypatch):
+    agent, _ = make_agent()
+    agent.layout = make_layout(tmp_path)
+    agent.layout.locate_release(NEW_RELEASE).mkdir()
+    agent.layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
+    agent.layout.switch_current_to(NEW_RELEASE)
+    read_pending = agent.layout.read_pending
+
+    def fail_reading():
+        raise OSError("input/output error")
+
+    monkeypatch.setattr(agent.layout, "read_pending", fail_reading)
+    agent.settle_update()
+    agent.on_connected()
+    monkeypatch.setattr(agent.layout, "read_pending", read_pending)
+
+    agent.tend_update()
+
+    assert agent.update_gate is not None
+    assert agent.update_gate.has_said_hello
+    assert contract.build_hello_topic("bench") in agent.client.topics()
+
+
 def test_a_new_release_that_hears_no_heartbeat_rolls_back_and_restarts(tmp_path):
     agent, clock = start_new_release_on_its_gate(tmp_path)
     agent.say_hello()
@@ -206,7 +255,7 @@ def test_a_new_release_that_hears_no_heartbeat_rolls_back_and_restarts(tmp_path)
 def roll_back_before_this_start(tmp_path):
     agent, _ = make_agent()
     agent.layout = make_layout(tmp_path)
-    reason = f"{NEW_RELEASE} sent no heartbeat within {GATE_SECONDS}s"
+    reason = f"{NEW_RELEASE} heard no heartbeat in {GATE_SECONDS}s with the server online"
     agent.layout.write_outcome(UpdateOutcome("update-1", contract.UpdateState.ROLLED_BACK, reason))
     agent.settle_update()
     return agent, reason

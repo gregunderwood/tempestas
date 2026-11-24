@@ -50,7 +50,7 @@ class ReleaseInstaller:
         """Leaves the new release current and pending its health gate, or raises UpdateFailed."""
         version = command["version"]
         running_release = self._require_running_release(version)
-        staging = self.layout.unfinished_path(version)
+        staging = self.layout.locate_unfinished_release(version)
         try:
             report(contract.UpdateState.DOWNLOADING)
             manifest = self._fetch_verified_manifest(command)
@@ -91,7 +91,7 @@ class ReleaseInstaller:
             destination.write_bytes(self.fetch(build_file_url(manifest_url, path)))
 
     def _require_same_dependencies(self, files: list[dict], running_release: str) -> None:
-        running_lock = self.layout.release_path(running_release) / DEPENDENCY_LOCK
+        running_lock = self.layout.locate_release(running_release) / DEPENDENCY_LOCK
         listed_lock = next((file for file in files if file["path"] == DEPENDENCY_LOCK), None)
         if listed_lock is None:
             raise UpdateFailed(f"the bundle has no {DEPENDENCY_LOCK}")
@@ -111,7 +111,7 @@ class ReleaseInstaller:
         self, staging: Path, command: dict, running_release: str
     ) -> PendingUpdate:
         version = command["version"]
-        destination = self.layout.release_path(version)
+        destination = self.layout.locate_release(version)
         shutil.rmtree(destination, ignore_errors=True)
         staging.rename(destination)
         pending = PendingUpdate(command["id"], version, running_release)

@@ -155,6 +155,8 @@ class Agent:
         self.update_gate = None
         self.outcome_to_report = None
         self._outcome_delivery = None
+        self._is_update_settled = False
+        self.is_connected = False
         self.restart_requested = threading.Event()
         self._update_in_progress = threading.Lock()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
@@ -278,6 +280,7 @@ class Agent:
             log.info("the server came back online - saying hello again")
             self.say_hello()
         elif state == SERVER_OFFLINE:
+            self._stop_watching_the_gate()
             # A deploy restarts the server too; the dead-man decides whether it is really gone.
             log.warning(
                 "the server reported itself offline - holding the lines for the dead-man (%.0fs)",
@@ -290,16 +293,29 @@ class Agent:
         gate = self.update_gate
         if gate is not None:
             gate.note_hello()
+            gate.start_watching(self._clock())
+
+    def on_connected(self) -> None:
+        self.is_connected = True
+
+    def on_disconnected(self) -> None:
+        self.is_connected = False
+        self._stop_watching_the_gate()
 
     def settle_update(self) -> None:
         try:
-            settlement = settle_update_on_start(self.layout, self._clock())
+            settlement = settle_update_on_start(self.layout)
         except OSError as error:
             # A full or read-only card must not keep the dead-man from ever starting.
-            log.error("could not settle the last update, so none is gated or reported: %s", error)
+            log.error("could not settle the last update yet: %s", error)
             return
+        self._is_update_settled = True
         self.update_gate = settlement.gate
         self.outcome_to_report = settlement.outcome
+        if self.is_connected:
+            # Settled after this connection announced itself, so the gate has heard no hello yet.
+            self.say_hello()
+            self.report_settled_update()
 
     def report_settled_update(self) -> None:
         """Sent on every connect until the broker has it; tend_update then forgets it."""
@@ -344,6 +360,9 @@ class Agent:
 
     def tend_update(self) -> None:
         """Main loop only: the MQTT callbacks note what happened, and this alone acts on it."""
+        if not self._is_update_settled:
+            # A pending update left unsettled would read as a failed start at the next crash.
+            self.settle_update()
         self._settle_update_gate()
         self._forget_delivered_outcome()
 
@@ -451,6 +470,11 @@ class Agent:
         log.error("update gate failed: %s - rolling back", gate.describe_failure())
         roll_back_gate(self.layout, gate)
         self.restart_requested.set()
+
+    def _stop_watching_the_gate(self) -> None:
+        gate = self.update_gate
+        if gate is not None:
+            gate.stop_watching(self._clock())
 
     def _has_undelivered_outcome(self) -> bool:
         delivery = self._outcome_delivery

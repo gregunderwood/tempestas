@@ -28,7 +28,7 @@ def layout(tmp_path, monkeypatch):
 
 
 def install_pending_update(layout) -> None:
-    layout.release_path(NEW_RELEASE).mkdir()
+    layout.locate_release(NEW_RELEASE).mkdir()
     layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
     layout.switch_current_to(NEW_RELEASE)
 
@@ -39,7 +39,7 @@ def test_switches_back_from_a_pending_update_and_leaves_it_to_be_reported(layout
     assert load_rollback_script().main() == 0
 
     assert layout.read_current_release() == RUNNING_RELEASE
-    settlement = settle_update_on_start(layout, now=0.0)
+    settlement = settle_update_on_start(layout)
     assert (
         settlement.outcome.reason == f"{NEW_RELEASE} did not start, so {RUNNING_RELEASE} runs again"
     )
