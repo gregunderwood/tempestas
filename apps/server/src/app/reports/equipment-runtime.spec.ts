@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import { DeviceRole, type DeviceRuntime } from '@tempestas/domain';
 import {
+  PROPANE_BTU_PER_LITRE,
   summariseEquipmentRuntime,
   type NodeSighting,
   type RuntimeDevice,
@@ -19,6 +20,12 @@ const BURNER: RuntimeDevice = {
   zoneId: 'greenhouse-zone',
   timezone: TIMEZONE,
   addedAt: new Date('2026-01-01T00:00:00Z'),
+  inputBtuPerHour: null,
+};
+
+const RATED_BURNER: RuntimeDevice = {
+  ...BURNER,
+  inputBtuPerHour: 2 * PROPANE_BTU_PER_LITRE,
 };
 
 const ONLINE: NodeSighting = { isOnline: true, lastHeardAt: null };
@@ -452,6 +459,75 @@ describe('summariseEquipmentRuntime', () => {
       expect(
         summariseTorontoDay('2026-10-31T00:00', '2026-11-02T00:00'),
       ).toMatchObject({ date: '2026-11-01', hoursOn: 25, hoursUnknown: 0 });
+    });
+  });
+
+  describe('propane used', () => {
+    it('is left out for a device with no burner rating', () => {
+      const burner = summariseBurner({
+        transitions: [
+          transition('2026-09-10T08:00', true),
+          transition('2026-09-10T09:00', false),
+        ],
+        nowLocal: '2026-09-10T12:00',
+        days: 1,
+      });
+      expect(burner.inputBtuPerHour).toBeNull();
+      expect(burner.totalPropaneLitres).toBeNull();
+      expect(burner.days[0].propaneLitres).toBeNull();
+    });
+
+    it('is hours on times the rating, in litres, per day and in total', () => {
+      const burner = summariseBurner({
+        devices: [RATED_BURNER],
+        transitions: [
+          transition('2026-09-09T22:00', true),
+          transition('2026-09-10T03:00', false),
+        ],
+        nowLocal: '2026-09-10T12:00',
+        days: 2,
+      });
+      expect(burner.inputBtuPerHour).toBe(2 * PROPANE_BTU_PER_LITRE);
+      expect(burner.days.map((day) => day.propaneLitres)).toEqual([4, 6]);
+      expect(burner.totalPropaneLitres).toBe(10);
+    });
+
+    it('counts only hours known to be on, never unknown ones', () => {
+      const burner = summariseBurner({
+        devices: [RATED_BURNER],
+        transitions: [
+          transition('2026-09-10T08:00', true),
+          transition('2026-09-10T09:00', null),
+          transition('2026-09-10T11:00', false),
+        ],
+        nowLocal: '2026-09-10T12:00',
+        days: 1,
+      });
+      expect(burner.days[0].hoursUnknown).toBeGreaterThan(0);
+      expect(burner.totalPropaneLitres).toBe(2);
+    });
+
+    it('is unrounded, so the browser can round it once in either unit', () => {
+      const burner = summariseBurner({
+        devices: [{ ...BURNER, inputBtuPerHour: 40_000 }],
+        transitions: [
+          transition('2026-09-10T08:00', true),
+          transition('2026-09-10T09:00', false),
+        ],
+        nowLocal: '2026-09-10T12:00',
+        days: 1,
+      });
+      expect(burner.totalPropaneLitres).toBeCloseTo(40_000 / 24_000, 10);
+    });
+
+    it('is zero on the days before the device was added', () => {
+      const burner = summariseBurner({
+        devices: [{ ...RATED_BURNER, addedAt: atLocal('2026-09-10T07:00') }],
+        transitions: [transition('2026-09-10T08:00', false)],
+        nowLocal: '2026-09-10T12:00',
+        days: 2,
+      });
+      expect(burner.days.map((day) => day.propaneLitres)).toEqual([0, 0]);
     });
   });
 

@@ -68,6 +68,10 @@ export class DeviceEntity {
   @Column({ type: 'enum', enum: DeviceRole, nullable: true })
   role!: DeviceRole | null;
 
+  /** Gas input from the burner's nameplate, not heat output, so efficiency never enters the estimate. */
+  @Column({ type: 'integer', name: 'input_btu_per_hour', nullable: true })
+  inputBtuPerHour!: number | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 

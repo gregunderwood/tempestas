@@ -50,6 +50,7 @@ function makeService(tables: FakeTables): ReportsService {
         node: { slug: 'elantris' },
         zone,
         createdAt: new Date('2026-01-01T00:00:00Z'),
+        inputBtuPerHour: 48_000,
       },
     ],
   } as unknown as Repository<DeviceEntity>;
@@ -160,5 +161,16 @@ describe('ReportsService.buildEquipmentRuntime', () => {
   it('says when each device was added', async () => {
     const report = await makeService({}).buildEquipmentRuntime({ days: 1 });
     expect(report.devices[0].addedAt).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it("estimates propane from each device's own burner rating", async () => {
+    const report = await makeService({
+      inWindow: [
+        burnerRow('2026-09-09T15:00:00Z', true),
+        burnerRow('2026-09-09T16:00:00Z', false),
+      ],
+    }).buildEquipmentRuntime({ days: 1 });
+    expect(report.devices[0].inputBtuPerHour).toBe(48_000);
+    expect(report.devices[0].totalPropaneLitres).toBe(2);
   });
 });

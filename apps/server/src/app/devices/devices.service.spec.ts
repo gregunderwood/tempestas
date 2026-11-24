@@ -36,6 +36,7 @@ function burner(overrides: Partial<DeviceEntity> = {}): DeviceEntity {
     onLevel: 0,
     rulesEnabled: true,
     role: null,
+    inputBtuPerHour: null,
     node: { id: 'node-uuid', slug: 'elantris', status: NodeStatus.Admitted },
     ...overrides,
   } as DeviceEntity;
@@ -269,6 +270,21 @@ describe('DevicesService.create', () => {
     expect(dto.nodeId).toBe('elantris');
   });
 
+  it('stores no burner rating unless the payload gives one', async () => {
+    const { service, mocks } = makeService(burner());
+    const dto = await service.create({
+      nodeId: 'elantris',
+      name: 'Extra Relay',
+      gpio: 12,
+      onDelayDuration: 0,
+      onLevel: 0,
+    });
+    expect(mocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ inputBtuPerHour: null }),
+    );
+    expect(dto.inputBtuPerHour).toBeNull();
+  });
+
   it('inherits the zone from the node when the payload omits it', async () => {
     const { service, mocks } = makeService(burner());
     await service.create({
@@ -384,6 +400,14 @@ describe('DevicesService mutations', () => {
     });
     expect(save).toHaveBeenCalledTimes(1);
     expect(dto).toMatchObject({ name: 'Burner', onDelayDuration: 600 });
+  });
+
+  it('sets and clears the burner rating', async () => {
+    const { service } = makeService(burner());
+    const rated = await service.update('dev-1', { inputBtuPerHour: 40_000 });
+    expect(rated.inputBtuPerHour).toBe(40_000);
+    const cleared = await service.update('dev-1', { inputBtuPerHour: null });
+    expect(cleared.inputBtuPerHour).toBeNull();
   });
 
   // The manual override. Automation skips the device; REST still drives it.

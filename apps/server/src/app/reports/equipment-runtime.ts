@@ -26,6 +26,7 @@ export interface RuntimeDevice {
   zoneId: string;
   timezone: string;
   addedAt: Date;
+  inputBtuPerHour: number | null;
 }
 
 export interface EquipmentRuntimeInput {
@@ -63,6 +64,8 @@ interface DayDurations {
 const MILLISECONDS_PER_MINUTE = 60 * MILLISECONDS_PER_SECOND;
 const MILLISECONDS_PER_HOUR = MINUTES_PER_HOUR * MILLISECONDS_PER_MINUTE;
 const HOUR_DECIMALS = 2;
+// Natural Resources Canada gives propane 25.31 MJ/L, about 23,990 BTU per litre.
+export const PROPANE_BTU_PER_LITRE = 24_000;
 const MINUTE_DECIMALS = 1;
 
 export function summariseEquipmentRuntime(
@@ -146,8 +149,15 @@ function summariseDevice(
     measureDay(startNoEarlierThan(window, addedAtMs), spans),
   );
   const days = dayWindows.map((window, index) =>
-    summariseDay(window, durations[index], runs, addedAtMs),
+    summariseDay(
+      window,
+      durations[index],
+      runs,
+      addedAtMs,
+      device.inputBtuPerHour,
+    ),
   );
+  const totalOnMs = sumOf(durations.map((day) => day.onMs));
   return {
     deviceId: device.id,
     deviceName: device.name,
@@ -157,9 +167,14 @@ function summariseDevice(
     timezone: device.timezone,
     addedAt: device.addedAt.toISOString(),
     days,
-    totalHoursOn: toHours(sumOf(durations.map((day) => day.onMs))),
+    totalHoursOn: toHours(totalOnMs),
     totalStarts: sumOf(days.map((day) => day.starts)),
     totalHoursUnknown: toHours(sumOf(durations.map((day) => day.unknownMs))),
+    inputBtuPerHour: device.inputBtuPerHour,
+    totalPropaneLitres: estimatePropaneLitres(
+      totalOnMs,
+      device.inputBtuPerHour,
+    ),
   };
 }
 
@@ -181,6 +196,7 @@ function summariseDay(
   durations: DayDurations,
   runs: Run[],
   addedAtMs: number,
+  inputBtuPerHour: number | null,
 ): DeviceRuntimeDay {
   const startedThisDay = runs.filter(
     (run) => run.isStart && isWithin(run.fromMs, window),
@@ -196,7 +212,19 @@ function summariseDay(
       (run) => run.isCappedAtLastSeen && isTouching(run, window),
     ),
     isBeforeDeviceAdded: window.toMs <= addedAtMs,
+    propaneLitres: estimatePropaneLitres(durations.onMs, inputBtuPerHour),
   };
+}
+
+// Unrounded and from known hours on only: unknown hours are never guessed at, and the browser rounds.
+export function estimatePropaneLitres(
+  onMs: number,
+  inputBtuPerHour: number | null,
+): number | null {
+  if (inputBtuPerHour === null) return null;
+  return (
+    ((onMs / MILLISECONDS_PER_HOUR) * inputBtuPerHour) / PROPANE_BTU_PER_LITRE
+  );
 }
 
 // A whole run belongs to the day it started: splitting at midnight would invent two short runs.
