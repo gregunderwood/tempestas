@@ -1,4 +1,5 @@
 import { DateTime } from 'luxon';
+import { roundTo } from '../common/rounding';
 import type {
   DeviceRole,
   DeviceRuntime,
@@ -278,9 +279,4 @@ function sumOf(values: number[]): number {
 
 function toHours(milliseconds: number): number {
   return roundTo(milliseconds / MILLISECONDS_PER_HOUR, HOUR_DECIMALS);
-}
-
-function roundTo(value: number, decimals: number): number {
-  const scale = 10 ** decimals;
-  return Math.round(value * scale) / scale;
 }
