@@ -26,7 +26,6 @@ log = logging.getLogger("tempestas.agent")
 EXIT_OK = 0
 EXIT_BAD_CONFIG = 2
 EXIT_ALREADY_RUNNING = 3
-# The unit's RestartForceExitStatus: systemd starts whatever `current` now points at.
 EXIT_RESTART_FOR_UPDATE = 75
 CONNECT_ACCEPTED = 0
 LOCK_PATH_TEMPLATE = "/run/tempestas/agent-{node_id}.lock"
@@ -238,11 +237,10 @@ def run_until_signalled(agent: Agent, config: AgentConfig) -> None:
 
 
 class NetworkLoopDied(RuntimeError):
-    """A failed run: systemd restarts the agent, and OnFailure judges an update on its gate."""
+    pass
 
 
 def require_network_loop_alive(network_thread: threading.Thread | None) -> None:
-    # A callback that raises ends paho's thread for good, leaving an agent that cannot hear.
     if has_died(network_thread):
         raise NetworkLoopDied("the MQTT network thread died, so this agent can no longer hear")
 
@@ -252,8 +250,6 @@ def has_died(thread: threading.Thread | None) -> bool:
 
 
 class StopRequest:
-    """Set by a signal handler, which takes no lock: it may interrupt a thread holding one."""
-
     def __init__(self):
         self.is_requested = False
 
@@ -262,23 +258,25 @@ class StopRequest:
 
 
 def read_watchdog_ping_interval_s() -> float | None:
-    """None unless systemd watches this very process."""
-    watchdog_pid = os.environ.get("WATCHDOG_PID")
-    if watchdog_pid and watchdog_pid != str(os.getpid()):
+    if is_watchdog_for_another_process():
         return None
     try:
-        timeout_us = int(os.environ.get("WATCHDOG_USEC", ""))
+        timeout_microseconds = int(os.environ.get("WATCHDOG_USEC", ""))
     except ValueError:
         return None
-    if timeout_us <= 0:
+    if timeout_microseconds <= 0:
         return None
-    return timeout_us / MICROSECONDS_PER_SECOND * WATCHDOG_PING_SHARE
+    return timeout_microseconds / MICROSECONDS_PER_SECOND * WATCHDOG_PING_SHARE
+
+
+def is_watchdog_for_another_process() -> bool:
+    watchdog_pid = os.environ.get("WATCHDOG_PID")
+    return bool(watchdog_pid) and watchdog_pid != str(os.getpid())
 
 
 def wait_for_next_tick(
     agent: Agent, interval_s: float, ping_interval_s: float | None, stop: StopRequest
 ) -> None:
-    """Pings the watchdog through the wait, so only a pass of the loop that hangs trips it."""
     deadline = time.monotonic() + interval_s
     next_ping_at = time.monotonic() if ping_interval_s is not None else math.inf
     while not agent.wake_main_loop.is_set() and not stop.is_requested:

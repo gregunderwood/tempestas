@@ -14,7 +14,6 @@ EXIT_ROLLED_BACK = 0
 EXIT_NOTHING_TO_ROLL_BACK = 1
 # Run as ExecCondition, where 1-254 quietly skips the unit; 255 marks it failed, as it should.
 EXIT_ROLLBACK_FAILED = 255
-# The release layout's names, repeated here because this script imports nothing from a release.
 HOME_ENVIRONMENT_VARIABLE = "TEMPESTAS_AGENT_HOME"
 RELEASES_DIRECTORY = "releases"
 CURRENT_LINK = "current"
@@ -107,7 +106,6 @@ def read_record(path: Path) -> dict:
 
 @contextmanager
 def hold_switch_lock(home: Path) -> Iterator[None]:
-    """The lock the agent and a hand deploy hold around every switch of `current`."""
     lock_path = home / STATE_DIRECTORY / SWITCH_LOCK_FILE
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "w") as lock_file:

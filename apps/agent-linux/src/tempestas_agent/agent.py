@@ -54,11 +54,9 @@ ANOTHER_UPDATE_IN_PROGRESS = "another update is in progress"
 PENDING_RECORD_LOST = (
     "its pending record was lost before its health gate finished, so {version} stays"
 )
-# Every holder of the switch lock lets go within this, well inside systemd's stop timeout.
 STOP_SWITCH_WAIT_S = 10.0
-# This module sits at <release>/src/tempestas_agent/agent.py.
 RELEASE_ROOT_ABOVE_MODULE = 2
-# Resolved on import, as the code was loaded: `current` may be switched under this process later.
+# Resolved at import: `current` may be switched under this process later.
 LOADED_RELEASE = Path(__file__).resolve().parents[RELEASE_ROOT_ABOVE_MODULE]
 SWITCH_LOCK_RETRY_S = 0.1
 FINAL_UPDATE_STATES = frozenset(
@@ -183,13 +181,11 @@ class Agent:
         self.is_server_online = False
         self.restart_requested = threading.Event()
         self.network_thread: threading.Thread | None = None
-        # Set by a restart request, so the main loop's wait ends at once.
         self.wake_main_loop = threading.Event()
         self._update_in_progress = threading.Lock()
         self.is_stopping = False
         self._installing_command_id: str | None = None
         self._update_claim_lock = threading.Lock()
-        # Ids that reached a final state here; `failed` is final, so a retry needs a new id.
         self._settled_command_ids: set[str] = set()
         self._held_until_exit = ExitStack()
         self.boot_id = f"boot-{uuid.uuid4().hex[:BOOT_ID_HEX_LENGTH]}"
@@ -360,7 +356,6 @@ class Agent:
         try:
             settlement = settle_update_on_start(self.layout, self.loaded_release)
         except BlockingIOError:
-            # A deploy or the installer holds the switch lock; the next tick tries again.
             return
         except OSError as error:
             # A full or read-only card must not keep the dead-man from ever starting.
@@ -387,7 +382,6 @@ class Agent:
             self.report_settled_update()
 
     def report_settled_update(self) -> None:
-        """Sent until the broker has it with the server online; tend_update then forgets it."""
         outcome = self.outcome_to_report
         if outcome is None:
             return
@@ -455,7 +449,6 @@ class Agent:
             log.error("could not hold the switch lock while stopping: %s", error)
 
     def _hold_switch_lock_until_exit(self) -> bool:
-        """Waits only so long: the relays are released after this, never behind a slow card."""
         deadline = time.monotonic() + STOP_SWITCH_WAIT_S
         while True:
             try:
@@ -471,7 +464,6 @@ class Agent:
         pending = self.layout.read_pending()
         if pending is not None and pending.command_id == command_id:
             return
-        # Its thread now waits on the lock this process holds until it exits.
         self._report_failed_install(command_id, STOPPING)
 
     def has_current_moved_off_this_release(self) -> bool:
@@ -487,9 +479,7 @@ class Agent:
         self.wake_main_loop.set()
 
     def tend_update(self) -> None:
-        """Main loop only, and never waits for the switch lock: a busy one is tried next tick."""
         if not self._is_update_settled:
-            # A pending update left unsettled would read as a failed start at the next crash.
             self.settle_update()
         self._record_start_of_gated_release()
         self._settle_update_gate()
@@ -572,40 +562,45 @@ class Agent:
         has_passed = gate.is_passed()
         if not has_passed and not gate.is_overdue(self._clock()):
             return
-        should_prune = False
         try:
             with self.layout.hold_switch_lock(should_wait=False):
-                if not is_still_pending(self.layout, gate):
-                    log.warning("update to %s was replaced by a hand deploy", gate.pending.version)
-                    recorded = self.layout.read_outcome()
-                    # The hand deploy recorded what became of it; an install would clear that.
-                    if is_already_settled(recorded, gate.pending):
-                        self.outcome_to_report = recorded
-                        self.report_settled_update()
-                    else:
-                        self._report_install(
-                            gate.pending.command_id,
-                            contract.UpdateState.FAILED,
-                            PENDING_RECORD_LOST.format(version=gate.pending.version),
-                        )
-                elif not is_still_current(self.layout, gate):
-                    # The rollback unit switched back while systemd restarted this release.
-                    log.warning("update to %s was rolled back under it", gate.pending.version)
-                    self.request_restart()
-                elif has_passed:
-                    self._pass_update_gate(gate)
-                    should_prune = True
-                else:
-                    self._fail_update_gate(gate)
+                should_prune = self._settle_gate_while_locked(gate, has_passed)
         except BlockingIOError:
             return
         except OSError as error:
-            # Kept, so the next tick tries again; failing here must never stop the dead-man.
             log.error("could not settle the update to %s: %s", gate.pending.version, error)
             return
         self.update_gate = None
         if should_prune:
             self._prune_after_passing(gate)
+
+    def _settle_gate_while_locked(self, gate: HealthGate, has_passed: bool) -> bool:
+        if not is_still_pending(self.layout, gate):
+            self._report_update_replaced_by_hand_deploy(gate)
+            return False
+        if not is_still_current(self.layout, gate):
+            # The rollback unit switched back while systemd restarted this release.
+            log.warning("update to %s was rolled back under it", gate.pending.version)
+            self.request_restart()
+            return False
+        if not has_passed:
+            self._fail_update_gate(gate)
+            return False
+        self._pass_update_gate(gate)
+        return True
+
+    def _report_update_replaced_by_hand_deploy(self, gate: HealthGate) -> None:
+        log.warning("update to %s was replaced by a hand deploy", gate.pending.version)
+        recorded = self.layout.read_outcome()
+        if is_already_settled(recorded, gate.pending):
+            self.outcome_to_report = recorded
+            self.report_settled_update()
+            return
+        self._report_install(
+            gate.pending.command_id,
+            contract.UpdateState.FAILED,
+            PENDING_RECORD_LOST.format(version=gate.pending.version),
+        )
 
     def _pass_update_gate(self, gate: HealthGate) -> None:
         log.info("update to %s passed its health gate", gate.pending.version)
@@ -627,7 +622,6 @@ class Agent:
             # Kept unsent when it restarts: the previous release reports it then.
             self.outcome_to_report = roll_back_gate(self.layout, gate)
         finally:
-            # Even if the outcome could not be recorded.
             if self._has_switched_back(gate):
                 self.request_restart()
         if not self.restart_requested.is_set():
@@ -638,7 +632,6 @@ class Agent:
         return self.layout.read_current_release() == gate.pending.previous_release
 
     def _was_outcome_sent_while_server_away(self) -> bool:
-        # The broker took it then, with nobody listening.
         return not self._was_server_online_at_report
 
     def _start_watching_the_gate(self) -> None:
@@ -753,7 +746,6 @@ class Agent:
             self.request_restart()
 
     def _is_left_for_the_next_start(self, command_id: str) -> bool:
-        """True when a failed switch left its pending record: the next start settles it, once."""
         try:
             pending = self.layout.read_pending()
         except OSError:
@@ -765,7 +757,6 @@ class Agent:
         if recorded is None:
             self._report_install(command_id, contract.UpdateState.FAILED, reason)
             return
-        # Tracked like any outcome, so the record is cleared once the server has heard it.
         with self._update_claim_lock:
             if command_id in self._settled_command_ids:
                 return

@@ -29,8 +29,8 @@ def make_current(layout: ReleaseLayout, release: str) -> list[str]:
         layout.switch_current_to(release)
     # Outside the lock: deleting releases on a slow card must not hold up the agent.
     protected = {release, previous_release}
-    if pending is not None and not is_replacing_an_update:
-        # The gate left running may still need the release it would roll back to.
+    is_gate_left_running = pending is not None and not is_replacing_an_update
+    if is_gate_left_running:
         protected.add(pending.previous_release)
     return layout.prune_releases(protected - {None})
 

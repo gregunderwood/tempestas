@@ -34,7 +34,7 @@ MAX_FILE_BYTES = 20 * 1024 * 1024
 
 
 class UpdateFailed(Exception):
-    """Why an update went nowhere; the node still runs what it ran before."""
+    pass
 
 
 def fetch_over_http(url: str, clock: Callable[[], float] = time.monotonic) -> bytes:
@@ -69,7 +69,6 @@ class ReleaseInstaller:
         self.fetch = fetch
 
     def install(self, command: dict, report: Callable[[str], None]) -> PendingUpdate:
-        """Leaves the new release current and pending its health gate, or raises UpdateFailed."""
         version = command["version"]
         running_release = self._require_running_release(version)
         running_link_identity = self.layout.read_current_link_identity()
@@ -164,7 +163,6 @@ class ReleaseInstaller:
         pending: PendingUpdate,
         cause: BaseException,
     ) -> None:
-        """Reported as failed, so it must not also read as a rollback, or keep a release slot."""
         shutil.rmtree(staging, ignore_errors=True)
         try:
             self.layout.switch_current_to(running_release)
@@ -186,7 +184,6 @@ class ReleaseInstaller:
         shutil.rmtree(destination, ignore_errors=True)
 
     def _clear_pending_without_raising(self) -> None:
-        # The failure is reported now, so it must not be reported again as a rollback at start.
         try:
             self.layout.clear_pending()
         except OSError as error:
@@ -242,7 +239,6 @@ def is_listed_file_well_formed(listed_file) -> bool:
     )
 
 
-# Written under the release by name, so a path must stay inside it.
 def is_safe_relative_path(path) -> bool:
     if not isinstance(path, str) or "\\" in path:
         return False

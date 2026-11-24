@@ -22,7 +22,6 @@ OUTCOME_FILE = "outcome.json"
 STARTED_FILE = "started.json"
 FAILED_RUNS_FILE = "failed-runs.json"
 SWITCH_LOCK_FILE = "switch.lock"
-# A release still arriving or being replaced: never run, and never counted as one to keep.
 UNFINISHED_PREFIX = "."
 # tools/deploy-agent-linux.sh stages here and cleans up itself, perhaps while the agent starts.
 HAND_DEPLOY_STAGING_PREFIX = ".deploy-"
@@ -66,7 +65,6 @@ class ReleaseLayout:
 
     @contextmanager
     def hold_switch_lock(self, should_wait: bool = True) -> Iterator[None]:
-        """Around every read-then-switch of `current`; BlockingIOError if busy and not waiting."""
         self.state.mkdir(parents=True, exist_ok=True)
         with open(self.state / SWITCH_LOCK_FILE, "w") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX if should_wait else fcntl.LOCK_EX | fcntl.LOCK_NB)

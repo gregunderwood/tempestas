@@ -12,7 +12,6 @@ SETTLE_SECONDS=5
 REQUIREMENTS_FILE=requirements.txt
 # Older systemd reaches `failed` only at the start limit, so OnFailure= cannot judge each run.
 MINIMUM_SYSTEMD_VERSION=254
-# The lock the agent's installer holds while it replaces a release of the same name.
 SWITCH_LOCK=update-state/switch.lock
 ROLLBACK_SCRIPT_DIR=/usr/local/lib/tempestas
 UNIT_DIR=/etc/systemd/system
@@ -52,7 +51,6 @@ for HOST in "${HOSTS[@]}"; do
   warn_unless_systemd_rolls_back "$HOST"
 done
 
-# Staged apart from an update's download of the same version, then put in place in one step.
 copy_release() {
   local host="$1"
   local releases="$REMOTE_AGENT_HOME/releases"
@@ -85,7 +83,6 @@ rm -rf "$staging"
 REMOTE
 }
 
-# Built beside the running venv, which the agent keeps using until swap_in_built_venv.
 build_venv_if_needed() {
   local host="$1"
   printf '%s\n' "$REQUIREMENTS" | ssh "$host" "mkdir -p $REMOTE_AGENT_HOME && cat > $REMOTE_AGENT_HOME/.$REQUIREMENTS_FILE"
@@ -106,7 +103,6 @@ mv "$home/.$requirements_file" "$home/.venv-building/$requirements_file"
 REMOTE
 }
 
-# Just before the restart, so the old agent never runs against packages it was not built for.
 swap_in_built_venv() {
   local host="$1"
   ssh "$host" bash -s -- "$REMOTE_AGENT_HOME" "$REQUIREMENTS_FILE" <<'REMOTE'
@@ -121,7 +117,6 @@ echo swapped
 REMOTE
 }
 
-# When `current` could not follow, so the running release keeps the packages it was built for.
 swap_back_venv() {
   local host="$1"
   ssh "$host" "[ ! -e $REMOTE_AGENT_HOME/.venv-replaced ] || \

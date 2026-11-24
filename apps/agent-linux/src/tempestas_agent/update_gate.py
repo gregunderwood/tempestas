@@ -14,8 +14,6 @@ GATE_SECONDS = 120
 
 @dataclass
 class UpdateSettlement:
-    """What this start owes the server about an update: a gate to run, an outcome to report."""
-
     gate: HealthGate | None = None
     outcome: UpdateOutcome | None = None
     should_restart: bool = False
@@ -71,7 +69,6 @@ class HealthGate:
 def settle_update_on_start(
     layout: ReleaseLayout | None, loaded_release: Path | None = None
 ) -> UpdateSettlement:
-    """Raises BlockingIOError rather than wait while another process switches `current`."""
     if layout is None:
         return UpdateSettlement()
     with layout.hold_switch_lock(should_wait=False):
@@ -82,7 +79,6 @@ def settle_update_on_start(
 
 
 def is_running_another_release(layout: ReleaseLayout, loaded_release: Path | None) -> bool:
-    """True when a rollback switched `current` after systemd had already restarted this code."""
     if loaded_release is None or loaded_release.parent != layout.releases.resolve():
         return False
     current_release = layout.read_current_release()
@@ -110,7 +106,6 @@ def is_already_settled(outcome: UpdateOutcome | None, pending: PendingUpdate) ->
 
 
 def describe_finished_rollback(layout: ReleaseLayout, pending: PendingUpdate) -> UpdateOutcome:
-    """With `current` already back: keep a recorded reason, else tell no start from a crash."""
     recorded = layout.read_outcome()
     if recorded is not None and recorded.command_id == pending.command_id:
         return recorded
@@ -127,12 +122,10 @@ def describe_finished_rollback(layout: ReleaseLayout, pending: PendingUpdate) ->
 
 
 def is_still_pending(layout: ReleaseLayout, gate: HealthGate) -> bool:
-    """False once a hand deploy has replaced the update this gate is judging."""
     return layout.read_pending() == gate.pending
 
 
 def is_still_current(layout: ReleaseLayout, gate: HealthGate) -> bool:
-    """False once the rollback unit switched back, which leaves the pending record in place."""
     return layout.read_current_release() == gate.pending.version
 
 
@@ -144,7 +137,6 @@ def pass_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
 
 
 def prune_after_update(layout: ReleaseLayout, pending: PendingUpdate) -> list[str]:
-    """Raises BlockingIOError rather than wait for the switch lock."""
     return layout.prune_releases(
         protected={pending.version, pending.previous_release}, should_wait=False
     )
@@ -178,9 +170,8 @@ def record_start(layout: ReleaseLayout, gate: HealthGate) -> None:
 
 
 def record_outcome(layout: ReleaseLayout, outcome: UpdateOutcome) -> UpdateOutcome:
-    # The outcome before the pending record goes, so a crash between them still reports.
+    # The pending record goes last, so a crash before it still reports and retries the step.
     layout.write_outcome(outcome)
     layout.clear_start_records()
-    # Last, so a failure before it leaves the update pending and the whole step is tried again.
     layout.clear_pending()
     return outcome
