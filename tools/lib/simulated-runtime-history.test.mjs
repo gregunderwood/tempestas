@@ -221,7 +221,6 @@ describe('seed-runtime-history.mjs', () => {
   }
 
   for (const refused of [
-    'tempestas',
     'postgres',
     'tempestas_prod',
     'tempestas_pr_12',

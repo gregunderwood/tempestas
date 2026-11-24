@@ -3,40 +3,39 @@
 // When and how to use it: docs/Testing.md.
 import { spawnSync } from 'node:child_process';
 import {
+  DEVELOPMENT_DATABASE_CONTAINER,
+  DEVELOPMENT_DATABASE_RULE,
+  DEVELOPMENT_DATABASE_USER,
+  explainDatabaseRefusal,
+} from './lib/development-database.mjs';
+import { buildReplaceHistorySql } from './lib/runtime-history-sql.mjs';
+import {
   buildSimulatedHistory,
   HISTORY_DAYS,
 } from './lib/simulated-runtime-history.mjs';
 
-const DATABASE_CONTAINER = 'tempestas-db';
-const DATABASE_USER = 'tempestas';
-const PRODUCTION_DATABASE = 'tempestas';
-const DEVELOPMENT_DATABASE_PATTERN =
-  /^tempestas_(dev|pr_[0-9]+_(before|after))(_[a-z0-9]+)*$/;
 const DEFAULT_TIMEZONE = 'America/Vancouver';
-const ROWS_PER_INSERT = 500;
 const USAGE = `Usage: tools/seed-runtime-history.mjs <database>
 
 Replaces the last ${HISTORY_DAYS} days of pin_transitions for every device in <database>, in the
-${DATABASE_CONTAINER} container, with simulated history, and moves each device's created_at back to
+${DEVELOPMENT_DATABASE_CONTAINER} container, with simulated history, and moves each device's created_at back to
 its start. Heaters run more at night, one day short-cycles, and one node drops out for a few hours.
 Rerunning replaces the same window again, so it never doubles the history.
 
-<database> must be a dev or screenshot database: tempestas_dev, tempestas_dev_<suffix> or
-tempestas_pr_<n>_before|after. Production's name, ${PRODUCTION_DATABASE}, is always refused, and so
-is the dev database of that name: copy it first with
-  docker exec ${DATABASE_CONTAINER} createdb -U ${DATABASE_USER} -T tempestas tempestas_dev`;
+${DEVELOPMENT_DATABASE_RULE}`;
 
 main();
 
 function main() {
   const databaseName = parseArguments(process.argv.slice(2));
   requireDevelopmentDatabase(databaseName);
+  const now = new Date();
   const lines = readDeviceLines(databaseName);
   if (lines.length === 0) {
     fail(`${databaseName} has no devices to give history to.`);
   }
-  const histories = buildSimulatedHistory({ lines, now: new Date() });
-  runSql(databaseName, buildReplaceHistorySql(histories));
+  const histories = buildSimulatedHistory({ lines, now });
+  runSql(databaseName, buildReplaceHistorySql({ histories, now }));
   describeWhatWasWritten(databaseName, histories);
 }
 
@@ -52,20 +51,27 @@ function parseArguments(argumentsAfterScript) {
 }
 
 function requireDevelopmentDatabase(databaseName) {
-  if (databaseName === PRODUCTION_DATABASE) {
-    fail(
-      `refusing ${databaseName}: it is production's name. Seed a copy named tempestas_dev instead.`,
-    );
-  }
-  if (!DEVELOPMENT_DATABASE_PATTERN.test(databaseName)) {
-    fail(
-      `refusing ${databaseName}: not a dev or screenshot database name.\n\n${USAGE}`,
-    );
-  }
+  const refusal = explainDatabaseRefusal(databaseName, readContainerLabels());
+  if (refusal) fail(`${refusal}\n\n${USAGE}`);
+}
+
+function readContainerLabels() {
+  const result = spawnSync(
+    'docker',
+    [
+      'inspect',
+      '--format',
+      '{{json .Config.Labels}}',
+      DEVELOPMENT_DATABASE_CONTAINER,
+    ],
+    { encoding: 'utf8' },
+  );
+  if (result.status !== 0) return null;
+  return JSON.parse(result.stdout);
 }
 
 function readDeviceLines(databaseName) {
-  const json = runSql(
+  const deviceLinesJson = runSql(
     databaseName,
     `select coalesce(json_agg(line order by line."nodeId", line.pin), '[]')
      from (
@@ -82,48 +88,7 @@ function readDeviceLines(databaseName) {
      ) line`,
     ['-tAX'],
   );
-  return JSON.parse(json);
-}
-
-function buildReplaceHistorySql(histories) {
-  const statements = ['begin;'];
-  for (const { line, historyStart, rows } of histories) {
-    const windowEnd = rows.at(-1).observedAt;
-    statements.push(
-      `delete from pin_transitions where node_id = ${quote(line.nodeId)} and pin = ${line.pin}` +
-        ` and observed_at between ${quoteInstant(historyStart)} and greatest(now(), ${quoteInstant(windowEnd)});`,
-      `update devices set created_at = least(created_at, ${quoteInstant(historyStart)})` +
-        ` where id = ${quote(line.deviceId)};`,
-    );
-  }
-  const allRows = histories.flatMap((history) => history.rows);
-  for (let index = 0; index < allRows.length; index += ROWS_PER_INSERT) {
-    statements.push(buildInsert(allRows.slice(index, index + ROWS_PER_INSERT)));
-  }
-  statements.push('commit;');
-  return statements.join('\n');
-}
-
-function buildInsert(rows) {
-  const values = rows.map(
-    (row) =>
-      `(${quote(row.nodeId)}, ${row.pin}, ${row.level ?? 'null'}, ${row.known}, ${row.energised ?? 'null'}, ` +
-      `${quote(row.deviceId)}, ${row.role === null ? 'null' : quote(row.role)}, ${quote(row.reason)}, ` +
-      `${quoteInstant(row.observedAt)})`,
-  );
-  return (
-    'insert into pin_transitions (node_id, pin, level, known, energised, device_id, role, reason, observed_at) values\n' +
-    values.join(',\n') +
-    ';'
-  );
-}
-
-function quote(text) {
-  return `'${String(text).replaceAll("'", "''")}'`;
-}
-
-function quoteInstant(instant) {
-  return `${quote(instant.toISOString())}::timestamptz`;
+  return JSON.parse(deviceLinesJson);
 }
 
 function runSql(databaseName, sql, psqlOptions = []) {
@@ -132,13 +97,13 @@ function runSql(databaseName, sql, psqlOptions = []) {
     [
       'exec',
       '-i',
-      DATABASE_CONTAINER,
+      DEVELOPMENT_DATABASE_CONTAINER,
       'psql',
       '-q',
       '-v',
       'ON_ERROR_STOP=1',
       '-U',
-      DATABASE_USER,
+      DEVELOPMENT_DATABASE_USER,
       '-d',
       databaseName,
       ...psqlOptions,

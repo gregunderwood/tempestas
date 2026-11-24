@@ -120,14 +120,14 @@ history, and a report over 30 days shows nothing. `tools/seed-runtime-history.mj
 writes 30 days of it for every device already in a database:
 
 ```bash
-docker exec tempestas-db createdb -U tempestas -T tempestas tempestas_dev   # a copy; stop the dev server first
-node tools/seed-runtime-history.mjs tempestas_dev
+node tools/seed-runtime-history.mjs tempestas   # the everyday dev database
 ```
 
 - **Only a dev or screenshot database.** The name must be `tempestas_dev`, `tempestas_dev_<suffix>`
-  or `tempestas_pr_<n>_before|after`. `tempestas` is refused: it is production's name, so the dev
-  database of that name is seeded through a copy. It only ever reaches the `tempestas-db`
-  container: no MQTT, no GPIO.
+  or `tempestas_pr_<n>_before|after`, or `tempestas` itself when the `tempestas-db` container was
+  started by this repo's `docker compose` (it carries the compose service label `db`). Production
+  uses the same container and database names but starts its container with `docker run`, so there
+  `tempestas` is refused. It only ever reaches the `tempestas-db` container: no MQTT, no GPIO.
 - **Plausible, and the same every run.** Heating roles run mostly at night in the zone's timezone,
   fans and lights by day. Six days ago short-cycles from 10:00 to 14:00. Twelve days ago the first
   node by slug drops out from 01:30 to 05:00: a `node-offline` row, unknown, as the server writes
