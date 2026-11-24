@@ -1,7 +1,12 @@
 // Pure: builds pin_transitions rows for devices, from their wiring and a `now`. No database here.
 import { DateTime } from 'luxon';
-
-export const HISTORY_DAYS = 30;
+import {
+  findHistoryStart,
+  HISTORY_DAYS,
+  startOfLocalDay,
+} from './history-window.mjs';
+import { seededRandom } from './seeded-random.mjs';
+import { findNightColdness } from './simulated-weather.mjs';
 
 const MILLISECONDS_PER_MINUTE = 60_000;
 const DAY_STARTS_AT = { hour: 7, minute: 0 };
@@ -69,14 +74,6 @@ function buildLineHistory(line, now, hasOutage) {
   return { line, historyStart, rows: dropRepeatedStates(rows) };
 }
 
-function findHistoryStart(now, timezone) {
-  return localDay(now, timezone).minus({ days: HISTORY_DAYS }).toJSDate();
-}
-
-function localDay(now, timezone) {
-  return DateTime.fromJSDate(now, { zone: timezone }).startOf('day');
-}
-
 function simulateRuns(line, historyStart, now) {
   const duty = DUTY_BY_ROLE[line.role] ?? DEFAULT_DUTY;
   const runs = listPeriods(line.timezone, historyStart, now).flatMap((period) =>
@@ -138,6 +135,7 @@ function listDaytimePeriods(day, daysAgo) {
 function buildPeriod(kind, from, to, daysAgo) {
   return {
     kind,
+    daysAgo,
     fromMs: from.toMillis(),
     toMs: to.toMillis(),
     key: `${daysAgo}:${kind}:${from.toFormat('HH:mm')}`,
@@ -147,7 +145,8 @@ function buildPeriod(kind, from, to, daysAgo) {
 function simulatePeriod(period, duty, random) {
   if (duty.runMinutes === 0) return [];
   const runMinutes =
-    duty.runMinutes * (period.kind === 'night' ? nightColdness(random) : 1);
+    duty.runMinutes *
+    (period.kind === 'night' ? nightRunFactor(period.daysAgo) : 1);
   const runs = [];
   let cursorMs = period.fromMs + jitterMinutes(duty.gapMinutes / 2, random);
   while (cursorMs < period.toMs) {
@@ -164,10 +163,10 @@ function findRunEnd(startMs, runMinutes, period, random) {
   return startMs + jitterMinutes(runMinutes, random);
 }
 
-function nightColdness(random) {
+function nightRunFactor(daysAgo) {
   return (
     MILDEST_NIGHT_FACTOR +
-    (COLDEST_NIGHT_FACTOR - MILDEST_NIGHT_FACTOR) * random()
+    (COLDEST_NIGHT_FACTOR - MILDEST_NIGHT_FACTOR) * findNightColdness(daysAgo)
   );
 }
 
@@ -209,7 +208,7 @@ function dropRepeatedStates(rows) {
 }
 
 function findOutage(now, timezone) {
-  const day = localDay(now, timezone).minus({ days: OUTAGE_DAYS_AGO });
+  const day = startOfLocalDay(now, timezone).minus({ days: OUTAGE_DAYS_AGO });
   return {
     from: day.set(OUTAGE_FROM).toJSDate(),
     until: day.set(OUTAGE_UNTIL).toJSDate(),
@@ -277,23 +276,4 @@ function stateOf(row) {
 
 function isSameState(first, second) {
   return first.known === second.known && first.level === second.level;
-}
-
-// mulberry32, seeded from a string, so every line and period gets its own repeatable sequence.
-function seededRandom(seedText) {
-  let state = hashText(seedText);
-  return () => {
-    state = (state + 0x6d2b79f5) | 0;
-    let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
-    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
-    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
-  };
-}
-
-function hashText(text) {
-  let hash = 2_166_136_261;
-  for (const character of text) {
-    hash = Math.imul(hash ^ character.charCodeAt(0), 16_777_619);
-  }
-  return hash >>> 0;
 }

@@ -124,8 +124,9 @@ PR's head commit or if tracked files have changes. It then:
   dev database `tempestas`, the server with `HARDWARE_DRIVER=fake`, both simulated nodes admitted
   and a device created on each relay pin with its zone's roles, so the rules switch them and the
   pages show equipment, and `nx serve web` proxied to it.
-- **seeds 30 days of runtime history with `--history`**, after the devices are created on each
-  side, using this checkout's `tools/seed-runtime-history.mjs` on both. See below.
+- **seeds 30 days of history with `--history`**, using this checkout's seeders on both sides:
+  `tools/seed-runtime-history.mjs` after the devices are created, and
+  `tools/seed-reading-history.mjs` after the first real readings arrive. See below.
 - **uses ports 7020 and 4220**, and refuses to start if anything listens on either. Other ports:
   `PR_SCREENSHOTS_SERVER_PORT` and `PR_SCREENSHOTS_WEB_PORT`.
 - **takes each page at 1280 px and 390 px** with headless Chrome.
@@ -195,7 +196,7 @@ node tools/seed-runtime-history.mjs tempestas   # the everyday dev database
   uses the same container and database names but starts its container with `docker run`, so there
   `tempestas` is refused. It only ever reaches the `tempestas-db` container: no MQTT, no GPIO.
 - **Plausible, and the same every run.** Heating roles run mostly at night in the zone's timezone,
-  fans and lights by day. Six days ago short-cycles from 10:00 to 14:00. Twelve days ago the first
+  longest on the cold nights the readings seeder shows, fans and lights by day. Six days ago short-cycles from 10:00 to 14:00. Twelve days ago the first
   node by slug drops out from 01:30 to 05:00: a `node-offline` row, unknown, as the server writes
   it, then a known row when it returns. The pattern is seeded from each line and day, not random.
 - **Rerunnable.** It replaces each device pin's rows from local midnight 30 days back to now, ends
@@ -204,6 +205,35 @@ node tools/seed-runtime-history.mjs tempestas   # the everyday dev database
 - **Its specs** run in the gate as `tools:test` (`npx nx test tools`, which runs
   `node --test tools/lib/*.test.mjs`). They need no Docker and no database: the refusal specs stop
   before any `psql`, and a missing `docker` only makes `tempestas` refused too.
+
+### Simulated temperature readings
+
+The zone history chart shows the last 24 hours and the reports look back 30 days, but a fresh stack
+has only the readings since it started. `tools/seed-reading-history.mjs <database>` writes 30 days
+of `sensor_readings` for every probe that has reported, so run it once the stack has its first
+readings:
+
+```bash
+node tools/seed-runtime-history.mjs tempestas
+node tools/seed-reading-history.mjs tempestas
+```
+
+- **Only a dev or screenshot database**, by the same rule as the runtime history above.
+- **One reading a minute per probe**, from local midnight 30 days back: about 44,000 rows a probe,
+  so about 88,000 on a screenshot stack's two probes.
+- **Plausible, and the same every run.** Coldest at 06:00 and warmest at 15:00 in the zone's
+  timezone, eased between the two, with a little noise and a small fixed offset per probe. Each
+  night's coldness is shared with the runtime history, so the heaters run longest on the cold
+  nights. The nights 4 and 17 days ago drop to about 0.6 °C, for the freeze-margin report to flag;
+  every other night stays above about 2 °C. Humidity and CO2 are written only if the probe has
+  ever reported them, and are null otherwise.
+- **Never touches a real reading.** Each seeded row has `boot_id` `seeded-history`. A rerun deletes
+  only those rows, for the probes it reseeds, so it never doubles them. Each probe's seed stops just
+  before its first real reading at or after the window start, so nothing at or after that reading
+  is written over, and real readings older than the window are left alone. Its last hour leans
+  toward that first real reading, so the chart does not jump where the seed ends. A probe that
+  already has a real reading at the window start gets none, and one with no real reading in the
+  window is skipped, so a long-dead sensor never looks alive.
 
 A screenshot cannot show interaction, and the fake driver always leads. For a state reached by
 clicking (an open menu, a drag) or one the fake driver cannot produce (a follower), take the
@@ -348,5 +378,6 @@ And `mosquitto_pub -r` of a `gpio/set` **must** be dropped and alarmed.
 - A new coverage-enforced path is added
 - A new class of test appears (fault injection, contract, e2e)
 - `tools/pr-screenshots.sh` changes how it starts its stack or where it stores images
-- `tools/seed-runtime-history.mjs` changes which databases it accepts or what history it writes
+- `tools/seed-runtime-history.mjs` or `tools/seed-reading-history.mjs` changes which databases it
+  accepts or what history it writes
 - A porting landmine or boundary case is discovered that future work must not undo

@@ -1,3 +1,5 @@
+import { quote, quoteInstant } from './sql-literals.mjs';
+
 const ROWS_PER_INSERT = 500;
 
 export function buildReplaceHistorySql({ histories, now }) {
@@ -18,10 +20,6 @@ export function buildReplaceHistorySql({ histories, now }) {
   return statements.join('\n');
 }
 
-export function quote(text) {
-  return `'${String(text).replaceAll("'", "''")}'`;
-}
-
 function buildInsert(rows) {
   const values = rows.map(
     (row) =>
@@ -34,8 +32,4 @@ function buildInsert(rows) {
     values.join(',\n') +
     ';'
   );
-}
-
-function quoteInstant(instant) {
-  return `${quote(instant.toISOString())}::timestamptz`;
 }

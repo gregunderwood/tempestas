@@ -3,10 +3,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { DateTime } from 'luxon';
-import {
-  buildSimulatedHistory,
-  HISTORY_DAYS,
-} from './simulated-runtime-history.mjs';
+import { HISTORY_DAYS } from './history-window.mjs';
+import { buildSimulatedHistory } from './simulated-runtime-history.mjs';
+import { FREEZING_NIGHTS_DAYS_AGO } from './simulated-weather.mjs';
 
 const TIMEZONE = 'America/Vancouver';
 const NOW = new Date('2026-11-23T20:30:00Z');
@@ -118,6 +117,29 @@ describe('buildSimulatedHistory', () => {
       nightMinutes > 2 * dayMinutes,
       `night ${nightMinutes} min, day ${dayMinutes} min`,
     );
+  });
+
+  it('runs a heater longest on the freezing nights', () => {
+    const [history] = historyFor([deviceLine()]);
+    const minutesByNight = new Map();
+    for (const run of listRuns(history.rows)) {
+      const started = DateTime.fromJSDate(run.startedAt, { zone: TIMEZONE });
+      if (started.hour < 20) continue;
+      const night = daysAgoOf({ observedAt: run.startedAt });
+      minutesByNight.set(night, (minutesByNight.get(night) ?? 0) + run.minutes);
+    }
+    const ordinaryMinutes = [...minutesByNight]
+      .filter(([night]) => !FREEZING_NIGHTS_DAYS_AGO.includes(night))
+      .map(([, minutes]) => minutes)
+      .sort((first, second) => first - second);
+    const medianOrdinary =
+      ordinaryMinutes[Math.floor(ordinaryMinutes.length / 2)];
+    for (const night of FREEZING_NIGHTS_DAYS_AGO) {
+      assert.ok(
+        minutesByNight.get(night) > medianOrdinary,
+        `night ${night}: ${minutesByNight.get(night)} min, ordinary median ${medianOrdinary}`,
+      );
+    }
   });
 
   it('short-cycles on one day only', () => {
