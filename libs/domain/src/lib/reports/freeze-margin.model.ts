@@ -32,6 +32,8 @@ export interface HeatingAtColdest {
   state: RelayState;
   /** Its rule's heat on-setpoint, or the default warning temperature when the rule has none. */
   onBelowC: number;
+  /** False when `onBelowC` is the default warning, because its rule has no heat on-setpoint. */
+  isOnBelowFromRule: boolean;
   /** Whether its rule's own sensor source read below `onBelowC` at the coldest moment. */
   isHeatOwed: boolean;
 }

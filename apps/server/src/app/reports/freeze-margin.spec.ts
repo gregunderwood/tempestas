@@ -124,6 +124,7 @@ describe('summariseZoneFreezeMargin', () => {
         role: DeviceRole.Heater,
         state: 'on',
         onBelowC: 3,
+        isOnBelowFromRule: true,
         isHeatOwed: true,
       },
       {
@@ -132,6 +133,7 @@ describe('summariseZoneFreezeMargin', () => {
         role: DeviceRole.HeatTape,
         state: 'on',
         onBelowC: 2,
+        isOnBelowFromRule: true,
         isHeatOwed: true,
       },
     ]);
@@ -206,14 +208,26 @@ describe('summariseZoneFreezeMargin', () => {
     expect(onlyNight.concern).toBe('heat-off-while-cold');
   });
 
-  it('owes no heat when the rule follows a probe that was silent at the coldest moment', () => {
+  it('falls back to the coldest probe when the rule follows a probe that was silent at the coldest moment', () => {
     const [onlyNight] = summarise({
       devices: [HEATER],
       sensorSourceByRole: { [DeviceRole.Heater]: 'node:braize' },
+      nights: [night(coldestReading(0.5))],
       spans: [spanAcrossNight(HEATER.id, 'off')],
     }).nights;
-    expect(onlyNight.heating[0].isHeatOwed).toBe(false);
-    expect(onlyNight.concern).toBeNull();
+    expect(onlyNight.heating[0].isHeatOwed).toBe(true);
+    expect(onlyNight.concern).toBe('heat-off-while-cold');
+  });
+
+  it('says when a heat source is judged against the default warning, not a setpoint of its own', () => {
+    const [onlyNight] = summarise({
+      devices: [HEATER],
+      heatOnBelowByRole: { [DeviceRole.HeatTape]: 2 },
+    }).nights;
+    expect(onlyNight.heating[0]).toMatchObject({
+      onBelowC: DEFAULT_FREEZE_WARNING_C,
+      isOnBelowFromRule: false,
+    });
   });
 
   it('counts hours below the warning from the coldest probe in each bucket', () => {

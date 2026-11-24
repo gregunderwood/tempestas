@@ -6,6 +6,7 @@ import {
   type FreezeMarginNight,
   type HeatingAtColdest,
   type Reading,
+  type SensorSource,
   type ZoneFreezeMargin,
 } from '@tempestas/domain';
 import { roundTo } from '../common/rounding';
@@ -20,6 +21,7 @@ import {
   type ProbeTemperature,
 } from '../rules/climate-resolver';
 import {
+  FALLBACK_SENSOR_SOURCE,
   findOnBelowFor,
   findSensorSourceFor,
   resolveFreezeWarning,
@@ -137,7 +139,7 @@ function describeHeatingAt(
   const probes = findProbesAround(coldest, input);
   return input.devices.map((device) => {
     const onBelowC = findOnBelowFor(device.role, input.heatOnBelowByRole);
-    const ruleTemperatureC = pickSourceTemperature(
+    const ruleTemperatureC = readRuleSourceTemperature(
       probes,
       findSensorSourceFor(device.role, input.sensorSourceByRole),
     );
@@ -150,9 +152,21 @@ function describeHeatingAt(
         coldestMs,
       ),
       onBelowC,
+      isOnBelowFromRule: input.heatOnBelowByRole[device.role] !== undefined,
       isHeatOwed: ruleTemperatureC !== null && ruleTemperatureC < onBelowC,
     };
   });
+}
+
+// A silent source does not mean no heat was owed, so fall back to the coldest probe, the cautious reading.
+function readRuleSourceTemperature(
+  probes: readonly ProbeTemperature[],
+  source: SensorSource,
+): number | null {
+  return (
+    pickSourceTemperature(probes, source) ??
+    pickSourceTemperature(probes, FALLBACK_SENSOR_SOURCE)
+  );
 }
 
 // Each probe at its lowest in the coldest moment's bucket, so a doubtful night leans towards a flag.

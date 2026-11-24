@@ -29,6 +29,7 @@ function freezeNight(
         role: DeviceRole.Heater,
         state: 'on',
         onBelowC: 3,
+        isOnBelowFromRule: true,
         isHeatOwed: true,
       },
       {
@@ -37,6 +38,7 @@ function freezeNight(
         role: DeviceRole.HeatTape,
         state: 'unknown',
         onBelowC: 2,
+        isOnBelowFromRule: true,
         isHeatOwed: true,
       },
     ],
@@ -93,6 +95,37 @@ describe('buildNightRows', () => {
       heating: '—',
       hoursBelow: '—',
     });
+  });
+
+  it('says how much of the night had readings when some of it is missing', () => {
+    const [halfRead, fullyRead] = buildNightRows(
+      pumphouse([
+        freezeNight({ hoursWithReadings: 7 }),
+        freezeNight({ hoursWithReadings: 13.9 }),
+      ]),
+    );
+    expect(halfRead.hoursBelow).toBe('2.5 h of 7.0 h read');
+    expect(fullyRead.hoursBelow).toBe('2.5 h');
+  });
+
+  it('names the default warning for a heat source with no on-setpoint of its own', () => {
+    const [row] = buildNightRows(
+      pumphouse([
+        freezeNight({
+          concern: 'heat-off-while-cold',
+          heating: [
+            {
+              ...freezeNight().heating[0],
+              state: 'off',
+              isOnBelowFromRule: false,
+            },
+          ],
+        }),
+      ]),
+    );
+    expect(row.concern).toBe(
+      'Heater was off at the coldest moment, below the default 3 °C warning, with no heat on-setpoint of its own.',
+    );
   });
 
   it('names each heat source that was owed and off, or not heard from', () => {

@@ -106,6 +106,7 @@ function pumphouseFreezeMargin(): ZoneFreezeMargin {
             role: DeviceRole.Heater,
             state: 'off',
             onBelowC: 3,
+            isOnBelowFromRule: true,
             isHeatOwed: true,
           },
         ],

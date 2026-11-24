@@ -1,5 +1,6 @@
 import {
   FREEZE_MARGIN_ALARM_C,
+  FREEZE_MARGIN_BUCKET_MINUTES,
   type FreezeConcern,
   type FreezeMarginNight,
   type HeatingAtColdest,
@@ -33,15 +34,17 @@ const OWED_HEAT_WORDING: Record<OwedHeatConcern, OwedHeatWording> = {
   'heat-off-while-cold': {
     state: 'off',
     describe: (device) =>
-      `${device.deviceName} was off at the coldest moment, below its ${device.onBelowC} °C on-setpoint.`,
+      `${device.deviceName} was off at the coldest moment, ${describeSetpoint(device)}.`,
   },
   'heat-unknown-while-cold': {
     state: 'unknown',
     describe: (device) =>
-      `Nothing was heard from ${device.deviceName} at the coldest moment, below its ${device.onBelowC} °C on-setpoint.`,
+      `Nothing was heard from ${device.deviceName} at the coldest moment, ${describeSetpoint(device)}.`,
   },
 };
 const COLD_DESPITE_HEAT_WORDING = `The heat was on and it still came within ${FREEZE_MARGIN_ALARM_C} °C of freezing.`;
+const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
+const BUCKET_HOURS = FREEZE_MARGIN_BUCKET_MINUTES / 60;
 const NIGHT_DATE_FORMAT: Intl.DateTimeFormatOptions = {
   weekday: 'short',
   day: 'numeric',
@@ -56,8 +59,7 @@ export function buildNightRows(zone: ZoneFreezeMargin): NightRow[] {
     label: labelNight(night, formatDate),
     coldest: describeColdest(night, formatClock),
     heating: describeHeating(night.heating),
-    hoursBelow:
-      night.coldest === null ? '—' : formatHours(night.hoursBelowWarning),
+    hoursBelow: describeHoursBelow(night),
     concern: describeConcern(night),
   }));
 }
@@ -81,6 +83,27 @@ function describeConcern(night: FreezeMarginNight): string | null {
     .filter((device) => device.isHeatOwed && device.state === wording.state)
     .map((device) => wording.describe(device))
     .join(' ');
+}
+
+function describeSetpoint(device: HeatingAtColdest): string {
+  return device.isOnBelowFromRule
+    ? `below its ${device.onBelowC} °C on-setpoint`
+    : `below the default ${device.onBelowC} °C warning, with no heat on-setpoint of its own`;
+}
+
+function describeHoursBelow(night: FreezeMarginNight): string {
+  if (night.coldest === null) return '—';
+  const hoursBelow = formatHours(night.hoursBelowWarning);
+  if (!isMissingReadings(night)) return hoursBelow;
+  return `${hoursBelow} of ${formatHours(night.hoursWithReadings)} read`;
+}
+
+// Night edges rarely fall on a bucket boundary, so a full night can come up one bucket short.
+function isMissingReadings(night: FreezeMarginNight): boolean {
+  const nightHours =
+    (new Date(night.to).getTime() - new Date(night.from).getTime()) /
+    MILLISECONDS_PER_HOUR;
+  return night.hoursWithReadings < nightHours - BUCKET_HOURS;
 }
 
 function labelNight(
