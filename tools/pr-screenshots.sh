@@ -50,6 +50,7 @@ main() {
   copy_zones_from_dev_database
   start_server
   admit_simulated_nodes
+  wait_for_readings_and_rules_cycle
   start_web
   take_screenshots
   publish_screenshots
@@ -104,7 +105,9 @@ create_database() {
 build_and_migrate_server() {
   say "Building the server and running its migrations"
   run_nx build server >"$WORK_DIR/build.log" 2>&1 || fail_with_log "the server build failed" build.log
-  with_server_environment node "$REPO_ROOT/dist/apps/server/main.js" migrate:run \
+  local environment
+  mapfile -t environment < <(server_environment)
+  env "${environment[@]}" node "$REPO_ROOT/dist/apps/server/main.js" migrate:run \
     >"$WORK_DIR/migrate.log" 2>&1 || fail_with_log "the migrations failed" migrate.log
 }
 
@@ -119,24 +122,28 @@ copy_zones_from_dev_database() {
 
 start_server() {
   say "Starting the server on port $SERVER_PORT with the fake hardware driver"
-  with_server_environment setsid node "$REPO_ROOT/dist/apps/server/main.js" >"$WORK_DIR/server.log" 2>&1 &
+  local environment
+  mapfile -t environment < <(server_environment)
+  setsid env "${environment[@]}" node "$REPO_ROOT/dist/apps/server/main.js" >"$WORK_DIR/server.log" 2>&1 &
   SERVER_PROCESS=$!
   wait_until_answering "http://127.0.0.1:$SERVER_PORT/api/nodes" "$SERVER_PROCESS" server.log
 }
 
 # Explicit variables win over the checkout's own apps/server/.env, so a real driver there is never used.
-with_server_environment() {
-  env \
-    NODE_ENV=development \
-    PORT="$SERVER_PORT" \
-    HARDWARE_DRIVER=fake \
-    TEMPESTAS_TZ=America/Vancouver \
-    DATABASE_HOST=127.0.0.1 \
-    DATABASE_PORT="$DATABASE_PORT" \
-    DATABASE_USER="$DATABASE_USER" \
-    DATABASE_PASSWORD=tempestas \
-    DATABASE_NAME="$DATABASE_NAME" \
-    "$@"
+server_environment() {
+  echo NODE_ENV=development
+  echo PORT="$SERVER_PORT"
+  echo HARDWARE_DRIVER=fake
+  echo TEMPESTAS_TZ=America/Vancouver
+  echo DATABASE_HOST=127.0.0.1
+  echo DATABASE_PORT="$DATABASE_PORT"
+  echo DATABASE_USER="$DATABASE_USER"
+  echo DATABASE_PASSWORD=tempestas
+  echo DATABASE_NAME="$DATABASE_NAME"
+}
+
+fetch_api() {
+  curl -sf "http://127.0.0.1:$SERVER_PORT/api/$1"
 }
 
 admit_simulated_nodes() {
@@ -155,12 +162,30 @@ admit_simulated_nodes() {
 }
 
 wait_for_simulated_nodes() {
+  wait_until have_all_simulated_nodes_said_hello || fail_with_log "the simulated nodes never said hello" server.log
+}
+
+have_all_simulated_nodes_said_hello() {
+  [[ "$(list_node_ids | wc -l)" -ge "$FAKE_NODE_COUNT" ]]
+}
+
+wait_for_readings_and_rules_cycle() {
+  say "Waiting for the first readings and rules cycle, so pages show more than empty states"
+  wait_until has_readings_and_rules_cycle || fail_with_log "no readings or rules cycle arrived" server.log
+}
+
+has_readings_and_rules_cycle() {
+  [[ "$(fetch_api readings/latest)" == '[{'* ]] && [[ "$(fetch_api rules/latest-cycle)" == '{"cycle":{'* ]]
+}
+
+wait_until() {
+  local condition=$1
   local attempt
   for attempt in $(seq 1 "$STARTUP_ATTEMPTS"); do
-    [[ "$(list_node_ids | wc -l)" -ge "$FAKE_NODE_COUNT" ]] && return 0
+    "$condition" && return 0
     sleep 0.5
   done
-  fail_with_log "the simulated nodes never said hello" server.log
+  return 1
 }
 
 list_zone_ids() {
@@ -168,7 +193,7 @@ list_zone_ids() {
 }
 
 list_node_ids() {
-  curl -sf "http://127.0.0.1:$SERVER_PORT/api/nodes" |
+  fetch_api nodes |
     node -e 'let input = ""; process.stdin.on("data", (chunk) => (input += chunk)).on("end", () => {
       for (const node of JSON.parse(input)) console.log(node.id);
     });'
@@ -297,7 +322,16 @@ tear_down() {
     git -C "$REPO_ROOT" worktree remove --force "$SCREENSHOTS_CHECKOUT" || true
   fi
   rm -rf "$WORK_DIR"
+  warn_if_still_listening "$SERVER_PORT"
+  warn_if_still_listening "$WEB_PORT"
   exit "$exit_status"
+}
+
+warn_if_still_listening() {
+  local port=$1
+  if is_port_listening "$port"; then
+    echo "pr-screenshots: something still listens on port $port after tear-down; stop it by hand." >&2
+  fi
 }
 
 stop_process_group() {
