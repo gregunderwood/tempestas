@@ -4,13 +4,23 @@ import {
   computed,
   effect,
   inject,
+  signal,
   untracked,
 } from '@angular/core';
+import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCardModule } from '@angular/material/card';
 import { ApiService } from '../../core/api.service';
 import { injectLiveSource } from '../../core/live-source';
 import { RealtimeService } from '../../core/realtime.service';
+import { openBrowserStorage } from '../../shared/arrange/card-order';
 import { EquipmentRuntimeCard } from './equipment-runtime-card';
+import {
+  labelPropaneUnit,
+  PROPANE_UNITS,
+  readSavedPropaneUnit,
+  writeSavedPropaneUnit,
+  type PropaneUnit,
+} from './propane-units';
 
 const UPCOMING_REPORTS: readonly string[] = [
   'Time in range',
@@ -21,7 +31,7 @@ const UPCOMING_REPORTS: readonly string[] = [
 
 @Component({
   selector: 'temp-reports-page',
-  imports: [MatCardModule, EquipmentRuntimeCard],
+  imports: [MatButtonToggleModule, MatCardModule, EquipmentRuntimeCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="equipment-runtime-heading">
@@ -30,6 +40,21 @@ const UPCOMING_REPORTS: readonly string[] = [
         Hours on, starts and the shortest run, per device per day. Many starts
         or very short runs mean short-cycling.
       </p>
+      @if (hasPropaneEstimate()) {
+        <mat-button-toggle-group
+          class="temp-propane-unit"
+          aria-label="Propane unit"
+          hideSingleSelectionIndicator
+          [value]="propaneUnit()"
+          (change)="choosePropaneUnit($event.value)"
+        >
+          @for (unit of propaneUnits; track unit) {
+            <mat-button-toggle [value]="unit">{{
+              labelPropaneUnit(unit)
+            }}</mat-button-toggle>
+          }
+        </mat-button-toggle-group>
+      }
       <div aria-live="polite">
         @switch (runtimeState()) {
           @case ('loading') {
@@ -51,7 +76,10 @@ const UPCOMING_REPORTS: readonly string[] = [
       }
       <div class="temp-runtime-cards">
         @for (device of runtimeDevices(); track device.deviceId) {
-          <temp-equipment-runtime-card [device]="device" />
+          <temp-equipment-runtime-card
+            [device]="device"
+            [propaneUnit]="propaneUnit()"
+          />
         }
       </div>
     </section>
@@ -69,6 +97,9 @@ const UPCOMING_REPORTS: readonly string[] = [
   styles: `
     h2 {
       margin: 0 0 0.25rem;
+    }
+    .temp-propane-unit {
+      margin-bottom: 1rem;
     }
     .temp-runtime-cards {
       display: grid;
@@ -97,15 +128,30 @@ export class ReportsPage {
   private readonly runtimeSource = injectLiveSource((options) =>
     this.api.fetchEquipmentRuntime({}, options),
   );
+  private readonly browserStorage = openBrowserStorage();
 
   readonly upcomingReports = UPCOMING_REPORTS;
+  protected readonly propaneUnits = PROPANE_UNITS;
+  protected readonly labelPropaneUnit = labelPropaneUnit;
+  protected readonly propaneUnit = signal(
+    readSavedPropaneUnit(this.browserStorage),
+  );
   protected readonly runtimeState = this.runtimeSource.sourceState;
   protected readonly runtimeDevices = computed(
     () => this.runtimeSource.latest()?.payload.devices ?? [],
   );
 
+  protected readonly hasPropaneEstimate = computed(() =>
+    this.runtimeDevices().some((device) => device.totalPropaneLitres !== null),
+  );
+
   constructor() {
     this.refreshWhenADeviceSwitchesOrANodeComesAndGoes();
+  }
+
+  protected choosePropaneUnit(unit: PropaneUnit): void {
+    this.propaneUnit.set(unit);
+    writeSavedPropaneUnit(this.browserStorage, unit);
   }
 
   private refreshWhenADeviceSwitchesOrANodeComesAndGoes(): void {

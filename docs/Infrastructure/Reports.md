@@ -14,6 +14,7 @@ the first; the next reports follow the same shape.
 - [../../apps/server/src/app/reports/reports.service.ts](../../apps/server/src/app/reports/reports.service.ts) — loads the rows, resolves each zone's timezone
 - [../../libs/domain/src/lib/reports/equipment-runtime.model.ts](../../libs/domain/src/lib/reports/equipment-runtime.model.ts) — the wire types
 - [../../apps/web/src/app/features/reports/equipment-runtime-card.ts](../../apps/web/src/app/features/reports/equipment-runtime-card.ts) — the card
+- [../../apps/web/src/app/features/reports/propane-units.ts](../../apps/web/src/app/features/reports/propane-units.ts) — litres to pounds, rounding, the remembered unit
 
 ## The API
 
@@ -50,7 +51,29 @@ force when it opened, so the first day does not start as unknown.
   retained offline status, so the run before it counts as on until then.
 - History on a pin from before its device row claimed it belongs to no device and is left out.
 
-Not here yet: propane used. It needs a burn rate on each device, and so a migration.
+### Propane used
+
+An estimate for every device with a burner rating, per day and in total. Mainly the heater and the
+CO2 generator, but it is keyed on the rating, never on the role.
+
+- **The rating is the nameplate's gas input**, `inputBtuPerHour` on the device, set with
+  `POST /api/devices` or `PUT /api/devices/:id` like its other settings. It is input, not heat
+  output, so efficiency never enters into it. Null, the default, means no estimate and nothing
+  extra on the card.
+- **Litres = hours on × BTU/hr ÷ 24,000 BTU per litre**, `PROPANE_BTU_PER_LITRE` in
+  `equipment-runtime.ts`, from Natural Resources Canada's 25.31 MJ/L for propane. Litres, because
+  Superior Propane bills by the litre.
+- **Only hours known to be on count.** Unknown hours are not estimated, and the card says so.
+- **The server sends unrounded litres; the browser converts and rounds.** Pounds are litres × about
+  1.12 lb/L, from liquid propane at about 0.51 kg/L, so the two units always agree. One litres or
+  pounds toggle above the cards switches all of them. It starts on litres and is remembered in the
+  browser, like the card arrangement, so each browser keeps its own.
+- **Today's rating applies to the whole window.** Changing a device's rating recalculates every day
+  in the report at the new one; the rating is not stored with each transition. A rating is a fixed
+  nameplate figure, so it changes only to correct a mistake, and then the old figures were wrong
+  too.
+
+Not here: cost. The price per litre changes through the year.
 
 ## When to update this file
 
