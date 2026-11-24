@@ -25,6 +25,7 @@ from .release_layout import ReleaseLayout, UpdateOutcome
 from .update_command import ANSWER_ALARM, ANSWER_FAILED_STATUS, UpdateVerdict, judge_update_command
 from .update_gate import (
     HealthGate,
+    is_already_settled,
     is_still_current,
     is_still_pending,
     pass_gate,
@@ -350,15 +351,8 @@ class Agent:
         self._stop_watching_the_gate()
 
     def settle_update(self) -> None:
-        if self._is_running_another_release():
-            log.warning(
-                "`current` moved off %s after this process loaded it - restarting into it",
-                self.loaded_release.name,
-            )
-            self.request_restart()
-            return
         try:
-            settlement = settle_update_on_start(self.layout)
+            settlement = settle_update_on_start(self.layout, self.loaded_release)
         except BlockingIOError:
             # A deploy or the installer holds the switch lock; the next tick tries again.
             return
@@ -370,6 +364,13 @@ class Agent:
             return
         if self._has_logged_settle_failure:
             log.info("settled the last update after all")
+        if settlement.should_restart:
+            log.warning(
+                "`current` moved off %s after this process loaded it - restarting into it",
+                self.loaded_release.name,
+            )
+            self.request_restart()
+            return
         self.update_gate = settlement.gate
         self.outcome_to_report = settlement.outcome
         # Last: on_update reads the flag and then trusts the gate and the outcome.
@@ -561,9 +562,11 @@ class Agent:
             with self.layout.hold_switch_lock(should_wait=False):
                 if not is_still_pending(self.layout, gate):
                     log.warning("update to %s was replaced by a hand deploy", gate.pending.version)
+                    recorded = self.layout.read_outcome()
                     # The hand deploy recorded what became of it; an install would clear that.
-                    self.outcome_to_report = self.layout.read_outcome()
-                    self.report_settled_update()
+                    if is_already_settled(recorded, gate.pending):
+                        self.outcome_to_report = recorded
+                        self.report_settled_update()
                 elif not is_still_current(self.layout, gate):
                     # The rollback unit switched back while systemd restarted this release.
                     log.warning("update to %s was rolled back under it", gate.pending.version)
@@ -723,16 +726,6 @@ class Agent:
         finally:
             # `current` already points at the new release, so it restarts whatever the publish did.
             self.request_restart()
-
-    def _is_running_another_release(self) -> bool:
-        """True when a rollback switched `current` after systemd had already restarted this code."""
-        if self.layout is None or not self._is_loaded_from_a_release():
-            return False
-        current_release = self.layout.read_current_release()
-        return current_release is not None and current_release != self.loaded_release.name
-
-    def _is_loaded_from_a_release(self) -> bool:
-        return self.loaded_release.parent == self.layout.releases.resolve()
 
     def _is_left_for_the_next_start(self, command_id: str) -> bool:
         """True when a failed switch left its pending record: the next start settles it, once."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 from . import contract
 from .release_layout import PendingUpdate, ReleaseLayout, StartedUpdate, UpdateOutcome
@@ -17,6 +18,7 @@ class UpdateSettlement:
 
     gate: HealthGate | None = None
     outcome: UpdateOutcome | None = None
+    should_restart: bool = False
 
 
 class HealthGate:
@@ -66,12 +68,25 @@ class HealthGate:
         return f"{version} heard no heartbeat in {GATE_SECONDS}s with the server online"
 
 
-def settle_update_on_start(layout: ReleaseLayout | None) -> UpdateSettlement:
+def settle_update_on_start(
+    layout: ReleaseLayout | None, loaded_release: Path | None = None
+) -> UpdateSettlement:
     """Raises BlockingIOError rather than wait while another process switches `current`."""
     if layout is None:
         return UpdateSettlement()
     with layout.hold_switch_lock(should_wait=False):
+        # Under the lock: a rollback switching after the check would leave this code running.
+        if is_running_another_release(layout, loaded_release):
+            return UpdateSettlement(should_restart=True)
         return settle_while_locked(layout)
+
+
+def is_running_another_release(layout: ReleaseLayout, loaded_release: Path | None) -> bool:
+    """True when a rollback switched `current` after systemd had already restarted this code."""
+    if loaded_release is None or loaded_release.parent != layout.releases.resolve():
+        return False
+    current_release = layout.read_current_release()
+    return current_release is not None and current_release != loaded_release.name
 
 
 def settle_while_locked(layout: ReleaseLayout) -> UpdateSettlement:
