@@ -311,7 +311,7 @@ mosquitto_pub -r -t 'tempestas/v1/node/elantris/gpio/set' -m '{...}'   # MUST be
   met every node — nodes re-announce on their own connect and whenever `server/status` turns
   `online` (a live publish, not the retained replay), and the fake driver deliberately reproduces
   this by announcing from `onApplicationBootstrap` rather than at construction.
-  The server announces `online` only after the broker acknowledges its subscribe to
+  The leader announces `online` only after the broker acknowledges its subscribe to
   `tempestas/v1/node/#`, so those answering hellos cannot reach the broker ahead of it.
 - **A retained `status` for an unknown slug arrives before that node's `hello`.** Ignore it; do not
   half-create a node from it.
