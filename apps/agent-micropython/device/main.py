@@ -1,10 +1,17 @@
 import time
 
-import node_runtime
+import machine
 
-BOOT_GRACE_SECONDS = 5
+import bootloader
+import slots
 
-# The watchdog cannot be stopped once armed, so a deploy has to catch the board before run().
-print("tempestas agent starts in %d s; Ctrl-C keeps the REPL" % BOOT_GRACE_SECONDS)
-time.sleep(BOOT_GRACE_SECONDS)
-node_runtime.run()
+# Held here, as a timer that is garbage collected never fires.
+started_timers = []
+
+
+def start_one_shot_timer(milliseconds, callback):
+    started_timers.append(machine.Timer(mode=machine.Timer.ONE_SHOT, period=milliseconds, callback=callback))
+
+
+board = bootloader.Board(time.sleep_ms, bootloader.is_bootsel_pressed, machine.reset, start_one_shot_timer)
+bootloader.boot(board, slots.SlotStore(), bootloader.run_slot_from, print)

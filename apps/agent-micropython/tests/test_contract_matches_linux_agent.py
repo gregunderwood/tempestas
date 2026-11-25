@@ -79,3 +79,10 @@ def test_every_update_state_matches():
 def test_schema_major_reads_like_the_linux_agent():
     for schema in ["sample/1", "sample/2", "sample", "sample/x", None, 3]:
         assert micropython_contract.read_schema_major(schema) == linux_contract.read_schema_major(schema)
+
+
+def test_heartbeat_names_the_accepted_version_in_the_same_field():
+    assert (
+        micropython_contract.HEARTBEAT_ACCEPTED_VERSION_FIELD
+        == linux_contract.HEARTBEAT_ACCEPTED_VERSION_FIELD
+    )

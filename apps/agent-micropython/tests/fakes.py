@@ -63,8 +63,11 @@ class PublishedMessage:
 
 
 class FakePublisher:
+    """Records every message, and reports each as delivered unless is_delivering is False."""
+
     def __init__(self):
         self.messages = []
+        self.is_delivering = True
 
     def publish(self, topic, text, is_retained, quality_of_service, should_hold_while_offline):
         self.messages.append(
@@ -72,6 +75,7 @@ class FakePublisher:
                 topic, json.loads(text), is_retained, quality_of_service, should_hold_while_offline
             )
         )
+        return self.is_delivering
 
     def on_topic(self, suffix):
         return [message for message in self.messages if message.topic.endswith(suffix)]
@@ -159,3 +163,23 @@ class RecordingLog:
 
     def __call__(self, message):
         self.lines.append(message)
+
+
+class FakeInstaller:
+    """Records each install, and fails with a reason when given one."""
+
+    def __init__(self, slot="b", failure=None):
+        self.slot = slot
+        self.failure = failure
+        self.installed_commands = []
+
+    def install(self, command, report):
+        from slot_installer import UpdateFailed
+
+        report("downloading")
+        if self.failure is not None:
+            raise UpdateFailed(self.failure)
+        report("verifying")
+        report("installing")
+        self.installed_commands.append(command)
+        return self.slot

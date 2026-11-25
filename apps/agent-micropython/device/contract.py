@@ -18,8 +18,10 @@ SCHEMAS = {
 }
 
 SUPPORTED_MAJOR = 1
-# Behind the TypeScript minor until this agent handles `update`; the minor says what it accepts.
-MQTT_CONTRACT_MINOR = 0
+# May trail the TypeScript minor, never lead it; the minor says what this agent accepts.
+MQTT_CONTRACT_MINOR = 2
+# Added in 1.2, so a heartbeat without it comes from an older server.
+HEARTBEAT_ACCEPTED_VERSION_FIELD = "agentVersion"
 
 
 def build_node_root(node_id):

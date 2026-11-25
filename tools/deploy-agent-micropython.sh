@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copies inside main.py's boot grace, before an armed watchdog could reset the board mid-copy.
+# Copies inside the bootloader's grace, before an armed watchdog could reset the board mid-copy.
 
 set -euo pipefail
 
@@ -12,7 +12,10 @@ UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 PORT_WAIT_SECONDS=10
 BOARD="$(sed -n 's/^BOARD = "\(.*\)"$/\1/p' "$DEVICE/settings.py")"
 BOARD_FILE="$MICROPYTHON_BOARDS_DIRECTORY/$BOARD.py"
-AGENT_FILES=("${MICROPYTHON_AGENT_CODE[@]}" "${MICROPYTHON_NODE_CONFIG[@]}")
+SLOT="$MICROPYTHON_USB_DEPLOY_SLOT"
+ROOT_FILES=("${MICROPYTHON_BOOTLOADER[@]}" "${MICROPYTHON_NODE_CONFIG[@]}")
+# The old flat layout kept these at the root, where they would shadow nothing but waste flash.
+FLAT_LAYOUT_FILES=("${MICROPYTHON_AGENT_CODE[@]}" "$MICROPYTHON_BOARD_FILE" "$MICROPYTHON_AGENT_VERSION_STAMP")
 
 mpremote() { "$UV" tool run mpremote connect "$PORT" "$@"; }
 
@@ -41,9 +44,11 @@ say "Gate"
 say "Stamping the version"
 AGENT_VERSION="$("$HERE/tools/describe-agent-version.sh" "$HERE/apps/agent-micropython")"
 STAMP_FILE="$(mktemp)"
-trap 'rm -f "$STAMP_FILE"' EXIT
 printf 'AGENT_VERSION = "%s"\n' "$AGENT_VERSION" > "$STAMP_FILE"
 echo "$AGENT_VERSION"
+SLOT_STATE_FILE="$(mktemp)"
+trap 'rm -f "$STAMP_FILE" "$SLOT_STATE_FILE"' EXIT
+printf '{"active": "%s", "pending": null, "outcome": null}\n' "$SLOT" > "$SLOT_STATE_FILE"
 
 say "Fetching mpremote"
 # Fetched before the reset, so none of the boot grace is spent downloading it.
@@ -54,9 +59,18 @@ mpremote reset || true
 sleep 1
 wait_for_port
 
-say "Copying the agent for the $BOARD board"
+say "Copying the agent for the $BOARD board into slot $SLOT"
 REFUSE_IF_WATCHDOG_ARMED="$(cat "$DEVICE/$BOARD_FILE")
 refuse_if_watchdog_armed()"
-(cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + cp "${AGENT_FILES[@]}" : + cp "$BOARD_FILE" :board.py + cp "$STAMP_FILE" :"$MICROPYTHON_AGENT_VERSION_STAMP" + reset)
+CLEAR_SLOT_AND_FLAT_LAYOUT="$(cat "$HERE/apps/agent-micropython/usb/clear_slot.py")
+clear_slot_and_flat_layout('$SLOT', [$(printf "'%s'," "$MICROPYTHON_SLOT_STATE" "${FLAT_LAYOUT_FILES[@]}")])"
+# The slot state is removed first and written last, so a deploy cut short boots nothing rather than half a slot.
+(cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + exec "$CLEAR_SLOT_AND_FLAT_LAYOUT" \
+  + cp "${MICROPYTHON_AGENT_CODE[@]}" :"$SLOT/" \
+  + cp "$BOARD_FILE" :"$SLOT/$MICROPYTHON_BOARD_FILE" \
+  + cp "$STAMP_FILE" :"$SLOT/$MICROPYTHON_AGENT_VERSION_STAMP" \
+  + cp "${ROOT_FILES[@]}" : \
+  + cp "$SLOT_STATE_FILE" :"$MICROPYTHON_SLOT_STATE" \
+  + reset)
 
 say "Done. Watch it with: uv tool run mpremote connect $PORT resume repl"
