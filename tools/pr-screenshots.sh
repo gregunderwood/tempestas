@@ -126,12 +126,11 @@ shoot_checkout() {
   stop_stack
 }
 
-# From this checkout on both sides, since the base may predate the script. After the first readings,
-# since heaters follow the temperatures seeded for the probes that have reported.
+# After the first readings, since heaters follow the temperatures seeded for the probes that have reported.
 seed_runtime_history() {
   local label=$1
   say "Seeding $label with simulated runtime history"
-  node "$REPO_ROOT/tools/seed-runtime-history.mjs" "$DATABASE_NAME" >"$WORK_DIR/$label-history.log" 2>&1 ||
+  node "$(seeder_for_checkout seed-runtime-history.mjs)" "$DATABASE_NAME" >"$WORK_DIR/$label-history.log" 2>&1 ||
     fail_with_log "seeding the runtime history failed" "$label-history.log"
 }
 
@@ -139,8 +138,18 @@ seed_runtime_history() {
 seed_reading_history() {
   local label=$1
   say "Seeding $label with simulated temperature readings"
-  node "$REPO_ROOT/tools/seed-reading-history.mjs" "$DATABASE_NAME" >"$WORK_DIR/$label-readings.log" 2>&1 ||
+  node "$(seeder_for_checkout seed-reading-history.mjs)" "$DATABASE_NAME" >"$WORK_DIR/$label-readings.log" 2>&1 ||
     fail_with_log "seeding the readings failed" "$label-readings.log"
+}
+
+# The checkout's own seeder, so before shows the base's history; this checkout's if the base predates it.
+seeder_for_checkout() {
+  local seeder=$1
+  if [[ -f "$CHECKOUT/tools/$seeder" ]]; then
+    echo "$CHECKOUT/tools/$seeder"
+  else
+    echo "$REPO_ROOT/tools/$seeder"
+  fi
 }
 
 take_screenshots() {
