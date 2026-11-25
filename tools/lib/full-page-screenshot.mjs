@@ -1,6 +1,4 @@
-#!/usr/bin/env node
 // Saves a screenshot of a page's full height, at desktop or phone width, through headless Chrome's DevTools protocol.
-// Usage: node tools/lib/full-page-screenshot.mjs <desktop|phone> <url> <png file> <chrome profile folder>
 
 import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -184,14 +182,18 @@ async function runVirtualTime(session, milliseconds) {
 function waitForDevToolsUrl(chrome) {
   return new Promise((resolve, reject) => {
     let chromeOutput = '';
-    chrome.stderr.on('data', (chunk) => {
-      process.stderr.write(chunk);
+    const forwardChromeOutput = (chunk) => process.stderr.write(chunk);
+    const watchForDevToolsUrl = (chunk) => {
+      forwardChromeOutput(chunk);
       chromeOutput += chunk;
       const devToolsUrl = findDevToolsUrl(chromeOutput);
       if (devToolsUrl) {
+        chrome.stderr.off('data', watchForDevToolsUrl);
+        chrome.stderr.on('data', forwardChromeOutput);
         resolve(devToolsUrl);
       }
-    });
+    };
+    chrome.stderr.on('data', watchForDevToolsUrl);
     chrome.once('exit', (code, signal) =>
       reject(
         new Error(`Chrome exited before it was ready (${signal ?? code})`),
