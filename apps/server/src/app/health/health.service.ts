@@ -11,7 +11,11 @@ import { Clock } from '../common/clock';
 import { DivergenceLog } from '../common/divergence-log';
 import { MILLISECONDS_PER_SECOND, SECONDS_PER_DAY } from '../common/time-units';
 import { NodesService } from '../nodes/nodes.service';
-import { readReleaseId } from '../common/release-id';
+import {
+  PRODUCT_VERSION_FILE,
+  RELEASE_ID_FILE,
+  readReleaseFile,
+} from '../common/release-files';
 import { SensorReadingEntity } from '../readings/models';
 import { rememberSensorsSince } from '../readings/sensor-memory';
 import { RulesService } from '../rules/rules.service';
@@ -24,7 +28,8 @@ export const READINGS_STALE_AFTER_SECONDS = 120;
 export const EVALUATION_STALE_AFTER_SECONDS = 60;
 
 // Read once: a release's code never changes under a running server.
-const RELEASE_ID = readReleaseId();
+const RELEASE_ID = readReleaseFile(RELEASE_ID_FILE);
+const PRODUCT_VERSION = readReleaseFile(PRODUCT_VERSION_FILE);
 
 // A day, so an overnight failsafe is still reported in the morning and then clears on its own.
 const DIVERGENCE_WINDOW_SECONDS = SECONDS_PER_DAY;
@@ -99,6 +104,7 @@ export class HealthService {
       status: problems.some(isDegrading) ? 'degraded' : 'ok',
       db: true,
       releaseId: RELEASE_ID,
+      productVersion: PRODUCT_VERSION,
       uptimeSeconds: Math.round(process.uptime()),
       nodes: counts,
       readings: {
@@ -178,6 +184,7 @@ function unreachableDatabaseReport(): HealthReport {
     status: 'degraded',
     db: false,
     releaseId: RELEASE_ID,
+    productVersion: PRODUCT_VERSION,
     uptimeSeconds: Math.round(process.uptime()),
     nodes: { total: 0, online: 0, pending: 0 },
     readings: { latestAt: null, ageSeconds: null },

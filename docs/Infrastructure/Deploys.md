@@ -24,7 +24,7 @@ problem found after a deploy passed.
 ```
 ~/tempestas/
   releases/
-    20261121-101500-e95e066/   server/  web/  release-id  previous-release  applied-migrations.json  backup-before-migrations  healthy
+    20261121-101500-e95e066/   server/  web/  release-id  product-version  previous-release  applied-migrations.json  backup-before-migrations  healthy
     20261121-143000-1a2b3c4/   …
   current  -> releases/20261121-143000-1a2b3c4    # tempestas-server.service runs this
   migrator -> releases/20261121-143000-1a2b3c4    # tempestas-migrate@ runs this
@@ -32,6 +32,25 @@ problem found after a deploy passed.
 
 A release ID is `<UTC time>-<commit>`, with `-dev` when the commit is not `origin/main` and
 `-dev-dirty` with uncommitted changes. The server reports it as `releaseId` on `/api/health`.
+
+The **product version** names what was shipped rather than when.
+[`tools/describe-product-version.sh`](../../tools/describe-product-version.sh) prints it from the highest
+`vX.Y.Z` tag reachable from `HEAD`, on any branch, with `1.4.0-dev.N` below `1.4.0`:
+
+| Where `HEAD` is                       | Version                          |
+| ------------------------------------- | -------------------------------- |
+| at `v1.3.0` on `main`                 | `1.3.0`, a release               |
+| 5 commits past it, on any branch      | `1.3.0+5.g<commit>`              |
+| at `v1.4.0-dev.1`, tagged on a branch | `1.4.0-dev.1`, a named dev build |
+| with uncommitted changes              | any of these, plus `dirty`       |
+| before the first tag                  | `0.0.0+N.g<commit>`              |
+
+So a branch always has a version, and a tag such as `v1.4.0-dev.1` gives a dev build a name to
+install and talk about. Only a bare `X.Y.Z` from `main` is a release. The script refuses a shallow
+clone, which would hide the tags, and the deploy fetches tags with `main`. The deploy writes the
+version to `product-version`, and the server reports it as `productVersion` on `/api/health`.
+Each agent keeps its own version, from its contract, as the [MQTT Contract](MQTT%20Contract.md)
+describes.
 
 ```bash
 tools/deploy.sh                          # elantris

@@ -39,6 +39,10 @@ npx nx test server                     # one project
 npx nx test server -- device-state     # one file, by substring
 ```
 
+The same gate, coverage included, runs on GitHub Actions for every PR and every push to `main`,
+from [../.github/workflows/gate.yml](../.github/workflows/gate.yml). It runs the Python apps on 3.11,
+Debian bookworm's, and a second job runs the Linux agent on 3.13, trixie's, as nodes run both.
+
 `tools/` is an Nx project too, where it sits: `tools:test` runs the `node:test` specs in
 `tools/lib/`, and `tools:lint` runs eslint over its `.mjs` and `.cjs` scripts. The shell and Python
 scripts there are not checked.

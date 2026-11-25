@@ -25,13 +25,18 @@ RELEASE_SYSTEMCTL_LINES=(
   "restart tempestas-server.service"
 )
 
+# Both the release ID and the product version read it, so a tag made on another machine counts.
+fetch_main_and_tags() {
+  local repository="$1"
+  if ! git -C "$repository" fetch --quiet --tags origin main 2>/dev/null; then
+    echo "Could not fetch all of origin/main and its tags; check git fetch --tags origin main, as a stale tag gives a stale product version." >&2
+  fi
+}
+
 # <UTC time to the second>-<commit>, marked -dev off a clean origin/main, as the agents are.
 describe_release_id() {
   local repository="$1"
   local stamp commit released_commit
-  if ! git -C "$repository" fetch --quiet origin main 2>/dev/null; then
-    echo "Could not fetch origin/main, so the release ID compares against the last fetch." >&2
-  fi
   stamp="$(date -u +%Y%m%d-%H%M%S)"
   commit="$(git -C "$repository" rev-parse --short="$COMMIT_ID_LENGTH" HEAD)"
   released_commit="$(git -C "$repository" rev-parse --short="$COMMIT_ID_LENGTH" --verify --quiet origin/main || true)"
@@ -98,7 +103,7 @@ is_release_healthy() {
 
 # Node modules are hard-linked from the previous release when the lockfile has not changed.
 ship_release() {
-  local host="$1" release_id="$2" previous_release_id="$3" repository="$4"
+  local host="$1" release_id="$2" previous_release_id="$3" repository="$4" product_version="$5"
   local release_dir="$REMOTE_ROOT/releases/$release_id"
   if ssh "$host" "test -e $release_dir"; then
     echo "$release_dir already exists on $host; a release is never shipped over." >&2
@@ -107,11 +112,12 @@ ship_release() {
   ssh "$host" "mkdir -p $release_dir"
   rsync -a "$repository/dist/apps/server/" "$host:$release_dir/server/"
   rsync -a "$repository/dist/apps/web/browser/" "$host:$release_dir/web/"
-  ssh "$host" bash -s -- "$release_dir" "$release_id" "$previous_release_id" "$PREVIOUS_RECORD" <<'REMOTE'
+  ssh "$host" bash -s -- "$release_dir" "$release_id" "$previous_release_id" "$PREVIOUS_RECORD" "$product_version" <<'REMOTE'
 set -euo pipefail
-release_dir="$1" release_id="$2" previous_release_id="$3" previous_record="$4"
+release_dir="$1" release_id="$2" previous_release_id="$3" previous_record="$4" product_version="$5"
 previous_release_dir="$(dirname "$release_dir")/$previous_release_id"
 echo "$release_id" >"$release_dir/release-id"
+echo "$product_version" >"$release_dir/product-version"
 echo "$previous_release_id" >"$release_dir/$previous_record"
 cd "$release_dir/server"
 if [ -d "$previous_release_dir/server/node_modules" ] &&
