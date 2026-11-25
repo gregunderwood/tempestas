@@ -103,7 +103,8 @@ write_player() {
   say "Writing the player page to $PLAYER_FOLDER"
   rm -rf "$PLAYER_FOLDER"
   mkdir -p "$PLAYER_FOLDER"
-  cp "$PLAYER_TEMPLATE" "$PLAYER_FOLDER/index.html"
+  # Named for the PR, so each player is told apart in the artifact list.
+  sed "s|<title>PR Video Player</title>|<title>PR #$PULL_REQUEST Video</title>|" "$PLAYER_TEMPLATE" >"$PLAYER_FOLDER/index.html"
   node "$RECORDINGS_SCRIPT" player "$VIDEOS_FOLDER" "$PLAYER_FOLDER" "$PULL_REQUEST" "${HEAD_SHA:0:7}"
 }
 
