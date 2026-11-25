@@ -132,9 +132,9 @@ PR's head commit or if tracked files have changes. It then:
   dev database `tempestas`, the server with `HARDWARE_DRIVER=fake`, both simulated nodes admitted
   and a device created on each relay pin with its zone's roles, so the rules switch them and the
   pages show equipment, and `nx serve web` proxied to it.
-- **seeds 30 days of history with `--history`**, using this checkout's seeders on both sides:
-  `tools/seed-runtime-history.mjs` after the devices are created, and
-  `tools/seed-reading-history.mjs` after the first real readings arrive. See below.
+- **seeds 30 days of history with `--history`**, using each side's own seeders (this checkout's
+  when the base has none), once the devices are created and the first real readings have arrived:
+  `tools/seed-runtime-history.mjs`, then `tools/seed-reading-history.mjs`. See below.
 - **uses ports 7020 and 4220**, and refuses to start if anything listens on either. Other ports:
   `PR_SCREENSHOTS_SERVER_PORT` and `PR_SCREENSHOTS_WEB_PORT`.
 - **takes each page at 1280 px and 390 px, the full height of the page**, with headless Chrome
@@ -197,7 +197,8 @@ person works on the project.
 
 The server stamps every `pin_transitions` row with the real time, so a fresh stack has minutes of
 history, and a report over 30 days shows nothing. `tools/seed-runtime-history.mjs <database>`
-writes 30 days of it for every device already in a database:
+writes 30 days of it for every device already in a database. Run it once the stack has its first
+real readings, since the heaters follow the temperatures seeded for the probes that have reported:
 
 ```bash
 node tools/seed-runtime-history.mjs tempestas   # the everyday dev database
@@ -208,11 +209,27 @@ node tools/seed-runtime-history.mjs tempestas   # the everyday dev database
   started by this repo's `docker compose` (it carries the compose service label `db`). Production
   uses the same container and database names but starts its container with `docker run`, so there
   `tempestas` is refused. It only ever reaches the `tempestas-db` container: no MQTT, no GPIO.
-- **Plausible, and the same every run.** Heating roles run mostly at night in the zone's timezone,
-  longest on the cold nights the readings seeder shows, fans and lights by day. Six days ago
-  short-cycles from 10:00 to 14:00. Twelve days ago the first node by slug drops out from 01:30 to
-  05:00: a `node-offline` row, unknown, as the server writes it, then a known row when it returns.
-  The pattern is seeded from each line and day, not random.
+- **Heaters follow the seeded temperatures, as the rules would.** A heater or heat tape under the
+  rules, whose zone owns its role and has a heat `thermostat` rule for it, switches by the
+  temperature the readings seeder writes for that zone's probes, read through the rule's sensor
+  source (`min`, `mean`, `node:`...): on strictly below `onAtC`, off strictly above `offAtC`, and
+  not back on until the device's `onDelayDuration` after it went off. Both seeders compute those
+  temperatures from the same seeded functions in `tools/lib/simulated-readings.mjs`, so neither
+  reads the other's rows and the order they run in does not matter. After a probe's seed ends, the
+  heater holds that probe's first real reading. A heating device switched to manual, or with no such
+  rule, or whose rule has no probe that has reported, runs by the night pattern below and the seeder
+  says so.
+- **One deliberate fault night.** The night 17 days ago, 20:00 to 07:00, the zone's heat tape (or
+  its heater, if no heat tape there follows a thermostat) fails to come on, and goes off if it was
+  on, while the zone drops to about 0.6 °C. The heater in a zone with both still comes on. The
+  freeze-margin report flags that night as heat off while cold. The night 4 days ago is as cold,
+  with every heat source on, so it shows the heat on and still close to freezing instead.
+- **Plausible, and the same every run.** Other roles run by a daily pattern in the zone's timezone:
+  fans and lights by day, a CO2 generator or an unruled heater mostly at night, longest on the cold
+  nights the readings seeder shows. Six days ago every line short-cycles from 10:00 to 14:00, heaters
+  included. Twelve days ago the first node by slug drops out from 01:30 to 05:00: a `node-offline`
+  row, unknown, as the server writes it, then a known row when it returns. The pattern is seeded
+  from each line and day, not random.
 - **Rerunnable.** It replaces each device pin's rows from local midnight 30 days back to now, ends
   on the state the pin is in now so the server carries on from it, and moves each device's
   `created_at` back to the start of that window, so the report counts all 30 days.
@@ -236,11 +253,10 @@ node tools/seed-reading-history.mjs tempestas
 - **One reading a minute per probe**, from local midnight 30 days back: about 44,000 rows a probe,
   so about 88,000 on a screenshot stack's two probes.
 - **Plausible, and the same every run.** Coldest at 06:00 and warmest at 15:00 in the zone's
-  timezone, eased between the two, with a little noise and a small fixed offset per probe. Each
-  night's coldness is shared with the runtime history, so the heaters run longest on the cold
-  nights. The nights 4 and 17 days ago drop to about 0.6 °C, for the freeze-margin report to flag;
-  every other night stays above about 2 °C. Humidity and CO2 are written only if the probe has
-  ever reported them, and are null otherwise.
+  timezone, eased between the two, with a little noise and a small fixed offset per probe. The
+  runtime history switches the heaters by these same temperatures. The nights 4 and 17 days ago drop
+  to about 0.6 °C, for the freeze-margin report to flag; every other night stays above about 2 °C.
+  Humidity and CO2 are written only if the probe has ever reported them, and are null otherwise.
 - **Never touches a real reading.** Each seeded row has `boot_id` `seeded-history`. A rerun deletes
   only those rows, for the probes it reseeds, so it never doubles them. Each probe's seed stops just
   before its first real reading at or after the window start, so nothing at or after that reading

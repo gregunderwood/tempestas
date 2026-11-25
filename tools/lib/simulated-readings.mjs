@@ -30,12 +30,13 @@ const CO2_NOISE_RANGE_PPM = 20;
 
 /**
  * @typedef {{ at: Date, temperature: number }} RealReading
- * @typedef {{ nodeUuid: string, nodeId: string, sensorId: string, timezone: string,
+ * @typedef {{ nodeUuid: string, nodeId: string, zoneId: string | null, sensorId: string, timezone: string,
  *   reportsHumidity: boolean, reportsCo2: boolean, firstRealReading: RealReading }} Probe
  * @typedef {{ nodeUuid: string, sensorId: string, temperature: number, humidity: number | null,
  *   co2: number | null, nodeSeq: number, createdAt: Date }} ReadingRow
  * @typedef {{ probe: Probe, historyStart: Date, rows: ReadingRow[] }} ProbeReadings
  * @typedef {{ atMs: number, temperature: number }} Extreme
+ * @typedef {{ at: Date, temperature: number, nightness: number }} ProbeMinute
  */
 
 /** @returns {ProbeReadings[]} */
@@ -43,65 +44,60 @@ export function buildSimulatedReadings({ probes, now }) {
   return probes.map((probe) => buildProbeReadings(probe, now));
 }
 
-// Ends at the probe's first real reading in the window, so a real reading is never shadowed.
 function buildProbeReadings(probe, now) {
+  const { historyStart, minutes } = simulateProbeClimate(probe, now);
+  const random = seededRandom(`${probe.nodeId}:${probe.sensorId}:readings`);
+  const rows = minutes.map((minute, index) => ({
+    nodeUuid: probe.nodeUuid,
+    sensorId: probe.sensorId,
+    temperature: minute.temperature,
+    humidity: probe.reportsHumidity
+      ? simulateHumidity(minute.temperature, random)
+      : null,
+    co2: probe.reportsCo2 ? simulateCo2(minute.nightness, random) : null,
+    nodeSeq: index + 1,
+    createdAt: minute.at,
+  }));
+  return { probe, historyStart, rows };
+}
+
+/**
+ * What one probe reads each minute, from the window start up to its first real reading, which it
+ * is never allowed to shadow. The runtime seeder switches heaters by these same temperatures.
+ * @returns {{ historyStart: Date, minutes: ProbeMinute[] }}
+ */
+export function simulateProbeClimate(probe, now) {
   const historyStart = findHistoryStart(now, probe.timezone);
   const offsetC = findProbeOffset(probe);
-  const random = seededRandom(`${probe.nodeId}:${probe.sensorId}:readings`);
+  const random = seededRandom(`${probe.nodeId}:${probe.sensorId}:temperature`);
   const climateAt = buildClimate({
     timezone: probe.timezone,
     from: historyStart,
     until: probe.firstRealReading.at,
     now,
   });
-  const rows = [];
+  const minutes = [];
   for (
-    let createdAtMs = historyStart.getTime();
-    createdAtMs < probe.firstRealReading.at.getTime();
-    createdAtMs += READING_INTERVAL_MINUTES * MILLISECONDS_PER_MINUTE
+    let atMs = historyStart.getTime();
+    atMs < probe.firstRealReading.at.getTime();
+    atMs += READING_INTERVAL_MINUTES * MILLISECONDS_PER_MINUTE
   ) {
-    const createdAt = new Date(createdAtMs);
-    rows.push(
-      simulateReading({
-        probe,
-        createdAt,
-        nodeSeq: rows.length + 1,
-        climate: climateAt(createdAt),
-        offsetC,
-        random,
-      }),
-    );
+    const at = new Date(atMs);
+    const climate = climateAt(at);
+    const modelledC =
+      climate.temperature + offsetC + spread(TEMPERATURE_NOISE_RANGE_C, random);
+    minutes.push({
+      at,
+      temperature: roundTo(meetFirstRealReading(modelledC, at, probe), 2),
+      nightness: climate.nightness,
+    });
   }
-  return { probe, historyStart, rows };
+  return { historyStart, minutes };
 }
 
 function findProbeOffset(probe) {
   const random = seededRandom(`${probe.nodeId}:${probe.sensorId}:offset`);
   return (random() - 0.5) * PROBE_OFFSET_RANGE_C;
-}
-
-function simulateReading({
-  probe,
-  createdAt,
-  nodeSeq,
-  climate,
-  offsetC,
-  random,
-}) {
-  const modelledC =
-    climate.temperature + offsetC + spread(TEMPERATURE_NOISE_RANGE_C, random);
-  const temperature = meetFirstRealReading(modelledC, createdAt, probe);
-  return {
-    nodeUuid: probe.nodeUuid,
-    sensorId: probe.sensorId,
-    temperature: roundTo(temperature, 2),
-    humidity: probe.reportsHumidity
-      ? simulateHumidity(temperature, random)
-      : null,
-    co2: probe.reportsCo2 ? simulateCo2(climate.nightness, random) : null,
-    nodeSeq,
-    createdAt,
-  };
 }
 
 // The last hour leans toward the first real reading, so the chart does not jump where the seed ends.

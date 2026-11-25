@@ -7,18 +7,11 @@ import {
 } from './lib/development-database.mjs';
 import {
   explainDevelopmentDatabaseRefusal,
-  readJson,
   runSql,
 } from './lib/development-database-psql.mjs';
+import { HISTORY_DAYS } from './lib/history-window.mjs';
+import { readProbesWithRealReadings } from './lib/probes-psql.mjs';
 import {
-  DEFAULT_TIMEZONE,
-  findHistoryStart,
-  HISTORY_DAYS,
-} from './lib/history-window.mjs';
-import {
-  attachFirstRealReading,
-  buildFindFirstRealReadingsSql,
-  buildFindProbesSql,
   buildReplaceReadingsSql,
   SEEDED_BOOT_ID,
 } from './lib/reading-history-sql.mjs';
@@ -72,20 +65,6 @@ function parseArguments(argumentsAfterScript) {
 function requireDevelopmentDatabase(databaseName) {
   const refusal = explainDevelopmentDatabaseRefusal(databaseName);
   if (refusal) fail(`${refusal}\n\n${USAGE}`);
-}
-
-function readProbesWithRealReadings(databaseName, now) {
-  const probes = readJson(databaseName, buildFindProbesSql(DEFAULT_TIMEZONE));
-  if (probes.length === 0) return [];
-  const probeStarts = probes.map((probe) => ({
-    probe,
-    historyStart: findHistoryStart(now, probe.timezone),
-  }));
-  const firstRealReadings = readJson(
-    databaseName,
-    buildFindFirstRealReadingsSql(probeStarts),
-  );
-  return attachFirstRealReading(probes, firstRealReadings);
 }
 
 function describeWhatWasWritten(databaseName, probeReadings) {

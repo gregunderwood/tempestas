@@ -6,6 +6,14 @@ import {
   startOfLocalDay,
 } from './history-window.mjs';
 import { seededRandom } from './seeded-random.mjs';
+import { simulateProbeClimate } from './simulated-readings.mjs';
+import {
+  buildSourceTemperature,
+  chooseFailingRole,
+  findFaultNight,
+  findHeatThermostat,
+  simulateThermostatRuns,
+} from './simulated-thermostat.mjs';
 import { findNightColdness } from './simulated-weather.mjs';
 
 const MILLISECONDS_PER_MINUTE = 60_000;
@@ -43,18 +51,69 @@ const DEFAULT_DUTY = {
 /**
  * @typedef {{ level: 0 | 1 | null, known: boolean }} PinState
  * @typedef {{ deviceId: string, nodeId: string, pin: number, onLevel: 0 | 1,
- *   role: string | null, timezone: string, currentState: PinState | null }} DeviceLine
+ *   role: string | null, timezone: string, currentState: PinState | null, zoneId: string | null,
+ *   rulesConfig: object | null, onDelaySeconds: number, isUnderRules: boolean }} DeviceLine
  * @typedef {{ nodeId: string, pin: number, level: 0 | 1 | null, known: boolean,
  *   energised: boolean | null, deviceId: string, role: string | null, reason: string,
  *   observedAt: Date }} TransitionRow
- * @typedef {{ line: DeviceLine, historyStart: Date, rows: TransitionRow[] }} LineHistory
+ * @typedef {{ line: DeviceLine, historyStart: Date, rows: TransitionRow[],
+ *   isFollowingThermostat: boolean }} LineHistory
  */
 
-/** @returns {LineHistory[]} */
-export function buildSimulatedHistory({ lines, now }) {
+/**
+ * A heating line under its zone's rules, with a heat thermostat for its role and a probe its rule
+ * reads, follows those probes' seeded temperatures; every other line follows its role's duty pattern.
+ * @param {{ lines: DeviceLine[], probes?: import('./simulated-readings.mjs').Probe[], now: Date }} seed
+ * @returns {LineHistory[]}
+ */
+export function buildSimulatedHistory({ lines, probes = [], now }) {
   const outageNodeId = chooseOutageNode(lines);
-  return lines.map((line) =>
-    buildLineHistory(line, now, line.nodeId === outageNodeId),
+  const probeClimates = probes.map((probe) => ({
+    probe,
+    ...simulateProbeClimate(probe, now),
+  }));
+  const followers = lines.map((line) => ({
+    line,
+    zoneThermostat: findZoneThermostat(line, probeClimates, now),
+  }));
+  const failingLines = findFailingLines(followers);
+  return followers.map(({ line, zoneThermostat }) =>
+    buildLineHistory(line, now, {
+      hasOutage: line.nodeId === outageNodeId,
+      zoneThermostat,
+      isFailing: failingLines.has(line),
+    }),
+  );
+}
+
+function findZoneThermostat(line, probeClimates, now) {
+  if (!line.isUnderRules) return null;
+  const thermostat = findHeatThermostat(line.rulesConfig, line.role);
+  if (!thermostat) return null;
+  const zoneProbeClimates = probeClimates.filter(
+    (probeClimate) => probeClimate.probe.zoneId === line.zoneId,
+  );
+  const temperatureAt = buildSourceTemperature(
+    zoneProbeClimates,
+    thermostat.source,
+  );
+  const hasSourceProbe = temperatureAt(now.getTime()) !== null;
+  if (!hasSourceProbe) return null;
+  return { thermostat, temperatureAt };
+}
+
+// Chosen from the lines that follow a thermostat, so a rule with no device behind it can't hide the fault.
+function findFailingLines(followers) {
+  const followingLines = followers
+    .filter((follower) => follower.zoneThermostat !== null)
+    .map((follower) => follower.line);
+  const zoneIds = new Set(followingLines.map((line) => line.zoneId));
+  return new Set(
+    [...zoneIds].flatMap((zoneId) => {
+      const zoneLines = followingLines.filter((line) => line.zoneId === zoneId);
+      const failingRole = chooseFailingRole(zoneLines.map((line) => line.role));
+      return zoneLines.filter((line) => line.role === failingRole);
+    }),
   );
 }
 
@@ -63,15 +122,75 @@ function chooseOutageNode(lines) {
   return lines.map((line) => line.nodeId).sort()[0];
 }
 
-function buildLineHistory(line, now, hasOutage) {
+function buildLineHistory(line, now, { hasOutage, zoneThermostat, isFailing }) {
   const historyStart = findHistoryStart(now, line.timezone);
-  const runs = simulateRuns(line, historyStart, now);
+  const runs = zoneThermostat
+    ? simulateHeatingRuns(line, zoneThermostat, isFailing, historyStart, now)
+    : simulateRuns(line, historyStart, now);
   let rows = toTransitionRows(line, runs, historyStart, now);
   if (hasOutage) {
     rows = cutOutOutage(line, rows, findOutage(now, line.timezone));
   }
   rows = appendCurrentState(line, rows, now);
-  return { line, historyStart, rows: dropRepeatedStates(rows) };
+  return {
+    line,
+    historyStart,
+    rows: dropRepeatedStates(rows),
+    isFollowingThermostat: zoneThermostat !== null,
+  };
+}
+
+// The short-cycling morning overrides the thermostat, as a chattering relay would.
+function simulateHeatingRuns(
+  line,
+  zoneThermostat,
+  isFailing,
+  historyStart,
+  now,
+) {
+  const thermostatRuns = simulateThermostatRuns({
+    ...zoneThermostat,
+    onDelaySeconds: line.onDelaySeconds,
+    fromMs: historyStart.getTime(),
+    untilMs: now.getTime(),
+    isFailing: isFailing ? buildFaultCheck(line, now) : () => false,
+  });
+  const shortCyclingPeriods = listPeriods(
+    line.timezone,
+    historyStart,
+    now,
+  ).filter((period) => period.kind === 'short-cycling');
+  const shortCyclingRuns = shortCyclingPeriods.flatMap((period) =>
+    simulatePeriod(period, SHORT_CYCLING, seedRandomFor(line, period)),
+  );
+  const runsAroundShortCycling = shortCyclingPeriods.reduce(
+    cutOutPeriod,
+    thermostatRuns,
+  );
+  return mergeTouchingRuns(
+    [...runsAroundShortCycling, ...shortCyclingRuns].sort(
+      (first, second) => first.fromMs - second.fromMs,
+    ),
+  );
+}
+
+function buildFaultCheck(line, now) {
+  const faultNight = findFaultNight(now, line.timezone);
+  return (atMs) => atMs >= faultNight.fromMs && atMs < faultNight.toMs;
+}
+
+function cutOutPeriod(runs, period) {
+  return runs.flatMap((run) => {
+    if (run.toMs <= period.fromMs || run.fromMs >= period.toMs) return [run];
+    const pieces = [];
+    if (run.fromMs < period.fromMs) {
+      pieces.push({ fromMs: run.fromMs, toMs: period.fromMs });
+    }
+    if (run.toMs > period.toMs) {
+      pieces.push({ fromMs: period.toMs, toMs: run.toMs });
+    }
+    return pieces;
+  });
 }
 
 function simulateRuns(line, historyStart, now) {
@@ -80,10 +199,14 @@ function simulateRuns(line, historyStart, now) {
     simulatePeriod(
       period,
       dutyFor(period.kind, duty),
-      seededRandom(`${line.nodeId}:${line.pin}:${period.key}`),
+      seedRandomFor(line, period),
     ),
   );
   return mergeTouchingRuns(runs).filter((run) => run.fromMs < now.getTime());
+}
+
+function seedRandomFor(line, period) {
+  return seededRandom(`${line.nodeId}:${line.pin}:${period.key}`);
 }
 
 function dutyFor(kind, duty) {
