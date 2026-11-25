@@ -106,6 +106,7 @@ if lsof -ti tcp:7000 -sTCP:LISTEN >/dev/null 2>&1; then
   exit 1
 fi
 
+fetch_main_and_tags "$HERE"
 RELEASE_ID="$(describe_release_id "$HERE")"
 PRODUCT_VERSION="$("$HERE/tools/describe-product-version.sh" "$HERE")"
 PREVIOUS_RELEASE_ID="$(read_release_behind "$HOST" current)"

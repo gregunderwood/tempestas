@@ -105,6 +105,18 @@ describe('describe-product-version.sh', () => {
     assert.equal(describeProductVersion(repository), `1.3.0-dev.1+1.g${head}`);
   });
 
+  it('takes the highest version reached, not the nearest or an annotated tag', () => {
+    const repository = makeRepository();
+    commit(repository, 'first');
+    runGit(repository, 'tag', 'v1.4.0');
+    runGit(repository, 'tag', '-a', '-m', 'dev', 'v1.4.0-dev.1');
+    assert.equal(describeProductVersion(repository), '1.4.0');
+    commit(repository, 'second');
+    runGit(repository, 'tag', 'v1.3.9');
+    const head = commit(repository, 'third');
+    assert.equal(describeProductVersion(repository), `1.4.0+2.g${head}`);
+  });
+
   it('refuses a shallow clone, whose tags and counts are missing', () => {
     const repository = makeRepository();
     commit(repository, 'first');

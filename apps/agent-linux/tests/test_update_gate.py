@@ -355,6 +355,7 @@ def test_a_prune_skips_a_release_another_prune_removed_first(tmp_path, monkeypat
 
     def stat_after_another_prune(path, *arguments, **options):
         if path == vanished:
+            shutil.rmtree(vanished, ignore_errors=True)
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(path))
         return real_stat(path, *arguments, **options)
 
@@ -363,7 +364,8 @@ def test_a_prune_skips_a_release_another_prune_removed_first(tmp_path, monkeypat
 
     removed = layout.prune_releases(protected={RUNNING_RELEASE})
 
-    assert removed[-1] == older_releases[0]
+    assert older_releases[0] not in removed
+    assert not vanished.exists()
 
 
 def test_an_unreadable_pending_record_is_dropped_rather_than_stopping_the_start(tmp_path):

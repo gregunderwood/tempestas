@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tools/describe-product-version.sh [repository]
-# Prints the last vX.Y.Z or vX.Y.Z-<pre-release> tag's version, +N.g<commit> when N commits past it, and dirty with uncommitted changes.
+# Prints the highest reachable vX.Y.Z or vX.Y.Z-<pre-release> tag's version, +N.g<commit> when N commits past it, and dirty with uncommitted changes.
 
 set -euo pipefail
 shopt -s inherit_errexit
@@ -21,29 +21,26 @@ require_full_history() {
   fi
 }
 
-describe_from_tag() {
-  git -C "$REPOSITORY" describe --tags --match "$RELEASE_TAG_PATTERN" --abbrev="$COMMIT_ID_LENGTH" --long 2>/dev/null
+# The highest version reachable, not the nearest tag; versionsort.suffix puts 1.4.0-dev.1 below 1.4.0.
+find_highest_release_tag() {
+  git -C "$REPOSITORY" -c versionsort.suffix=- tag --merged HEAD --list "$RELEASE_TAG_PATTERN" --sort=-v:refname |
+    head -n 1
 }
 
-describe_without_tag() {
-  local commit_count commit
-  commit_count="$(git -C "$REPOSITORY" rev-list --count HEAD)"
+describe_version() {
+  local tag="$1" tagged_version commits_past commit
+  if [ -z "$tag" ]; then
+    tagged_version="$UNTAGGED_VERSION"
+    commits_past="$(git -C "$REPOSITORY" rev-list --count HEAD)"
+  else
+    tagged_version="${tag#v}"
+    commits_past="$(git -C "$REPOSITORY" rev-list --count "$tag..HEAD")"
+  fi
   commit="$(git -C "$REPOSITORY" rev-parse --short="$COMMIT_ID_LENGTH" HEAD)"
-  echo "v$UNTAGGED_VERSION-$commit_count-g$commit"
-}
-
-# Splits describe's v<version>-<commits past>-g<commit> on its last two dashes, as a pre-release has dashes of its own.
-format_version() {
-  local description="$1"
-  local commit="${description##*-}"
-  local tag_and_commits_past="${description%-*}"
-  local commits_past="${tag_and_commits_past##*-}"
-  local tagged_version="${tag_and_commits_past%-*}"
-  tagged_version="${tagged_version#v}"
-  if [ "$commits_past" = 0 ]; then
+  if [ "$commits_past" = 0 ] && [ -n "$tag" ]; then
     echo "$tagged_version"
   else
-    echo "$tagged_version+$commits_past.$commit"
+    echo "$tagged_version+$commits_past.g$commit"
   fi
 }
 
@@ -59,5 +56,4 @@ mark_if_dirty() {
 }
 
 require_full_history
-description="$(describe_from_tag)" || description="$(describe_without_tag)"
-mark_if_dirty "$(format_version "$description")"
+mark_if_dirty "$(describe_version "$(find_highest_release_tag)")"

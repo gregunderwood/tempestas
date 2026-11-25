@@ -25,13 +25,18 @@ RELEASE_SYSTEMCTL_LINES=(
   "restart tempestas-server.service"
 )
 
+# Both the release ID and the product version read it, so a tag made on another machine counts.
+fetch_main_and_tags() {
+  local repository="$1"
+  if ! git -C "$repository" fetch --quiet --tags origin main 2>/dev/null; then
+    echo "Could not fetch origin/main and its tags, so the release ID and product version use the last fetch." >&2
+  fi
+}
+
 # <UTC time to the second>-<commit>, marked -dev off a clean origin/main, as the agents are.
 describe_release_id() {
   local repository="$1"
   local stamp commit released_commit
-  if ! git -C "$repository" fetch --quiet --tags origin main 2>/dev/null; then
-    echo "Could not fetch origin/main and its tags, so the release ID and product version use the last fetch." >&2
-  fi
   stamp="$(date -u +%Y%m%d-%H%M%S)"
   commit="$(git -C "$repository" rev-parse --short="$COMMIT_ID_LENGTH" HEAD)"
   released_commit="$(git -C "$repository" rev-parse --short="$COMMIT_ID_LENGTH" --verify --quiet origin/main || true)"

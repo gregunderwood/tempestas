@@ -124,12 +124,15 @@ class ReleaseLayout:
     def prune_releases(self, protected: set[str], should_wait: bool = True) -> list[str]:
         # Moved aside under the lock, so no switch can pick one meanwhile.
         with self.hold_switch_lock(should_wait=should_wait):
-            removed = self._choose_releases_to_prune(protected)
-            doomed = [self._move_aside_for_pruning(release) for release in removed]
+            moved_aside = {
+                release: self._move_aside_for_pruning(release)
+                for release in self._choose_releases_to_prune(protected)
+            }
+        pruned = {release: aside for release, aside in moved_aside.items() if aside is not None}
         # Deleted outside the lock, so a slow card never blocks a switch.
-        for path in doomed:
-            shutil.rmtree(path, ignore_errors=True)
-        return removed
+        for aside in pruned.values():
+            shutil.rmtree(aside, ignore_errors=True)
+        return list(pruned)
 
     def _choose_releases_to_prune(self, protected: set[str]) -> list[str]:
         finished = [
@@ -142,10 +145,13 @@ class ReleaseLayout:
         kept.add(self.read_current_release())
         return [entry.name for entry in newest_first if entry.name not in kept]
 
-    def _move_aside_for_pruning(self, release: str) -> Path:
+    def _move_aside_for_pruning(self, release: str) -> Path | None:
         aside = self.releases / f"{PRUNING_PREFIX}{release}"
         shutil.rmtree(aside, ignore_errors=True)
-        self.locate_release(release).rename(aside)
+        try:
+            self.locate_release(release).rename(aside)
+        except FileNotFoundError:
+            return None
         return aside
 
     def remove_unfinished_downloads(self) -> list[str]:
