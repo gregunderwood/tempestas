@@ -71,33 +71,11 @@ Work is tracked on GitHub (`gregunderwood/tempestas`, private) with `gh`.
   done. A bug found mid-task becomes its own issue rather than a silent detour.
 - **A branch per issue**, off `main`: `<issue#>-<short-slug>`, e.g. `12-zones-page`.
 - **Related issues share a milestone**, and each one closes from its own PR: one PR per step.
-- **A PR that closes it.** The gate passes before the PR is opened, not after. The body is:
-  - `Closes #12.` then a paragraph saying why the change was needed.
-  - `## What changed`: bullets, each led by a bold sentence.
-  - `## Verified locally`: the gate, plus anything run on real hardware.
-  - `## After merge`: what still has to happen (deploys, hardware steps). Say what is
-    deliberately left out, and which issue tracks it.
-- **A PR that changes what a page shows posts before-and-after screenshots before review**, at
-  desktop and phone width: `tools/pr-screenshots.sh <pr> <page>...` (e.g.
-  `tools/pr-screenshots.sh 138 dashboard nodes`), run from the PR's pushed branch. Before is the
-  PR's base, after is its head. Reviewers compare the two. A state the fake driver cannot produce,
-  such as a follower, is shot with the e2e test's stubbed API and fake socket instead. See
-  [docs/Testing.md](docs/Testing.md#screenshots-on-a-pr).
-- **A PR about user interaction, or one that adds or changes a stack spec, also posts a video.**
-  Run `tools/pr-video.sh <pr>` from the PR's pushed branch. Then publish the player page it
-  writes as an artifact, and run `tools/pr-video.sh --player-url <url> <pr>`. The comment gives
-  each spec's GIF inline, then a link to the player, then a link to download the mp4. See
-  [docs/Testing.md](docs/Testing.md#video-of-a-pr).
-- **Review in rounds until only nits remain.** A reviewer who did not write the change posts one
-  comment headed `Review round N`, rating each finding **blocking** (wrong behaviour, a safety
-  regression, the issue not done, the gate failing), **important** (should be fixed before merge
-  but is not a bug, such as a missing spec for a real case) or **nit** (style or taste). The author
-  fixes every blocking and important finding or says why it is declined, runs the gate and pushes,
-  and the next round reviews afresh, up to three rounds.
-- **Once a round finds only nits, clean them up without another review.** Fix each nit that is
-  cheap and clearly right, run the gate, push, and post one comment headed `Nits addressed`
-  listing each nit as fixed or left, with why. A nit is left only if it was already declined for
-  a sound reason, would widen the PR's scope, or is wrong. The PR is then ready to merge.
+- **Opening a PR follows the `open-pr` skill** in [.claude/skills/open-pr](.claude/skills/open-pr/SKILL.md):
+  the gate, the PR body, before-and-after screenshots for a page change, and a video for an
+  interaction change.
+- **Reviewing one follows the `review-round` skill** in [.claude/skills/review-round](.claude/skills/review-round/SKILL.md):
+  rated rounds until only nits remain, then a `Nits addressed` clean-up with no further review.
 - **Merging is the user's call.** Do not merge your own PR; do not push to `main`.
 - Deploying to elantris from a branch is fine for a bench test; say so in the PR, because the
   box is then running code `main` does not have.
