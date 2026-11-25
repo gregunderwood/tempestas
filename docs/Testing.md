@@ -141,7 +141,8 @@ PR's head commit or if tracked files have changes. It then:
   driven over its DevTools protocol by `tools/lib/full-page-screenshot.mjs`. The phone shot is a
   mobile viewport at twice the scale. Each waits for the page to settle first, as Chrome's
   `--virtual-time-budget` does: its clock runs for 8 s, paused while any request is pending. A
-  long page makes a tall image; the comment shows it small and links to the full-size file.
+  long page makes a tall image; the comment shows it small and links to the full-size file. It
+  needs Node 22.4 or later, for the built-in `WebSocket`.
 - **adds a commit to the `pr-screenshots` branch** with the images in `<pr>/`, through a temporary
   worktree, so no checkout changes branch. If another run pushed first, it replays its commit on
   top and tries again.

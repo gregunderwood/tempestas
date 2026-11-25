@@ -33,6 +33,8 @@ BASE_SHA=""
 BASE_CHECKOUT=""
 CHECKOUT=""
 DATABASE_NAME=""
+DESKTOP_WIDTH=""
+PHONE_WIDTH=""
 
 main() {
   parse_arguments "$@"
@@ -162,10 +164,9 @@ take_screenshot() {
   echo "  $page, $form_factor, $label"
 }
 
-form_factor_width() {
-  local form_factor=$1
-  SCRIPT="$FULL_PAGE_SCREENSHOT" FORM_FACTOR="$form_factor" node --input-type=module \
-    -e 'const { FORM_FACTORS } = await import(process.env.SCRIPT); console.log(FORM_FACTORS[process.env.FORM_FACTOR].width);'
+read_form_factor_widths() {
+  read -r DESKTOP_WIDTH PHONE_WIDTH < <(SCRIPT="$FULL_PAGE_SCREENSHOT" node --input-type=module \
+    -e 'const { FORM_FACTORS } = await import(process.env.SCRIPT); console.log(FORM_FACTORS.desktop.width, FORM_FACTORS.phone.width);')
 }
 
 image_name() {
@@ -179,6 +180,7 @@ publish_screenshots() {
 
 post_comment() {
   say "Posting the screenshots on PR #$PULL_REQUEST"
+  read_form_factor_widths
   write_comment_body >"$WORK_DIR/comment.md"
   post_marked_comment "$COMMENT_MARKER" "$WORK_DIR/comment.md"
 }
@@ -216,13 +218,13 @@ write_before_and_after_table() {
   local image_base=$1 page=$2
   echo "| | Before | After |"
   echo "| --- | --- | --- |"
-  echo "| Desktop, $(form_factor_width desktop) px | $(image_tag "$image_base" "$page" desktop before "$SIDE_BY_SIDE_DESKTOP_WIDTH") | $(image_tag "$image_base" "$page" desktop after "$SIDE_BY_SIDE_DESKTOP_WIDTH") |"
-  echo "| Phone, $(form_factor_width phone) px | $(image_tag "$image_base" "$page" phone before "$SIDE_BY_SIDE_PHONE_WIDTH") | $(image_tag "$image_base" "$page" phone after "$SIDE_BY_SIDE_PHONE_WIDTH") |"
+  echo "| Desktop, $DESKTOP_WIDTH px | $(image_tag "$image_base" "$page" desktop before "$SIDE_BY_SIDE_DESKTOP_WIDTH") | $(image_tag "$image_base" "$page" desktop after "$SIDE_BY_SIDE_DESKTOP_WIDTH") |"
+  echo "| Phone, $PHONE_WIDTH px | $(image_tag "$image_base" "$page" phone before "$SIDE_BY_SIDE_PHONE_WIDTH") | $(image_tag "$image_base" "$page" phone after "$SIDE_BY_SIDE_PHONE_WIDTH") |"
 }
 
 write_after_only_table() {
   local image_base=$1 page=$2
-  echo "| Desktop, $(form_factor_width desktop) px | Phone, $(form_factor_width phone) px |"
+  echo "| Desktop, $DESKTOP_WIDTH px | Phone, $PHONE_WIDTH px |"
   echo "| --- | --- |"
   echo "| $(image_tag "$image_base" "$page" desktop after "$AFTER_ONLY_DESKTOP_WIDTH") | $(image_tag "$image_base" "$page" phone after "$AFTER_ONLY_PHONE_WIDTH") |"
 }

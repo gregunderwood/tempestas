@@ -49,10 +49,10 @@ export function buildPageListUrl(devToolsUrl) {
   return `http://${hostname}:${port}/json/list`;
 }
 
-// At least the window's height, so a short page still fills the frame.
 export function fitViewportToContent(formFactor, layoutMetrics) {
   const contentHeight = Math.ceil(layoutMetrics.cssContentSize.height);
-  return { ...formFactor, height: Math.max(formFactor.height, contentHeight) };
+  const atLeastWindowHeight = Math.max(formFactor.height, contentHeight);
+  return { ...formFactor, height: atLeastWindowHeight };
 }
 
 class DevToolsSession {
@@ -150,11 +150,11 @@ async function captureFullPage(chrome, formFactor, url) {
     );
     await session.send('Emulation.setDeviceMetricsOverride', fullPage);
     await runVirtualTime(session, RELAYOUT_SETTLE_MILLISECONDS);
-    const { data } = await session.send('Page.captureScreenshot', {
+    const { data: pngBase64 } = await session.send('Page.captureScreenshot', {
       format: 'png',
       captureBeyondViewport: true,
     });
-    return Buffer.from(data, 'base64');
+    return Buffer.from(pngBase64, 'base64');
   } finally {
     session.close();
   }
@@ -212,14 +212,14 @@ async function findPageSocketUrl(devToolsUrl) {
 }
 
 async function withTimeout(promise, milliseconds, message) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), milliseconds);
+  let timeoutTimer;
+  const timeout = new Promise((_resolve, reject) => {
+    timeoutTimer = setTimeout(() => reject(new Error(message)), milliseconds);
   });
   try {
     return await Promise.race([promise, timeout]);
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timeoutTimer);
   }
 }
 
