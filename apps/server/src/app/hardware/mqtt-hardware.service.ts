@@ -271,14 +271,14 @@ export class MqttHardwareService
     client.on('close', () => this.logger.warn('Broker connection closed'));
   }
 
-  // Every node answers `online` with a hello, which is not retained and is lost without the SUBACK.
+  // A leader's `online` draws a hello from every node; hellos are not retained, so they are lost without the SUBACK.
   private async subscribeThenAnnounceOnline(client: MqttClient): Promise<void> {
     const connectNumber = ++this.connectCount;
     await this.subscribeToAllNodes(client);
     // Queued while disconnected, it would replay ahead of the next connect's subscribe.
     if (!this.isStillConnectedAs(client, connectNumber)) return;
     // Even after a refused subscribe: the server is connected and heartbeating, and a retained `offline` says not.
-    await this.announceServerOnline();
+    await this.announceServerStatus(client, 'online');
   }
 
   private isStillConnectedAs(
@@ -674,12 +674,6 @@ export class MqttHardwareService
     for (const pinKey of this.lastReports.keys()) {
       if (isPinKeyOfNode(pinKey, nodeId)) this.lastReports.delete(pinKey);
     }
-  }
-
-  private async announceServerOnline(): Promise<void> {
-    const client = this.client;
-    if (!client) return;
-    await this.announceServerStatus(client, 'online');
   }
 
   // Leader only, like the will: a follower's retained status would speak for the server nodes obey.

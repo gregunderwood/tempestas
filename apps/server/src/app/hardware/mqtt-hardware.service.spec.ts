@@ -114,6 +114,7 @@ describe('MqttHardwareService on a broker connect', () => {
 
 describe('MqttHardwareService server status by role', () => {
   let brokerClient: FakeBrokerClient;
+  let startedService: MqttHardwareService | undefined;
 
   function startService(role: string): MqttHardwareService {
     const service = new MqttHardwareService(
@@ -121,6 +122,7 @@ describe('MqttHardwareService server status by role', () => {
       new FixedClock(NOW),
     );
     service.onApplicationBootstrap();
+    startedService = service;
     return service;
   }
 
@@ -138,6 +140,11 @@ describe('MqttHardwareService server status by role', () => {
     );
   });
 
+  afterEach(async () => {
+    await startedService?.onModuleDestroy();
+    startedService = undefined;
+  });
+
   it('a leader announces online on connect and offline on a clean shutdown', async () => {
     const service = startService('leader');
     await connectAndAcknowledgeSubscribe();
@@ -148,11 +155,10 @@ describe('MqttHardwareService server status by role', () => {
   });
 
   it("a follower announces nothing on connect, so it cannot cover a crashed leader's will", async () => {
-    const service = startService('follower');
+    startService('follower');
     await connectAndAcknowledgeSubscribe();
 
     expect(brokerClient.hasAnnouncedServerStatus()).toBe(false);
-    await service.onModuleDestroy();
   });
 
   it('a follower announces nothing on a clean shutdown, so its restart does not tell nodes the server is gone', async () => {

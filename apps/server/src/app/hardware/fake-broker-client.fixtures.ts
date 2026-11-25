@@ -63,7 +63,7 @@ export class FakeBrokerClient extends EventEmitter {
   }
 
   hasAnnouncedServerStatus(): boolean {
-    return this.publishedTopics.includes(mqttTopics.serverStatus);
+    return this.publishedServerStates.length > 0;
   }
 }
 

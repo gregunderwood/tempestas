@@ -228,7 +228,9 @@ What a follower's server does today, in `MqttHardwareService`:
 - **It publishes no `server/status` at all**, neither `online` on connect nor `offline` on a clean
   shutdown. A follower restarted for a deploy would otherwise tell every node the server is gone,
   and one starting up would cover a crashed leader's will with an `online` nobody stands behind.
-  The topic speaks for the leader alone.
+  The topic speaks for the leader alone. The cost: `online` is also what draws a hello from every
+  node, and hellos are not retained, so a follower that boots learns of new nodes, capabilities
+  and agent versions only as each node reconnects or the leader next announces `online`.
 - **Promotion and demotion are a restart with the other `CONTROLLER_ROLE`.** The role is read once
   at boot. A promoted box connects as leader and announces `online`. A demoted box stops as leader,
   so its last word is a truthful `offline`, and comes back as a follower that leaves the topic
