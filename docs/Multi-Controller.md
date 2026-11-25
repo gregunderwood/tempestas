@@ -196,8 +196,8 @@ Cheap now, expensive later, and all of them matter even with a single box:
    A plug that is factory reset or replaced then keeps its role binding and its history instead of
    being deleted and recreated.
 3. **Record reachability class and owner** per device, per the table above.
-4. **Treat a device's own safe-state timer as _verified_ config.** Tasmota's `PulseTime` is the only
-   layer that survives a partition, and a factory reset clears it silently. Config must be reconciled
+4. **Treat a device's own dead-man as _verified_ config.** It is the only layer that survives a
+   partition, and a factory reset clears it silently. Config must be reconciled
    against the device, not merely replicated between boxes.
 5. **Inventory is not devices.** A discovered thing is a proposal until adopted.
 6. **Verify `onLevel` by driving it, not by typing it.** It is the field that lights the MH lamp if
