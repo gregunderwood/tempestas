@@ -21,7 +21,10 @@ so a dead node leaves them **on**, the same as patji in the [Pumphouse](../Pumph
 > Slots bench-tested on braize (2026-11-24) against elantris, with bundles served from a laptop and
 > installed from the REPL with the watchdog armed: the USB deploy onto slots, a 17-file install in
 > about 10 s, a good release kept by its gate, and a release that crashes on start rolled back after
-> 3 boots, each outcome sent and cleared. An update sent by the server has not run on a board yet.
+> 3 boots, each outcome sent and cleared. The bootloader's 10-minute timer left a kept slot alone
+> and reset a release that never reached the broker at each deadline, rolling it back after 3 boots.
+> Safe mode stopped at the REPL when BOOTSEL was pressed during the grace. An update sent by the
+> server has not run on a board yet.
 
 ## Key files
 
