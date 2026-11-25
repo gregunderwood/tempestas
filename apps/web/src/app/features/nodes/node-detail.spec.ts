@@ -17,6 +17,8 @@ import type {
 import {
   NO_UPDATE_SUMMARY,
   NodeStatus,
+  NodeUpdateOutcome,
+  type NodeUpdate,
   type NodeUpdateRequest,
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
@@ -34,6 +36,18 @@ const THROTTLE_WINDOW_AND_BOUNDARY_TIMEOUT = 2;
 const SCREEN_OPENED_AT = new Date('2026-09-10T22:39:50.000Z');
 const BROWSER_CLOCK_AHEAD_MILLISECONDS = 60 * 60 * 1000;
 const TEN_SECONDS_MILLISECONDS = 10_000;
+
+const inProgressUpdate: NodeUpdate = {
+  id: 'update-1',
+  fromVersion: '1.1.0',
+  toVersion: '1.1.1',
+  isRollBack: false,
+  lastState: null,
+  outcome: NodeUpdateOutcome.InProgress,
+  reason: null,
+  startedAt: '2026-09-10T22:40:00.000Z',
+  finishedAt: null,
+};
 
 let statsRequestCount = 0;
 let realtime: FakeRealtime;
@@ -154,6 +168,7 @@ function renderNodeDetail(
     live?: Record<string, Reading>;
     devices?: Device[];
     node?: Node;
+    fetchNode?: () => Node;
     slug?: string;
     updateNode?: (id: string, request: NodeUpdateRequest) => Observable<Node>;
   } = {},
@@ -170,7 +185,7 @@ function renderNodeDetail(
       {
         provide: ApiService,
         useValue: {
-          nodes: () => of([options.node ?? node()]),
+          nodes: () => of([options.fetchNode?.() ?? options.node ?? node()]),
           latestReadings: () => of(options.latest ?? [reading()]),
           dayNightStats: () => {
             statsRequestCount++;
@@ -222,26 +237,55 @@ describe('NodeDetail', () => {
     expect(updateNode).toHaveBeenCalledWith('n1', { version: '1.1.1' });
   });
 
-  it('says it is sending until the server answers', async () => {
+  async function confirmUpdate(page: HTMLElement): Promise<void> {
+    const appRef = TestBed.inject(ApplicationRef);
+    clickButton(page, 'Update to 1.1.1');
+    await appRef.whenStable();
+    clickButton(page, 'Update to 1.1.1');
+    await appRef.whenStable();
+  }
+
+  it('says it is sending until the node shows the update in progress', async () => {
+    const answer = new Subject<Node>();
+    const offered = node({ availableUpdate: '1.1.1' });
+    let fetched = offered;
+    const page = renderNodeDetail({
+      node: offered,
+      fetchNode: () => fetched,
+      updateNode: () => answer,
+    });
+
+    await confirmUpdate(page);
+    expect(page.textContent).toContain('Sending…');
+
+    fetched = node({
+      availableUpdate: '1.1.1',
+      updateSummary: {
+        ...NO_UPDATE_SUMMARY,
+        lastUpdate: inProgressUpdate,
+      },
+    });
+    answer.next(fetched);
+    answer.complete();
+    await TestBed.inject(ApplicationRef).whenStable();
+
+    expect(page.textContent).not.toContain('Sending…');
+    expect(page.textContent).toContain('Update to 1.1.1:');
+  });
+
+  it('offers the button again when the request fails', async () => {
     const answer = new Subject<Node>();
     const page = renderNodeDetail({
       node: node({ availableUpdate: '1.1.1' }),
       updateNode: () => answer,
     });
-    const appRef = TestBed.inject(ApplicationRef);
 
-    clickButton(page, 'Update to 1.1.1');
-    await appRef.whenStable();
-    clickButton(page, 'Update to 1.1.1');
-    await appRef.whenStable();
-
-    expect(page.textContent).toContain('Sending…');
-
-    answer.next(node());
-    answer.complete();
-    await appRef.whenStable();
+    await confirmUpdate(page);
+    answer.error(new Error('409'));
+    await TestBed.inject(ApplicationRef).whenStable();
 
     expect(page.textContent).not.toContain('Sending…');
+    expect(page.textContent).toContain('Update to 1.1.1');
   });
 
   it('names itself in the top bar, with its kind and whether it is online', () => {

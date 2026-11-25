@@ -15,7 +15,6 @@ import {
   BehaviorSubject,
   combineLatest,
   filter,
-  finalize,
   switchMap,
   tap,
   throttleTime,
@@ -43,6 +42,11 @@ import { metricsFor, nodeMetrics } from '../../shared/metrics';
 import { LONGEST_TIMEOUT_MILLISECONDS } from '../../shared/time';
 import { isHeldOffByInterlock } from '../devices/device-hold';
 import { NodeUpdateCard, type UpdateConfirmation } from './node-update-card';
+
+interface SentUpdate {
+  nodeId: string;
+  lastUpdateIdBefore: string | null;
+}
 
 // Each refresh is three periods of aggregates on an SD card; a reading arrives every 10 s.
 export const STATS_REFRESH_THROTTLE_MILLISECONDS = 60_000;
@@ -136,7 +140,7 @@ function describeNodeHeading(slug: string, node: Node | null) {
     @if (node(); as shownNode) {
       <temp-node-update-card
         [node]="shownNode"
-        [isSending]="sendingUpdateTo() === shownNode.id"
+        [isSending]="isSendingUpdate(shownNode)"
         (confirmed)="sendUpdate(shownNode, $event)"
       />
     }
@@ -432,7 +436,7 @@ export class NodeDetail {
   private readonly liveNodes = injectLiveNodes();
   private readonly nodes = this.liveNodes.nodes;
   protected readonly stats = signal<DayNightStats | null>(null);
-  protected readonly sendingUpdateTo = signal<string | null>(null);
+  private readonly sentUpdate = signal<SentUpdate | null>(null);
   protected readonly isHeldOffByInterlock = isHeldOffByInterlock;
 
   protected readonly node = computed(
@@ -489,10 +493,22 @@ export class NodeDetail {
       action === 'update'
         ? this.api.updateNode(node.id, { version })
         : this.api.rollBackNode(node.id, { version });
-    this.sendingUpdateTo.set(node.id);
+    this.sentUpdate.set({
+      nodeId: node.id,
+      lastUpdateIdBefore: node.updateSummary.lastUpdate?.id ?? null,
+    });
     refreshAfterSuccess(
-      request.pipe(finalize(() => this.sendingUpdateTo.set(null))),
+      request.pipe(tap({ error: () => this.sentUpdate.set(null) })),
       this.liveNodes.refresh,
+    );
+  }
+
+  // Until the node itself shows the new update, or the button would come back before its progress.
+  protected isSendingUpdate(node: Node): boolean {
+    const sent = this.sentUpdate();
+    return (
+      sent?.nodeId === node.id &&
+      (node.updateSummary.lastUpdate?.id ?? null) === sent.lastUpdateIdBefore
     );
   }
 

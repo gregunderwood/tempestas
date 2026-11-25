@@ -159,7 +159,7 @@ export function applyUpdateStatus(
   }
 }
 
-// Counted from the last status, so a slow download that still reports is not given up on.
+// Counted from the last status, so each step the node reports gets its own five minutes.
 export function isStalled(update: NodeUpdateEntity, now: Date): boolean {
   return (
     update.outcome === NodeUpdateOutcome.InProgress &&

@@ -195,7 +195,7 @@ export class NodeUpdatesService implements OnModuleInit, OnModuleDestroy {
     if (!bundle || !('url' in this.releasesAddress)) {
       throw new ConflictException({
         code: ApiErrorCode.UpdateNotAvailable,
-        message: `${agentName} ${version} is not offered.`,
+        message: `${agentName ?? 'This agent'} ${version} is not offered.`,
       });
     }
     return {

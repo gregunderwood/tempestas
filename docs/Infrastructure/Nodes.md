@@ -142,21 +142,23 @@ bundles it comes from are listed at `GET /api/agent-releases`; see
   is still in progress, so a bad release cannot take out every node at once. Two quick presses are
   queued, so the second sees the first.
 - **Only an admitted, online node, from the leader**, and only once `AGENT_RELEASES_URL` is set to
-  a plain http(s) server address, with no path, query or user name (`409 UPDATES_NOT_CONFIGURED`): it is the address the node downloads the
-  bundle from, as the node sees the server. Online is the derived `online` the page shows, not the
-  stored flag, so a node whose agent hung is not sent an update. `updateSummary.blockedBecause` says
-  which of these stands in the way, so the page disables the button and says why before anyone
-  presses it.
-- **A node that can never take an update from here says why** in `updateSummary.notUpdatableBecause`:
-  an agent too old to name itself, one that is not an agent this server bundles, or one before
-  contract 1.1. The page shows that instead of "Up to date."
+  a plain http(s) server address, with no path, query or user name
+  (`409 UPDATES_NOT_CONFIGURED`): it is the address the node downloads the bundle from, as the
+  node sees the server. Online is the derived `online` the page shows, not the stored flag, so a
+  node whose agent hung is not sent an update. `updateSummary.blockedBecause` says which of these
+  stands in the way, so the page disables the button and says why before anyone presses it.
+- **A node that can never take an update from here says why** in
+  `updateSummary.notUpdatableBecause`: an agent too old to name itself, one that is not an agent
+  this server bundles, or one before contract 1.1. The page shows that instead of "Up to date."
 - **Every update is a row in `node_updates`**, keyed by the command's `id`: from and to versions,
   whether it was a roll back, the last state the node reported, the outcome and its reason. A
   status is matched by `id` and by the node it came from, so a node cannot report on another's
   update. `updateSummary.lastUpdate` is the newest row.
 - **Five minutes without a word from the node is `timed-out`**, counted from the last status, with
-  the last state heard as the reason, and frees the next update. A slow download that still
-  reports is not cut off. The node may still finish: a final state it sends later replaces the
+  the last state heard as the reason, and frees the next update. Each step the node reports
+  (downloading, verifying, installing, restarting) gets its own five minutes. The agent sends
+  nothing during the download itself, so a download slower than that still times out. The node
+  may still finish: a final state it sends later replaces the
   time-out, since the node knows what happened and the server only stopped waiting.
 - **Roll back** sends the version the node ran before its last healthy update, while that bundle
   is still offered. It is offered only straight after that update: once the node has moved on, or
