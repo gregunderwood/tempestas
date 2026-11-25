@@ -421,6 +421,18 @@ describe('ReportsPage', () => {
       ]);
     });
 
+    it('names a node once when its name is its slug', () => {
+      const report = nodeHealthReport();
+      report.nodes[0] = { ...report.nodes[0], nodeName: 'patji', gaps: [] };
+      const { page } = renderReportsPage([NEVER], {
+        nodeHealth: [of(report)],
+      });
+      expect(
+        page.querySelector('temp-node-health-card mat-card-subtitle')
+          ?.textContent,
+      ).toBe('');
+    });
+
     it('says stale-sensor holds are not recorded', () => {
       const { page } = renderReportsPage([NEVER]);
       expect(page.textContent).toContain(

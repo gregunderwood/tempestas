@@ -68,8 +68,9 @@ export class NodeHealthCard {
 
   protected readonly gapMinutes = NODE_HEALTH_GAP_MINUTES;
   protected readonly subtitle = computed(() => {
-    const timeWithoutReadings = describeTimeWithoutReadings(this.node());
-    return [this.node().nodeId, timeWithoutReadings]
+    const node = this.node();
+    const slugUnlessName = node.nodeId === node.nodeName ? null : node.nodeId;
+    return [slugUnlessName, describeTimeWithoutReadings(node)]
       .filter(Boolean)
       .join(' · ');
   });
