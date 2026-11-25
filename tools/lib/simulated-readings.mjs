@@ -5,6 +5,11 @@ import {
   startOfLocalDay,
 } from './history-window.mjs';
 import { seededRandom } from './seeded-random.mjs';
+import {
+  chooseOutageNode,
+  findOutage,
+  isDuringOutage,
+} from './simulated-outage.mjs';
 import { findNightColdness } from './simulated-weather.mjs';
 
 export const READING_INTERVAL_MINUTES = 1;
@@ -41,10 +46,14 @@ const CO2_NOISE_RANGE_PPM = 20;
 
 /** @returns {ProbeReadings[]} */
 export function buildSimulatedReadings({ probes, now }) {
-  return probes.map((probe) => buildProbeReadings(probe, now));
+  const outageNodeId = chooseOutageNode(probes.map((probe) => probe.nodeId));
+  return probes.map((probe) =>
+    buildProbeReadings(probe, now, probe.nodeId === outageNodeId),
+  );
 }
 
-function buildProbeReadings(probe, now) {
+// A node that drops out sends nothing, so its night of outage is a gap in the readings too.
+function buildProbeReadings(probe, now, hasOutage) {
   const { historyStart, minutes } = simulateProbeClimate(probe, now);
   const random = seededRandom(`${probe.nodeId}:${probe.sensorId}:readings`);
   const rows = minutes.map((minute, index) => ({
@@ -58,7 +67,11 @@ function buildProbeReadings(probe, now) {
     nodeSeq: index + 1,
     createdAt: minute.at,
   }));
-  return { probe, historyStart, rows };
+  const outage = findOutage(now, probe.timezone);
+  const sentRows = hasOutage
+    ? rows.filter((row) => !isDuringOutage(row.createdAt, outage))
+    : rows;
+  return { probe, historyStart, rows: sentRows };
 }
 
 /**

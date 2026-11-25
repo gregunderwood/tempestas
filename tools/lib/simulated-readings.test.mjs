@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { DateTime } from 'luxon';
 import { findHistoryStart } from './history-window.mjs';
 import { buildClimate, buildSimulatedReadings } from './simulated-readings.mjs';
+import { findOutage, isDuringOutage } from './simulated-outage.mjs';
 import { FREEZING_NIGHTS_DAYS_AGO } from './simulated-weather.mjs';
 
 const TIMEZONE = 'America/Vancouver';
@@ -31,6 +32,15 @@ function probe(overrides = {}) {
 function readingsFor(overrides = {}) {
   const [readings] = buildSimulatedReadings({
     probes: [probe(overrides)],
+    now: NOW,
+  });
+  return readings;
+}
+
+// The outage falls on the first node by slug, so the probe under test is given one ahead of it.
+function readingsBesideTheOutageNode() {
+  const [, readings] = buildSimulatedReadings({
+    probes: [probe({ nodeId: 'a-outage-node' }), probe()],
     now: NOW,
   });
   return readings;
@@ -73,7 +83,7 @@ function averageAtHour(rows, hour) {
 
 describe('buildSimulatedReadings', () => {
   it('writes one reading a minute from local midnight thirty days back to the first real reading', () => {
-    const { historyStart, rows } = readingsFor();
+    const { historyStart, rows } = readingsBesideTheOutageNode();
     assert.equal(
       historyStart.getTime(),
       findHistoryStart(NOW, TIMEZONE).getTime(),
@@ -84,7 +94,7 @@ describe('buildSimulatedReadings', () => {
   });
 
   it('numbers the readings in order, on the probe they belong to', () => {
-    const { rows } = readingsFor();
+    const { rows } = readingsBesideTheOutageNode();
     rows.forEach((row, index) => {
       assert.equal(row.nodeSeq, index + 1);
       assert.equal(row.nodeUuid, '00000000-0000-0000-0000-0000000000aa');
@@ -152,6 +162,18 @@ describe('buildSimulatedReadings', () => {
       assert.ok(row.humidity >= 20 && row.humidity <= 99);
       assert.ok(Number.isInteger(row.co2));
     }
+  });
+
+  it("leaves the outage night out of the first node's readings only, as the runtime history does", () => {
+    const [steadyNode, outageNode] = buildSimulatedReadings({
+      probes: [probe({ nodeId: 'sim-pi-b' }), probe({ nodeId: 'sim-pi-a' })],
+      now: NOW,
+    });
+    const outage = findOutage(NOW, TIMEZONE);
+    const duringOutage = (rows) =>
+      rows.filter((row) => isDuringOutage(row.createdAt, outage));
+    assert.equal(duringOutage(steadyNode.rows).length, 210);
+    assert.equal(duringOutage(outageNode.rows).length, 0);
   });
 
   it('gives two probes in one zone slightly different lines', () => {
