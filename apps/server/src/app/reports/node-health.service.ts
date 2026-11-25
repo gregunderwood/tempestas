@@ -108,12 +108,19 @@ export class NodeHealthService {
       },
       relations: { node: true },
     });
-    return healthyUpdates.map((update) => ({
+    return healthyUpdates.filter(hasFinished).map((update) => ({
       nodeId: update.node.slug,
       fromVersion: update.fromVersion,
       toVersion: update.toVersion,
       isRollBack: update.isRollBack,
-      at: (update.finishedAt ?? update.lastHeardAt).toISOString(),
+      at: update.finishedAt.toISOString(),
     }));
   }
+}
+
+type FinishedUpdate = NodeUpdateEntity & { finishedAt: Date };
+
+// The query already requires finishedAt; this only tells the compiler so.
+function hasFinished(update: NodeUpdateEntity): update is FinishedUpdate {
+  return update.finishedAt !== null;
 }

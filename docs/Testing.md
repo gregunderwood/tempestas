@@ -45,7 +45,10 @@ scripts there are not checked.
 
 `migration-round-trip` needs Docker: it runs every migration against a throwaway Postgres. Its
 config is [../apps/server/vitest.round-trip.config.ts](../apps/server/vitest.round-trip.config.ts),
-named so the workspace does not pick it up as part of `test`.
+named so the workspace does not pick it up as part of `test`. It also runs any
+`src/**/*.postgres.ts` spec: raw SQL that a mocked repository would pass whatever it said, such
+as the reading-break walk in [reading-breaks.postgres.ts](../apps/server/src/app/readings/reading-breaks.postgres.ts).
+Each such spec creates its own database in the same container.
 
 Vitest globals are on: `describe`, `it`, `expect` and `vi` need no import.
 

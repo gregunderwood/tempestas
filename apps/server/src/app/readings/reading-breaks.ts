@@ -2,7 +2,7 @@ import type { Repository } from 'typeorm';
 import type { SensorReadingEntity } from './models';
 import type { ReadingWindow } from './reading-window';
 
-// tools/seed-reading-history.mjs stamps every simulated row with this one boot id.
+// Must match SEEDED_BOOT_ID in tools/lib/reading-history-sql.mjs, which stamps every seeded row.
 export const SEEDED_HISTORY_BOOT_ID = 'seeded-history';
 
 /** Two of a node's readings in a row that are a gap apart, or that came from different boots. */
@@ -13,6 +13,8 @@ export interface ReadingBreak {
   isGap: boolean;
   isNewBoot: boolean;
 }
+
+export type SqlRunner = Pick<Repository<SensorReadingEntity>, 'query'>;
 
 export interface NodeReadingSpan {
   nodeId: string;
@@ -59,7 +61,7 @@ const FIND_NODE_READING_SPANS = `
 
 // Walked in Postgres, not here: a month of one node at a 10 s interval is over a quarter of a million rows.
 export function findReadingBreaks(
-  readings: Repository<SensorReadingEntity>,
+  readings: SqlRunner,
   window: ReadingWindow,
   gapMinutes: number,
 ): Promise<ReadingBreak[]> {
@@ -72,7 +74,7 @@ export function findReadingBreaks(
 }
 
 export function findNodeReadingSpans(
-  readings: Repository<SensorReadingEntity>,
+  readings: SqlRunner,
   window: ReadingWindow,
 ): Promise<NodeReadingSpan[]> {
   return readings.query(FIND_NODE_READING_SPANS, [window.from, window.to]);

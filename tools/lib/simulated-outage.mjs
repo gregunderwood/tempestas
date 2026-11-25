@@ -5,7 +5,8 @@ export const OUTAGE_DAYS_AGO = 12;
 const OUTAGE_FROM = { hour: 1, minute: 30 };
 const OUTAGE_UNTIL = { hour: 5, minute: 0 };
 
-// The first node by slug, so the outage lands on the same node every run.
+// The first node by slug, so the outage lands on the same node every run. The readings seeder passes
+// probe nodes and the runtime seeder relay-line nodes, so the two agree only while that node has both.
 export function chooseOutageNode(nodeIds) {
   return [...nodeIds].sort()[0];
 }

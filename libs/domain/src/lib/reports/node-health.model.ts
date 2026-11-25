@@ -2,7 +2,7 @@ import type { NodeId } from '../nodes/node.model';
 
 export const NODE_HEALTH_DEFAULT_DAYS = 30;
 export const NODE_HEALTH_MAX_DAYS = 90;
-/** A silence longer than this is a gap: several samples missed even at the slowest agent's pace. */
+/** A silence longer than this is a gap, whatever the node's sample interval. */
 export const NODE_HEALTH_GAP_MINUTES = 5;
 
 export interface NodeHealthQuery {

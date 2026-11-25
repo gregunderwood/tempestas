@@ -126,8 +126,9 @@ A night with no readings otherwise just disappears from the averages, and a node
 times looks like one that ran all week. Per admitted node, over the last 30 days, newest first:
 
 - **Gaps** are silences longer than `NODE_HEALTH_GAP_MINUTES`, 5 minutes, between one reading from
-  the node and the next, any sensor. That is 30 samples at the Linux agent's 10 s interval and still
-  several at the slowest. A silence that runs up to now is an ongoing gap. Postgres walks the
+  the node and the next, any sensor. That is 30 samples at the Linux agent's 10 s interval. The
+  threshold is the same for every node, so one set to sample less often than every 5 minutes would
+  show a gap between every pair of readings. A silence that runs up to now is an ongoing gap. Postgres walks the
   readings with `LAG`, so a month of 10 s samples never reaches Node.
 - **Reboots** are changes of `boot_id` from one reading to the next, stamped at the first reading of
   the new boot. A null boot id predates the column and proves nothing, and the dev seeder's
@@ -137,8 +138,8 @@ times looks like one that ran all week. Per admitted node, over the last 30 days
   from the Nodes page are recorded; an agent installed by hand or by a deploy script changes
   `agent_version` on the node with no history, so it is not listed.
 - **Stale-sensor holds are not recorded.** When a role's sensors go stale the rules hold its last
-  state and only log it, so this report cannot list those periods. Recording them is a separate
-  decision.
+  state and only log it, so this report cannot list those periods. Recording them is
+  [#182](https://github.com/gregunderwood/tempestas/issues/182).
 - A gap that straddles the start of the window is not counted, and a node with no sensors has no
   readings to read gaps or reboots from; its card lists updates only.
 
