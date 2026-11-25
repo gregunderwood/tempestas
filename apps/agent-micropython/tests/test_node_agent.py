@@ -1,13 +1,16 @@
 import binascii
 import json
+import tempfile
 from types import SimpleNamespace
 
+from agent_version import read_agent_version
 from contract import SERVER_STATUS_TOPIC, AlarmCode
 from ds18b20_probes import Ds18b20Probes
 from fakes import (
     SET_CLOCK_EPOCH_SECONDS,
     FakeBusSensors,
     FakeClock,
+    FakeInstaller,
     FakeMachine,
     FakePublisher,
     RecordingLog,
@@ -15,7 +18,9 @@ from fakes import (
 )
 from iso_time import format_iso
 from node_agent import NodeAgent
+from node_updates import NodeUpdates
 from relay_lines import DRIVEN_LOW_LEVEL, RELEASED_LEVEL, ReleasedWhenHighLines
+from slots import SlotStore
 
 NODE_ID = "braize"
 CONTROLLER = "nestjs-1"
@@ -39,8 +44,12 @@ def skip_sleep(milliseconds):
 
 
 class AgentUnderTest:
-    def __init__(self, clock=None):
+    def __init__(self, clock=None, store=None, installer=None, running_version=None):
         self.clock = clock or FakeClock()
+        running_version = running_version or read_agent_version()
+        self.store = store or SlotStore(tempfile.mkdtemp())
+        self.installer = installer or FakeInstaller()
+        self.resets = []
         self.publisher = FakePublisher()
         self.machine = FakeMachine()
         self.relay_lines = ReleasedWhenHighLines(
@@ -52,9 +61,14 @@ class AgentUnderTest:
         self.relay_lines.claim_at_failsafe()
         probes = Ds18b20Probes(FakeBusSensors({AIR_ROM: 3.5}), AIR_PROBE, skip_sleep, RecordingLog())
         probes.start()
-        self.agent = NodeAgent(
-            SETTINGS, self.publisher, self.relay_lines, probes, self.clock, RecordingLog(), "boot-1"
+        log = RecordingLog()
+        updates = NodeUpdates(
+            self.store, self.installer, self.clock, log, lambda: self.resets.append(True), running_version
         )
+        self.agent = NodeAgent(
+            SETTINGS, self.publisher, self.relay_lines, probes, self.clock, log, "boot-1", updates
+        )
+        self.agent.agent_version = running_version
 
     def deliver(self, topic_suffix, payload, is_retained=False):
         topic = SERVER_STATUS_TOPIC if topic_suffix == "server" else NODE_ROOT + topic_suffix
@@ -108,6 +122,7 @@ def test_subscribes_with_the_contract_quality_of_service():
         (NODE_ROOT + "/gpio/set", 1),
         (NODE_ROOT + "/gpio/sync", 1),
         (NODE_ROOT + "/control/heartbeat", 0),
+        (NODE_ROOT + "/update", 1),
         (SERVER_STATUS_TOPIC, 1),
     ]
 
@@ -125,7 +140,7 @@ def test_announces_online_hello_and_the_lines_on_connect():
     assert hello.payload["capabilities"]["hasRtc"] is False
     assert hello.payload["kind"] == "pico"
     assert hello.payload["agentName"] == "agent-micropython"
-    assert hello.payload["capabilities"]["contractMinor"] == 0
+    assert hello.payload["capabilities"]["contractMinor"] == 2
     assert [(state.payload["pin"], state.payload["level"], state.is_retained) for state in states] == [
         (HEATER_PIN, RELEASED_LEVEL, True),
         (HEAT_TAPE_PIN, RELEASED_LEVEL, True),

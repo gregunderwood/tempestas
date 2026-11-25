@@ -21,17 +21,25 @@ select = ["E", "F", "I", "B", "SIM"]
 
 [tool.ruff.lint.isort]
 known-first-party = [
+  "agent_version",
   "board",
+  "bootloader",
   "command_guard",
   "contract",
   "credentials",
   "ds18b20_probes",
+  "http_fetch",
   "iso_time",
   "node_runtime",
   "tempestas_mqtt",
   "node_agent",
+  "node_updates",
   "relay_lines",
   "settings",
+  "slot_installer",
+  "slots",
+  "update_gate",
+  "update_guard",
 ]
 
 [tool.pytest.ini_options]

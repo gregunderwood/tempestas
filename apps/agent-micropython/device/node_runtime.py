@@ -3,6 +3,8 @@
 import binascii
 import json
 import os
+import socket
+import ssl
 import time
 
 import ds18x20
@@ -15,9 +17,14 @@ import board
 import contract
 import credentials
 import settings
+from agent_version import read_agent_version
 from ds18b20_probes import Ds18b20Probes
+from http_fetch import HttpFetcher
 from node_agent import OFFLINE_STATE, NodeAgent
+from node_updates import NodeUpdates
 from relay_lines import ReleasedWhenHighLines
+from slot_installer import SlotInstaller
+from slots import SlotStore
 from tempestas_mqtt import MqttSession
 
 WATCHDOG_TIMEOUT_MILLISECONDS = 8000
@@ -65,11 +72,13 @@ class BrokerPublisher:
         self.undelivered_messages = []
 
     def publish(self, topic, text, is_retained, quality_of_service, should_hold_while_offline):
+        """Returns whether the message went to the broker now, rather than being held or dropped."""
         message = (topic, text, is_retained, quality_of_service)
         if self.client is not None and self.try_publishing(message):
-            return
+            return True
         if should_hold_while_offline:
             self.hold(message)
+        return False
 
     def try_publishing(self, message):
         try:
@@ -266,6 +275,14 @@ def build_relay_lines():
     return relay_lines
 
 
+def build_updates(watchdog, clock):
+    store = SlotStore()
+    fetcher = HttpFetcher(socket, ssl, watchdog.feed, clock)
+    running_version = read_agent_version()
+    installer = SlotInstaller(store, fetcher, settings.BOARD, running_version)
+    return NodeUpdates(store, installer, clock, log, machine.reset, running_version)
+
+
 def run():
     watchdog = machine.WDT(timeout=WATCHDOG_TIMEOUT_MILLISECONDS)
     relay_lines = build_relay_lines()
@@ -273,7 +290,8 @@ def run():
     probes.start()
     clock = TicksClock()
     publisher = BrokerPublisher()
-    agent = NodeAgent(settings, publisher, relay_lines, probes, clock, log, build_boot_id())
+    updates = build_updates(watchdog, clock)
+    agent = NodeAgent(settings, publisher, relay_lines, probes, clock, log, build_boot_id(), updates)
     connection = Connection(watchdog, clock, agent, publisher)
     run_forever(watchdog, clock, agent, connection)
 
@@ -290,4 +308,5 @@ def run_forever(watchdog, clock, agent, connection):
             last_sample_ticks = clock.ticks()
             agent.publish_readings()
         agent.check_deadman()
+        agent.tend_update(connection.publisher.client is not None)
         time.sleep_ms(LOOP_PAUSE_MILLISECONDS)

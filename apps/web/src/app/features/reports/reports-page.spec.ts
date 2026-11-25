@@ -8,7 +8,9 @@ import {
   type FreezeMarginReport,
   type NodeHealthReport,
   type Reading,
+  type TimeInRangeReport,
   type ZoneFreezeMargin,
+  type ZoneTimeInRange,
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
@@ -139,6 +141,47 @@ function latestReading(nodeId: string): Reading {
   };
 }
 
+function greenhouseTimeInRange(): ZoneTimeInRange {
+  return {
+    zoneId: 'greenhouse-zone',
+    zoneSlug: 'greenhouse',
+    zoneName: 'Greenhouse',
+    timezone: 'America/Edmonton',
+    nodeIds: ['elantris'],
+    lowerBounds: [],
+    upperBounds: [
+      { role: DeviceRole.ExhaustFan, setpointC: 30, sensorSource: 'mean' },
+    ],
+    periods: [
+      {
+        kind: 'day',
+        from: '2026-09-09T12:30:00.000Z',
+        to: '2026-09-10T00:30:00.000Z',
+        inProgress: false,
+        hoursBelow: 0,
+        hoursInRange: 9,
+        hoursAbove: 3,
+        hoursWithoutReadings: 0,
+        extremes: {
+          temperature: {
+            value: 33.4,
+            at: '2026-09-09T21:00:00.000Z',
+            nodeId: 'elantris',
+            sensorId: 'scd41',
+          },
+          humidity: null,
+          co2: {
+            value: 1450,
+            at: '2026-09-09T15:00:00.000Z',
+            nodeId: 'elantris',
+            sensorId: 'scd41',
+          },
+        },
+      },
+    ],
+  };
+}
+
 function nodeHealthReport(): NodeHealthReport {
   return {
     days: 30,
@@ -165,8 +208,13 @@ function nodeHealthReport(): NodeHealthReport {
   };
 }
 
-interface FreezeMarginAnswers {
+function timeInRangeReport(zones: ZoneTimeInRange[]): TimeInRangeReport {
+  return { days: 30, generatedAt: '2026-09-09T19:00:00Z', zones };
+}
+
+interface ReportAnswers {
   freezeMargin?: Observable<FreezeMarginReport>[];
+  timeInRange?: Observable<TimeInRangeReport>[];
   nodeHealth?: Observable<NodeHealthReport>[];
 }
 
@@ -174,6 +222,7 @@ interface RenderedReportsPage {
   page: HTMLElement;
   requestCount(): number;
   freezeMarginRequestCount(): number;
+  timeInRangeRequestCount(): number;
   nodeHealthRequestCount(): number;
   render(): void;
   realtime: ReturnType<typeof fakeRealtime>;
@@ -181,10 +230,11 @@ interface RenderedReportsPage {
 
 function renderReportsPage(
   answers: Observable<EquipmentRuntimeReport>[],
-  { freezeMargin = [], nodeHealth = [] }: FreezeMarginAnswers = {},
+  { freezeMargin = [], timeInRange = [], nodeHealth = [] }: ReportAnswers = {},
 ): RenderedReportsPage {
   let requests = 0;
   let freezeMarginRequests = 0;
+  let timeInRangeRequests = 0;
   let nodeHealthRequests = 0;
   const realtime = fakeRealtime();
   TestBed.configureTestingModule({
@@ -202,6 +252,10 @@ function renderReportsPage(
             freezeMarginRequests += 1;
             return freezeMargin.shift() ?? NEVER;
           },
+          fetchTimeInRange: () => {
+            timeInRangeRequests += 1;
+            return timeInRange.shift() ?? NEVER;
+          },
           fetchNodeHealth: () => {
             nodeHealthRequests += 1;
             return nodeHealth.shift() ?? NEVER;
@@ -217,6 +271,7 @@ function renderReportsPage(
     page: fixture.nativeElement as HTMLElement,
     requestCount: () => requests,
     freezeMarginRequestCount: () => freezeMarginRequests,
+    timeInRangeRequestCount: () => timeInRangeRequests,
     nodeHealthRequestCount: () => nodeHealthRequests,
     render: () => {
       TestBed.tick();
@@ -238,7 +293,7 @@ describe('ReportsPage', () => {
     const listed = Array.from(page.querySelectorAll('li')).map((item) =>
       item.textContent?.trim(),
     );
-    expect(listed).toEqual(['Time in range', 'CO2 enrichment']);
+    expect(listed).toEqual(['CO2 enrichment']);
   });
 
   it('shows a card per device with its totals and shortest run', () => {
@@ -394,6 +449,89 @@ describe('ReportsPage', () => {
         freezeMargin: [throwError(() => new Error('offline'))],
       });
       expect(page.textContent).toContain('Could not load the freeze margin.');
+    });
+  });
+
+  describe('time in range', () => {
+    it('shows a card per zone with its band and each period', () => {
+      const { page } = renderReportsPage([NEVER], {
+        timeInRange: [of(timeInRangeReport([greenhouseTimeInRange()]))],
+      });
+      const card = page.querySelector('temp-time-in-range-card');
+      expect(card?.textContent).toContain('Greenhouse');
+      expect(card?.textContent).toContain(
+        'No lower bound: no always-on heater or heat tape thermostat here.',
+      );
+      expect(card?.textContent).toContain(
+        "Above: over the exhaust fan's 30 °C on-setpoint, read from the average of every probe.",
+      );
+      expect(card?.textContent).toContain('Days: 75% in range, 25% above');
+      expect(card?.textContent).toContain('High 33.4 °C at 15:00');
+      expect(card?.textContent).toContain('High 1450 ppm CO₂ at 09:00');
+    });
+
+    it('leaves out the column for a side with no bound', () => {
+      const { page } = renderReportsPage([NEVER], {
+        timeInRange: [of(timeInRangeReport([greenhouseTimeInRange()]))],
+      });
+      const headers = Array.from(
+        page.querySelectorAll('temp-time-in-range-card thead th'),
+      ).map((header) => header.textContent?.trim());
+      expect(headers).toEqual([
+        'Period',
+        'Extreme',
+        'In range',
+        'Above',
+        'No readings',
+      ]);
+    });
+
+    it('comes after the freeze margin', () => {
+      const { page } = renderReportsPage([NEVER]);
+      const headings = Array.from(page.querySelectorAll('h2')).map((heading) =>
+        heading.textContent?.trim(),
+      );
+      expect(headings).toEqual([
+        'Equipment runtime',
+        'Freeze margin',
+        'Time in range',
+        'Node health',
+      ]);
+    });
+
+    it("fetches again once a zone's readings are three buckets past the report", () => {
+      const rendered = renderReportsPage([NEVER], {
+        timeInRange: [
+          of(timeInRangeReport([greenhouseTimeInRange()])),
+          of(timeInRangeReport([greenhouseTimeInRange()])),
+        ],
+      });
+      const pushReading = (createdAt: string): void => {
+        rendered.realtime.readings.update((readings) => ({
+          ...readings,
+          elantris: { ...latestReading('elantris'), createdAt },
+        }));
+        rendered.render();
+      };
+      rendered.render();
+      pushReading('2026-09-09T19:14:00Z');
+      expect(rendered.timeInRangeRequestCount()).toBe(1);
+      pushReading('2026-09-09T19:15:00Z');
+      expect(rendered.timeInRangeRequestCount()).toBe(2);
+    });
+
+    it('says so when no zone has a node', () => {
+      const { page } = renderReportsPage([NEVER], {
+        timeInRange: [of(timeInRangeReport([]))],
+      });
+      expect(page.textContent).toContain('No zone has a node yet.');
+    });
+
+    it('says it could not load the time in range when the request fails', () => {
+      const { page } = renderReportsPage([NEVER], {
+        timeInRange: [throwError(() => new Error('offline'))],
+      });
+      expect(page.textContent).toContain('Could not load the time in range.');
     });
   });
 

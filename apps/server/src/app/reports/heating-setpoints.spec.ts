@@ -6,6 +6,7 @@ import {
   findOnBelowFor,
   findSensorSourceByRole,
   findSensorSourceFor,
+  findThermostatOnAtByRole,
   resolveFreezeWarning,
 } from './heating-setpoints';
 
@@ -126,5 +127,44 @@ describe('findSensorSourceFor', () => {
     expect(findSensorSourceFor(DeviceRole.HeatTape, byRole)).toBe(
       FALLBACK_SENSOR_SOURCE,
     );
+  });
+});
+
+describe('findThermostatOnAtByRole', () => {
+  it("borrows the on-setpoint of the asked roles' thermostats in the asked mode only", () => {
+    const rules = rulesWith({
+      heater: HEAT_THERMOSTAT,
+      exhaust_fan: {
+        ...HEAT_THERMOSTAT,
+        mode: 'cool',
+        onAtC: 30,
+        offAtC: 29.5,
+      },
+    });
+    expect(
+      findThermostatOnAtByRole(rules, [DeviceRole.ExhaustFan], 'cool'),
+    ).toEqual({ [DeviceRole.ExhaustFan]: 30 });
+    expect(
+      findThermostatOnAtByRole(rules, [DeviceRole.ExhaustFan], 'heat'),
+    ).toEqual({});
+  });
+});
+
+describe('findSensorSourceByRole for other roles', () => {
+  it('reads the asked roles instead of the heating ones', () => {
+    expect(
+      findSensorSourceByRole(
+        rulesWith({
+          exhaust_fan: {
+            ...HEAT_THERMOSTAT,
+            mode: 'cool',
+            onAtC: 30,
+            offAtC: 29.5,
+            sensor: { source: 'max' },
+          },
+        }),
+        [DeviceRole.ExhaustFan],
+      ),
+    ).toEqual({ [DeviceRole.ExhaustFan]: 'max' });
   });
 });

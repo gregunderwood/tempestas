@@ -201,9 +201,11 @@ downloading → verifying → installing → restarting → healthy
 `rolled-back` means the new version was installed and did not come up healthy, so the previous one
 is running again. `failed` means it never got that far and nothing changed. Both carry a `reason`.
 
-`healthy`, `rolled-back` and `failed` are final: a node sends at most one of them per `id`, and
-never acts on that `id` again. That holds for a refusal that would pass, such as another update in
-progress, so the server retries with a new `id`.
+`healthy`, `rolled-back` and `failed` are final: a node sends one of them per `id`, and never acts
+on that `id` again, even after a refusal that would pass later, such as another update in progress;
+the server retries with a new `id`. A node may repeat the same final state when it could not tell
+whether the broker took it, and the server ignores any status for an update it already holds as
+final.
 
 The server sends an `update` only when someone presses the button on the node page, and keeps
 every status it hears against that `id`. How it decides when to send one, and what it shows, is in

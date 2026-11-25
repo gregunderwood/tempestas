@@ -242,6 +242,7 @@ describe('ReadingsService.findColdestReading', () => {
       'reading.createdAt >= :from',
       'reading.createdAt <= :to',
       'node.slug IN (:...nodeSlugs)',
+      'reading.temperature IS NOT NULL',
     ]);
     expect(parameters).toMatchObject({
       ...WINDOW,
@@ -254,5 +255,133 @@ describe('ReadingsService.findColdestReading', () => {
     const { service, conditions } = makeServiceRecordingQueries();
     expect(await service.findColdestReading(WINDOW, [])).toBeNull();
     expect(conditions).toEqual([]);
+  });
+});
+
+describe('ReadingsService.findHighestReading', () => {
+  const WINDOW = {
+    from: new Date('2026-11-23T14:00:00Z'),
+    to: new Date('2026-11-24T02:00:00Z'),
+  };
+
+  it("takes the highest CO2 among the zone's nodes, skipping probes with none", async () => {
+    const { service, conditions, orderings } = makeServiceRecordingQueries();
+    expect(
+      await service.findHighestReading(WINDOW, ['elantris'], 'co2'),
+    ).toBeNull();
+    expect(conditions).toContain('node.slug IN (:...nodeSlugs)');
+    expect(conditions).toContain('reading.co2 IS NOT NULL');
+    expect(orderings).toEqual([['reading.co2', 'DESC']]);
+  });
+
+  it('asks nothing for a zone with no nodes', async () => {
+    const { service, conditions } = makeServiceRecordingQueries();
+    expect(
+      await service.findHighestReading(WINDOW, [], 'temperature'),
+    ).toBeNull();
+    expect(conditions).toEqual([]);
+  });
+});
+
+describe('ReadingsService.findLowestReading', () => {
+  it('takes the lowest humidity, skipping probes with none', async () => {
+    const { service, conditions, orderings } = makeServiceRecordingQueries();
+    await service.findLowestReading(
+      {
+        from: new Date('2026-11-23T02:00:00Z'),
+        to: new Date('2026-11-23T14:00:00Z'),
+      },
+      ['patji'],
+      'humidity',
+    );
+    expect(conditions).toContain('reading.humidity IS NOT NULL');
+    expect(orderings).toEqual([['reading.humidity', 'ASC']]);
+  });
+});
+
+describe('ReadingsService.bucketHeldTemperatures', () => {
+  function makeServiceAnsweringRawQuery(rawRows: unknown[]) {
+    const queries: { sql: string; parameters: unknown[] }[] = [];
+    const readings = {
+      query: async (sql: string, parameters: unknown[]) => {
+        queries.push({ sql, parameters });
+        return rawRows;
+      },
+    } as unknown as Repository<SensorReadingEntity>;
+    const service = new ReadingsService(
+      readings,
+      {} as Repository<NodeEntity>,
+      new SystemClock(),
+      {} as ConfigService,
+    );
+    return { service, queries };
+  }
+
+  const WINDOW = {
+    from: new Date('2026-11-22T12:00:00Z'),
+    to: new Date('2026-11-23T12:00:00Z'),
+  };
+  const QUERY = {
+    window: WINDOW,
+    bucketMinutes: 5,
+    longestHeldMinutes: 1,
+    nodeSlugs: ['patji', 'braize'],
+  };
+
+  it('passes the bucket, the window, the nodes, the longest hold and the row limit', async () => {
+    const { service, queries } = makeServiceAnsweringRawQuery([]);
+    await service.bucketHeldTemperatures(QUERY);
+    expect(queries[0].parameters).toEqual([
+      5,
+      WINDOW.from,
+      WINDOW.to,
+      ['patji', 'braize'],
+      1,
+      288 * 70,
+    ]);
+    expect(queries[0].sql).toContain('LEAD(reading.created_at)');
+  });
+
+  it('asks nothing for no nodes', async () => {
+    const { service, queries } = makeServiceAnsweringRawQuery([]);
+    expect(
+      await service.bucketHeldTemperatures({ ...QUERY, nodeSlugs: [] }),
+    ).toEqual([]);
+    expect(queries).toEqual([]);
+  });
+
+  it('hands the newest-first rows back oldest first, as numbers', async () => {
+    const { service } = makeServiceAnsweringRawQuery([
+      {
+        nodeId: 'patji',
+        sensorId: 'pipes',
+        at: new Date('2026-11-23T03:05:00Z'),
+        averageC: '3.14159',
+        heldMs: '230000.000000',
+      },
+      {
+        nodeId: 'patji',
+        sensorId: 'pipes',
+        at: new Date('2026-11-23T03:00:00Z'),
+        averageC: '4',
+        heldMs: '300000.000000',
+      },
+    ]);
+    expect(await service.bucketHeldTemperatures(QUERY)).toEqual([
+      {
+        nodeId: 'patji',
+        sensorId: 'pipes',
+        at: new Date('2026-11-23T03:00:00Z'),
+        averageC: 4,
+        heldMs: 300_000,
+      },
+      {
+        nodeId: 'patji',
+        sensorId: 'pipes',
+        at: new Date('2026-11-23T03:05:00Z'),
+        averageC: 3.14,
+        heldMs: 230_000,
+      },
+    ]);
   });
 });

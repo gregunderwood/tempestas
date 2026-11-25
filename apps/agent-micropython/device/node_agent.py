@@ -20,7 +20,7 @@ KNOWN_LEVELS = (0, 1)
 
 
 class NodeAgent:
-    def __init__(self, settings, publisher, relay_lines, probes, clock, log, boot_id):
+    def __init__(self, settings, publisher, relay_lines, probes, clock, log, boot_id, updates):
         self.settings = settings
         self.publisher = publisher
         self.relay_lines = relay_lines
@@ -35,6 +35,8 @@ class NodeAgent:
         self.last_heartbeat_ticks = None
         self.is_deadman_tripped = False
         self.has_unpublished_states = False
+        self.updates = updates
+        updates.report_to(self)
 
     def announce(self):
         self.send(
@@ -45,6 +47,7 @@ class NodeAgent:
 
     def send_hello(self):
         self.send("hello", contract.build_hello_topic(self.node_id), self.build_hello_payload())
+        self.updates.note_hello_sent(self.agent_version)
 
     def list_subscriptions(self):
         node_id = self.node_id
@@ -52,6 +55,7 @@ class NodeAgent:
             (contract.build_gpio_set_topic(node_id), read_quality_of_service("gpioSet")),
             (contract.build_gpio_sync_topic(node_id), read_quality_of_service("gpioSync")),
             (contract.build_heartbeat_topic(node_id), read_quality_of_service("heartbeat")),
+            (contract.build_update_topic(node_id), read_quality_of_service("update")),
             (contract.SERVER_STATUS_TOPIC, read_quality_of_service("serverStatus")),
         ]
 
@@ -65,6 +69,8 @@ class NodeAgent:
             self.on_command(payload, is_retained)
         elif topic == contract.build_gpio_sync_topic(node_id):
             self.ignore_sync_request()
+        elif topic == contract.build_update_topic(node_id):
+            self.updates.on_command(payload, is_retained, self.bound_controller, self.read_set_clock())
 
     def on_command(self, payload, is_retained):
         verdict = judge_command(payload, is_retained, self.bound_controller, self.read_set_clock())
@@ -118,9 +124,13 @@ class NodeAgent:
         if self.is_deadman_tripped:
             self.is_deadman_tripped = False
             self.publish_alarm(contract.AlarmCode.DEADMAN_CLEARED, INFO_SEVERITY, "heartbeats resumed")
+        if self.updates.note_heartbeat(heartbeat):
+            self.log("the server has not taken this release's hello - saying hello again")
+            self.send_hello()
 
     def on_server_status(self, payload, is_retained):
         server_status = parse_json_object(payload)
+        self.updates.on_server_status(is_server_online(server_status))
         if is_server_back_online(server_status, is_retained):
             self.log("the server came back online - saying hello again")
             self.send_hello()
@@ -130,6 +140,17 @@ class NodeAgent:
                 "the server reported itself offline - holding the lines for the dead-man (%ds)"
                 % self.settings.DEADMAN_SECONDS
             )
+
+    def tend_update(self, is_connected):
+        self.updates.tend(is_connected)
+
+    def send_update_status(self, command_id, state, reason=None):
+        payload = self.build_envelope("updateStatus")
+        payload["id"] = command_id
+        payload["state"] = state
+        if reason is not None:
+            payload["reason"] = reason
+        return self.send("updateStatus", contract.build_update_status_topic(self.node_id), payload)
 
     def check_deadman(self):
         if self.last_heartbeat_ticks is None or self.is_deadman_tripped:
@@ -187,7 +208,7 @@ class NodeAgent:
     def send(self, message_name, topic, payload):
         quality_of_service, is_retained = contract.QOS[message_name]
         should_hold_while_offline = message_name in contract.HELD_WHILE_OFFLINE
-        self.publisher.publish(
+        return self.publisher.publish(
             topic, json.dumps(payload), is_retained, quality_of_service, should_hold_while_offline
         )
 
@@ -281,6 +302,10 @@ def read_quality_of_service(message_name):
 def is_server_back_online(server_status, is_retained):
     # A retained online is the replay on our own connect, which announce has already answered.
     return not is_retained and server_status is not None and server_status.get("state") == ONLINE_STATE
+
+
+def is_server_online(server_status):
+    return server_status is not None and server_status.get("state") == ONLINE_STATE
 
 
 def is_server_offline(server_status):

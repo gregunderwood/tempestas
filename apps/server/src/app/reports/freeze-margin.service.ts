@@ -30,7 +30,6 @@ import {
 import { ZoneEntity } from '../zones/models';
 import {
   summariseZoneFreezeMargin,
-  type FreezeMarginZone,
   type HeatingDevice,
   type NightWithColdest,
 } from './freeze-margin';
@@ -41,10 +40,15 @@ import {
   type HeatOnBelowByRole,
   type SensorSourceByRole,
 } from './heating-setpoints';
-import { listRecentNights, type NightWindow } from './night-windows';
+import {
+  findEarliestStart,
+  listRecentNights,
+  type NightWindow,
+} from './report-periods';
+import type { ReportZone } from './report-zone';
 
 interface HeatedZone {
-  zone: FreezeMarginZone;
+  zone: ReportZone;
   heatOnBelowByRole: HeatOnBelowByRole;
   sensorSourceByRole: SensorSourceByRole;
   devices: HeatingDevice[];
@@ -82,7 +86,10 @@ export class FreezeMarginService {
     if (heatedZones.length === 0) return { ...report, zones: [] };
 
     const history = await this.findHistorySince(
-      findEarliestNightStart(heatedZones, now),
+      findEarliestStart(
+        heatedZones.flatMap((heatedZone) => heatedZone.nights),
+        now,
+      ),
       heatedZones.flatMap((heatedZone) => heatedZone.zone.nodeIds),
       nodes,
       now,
@@ -216,14 +223,4 @@ function hasHeatingRole(
   device: DeviceEntity,
 ): device is DeviceEntity & { role: DeviceRole } {
   return device.role !== null && HEATING_ROLES.includes(device.role);
-}
-
-function findEarliestNightStart(
-  heatedZones: readonly HeatedZone[],
-  now: Date,
-): Date {
-  const starts = heatedZones
-    .flatMap((heatedZone) => heatedZone.nights)
-    .map((night) => night.from.getTime());
-  return new Date(Math.min(now.getTime(), ...starts));
 }
