@@ -11,9 +11,13 @@ import type { PeriodRow } from './time-in-range-rows';
           <tr>
             <th scope="col">Period</th>
             <th scope="col">Extreme</th>
-            <th scope="col" class="range-periods__hours">Below</th>
+            @if (hasLowerBound()) {
+              <th scope="col" class="range-periods__hours">Below</th>
+            }
             <th scope="col" class="range-periods__hours">In range</th>
-            <th scope="col" class="range-periods__hours">Above</th>
+            @if (hasUpperBound()) {
+              <th scope="col" class="range-periods__hours">Above</th>
+            }
             <th scope="col" class="range-periods__hours">No readings</th>
           </tr>
         </thead>
@@ -22,9 +26,13 @@ import type { PeriodRow } from './time-in-range-rows';
             <tr>
               <th scope="row">{{ row.label }}</th>
               <td>{{ row.extreme }}</td>
-              <td class="range-periods__hours">{{ row.below }}</td>
+              @if (hasLowerBound()) {
+                <td class="range-periods__hours">{{ row.below }}</td>
+              }
               <td class="range-periods__hours">{{ row.inRange }}</td>
-              <td class="range-periods__hours">{{ row.above }}</td>
+              @if (hasUpperBound()) {
+                <td class="range-periods__hours">{{ row.above }}</td>
+              }
               <td class="range-periods__hours">{{ row.withoutReadings }}</td>
             </tr>
           }
@@ -62,4 +70,6 @@ import type { PeriodRow } from './time-in-range-rows';
 })
 export class TimeInRangeTable {
   readonly rows = input.required<readonly PeriodRow[]>();
+  readonly hasLowerBound = input.required<boolean>();
+  readonly hasUpperBound = input.required<boolean>();
 }

@@ -13,6 +13,8 @@ import {
 import {
   buildPeriodRows,
   describeLowerBound,
+  hasLowerBound,
+  hasUpperBound,
   describeUpperBound,
   summariseShareInRange,
 } from './time-in-range-rows';
@@ -41,11 +43,19 @@ const RECENT_PERIOD_COUNT = 14;
             No readings in the last {{ zone().periods.length }} periods.
           </p>
         }
-        <temp-time-in-range-table [rows]="recentRows()" />
+        <temp-time-in-range-table
+          [rows]="recentRows()"
+          [hasLowerBound]="hasLowerBound()"
+          [hasUpperBound]="hasUpperBound()"
+        />
         @if (earlierRows().length > 0) {
           <details>
             <summary>Earlier periods</summary>
-            <temp-time-in-range-table [rows]="earlierRows()" />
+            <temp-time-in-range-table
+              [rows]="earlierRows()"
+              [hasLowerBound]="hasLowerBound()"
+              [hasUpperBound]="hasUpperBound()"
+            />
           </details>
         }
         <p class="range-legend">
@@ -81,6 +91,8 @@ export class TimeInRangeCard {
 
   protected readonly bucketMinutes = TIME_IN_RANGE_BUCKET_MINUTES;
   protected readonly longestHeldMinutes = TIME_IN_RANGE_LONGEST_HELD_MINUTES;
+  protected readonly hasLowerBound = computed(() => hasLowerBound(this.zone()));
+  protected readonly hasUpperBound = computed(() => hasUpperBound(this.zone()));
   protected readonly lowerBound = computed(() =>
     describeLowerBound(this.zone()),
   );

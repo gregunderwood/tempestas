@@ -365,8 +365,8 @@ under any night where the heat was off, unknown, or on and not keeping up. The l
 earlier nights fold away. Time in range comes next: a card per zone with a node, naming the rules
 that bound it (or saying there is no lower or upper bound), the share of read hours in range for
 nights and for days apart, and a row per daylight and night period with the night's low or the
-day's high, the hours below, in range and above, and the share with no readings. The latest
-fourteen periods show; earlier ones fold away. Below them, a card names the reports still to come —
+day's high, the hours below, in range and above (a side with no bound has no column), and the
+share with no readings. The latest fourteen periods show; earlier ones fold away. Below them, a card names the reports still to come —
 CO2 enrichment and node health — and loses a line as each lands.
 
 Equipment runtime and freeze margin are fetched once and fetched again whenever a device switches

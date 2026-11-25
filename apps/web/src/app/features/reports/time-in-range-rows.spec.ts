@@ -87,11 +87,6 @@ describe('buildPeriodRows', () => {
     });
   });
 
-  it('leaves a side with no bound empty rather than showing no hours there', () => {
-    const [row] = buildPeriodRows(pumphouse([period()]));
-    expect(row.above).toBe('—');
-  });
-
   it('says when a period had no readings at all', () => {
     const [row] = buildPeriodRows(pumphouse([period({ extreme: null })]));
     expect(row.extreme).toBe('No readings');

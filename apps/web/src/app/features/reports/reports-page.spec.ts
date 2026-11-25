@@ -425,6 +425,22 @@ describe('ReportsPage', () => {
       expect(card?.textContent).toContain('High 33.4 °C at 15:00');
     });
 
+    it('leaves out the column for a side with no bound', () => {
+      const { page } = renderReportsPage([NEVER], {
+        timeInRange: [of(timeInRangeReport([greenhouseTimeInRange()]))],
+      });
+      const headers = Array.from(
+        page.querySelectorAll('temp-time-in-range-card thead th'),
+      ).map((header) => header.textContent?.trim());
+      expect(headers).toEqual([
+        'Period',
+        'Extreme',
+        'In range',
+        'Above',
+        'No readings',
+      ]);
+    });
+
     it('comes after the freeze margin', () => {
       const { page } = renderReportsPage([NEVER]);
       const headings = Array.from(page.querySelectorAll('h2')).map((heading) =>

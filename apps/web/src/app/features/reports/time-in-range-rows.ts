@@ -76,15 +76,13 @@ const SHARES_OF_READ_HOURS: readonly ShareOfReadHours[] = [
 export function buildPeriodRows(zone: ZoneTimeInRange): PeriodRow[] {
   const formatDate = buildZoneFormatter(zone.timezone, PERIOD_DATE_FORMAT);
   const formatClock = buildClockFormatter(zone.timezone);
-  const isBelowShown = hasLowerBound(zone);
-  const isAboveShown = hasUpperBound(zone);
   return zone.periods.map((period) => ({
     from: period.from,
     label: labelPeriod(period, formatDate),
     extreme: describeExtreme(period, formatClock),
-    below: isBelowShown ? formatHours(period.hoursBelow) : EMPTY_CELL,
+    below: formatHours(period.hoursBelow),
     inRange: formatHours(period.hoursInRange),
-    above: isAboveShown ? formatHours(period.hoursAbove) : EMPTY_CELL,
+    above: formatHours(period.hoursAbove),
     withoutReadings: formatPercent(
       period.hoursWithoutReadings / measurePeriodHours(period),
     ),
@@ -121,11 +119,11 @@ export function summariseShareInRange(zone: ZoneTimeInRange): string[] {
   });
 }
 
-function hasLowerBound(zone: ZoneTimeInRange): boolean {
+export function hasLowerBound(zone: ZoneTimeInRange): boolean {
   return zone.lowerBounds.length > 0;
 }
 
-function hasUpperBound(zone: ZoneTimeInRange): boolean {
+export function hasUpperBound(zone: ZoneTimeInRange): boolean {
   return zone.upperBounds.length > 0;
 }
 
