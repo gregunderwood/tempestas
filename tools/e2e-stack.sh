@@ -58,12 +58,12 @@ offer_agent_releases() {
 }
 
 # VS Code exports ELECTRON_RUN_AS_NODE, and Cypress then refuses to start.
+# The base URL goes by environment: Cypress keeps only the last --config, and the caller may pass one.
 run_stack_specs() {
   say "Running the stack specs"
-  env -u ELECTRON_RUN_AS_NODE npx cypress run \
+  env -u ELECTRON_RUN_AS_NODE CYPRESS_baseUrl="http://localhost:$WEB_PORT" npx cypress run \
     --project "$CYPRESS_PROJECT" \
     --config-file "$CYPRESS_CONFIG" \
-    --config "baseUrl=http://localhost:$WEB_PORT" \
     "$@"
 }
 
