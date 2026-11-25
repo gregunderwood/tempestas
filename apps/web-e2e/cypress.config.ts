@@ -12,6 +12,8 @@ export default defineConfig({
       ciWebServerCommand: 'npx nx run web:serve-static',
       ciBaseUrl: 'http://localhost:4200',
     }),
+    // The specs in src/stack need the server that tools/e2e-stack.sh starts.
+    specPattern: 'src/e2e/**/*.cy.ts',
     baseUrl: 'http://localhost:4200',
     supportFile: false,
   },

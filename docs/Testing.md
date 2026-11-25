@@ -73,6 +73,10 @@ npx nx e2e web-e2e     # starts nx serve web itself, runs headless, 15 to 40 s
   Readings reach the dashboard only over it, so the node card proves the socket path works.
 - **Fixtures are typed against `@tempestas/domain`**, so a contract change breaks
   `web-e2e:typecheck` in the gate even though the spec itself is not run there.
+- **It runs only the specs in `src/e2e/`.**
+  [../apps/web-e2e/cypress.config.ts](../apps/web-e2e/cypress.config.ts) narrows the Nx preset's
+  `src/**/*.cy.ts` to them, because the stack specs fail without the server `tools/e2e-stack.sh`
+  starts.
 - **It is not in the gate.** Cypress has no arm64 Linux binary (see Pitfalls), so the gate would
   fail on the Pi, and a dev server start makes it the slowest target by far.
 - **From a VS Code terminal, unset `ELECTRON_RUN_AS_NODE`.** VS Code exports it, and Cypress then
@@ -86,7 +90,7 @@ use cases through the page against a real server instead:
 
 ```bash
 tools/e2e-stack.sh                         # every stack spec, headless, about 2 minutes in all
-tools/e2e-stack.sh --spec src/stack/node-update.cy.ts --headed
+tools/e2e-stack.sh --spec apps/web-e2e/src/stack/node-update.cy.ts --headed
 ```
 
 - **It starts the same throwaway stack as the PR screenshots**, from
@@ -99,7 +103,10 @@ tools/e2e-stack.sh --spec src/stack/node-update.cy.ts --headed
   `AGENT_RELEASES_URL` set, so the simulated Pi is offered an update and then a roll back.
 - **The specs share one server**, so they run in order and leave it as they found it: the update
   spec rolls the Pi back to 1.1.0.
-- **Options after the script name go to `cypress run`**, such as `--spec` or `--headed`.
+- **It runs only the specs in `src/stack/`**, with
+  [../apps/web-e2e/cypress.stack.config.ts](../apps/web-e2e/cypress.stack.config.ts).
+- **Options after the script name go to `cypress run`**, such as `--spec` or `--headed`. Cypress
+  reads a `--spec` path from the repo root, so it starts with `apps/web-e2e/`.
 - **It is not in the gate**, for the same reasons as the smoke test, and it needs Docker.
 
 ### Screenshots on a PR
@@ -148,8 +155,8 @@ A screenshot shows one moment. For a PR about behaviour, such as a press, a conf
 node working through an update, the reviewer watches the stack specs run instead:
 
 ```bash
-tools/pr-video.sh 164                                    # every stack spec
-tools/pr-video.sh 164 src/stack/node-update.cy.ts        # only these
+tools/pr-video.sh 164                                             # every stack spec
+tools/pr-video.sh 164 apps/web-e2e/src/stack/node-update.cy.ts    # only these
 tools/pr-video.sh --player-url https://claude.ai/artifact/... 164
 ```
 
