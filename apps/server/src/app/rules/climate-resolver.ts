@@ -9,6 +9,12 @@ import { ROLE_ORDER } from './rules.engine';
 
 type SensorSource = SensorPolicy['source'];
 
+export interface ProbeTemperature {
+  nodeId: string;
+  sensorId: string;
+  temperatureC: number;
+}
+
 const NODE_SOURCE_PREFIX = 'node:';
 const SENSOR_SOURCE_PREFIX = 'sensor:';
 
@@ -74,10 +80,23 @@ function keepFresh(
   );
 }
 
-function selectSource(
-  samples: readonly NodeSample[],
+// Null when the source names no probe among those given.
+export function pickSourceTemperature(
+  probes: readonly ProbeTemperature[],
   source: SensorSource,
-): NodeSample[] {
+): number | null {
+  const candidates = selectSource(probes, source);
+  if (candidates.length === 0) return null;
+  return pickBySource(
+    candidates.map((probe) => probe.temperatureC),
+    source,
+  );
+}
+
+function selectSource<Probe extends { nodeId: string; sensorId: string }>(
+  samples: readonly Probe[],
+  source: SensorSource,
+): Probe[] {
   if (source.startsWith(NODE_SOURCE_PREFIX)) {
     const slug = source.slice(NODE_SOURCE_PREFIX.length);
     return samples.filter((sample) => sample.nodeId === slug);

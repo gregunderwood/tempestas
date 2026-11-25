@@ -20,8 +20,9 @@ function makeServiceRecordingQueries(clock: Clock = new SystemClock()) {
     },
     distinctOn: () => builder,
     addOrderBy: () => builder,
-    andWhere: (condition: string) => {
+    andWhere: (condition: string, conditionParameters = {}) => {
       conditions.push(condition);
+      Object.assign(parameters, conditionParameters);
       return builder;
     },
     orderBy: (column: string, direction: string) => {
@@ -30,6 +31,7 @@ function makeServiceRecordingQueries(clock: Clock = new SystemClock()) {
     },
     limit: () => builder,
     getMany: async () => [],
+    getOne: async () => null,
   };
   const readings = {
     createQueryBuilder: () => builder,
@@ -92,6 +94,7 @@ describe('ReadingsService.bucketTemperatures', () => {
     const parameters: Record<string, unknown> = {};
     const groupings: string[] = [];
     const orderings: [string, string][] = [];
+    const limits: number[] = [];
     const recordCondition = (
       condition: string,
       conditionParameters: Record<string, unknown> = {},
@@ -122,7 +125,10 @@ describe('ReadingsService.bucketTemperatures', () => {
         orderings.push([ordering, direction]);
         return builder;
       },
-      limit: () => builder,
+      limit: (rowCount: number) => {
+        limits.push(rowCount);
+        return builder;
+      },
       getRawMany: async () => rawRows,
     };
     const readings = {
@@ -134,7 +140,7 @@ describe('ReadingsService.bucketTemperatures', () => {
       new SystemClock(),
       {} as ConfigService,
     );
-    return { service, conditions, parameters, groupings, orderings };
+    return { service, conditions, parameters, groupings, orderings, limits };
   }
 
   const WINDOW = {
@@ -152,6 +158,24 @@ describe('ReadingsService.bucketTemperatures', () => {
     ]);
     expect(parameters).toMatchObject({ ...WINDOW, bucketMinutes: 5 });
     expect(groupings).toEqual(['node.slug', 'reading.sensorId', '"at"']);
+  });
+
+  it('reads only the given nodes when asked, and nothing for none', async () => {
+    const { service, conditions, parameters } = makeServiceAnsweringBuckets([]);
+    await service.bucketTemperatures(WINDOW, 10, ['patji']);
+    expect(conditions).toContain('node.slug IN (:...nodeSlugs)');
+    expect(parameters).toMatchObject({ nodeSlugs: ['patji'] });
+    expect(await service.bucketTemperatures(WINDOW, 10, [])).toEqual([]);
+  });
+
+  it('allows enough rows for every probe in every bucket of the window', async () => {
+    const { service, limits } = makeServiceAnsweringBuckets([]);
+    await service.bucketTemperatures(WINDOW, 5);
+    await service.bucketTemperatures(
+      { from: new Date('2026-10-24T12:00:00Z'), to: WINDOW.to },
+      10,
+    );
+    expect(limits).toEqual([288 * 70, 30 * 144 * 70]);
   });
 
   it('takes the newest buckets under the limit and hands them back oldest first', async () => {
@@ -199,5 +223,36 @@ describe('ReadingsService.bucketTemperatures', () => {
         sampleCount: 30,
       },
     ]);
+  });
+});
+
+describe('ReadingsService.findColdestReading', () => {
+  const WINDOW = {
+    from: new Date('2026-11-23T00:00:00Z'),
+    to: new Date('2026-11-23T14:00:00Z'),
+  };
+
+  it("takes the lowest temperature among the zone's nodes, the latest on a tie", async () => {
+    const { service, conditions, parameters, orderings } =
+      makeServiceRecordingQueries();
+    expect(
+      await service.findColdestReading(WINDOW, ['patji', 'braize']),
+    ).toBeNull();
+    expect(conditions).toEqual([
+      'reading.createdAt >= :from',
+      'reading.createdAt <= :to',
+      'node.slug IN (:...nodeSlugs)',
+    ]);
+    expect(parameters).toMatchObject({
+      ...WINDOW,
+      nodeSlugs: ['patji', 'braize'],
+    });
+    expect(orderings).toEqual([['reading.temperature', 'ASC']]);
+  });
+
+  it('asks nothing for a zone with no nodes', async () => {
+    const { service, conditions } = makeServiceRecordingQueries();
+    expect(await service.findColdestReading(WINDOW, [])).toBeNull();
+    expect(conditions).toEqual([]);
   });
 });

@@ -14,3 +14,4 @@ export * from './lib/realtime/realtime.model';
 export * from './lib/health/health.model';
 export * from './lib/ui/gauge-metrics';
 export * from './lib/reports/equipment-runtime.model';
+export * from './lib/reports/freeze-margin.model';
