@@ -106,7 +106,8 @@ tools/e2e-stack.sh --spec apps/web-e2e/src/stack/node-update.cy.ts --headed
 - **It runs only the specs in `src/stack/`**, with
   [../apps/web-e2e/cypress.stack.config.ts](../apps/web-e2e/cypress.stack.config.ts).
 - **Options after the script name go to `cypress run`**, such as `--spec` or `--headed`. Cypress
-  reads a `--spec` path from the repo root, so it starts with `apps/web-e2e/`.
+  reads a `--spec` path from the directory you run the script in, so from the repo root it starts
+  with `apps/web-e2e/`.
 - **It is not in the gate**, for the same reasons as the smoke test, and it needs Docker.
 
 ### Screenshots on a PR
