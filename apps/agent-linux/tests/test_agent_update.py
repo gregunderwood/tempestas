@@ -240,6 +240,33 @@ def test_a_new_release_reports_healthy_once_it_has_said_hello_and_heard_a_heartb
     assert agent.update_gate is None
 
 
+def test_a_new_release_rolls_back_when_the_server_never_accepts_its_hello(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    still_the_old_release = {"controller": SERVER, "epoch": 1, "agentVersion": RUNNING_RELEASE}
+
+    agent.say_hello()
+    agent.on_heartbeat(json.dumps(still_the_old_release).encode())
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert agent.layout.read_current_release() == RUNNING_RELEASE
+    assert agent.restart_requested.is_set()
+    assert agent.layout.read_outcome().reason.startswith(
+        f"the server did not accept {NEW_RELEASE}'s hello"
+    )
+
+
+def test_a_new_release_is_healthy_once_the_server_names_it_in_a_heartbeat(tmp_path):
+    agent, _ = start_new_release_on_its_gate(tmp_path)
+    accepted = {"controller": SERVER, "epoch": 1, "agentVersion": agent.agent_version}
+
+    agent.say_hello()
+    agent.on_heartbeat(json.dumps(accepted).encode())
+    agent.tend_update()
+
+    assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
+
+
 def test_a_healthy_update_is_kept_until_the_broker_has_it(tmp_path):
     agent, _ = start_new_release_on_its_gate(tmp_path)
     agent.client.is_delivering = False

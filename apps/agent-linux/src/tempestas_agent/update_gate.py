@@ -26,13 +26,17 @@ class HealthGate:
         self.pending = pending
         self.has_said_hello = False
         self.has_heard_heartbeat = False
+        self.hello_version: str | None = None
+        self.has_heard_another_accepted_version = False
+        self.server_accepted_version: str | None = None
         self.is_start_recorded = False
         self._watched_seconds = 0.0
         self._watching_since: float | None = None
         self._clock_lock = threading.Lock()
 
-    def note_hello(self) -> None:
+    def note_hello(self, agent_version: str) -> None:
         self.has_said_hello = True
+        self.hello_version = agent_version
 
     def start_watching(self, now: float) -> None:
         with self._clock_lock:
@@ -50,10 +54,21 @@ class HealthGate:
             running = 0.0 if self._watching_since is None else now - self._watching_since
             return self._watched_seconds + running
 
-    def note_heartbeat(self) -> None:
+    def note_heartbeat(self, heartbeat: dict) -> None:
         # Before our hello, a heartbeat proves only the broker.
-        if self.has_said_hello:
+        if not self.has_said_hello:
+            return
+        if self._has_server_accepted_our_hello(heartbeat):
             self.has_heard_heartbeat = True
+        else:
+            self.has_heard_another_accepted_version = True
+            self.server_accepted_version = heartbeat[contract.HEARTBEAT_ACCEPTED_VERSION]
+
+    def _has_server_accepted_our_hello(self, heartbeat: dict) -> bool:
+        # A server before contract 1.2 names no version, so any heartbeat is all it can show.
+        if contract.HEARTBEAT_ACCEPTED_VERSION not in heartbeat:
+            return True
+        return heartbeat[contract.HEARTBEAT_ACCEPTED_VERSION] == self.hello_version
 
     def is_passed(self) -> bool:
         return self.has_said_hello and self.has_heard_heartbeat
@@ -63,7 +78,15 @@ class HealthGate:
 
     def describe_failure(self) -> str:
         version = self.pending.version
+        if self.has_heard_another_accepted_version:
+            refusal = f"the server did not accept {version}'s hello in {GATE_SECONDS}s"
+            return f"{refusal}: {self._describe_what_server_accepted()}"
         return f"{version} heard no heartbeat in {GATE_SECONDS}s with the server online"
+
+    def _describe_what_server_accepted(self) -> str:
+        if self.server_accepted_version is None:
+            return "it has accepted no hello from this node"
+        return f"it still names {self.server_accepted_version}"
 
 
 def settle_update_on_start(

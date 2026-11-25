@@ -39,6 +39,8 @@ class FakeBrokerClient extends EventEmitter {
     this.publishedTopics.push(topic);
   });
 
+  readonly publish = vi.fn();
+
   readonly endAsync = vi.fn(async () => undefined);
 
   connectToBroker(): void {
@@ -271,5 +273,87 @@ describe('MqttHardwareService updates', () => {
       reason: null,
     });
     await service.onModuleDestroy();
+  });
+});
+
+describe('MqttHardwareService heartbeats', () => {
+  const HEARTBEAT_INTERVAL_MS = 5_000;
+  let brokerClient: FakeBrokerClient;
+  let service: MqttHardwareService;
+
+  function hello(overrides: Record<string, unknown> = {}) {
+    return {
+      schema: MQTT_SCHEMAS.hello,
+      node: 'patji',
+      ts: NOW.toISOString(),
+      kind: 'rpi',
+      agentName: AgentApp.Linux,
+      agentVersion: '1.2.0',
+      bootId: 'boot-1',
+      capabilities: { contractVersion: 1, contractMinor: 2 },
+      ...overrides,
+    };
+  }
+
+  async function sendHeartbeats(): Promise<Record<string, unknown>[]> {
+    brokerClient.publish.mockClear();
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+    return brokerClient.publish.mock.calls
+      .filter(([topic]) => topic === mqttTopics.heartbeat('patji'))
+      .map(([, body]) => JSON.parse(body as string));
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    brokerClient = new FakeBrokerClient();
+    vi.mocked(connect).mockReturnValue(
+      brokerClient as unknown as ReturnType<typeof connect>,
+    );
+    service = new MqttHardwareService(
+      new ConfigService({ CONTROLLER_ROLE: 'leader' }),
+      new FixedClock(NOW),
+    );
+    service.onApplicationBootstrap();
+    brokerClient.connectToBroker();
+    await vi.advanceTimersByTimeAsync(0);
+    brokerClient.acknowledgeSubscribe();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  afterEach(async () => {
+    await service.onModuleDestroy();
+    vi.useRealTimers();
+  });
+
+  it('names the agent version from the hello it accepted, so an update can tell it was taken', async () => {
+    brokerClient.deliver(mqttTopics.hello('patji'), hello());
+
+    const [heartbeat] = await sendHeartbeats();
+
+    expect(heartbeat).toMatchObject({
+      schema: MQTT_SCHEMAS.heartbeat,
+      node: 'patji',
+      agentVersion: '1.2.0',
+    });
+  });
+
+  it('keeps naming the last accepted version when a later hello is refused', async () => {
+    brokerClient.deliver(mqttTopics.hello('patji'), hello());
+    brokerClient.deliver(
+      mqttTopics.hello('patji'),
+      hello({ agentVersion: '1.2.1', bootId: '' }),
+    );
+
+    const [heartbeat] = await sendHeartbeats();
+
+    expect(heartbeat.agentVersion).toBe('1.2.0');
+  });
+
+  it('names no version for a node whose hello it never accepted', async () => {
+    brokerClient.deliver(mqttTopics.hello('patji'), hello({ bootId: '' }));
+
+    const [heartbeat] = await sendHeartbeats();
+
+    expect(heartbeat.agentVersion).toBeNull();
   });
 });

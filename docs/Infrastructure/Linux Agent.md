@@ -282,8 +282,12 @@ A graceful stop drives every line to its failsafe before the exit, so the five s
 ### The health gate
 
 The new release finds `pending.json` naming itself and has `GATE_SECONDS`, 120, to prove itself:
-a `hello`, then a heartbeat from the server after that `hello`. A heartbeat means the broker, the
-credentials and the server's view of the node all work.
+a `hello`, then a heartbeat from the server after that `hello` that names the new version as the
+one it accepted. That means the broker, the credentials and the server's view of the node all
+work, and that the server took this release's `hello`, not just any message from the node. A
+heartbeat still naming the old version, or none, does not count. If the gate runs out that way,
+the reason says so: "the server did not accept 1.2.1's hello in 120s: it still names 1.2.0". A
+server from before contract 1.2 names no version, and then any heartbeat after the `hello` passes.
 
 The 120 s count only while the broker is connected and the server is online. The clock runs once
 the node has said `hello` and the server is known to be online, and stops when the server reports

@@ -300,7 +300,7 @@ class Agent:
             )
         gate = self.update_gate
         if gate is not None:
-            gate.note_heartbeat()
+            gate.note_heartbeat(body)
 
     def on_server_status(self, payload: bytes, is_retained: bool) -> None:
         try:
@@ -339,7 +339,7 @@ class Agent:
         # Read once: the main loop may drop the gate meanwhile.
         gate = self.update_gate
         if gate is not None and has_left_this_node(delivery):
-            gate.note_hello()
+            gate.note_hello(self.agent_version)
             if self.is_server_online:
                 gate.start_watching(self._clock())
 

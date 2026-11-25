@@ -15,6 +15,7 @@ import {
   mqttQos,
   mqttTopics,
   type GpioResultPayload,
+  type HeartbeatPayload,
   type NodeId,
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
@@ -111,6 +112,7 @@ export class MqttHardwareService
   private readonly lastReports = new Map<string, PinStateReport>();
   private readonly isOnlineByNode = new Map<NodeId, boolean>();
   private readonly knownNodes = new Set<NodeId>();
+  private readonly acceptedAgentVersions = new Map<NodeId, string>();
   private readonly lastActedAt = new Map<string, number>();
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private commandCount = 0;
@@ -471,7 +473,9 @@ export class MqttHardwareService
       `${nodeId}:hello`,
       `Rejected hello from "${nodeId}"`,
     );
-    if (hello) this.hello.next(hello);
+    if (!hello) return;
+    this.acceptedAgentVersions.set(nodeId, hello.agentVersion);
+    this.hello.next(hello);
   }
 
   private receiveStatus(
@@ -720,16 +724,21 @@ export class MqttHardwareService
     for (const nodeId of this.knownNodes) {
       client.publish(
         mqttTopics.heartbeat(nodeId),
-        JSON.stringify({
-          schema: MQTT_SCHEMAS.heartbeat,
-          node: nodeId,
-          ts: this.clock.now().toISOString(),
-          controller: this.controllerId,
-          epoch: this.epoch,
-        }),
+        JSON.stringify(this.buildHeartbeat(nodeId)),
         mqttQos.heartbeat,
       );
     }
+  }
+
+  private buildHeartbeat(nodeId: NodeId): HeartbeatPayload {
+    return {
+      schema: MQTT_SCHEMAS.heartbeat,
+      node: nodeId,
+      ts: this.clock.now().toISOString(),
+      controller: this.controllerId,
+      epoch: this.epoch,
+      agentVersion: this.acceptedAgentVersions.get(nodeId) ?? null,
+    };
   }
 
   private logAlarm(
