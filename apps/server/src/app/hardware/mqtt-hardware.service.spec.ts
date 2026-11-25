@@ -112,6 +112,75 @@ describe('MqttHardwareService on a broker connect', () => {
   });
 });
 
+describe('MqttHardwareService server status by role', () => {
+  let brokerClient: FakeBrokerClient;
+  let startedService: MqttHardwareService | undefined;
+
+  function startService(role: string): MqttHardwareService {
+    const service = new MqttHardwareService(
+      new ConfigService({ CONTROLLER_ROLE: role }),
+      new FixedClock(NOW),
+    );
+    service.onApplicationBootstrap();
+    startedService = service;
+    return service;
+  }
+
+  async function connectAndAcknowledgeSubscribe(): Promise<void> {
+    brokerClient.connectToBroker();
+    await settlePendingWork();
+    brokerClient.acknowledgeSubscribe();
+    await settlePendingWork();
+  }
+
+  beforeEach(() => {
+    brokerClient = new FakeBrokerClient();
+    vi.mocked(connect).mockReturnValue(
+      brokerClient as unknown as ReturnType<typeof connect>,
+    );
+  });
+
+  afterEach(async () => {
+    await startedService?.onModuleDestroy();
+    startedService = undefined;
+  });
+
+  it('a leader announces online on connect and offline on a clean shutdown', async () => {
+    const service = startService('leader');
+    await connectAndAcknowledgeSubscribe();
+
+    await service.onModuleDestroy();
+
+    expect(brokerClient.publishedServerStates).toEqual(['online', 'offline']);
+  });
+
+  it("a follower announces nothing on connect, so it cannot cover a crashed leader's will", async () => {
+    startService('follower');
+    await connectAndAcknowledgeSubscribe();
+
+    expect(brokerClient.hasAnnouncedServerStatus()).toBe(false);
+  });
+
+  it('a follower announces nothing on a clean shutdown, so its restart does not tell nodes the server is gone', async () => {
+    const service = startService('follower');
+    await connectAndAcknowledgeSubscribe();
+
+    await service.onModuleDestroy();
+
+    expect(brokerClient.hasAnnouncedServerStatus()).toBe(false);
+    expect(brokerClient.endAsync).toHaveBeenCalled();
+  });
+
+  it("a follower registers no will, so a crash leaves the leader's status standing", () => {
+    startService('follower');
+
+    expect(connect).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.not.objectContaining({ will: expect.anything() }),
+    );
+  });
+});
+
 const ORDER: UpdateOrder = {
   id: '6f1c9e1e-8f7e-4a43-9c55-0d6f1d9b2b11',
   app: AgentApp.Linux,

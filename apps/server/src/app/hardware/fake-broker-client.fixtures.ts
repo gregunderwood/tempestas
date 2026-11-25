@@ -9,6 +9,7 @@ interface PendingSubscription {
 
 export class FakeBrokerClient extends EventEmitter {
   readonly publishedTopics: string[] = [];
+  readonly publishedServerStates: string[] = [];
   connected = false;
   private readonly pendingSubscriptions: PendingSubscription[] = [];
 
@@ -19,8 +20,11 @@ export class FakeBrokerClient extends EventEmitter {
       }),
   );
 
-  readonly publishAsync = vi.fn(async (topic: string) => {
+  readonly publishAsync = vi.fn(async (topic: string, payload: string) => {
     this.publishedTopics.push(topic);
+    if (topic === mqttTopics.serverStatus) {
+      this.publishedServerStates.push(JSON.parse(payload).state);
+    }
   });
 
   readonly publish = vi.fn();
@@ -59,7 +63,7 @@ export class FakeBrokerClient extends EventEmitter {
   }
 
   hasAnnouncedServerStatus(): boolean {
-    return this.publishedTopics.includes(mqttTopics.serverStatus);
+    return this.publishedServerStates.length > 0;
   }
 }
 

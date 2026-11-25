@@ -120,7 +120,7 @@ export class MqttHardwareService
 
   private readonly controllerId = `nestjs-${process.pid}`;
   private readonly epoch: number;
-  // A follower ingests everything, commands nothing, and neither heartbeats nor registers a will.
+  // A follower ingests everything, commands nothing, and neither heartbeats nor publishes the server status.
   private readonly role: ControllerRole;
 
   constructor(
@@ -157,13 +157,7 @@ export class MqttHardwareService
     if (!client) return;
 
     // Explicit, because a graceful disconnect fires no will.
-    try {
-      await this.publishServerStatus(client, 'offline');
-    } catch (error: unknown) {
-      this.logger.warn(
-        `Could not publish the offline status: ${describeError(error)}`,
-      );
-    }
+    await this.announceServerStatus(client, 'offline');
     await client.endAsync();
   }
 
@@ -277,14 +271,14 @@ export class MqttHardwareService
     client.on('close', () => this.logger.warn('Broker connection closed'));
   }
 
-  // Every node answers `online` with a hello, which is not retained and is lost without the SUBACK.
+  // A leader's `online` draws a hello from every node; hellos are not retained, so they are lost without the SUBACK.
   private async subscribeThenAnnounceOnline(client: MqttClient): Promise<void> {
     const connectNumber = ++this.connectCount;
     await this.subscribeToAllNodes(client);
     // Queued while disconnected, it would replay ahead of the next connect's subscribe.
     if (!this.isStillConnectedAs(client, connectNumber)) return;
     // Even after a refused subscribe: the server is connected and heartbeating, and a retained `offline` says not.
-    await this.announceServerOnline();
+    await this.announceServerStatus(client, 'online');
   }
 
   private isStillConnectedAs(
@@ -682,27 +676,23 @@ export class MqttHardwareService
     }
   }
 
-  private async announceServerOnline(): Promise<void> {
-    const client = this.client;
-    if (!client) return;
-    try {
-      await this.publishServerStatus(client, 'online');
-    } catch (error: unknown) {
-      this.logger.warn(
-        `Could not announce the server as online: ${describeError(error)}`,
-      );
-    }
-  }
-
-  private publishServerStatus(
+  // Leader only, like the will: a follower's retained status would speak for the server nodes obey.
+  private async announceServerStatus(
     client: MqttClient,
     state: 'online' | 'offline',
-  ): Promise<unknown> {
-    return client.publishAsync(
-      mqttTopics.serverStatus,
-      JSON.stringify(buildStatus('server', state, this.clock.now())),
-      mqttQos.serverStatus,
-    );
+  ): Promise<void> {
+    if (!this.isLeader) return;
+    try {
+      await client.publishAsync(
+        mqttTopics.serverStatus,
+        JSON.stringify(buildStatus('server', state, this.clock.now())),
+        mqttQos.serverStatus,
+      );
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Could not announce the server as ${state}: ${describeError(error)}`,
+      );
+    }
   }
 
   private startHeartbeat(): void {

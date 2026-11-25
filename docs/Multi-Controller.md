@@ -225,6 +225,21 @@ What a follower's server does today, in `MqttHardwareService`:
   follower creating one would have nodes obeying two controllers.
 - **It registers no server LWT.** A follower crashing is no reason for the greenhouse to fail safe,
   and its retained `offline` would sit on the topic telling every node exactly that.
+- **It publishes no `server/status` at all**, neither `online` on connect nor `offline` on a clean
+  shutdown. A follower restarted for a deploy would otherwise tell every node the server is gone,
+  and one starting up would cover a crashed leader's will with an `online` nobody stands behind.
+  The topic speaks for the leader alone. The cost: `online` is also what draws a hello from every
+  node, and hellos are not retained, so a follower that boots learns of new nodes, capabilities
+  and agent versions only as each node reconnects or the leader next announces `online`. Worse, a
+  node that rebooted while the follower was down keeps its old boot id there, so the follower
+  drops that node's samples as duplicates of the old boot's `seq` until it next hears the node's
+  hello, leaving a gap in its history.
+- **Promotion and demotion are a restart with the other `CONTROLLER_ROLE`.** The role is read once
+  at boot. A promoted box connects as leader and announces `online`. A demoted box stops as leader,
+  so its last word is a truthful `offline`, and comes back as a follower that leaves the topic
+  alone: it does not clear it, because it cannot tell whether the retained status is already a
+  new leader's `online`. So demote before promoting: the other way round, the old leader's
+  shutdown `offline` covers the new leader's `online` until the new leader next reconnects.
 - **It refuses `setPin` and `syncPins` locally** with `CONTROLLER_IS_FOLLOWER`. The node would deny
   the command anyway, but as a `CONTROLLER_CONFLICT` alarm, and a click on a follower's UI must not
   manufacture a real incident signal.

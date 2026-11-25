@@ -311,7 +311,7 @@ mosquitto_pub -r -t 'tempestas/v1/node/elantris/gpio/set' -m '{...}'   # MUST be
   met every node — nodes re-announce on their own connect and whenever `server/status` turns
   `online` (a live publish, not the retained replay), and the fake driver deliberately reproduces
   this by announcing from `onApplicationBootstrap` rather than at construction.
-  The server announces `online` only after the broker acknowledges its subscribe to
+  The leader announces `online` only after the broker acknowledges its subscribe to
   `tempestas/v1/node/#`, so those answering hellos cannot reach the broker ahead of it.
 - **A retained `status` for an unknown slug arrives before that node's `hello`.** Ignore it; do not
   half-create a node from it.
@@ -339,7 +339,8 @@ What this means for anything speaking the contract:
 - **Only `tempestas-server` may publish `update`**, and a node may publish only its own
   `update/status`.
 - **Only `tempestas-server` may publish `server/status`**, so another node cannot fake the server's
-  LWT.
+  LWT. Of the servers, only the leader does: a follower publishes neither the will nor an explicit
+  `online` or `offline`. See [Multi-Controller](../Multi-Controller.md).
 - **Read and write are separate grants.** A credential that publishes samples cannot subscribe to
   them - which is why a logger needs its own read-only identity rather than borrowing a node's.
 
