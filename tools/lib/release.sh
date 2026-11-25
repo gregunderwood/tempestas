@@ -98,7 +98,7 @@ is_release_healthy() {
 
 # Node modules are hard-linked from the previous release when the lockfile has not changed.
 ship_release() {
-  local host="$1" release_id="$2" previous_release_id="$3" repository="$4"
+  local host="$1" release_id="$2" previous_release_id="$3" repository="$4" product_version="$5"
   local release_dir="$REMOTE_ROOT/releases/$release_id"
   if ssh "$host" "test -e $release_dir"; then
     echo "$release_dir already exists on $host; a release is never shipped over." >&2
@@ -107,11 +107,12 @@ ship_release() {
   ssh "$host" "mkdir -p $release_dir"
   rsync -a "$repository/dist/apps/server/" "$host:$release_dir/server/"
   rsync -a "$repository/dist/apps/web/browser/" "$host:$release_dir/web/"
-  ssh "$host" bash -s -- "$release_dir" "$release_id" "$previous_release_id" "$PREVIOUS_RECORD" <<'REMOTE'
+  ssh "$host" bash -s -- "$release_dir" "$release_id" "$previous_release_id" "$PREVIOUS_RECORD" "$product_version" <<'REMOTE'
 set -euo pipefail
-release_dir="$1" release_id="$2" previous_release_id="$3" previous_record="$4"
+release_dir="$1" release_id="$2" previous_release_id="$3" previous_record="$4" product_version="$5"
 previous_release_dir="$(dirname "$release_dir")/$previous_release_id"
 echo "$release_id" >"$release_dir/release-id"
+echo "$product_version" >"$release_dir/product-version"
 echo "$previous_release_id" >"$release_dir/$previous_record"
 cd "$release_dir/server"
 if [ -d "$previous_release_dir/server/node_modules" ] &&

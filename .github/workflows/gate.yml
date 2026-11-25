@@ -1,0 +1,41 @@
+name: Gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # Full history: agent versions count commits, and the product version reads tags.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: astral-sh/setup-uv@v6
+
+      - run: npm ci
+
+      - name: Lint, typecheck, test, build and migration round trip
+        run: npx nx run-many -t lint,typecheck,test,build,migration-round-trip
+
+      - name: Server coverage
+        run: npx nx test server --coverage
+
+      - name: Product version
+        run: tools/describe-product-version.sh

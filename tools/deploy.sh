@@ -107,13 +107,14 @@ if lsof -ti tcp:7000 -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 RELEASE_ID="$(describe_release_id "$HERE")"
+PRODUCT_VERSION="$("$HERE/tools/describe-product-version.sh" "$HERE")"
 PREVIOUS_RELEASE_ID="$(read_release_behind "$HOST" current)"
 
 say "Bundling the agents for the server to offer"
 build_agent_bundles "$HERE" "$RELEASE_ID" "$AGENT_BUNDLES_DIR"
 
-say "Shipping $RELEASE_ID beside $PREVIOUS_RELEASE_ID"
-ship_release "$HOST" "$RELEASE_ID" "$PREVIOUS_RELEASE_ID" "$HERE"
+say "Shipping $RELEASE_ID ($PRODUCT_VERSION) beside $PREVIOUS_RELEASE_ID"
+ship_release "$HOST" "$RELEASE_ID" "$PREVIOUS_RELEASE_ID" "$HERE" "$PRODUCT_VERSION"
 ship_agent_bundles "$HOST" "$AGENT_BUNDLES_DIR"
 # Before the restart, as the server reads the bundles once when it starts.
 prune_agent_bundles "$HOST" || echo "Could not prune old agent bundles on $HOST; the next deploy tries again." >&2

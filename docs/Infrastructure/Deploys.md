@@ -24,7 +24,7 @@ problem found after a deploy passed.
 ```
 ~/tempestas/
   releases/
-    20261121-101500-e95e066/   server/  web/  release-id  previous-release  applied-migrations.json  backup-before-migrations  healthy
+    20261121-101500-e95e066/   server/  web/  release-id  product-version  previous-release  applied-migrations.json  backup-before-migrations  healthy
     20261121-143000-1a2b3c4/   …
   current  -> releases/20261121-143000-1a2b3c4    # tempestas-server.service runs this
   migrator -> releases/20261121-143000-1a2b3c4    # tempestas-migrate@ runs this
@@ -32,6 +32,13 @@ problem found after a deploy passed.
 
 A release ID is `<UTC time>-<commit>`, with `-dev` when the commit is not `origin/main` and
 `-dev-dirty` with uncommitted changes. The server reports it as `releaseId` on `/api/health`.
+
+The **product version** names what was shipped rather than when:
+[`tools/describe-product-version.sh`](../../tools/describe-product-version.sh) prints `X.Y.Z` at a
+`vX.Y.Z` tag, `X.Y.Z+N.g<commit>` N commits past it, and adds `dirty` with uncommitted changes. The
+deploy writes it to `product-version`, and the server reports it as `version` on `/api/health`.
+Each agent keeps its own version, from its contract, as the
+[MQTT Contract](MQTT%20Contract.md) describes.
 
 ```bash
 tools/deploy.sh                          # elantris
