@@ -8,7 +8,8 @@ const ROWS_PER_INSERT = 1000;
 export function buildFindProbesSql(defaultTimezone) {
   return `select coalesce(json_agg(probe order by probe."nodeId", probe."sensorId"), '[]')
      from (
-       select reading.node_id as "nodeUuid", node.slug as "nodeId", reading.sensor_id as "sensorId",
+       select reading.node_id as "nodeUuid", node.slug as "nodeId", node.zone_id as "zoneId",
+              reading.sensor_id as "sensorId",
               coalesce(zone.rules_config->>'timezone', ${quote(defaultTimezone)}) as timezone,
               bool_or(reading.humidity is not null) as "reportsHumidity",
               bool_or(reading.co2 is not null) as "reportsCo2"
@@ -16,7 +17,7 @@ export function buildFindProbesSql(defaultTimezone) {
          join nodes node on node.id = reading.node_id
          left join zones zone on zone.id = node.zone_id
         where reading.boot_id is distinct from ${quote(SEEDED_BOOT_ID)}
-        group by reading.node_id, node.slug, reading.sensor_id, zone.rules_config->>'timezone'
+        group by reading.node_id, node.slug, node.zone_id, reading.sensor_id, zone.rules_config->>'timezone'
      ) probe`;
 }
 

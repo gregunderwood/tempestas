@@ -6,6 +6,14 @@ import {
   startOfLocalDay,
 } from './history-window.mjs';
 import { seededRandom } from './seeded-random.mjs';
+import { simulateProbeClimate } from './simulated-readings.mjs';
+import {
+  buildSourceTemperature,
+  chooseFailingRole,
+  findFaultNight,
+  findHeatThermostat,
+  simulateThermostatRuns,
+} from './simulated-thermostat.mjs';
 import { findNightColdness } from './simulated-weather.mjs';
 
 const MILLISECONDS_PER_MINUTE = 60_000;
@@ -43,19 +51,50 @@ const DEFAULT_DUTY = {
 /**
  * @typedef {{ level: 0 | 1 | null, known: boolean }} PinState
  * @typedef {{ deviceId: string, nodeId: string, pin: number, onLevel: 0 | 1,
- *   role: string | null, timezone: string, currentState: PinState | null }} DeviceLine
+ *   role: string | null, timezone: string, currentState: PinState | null, zoneId: string | null,
+ *   rulesConfig: object | null, onDelaySeconds: number }} DeviceLine
  * @typedef {{ nodeId: string, pin: number, level: 0 | 1 | null, known: boolean,
  *   energised: boolean | null, deviceId: string, role: string | null, reason: string,
  *   observedAt: Date }} TransitionRow
- * @typedef {{ line: DeviceLine, historyStart: Date, rows: TransitionRow[] }} LineHistory
+ * @typedef {{ line: DeviceLine, historyStart: Date, rows: TransitionRow[],
+ *   isFollowingThermostat: boolean }} LineHistory
  */
 
-/** @returns {LineHistory[]} */
-export function buildSimulatedHistory({ lines, now }) {
+/**
+ * A heating line whose zone has a heat thermostat for its role, and a probe its rule reads, follows
+ * those probes' seeded temperatures; every other line follows its role's duty pattern.
+ * @param {{ lines: DeviceLine[], probes?: import('./simulated-readings.mjs').Probe[], now: Date }} seed
+ * @returns {LineHistory[]}
+ */
+export function buildSimulatedHistory({ lines, probes = [], now }) {
   const outageNodeId = chooseOutageNode(lines);
+  const probeClimates = probes.map((probe) => ({
+    probe,
+    ...simulateProbeClimate(probe, now),
+  }));
   return lines.map((line) =>
-    buildLineHistory(line, now, line.nodeId === outageNodeId),
+    buildLineHistory(
+      line,
+      now,
+      line.nodeId === outageNodeId,
+      findZoneThermostat(line, probeClimates, now),
+    ),
   );
+}
+
+function findZoneThermostat(line, probeClimates, now) {
+  const thermostat = findHeatThermostat(line.rulesConfig, line.role);
+  if (!thermostat) return null;
+  const zoneProbeClimates = probeClimates.filter(
+    (probeClimate) => probeClimate.probe.zoneId === line.zoneId,
+  );
+  const temperatureAt = buildSourceTemperature(
+    zoneProbeClimates,
+    thermostat.source,
+  );
+  const hasSourceProbe = temperatureAt(now.getTime()) !== null;
+  if (!hasSourceProbe) return null;
+  return { thermostat, temperatureAt };
 }
 
 // The first node by slug, so the outage lands on the same node every run.
@@ -63,15 +102,70 @@ function chooseOutageNode(lines) {
   return lines.map((line) => line.nodeId).sort()[0];
 }
 
-function buildLineHistory(line, now, hasOutage) {
+function buildLineHistory(line, now, hasOutage, zoneThermostat) {
   const historyStart = findHistoryStart(now, line.timezone);
-  const runs = simulateRuns(line, historyStart, now);
+  const runs = zoneThermostat
+    ? simulateHeatingRuns(line, zoneThermostat, historyStart, now)
+    : simulateRuns(line, historyStart, now);
   let rows = toTransitionRows(line, runs, historyStart, now);
   if (hasOutage) {
     rows = cutOutOutage(line, rows, findOutage(now, line.timezone));
   }
   rows = appendCurrentState(line, rows, now);
-  return { line, historyStart, rows: dropRepeatedStates(rows) };
+  return {
+    line,
+    historyStart,
+    rows: dropRepeatedStates(rows),
+    isFollowingThermostat: zoneThermostat !== null,
+  };
+}
+
+// The short-cycling morning overrides the thermostat, as a chattering relay would.
+function simulateHeatingRuns(line, zoneThermostat, historyStart, now) {
+  const thermostatRuns = simulateThermostatRuns({
+    ...zoneThermostat,
+    onDelaySeconds: line.onDelaySeconds,
+    fromMs: historyStart.getTime(),
+    untilMs: now.getTime(),
+    isFailing: buildFaultCheck(line, now),
+  });
+  const shortCyclingPeriods = listPeriods(
+    line.timezone,
+    historyStart,
+    now,
+  ).filter((period) => period.kind === 'short-cycling');
+  const shortCyclingRuns = shortCyclingPeriods.flatMap((period) =>
+    simulatePeriod(period, SHORT_CYCLING, seedRandomFor(line, period)),
+  );
+  const runsAroundShortCycling = shortCyclingPeriods.reduce(
+    cutOutPeriod,
+    thermostatRuns,
+  );
+  return mergeTouchingRuns(
+    [...runsAroundShortCycling, ...shortCyclingRuns].sort(
+      (first, second) => first.fromMs - second.fromMs,
+    ),
+  );
+}
+
+function buildFaultCheck(line, now) {
+  if (chooseFailingRole(line.rulesConfig) !== line.role) return () => false;
+  const faultNight = findFaultNight(now, line.timezone);
+  return (atMs) => atMs >= faultNight.fromMs && atMs < faultNight.toMs;
+}
+
+function cutOutPeriod(runs, period) {
+  return runs.flatMap((run) => {
+    if (run.toMs <= period.fromMs || run.fromMs >= period.toMs) return [run];
+    const pieces = [];
+    if (run.fromMs < period.fromMs) {
+      pieces.push({ fromMs: run.fromMs, toMs: period.fromMs });
+    }
+    if (run.toMs > period.toMs) {
+      pieces.push({ fromMs: period.toMs, toMs: run.toMs });
+    }
+    return pieces;
+  });
 }
 
 function simulateRuns(line, historyStart, now) {
@@ -80,10 +174,14 @@ function simulateRuns(line, historyStart, now) {
     simulatePeriod(
       period,
       dutyFor(period.kind, duty),
-      seededRandom(`${line.nodeId}:${line.pin}:${period.key}`),
+      seedRandomFor(line, period),
     ),
   );
   return mergeTouchingRuns(runs).filter((run) => run.fromMs < now.getTime());
+}
+
+function seedRandomFor(line, period) {
+  return seededRandom(`${line.nodeId}:${line.pin}:${period.key}`);
 }
 
 function dutyFor(kind, duty) {

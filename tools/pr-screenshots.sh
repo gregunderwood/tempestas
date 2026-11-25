@@ -116,11 +116,9 @@ shoot_checkout() {
   start_server "$label"
   admit_simulated_nodes
   create_devices_on_simulated_pins
-  if $SHOULD_SEED_HISTORY; then
-    seed_runtime_history "$label"
-  fi
   wait_for_readings_and_rules_cycle
   if $SHOULD_SEED_HISTORY; then
+    seed_runtime_history "$label"
     seed_reading_history "$label"
   fi
   start_web "$label"
@@ -128,7 +126,8 @@ shoot_checkout() {
   stop_stack
 }
 
-# From this checkout on both sides, since the base may predate the script.
+# From this checkout on both sides, since the base may predate the script. After the first readings,
+# since heaters follow the temperatures seeded for the probes that have reported.
 seed_runtime_history() {
   local label=$1
   say "Seeding $label with simulated runtime history"
