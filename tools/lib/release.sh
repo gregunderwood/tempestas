@@ -29,7 +29,7 @@ RELEASE_SYSTEMCTL_LINES=(
 fetch_main_and_tags() {
   local repository="$1"
   if ! git -C "$repository" fetch --quiet --tags origin main 2>/dev/null; then
-    echo "Could not fetch origin/main and its tags, so the release ID and product version use the last fetch." >&2
+    echo "Could not fetch all of origin/main and its tags; check git fetch --tags origin main, as a stale tag gives a stale product version." >&2
   fi
 }
 

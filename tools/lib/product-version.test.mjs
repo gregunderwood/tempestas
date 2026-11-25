@@ -135,6 +135,14 @@ describe('describe-product-version.sh', () => {
     assert.match(result.stderr, /shallow clone/);
   });
 
+  it('refuses a repository with no commits rather than print an empty version', () => {
+    const repository = makeRepository();
+    writeFileSync(join(repository, 'untracked.txt'), 'untracked');
+    const result = runDescribeProductVersion(repository);
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, '');
+  });
+
   it('refuses a directory that is not a repository', () => {
     const result = runDescribeProductVersion(
       mkdtempSync(join(tmpdir(), 'product-version-none-')),

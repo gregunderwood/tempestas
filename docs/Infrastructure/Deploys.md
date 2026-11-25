@@ -34,8 +34,8 @@ A release ID is `<UTC time>-<commit>`, with `-dev` when the commit is not `origi
 `-dev-dirty` with uncommitted changes. The server reports it as `releaseId` on `/api/health`.
 
 The **product version** names what was shipped rather than when.
-[`tools/describe-product-version.sh`](../../tools/describe-product-version.sh) prints it from the last
-`vX.Y.Z` tag reachable from `HEAD`, on any branch:
+[`tools/describe-product-version.sh`](../../tools/describe-product-version.sh) prints it from the highest
+`vX.Y.Z` tag reachable from `HEAD`, on any branch, with `1.4.0-dev.N` below `1.4.0`:
 
 | Where `HEAD` is                       | Version                          |
 | ------------------------------------- | -------------------------------- |

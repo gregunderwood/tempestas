@@ -39,6 +39,7 @@ npx nx serve server                   # API on :7000, HARDWARE_DRIVER=fake
 npx nx serve web                      # Angular dev server (on the Mac, never on the Pi)
 npx nx run-many -t lint,typecheck,test,build,migration-round-trip    # the gate — every project, Python and tools/ included
 npx nx test server --coverage         # also the gate: thresholds are checked ONLY here
+                                      # GitHub Actions runs both on every PR: .github/workflows/gate.yml
 npx nx test server                    # one project
 npx nx e2e web-e2e                    # Cypress smoke test, stubbed API and socket; not in the gate
 tools/e2e-stack.sh                    # Cypress use cases on a real server with the fake driver; not in the gate

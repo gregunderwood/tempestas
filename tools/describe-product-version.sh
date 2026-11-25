@@ -56,4 +56,7 @@ mark_if_dirty() {
 }
 
 require_full_history
-mark_if_dirty "$(describe_version "$(find_highest_release_tag)")"
+# Assigned one at a time, as a failure inside a command's argument would not stop the script.
+TAG="$(find_highest_release_tag)"
+VERSION="$(describe_version "$TAG")"
+mark_if_dirty "$VERSION"
