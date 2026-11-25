@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Copies inside the bootloader's grace, before an armed watchdog could reset the board mid-copy.
-# Puts the agent in slot a and makes it active, which also moves a board from the old flat layout.
 
 set -euo pipefail
 
@@ -63,22 +62,8 @@ wait_for_port
 say "Copying the agent for the $BOARD board into slot $SLOT"
 REFUSE_IF_WATCHDOG_ARMED="$(cat "$DEVICE/$BOARD_FILE")
 refuse_if_watchdog_armed()"
-# Python on the board, as mpremote's rm fails on a file that is not there.
-CLEAR_SLOT_AND_FLAT_LAYOUT="import os
-def remove_tree(path):
-    for name in os.listdir(path):
-        child = path + '/' + name
-        if os.stat(child)[0] & 0x4000:
-            remove_tree(child)
-        else:
-            os.remove(child)
-    os.rmdir(path)
-for name in $(printf "'%s'," "$MICROPYTHON_SLOT_STATE" "${FLAT_LAYOUT_FILES[@]}"):
-    if name in os.listdir():
-        os.remove(name)
-if '$SLOT' in os.listdir():
-    remove_tree('$SLOT')
-os.mkdir('$SLOT')"
+CLEAR_SLOT_AND_FLAT_LAYOUT="$(cat "$HERE/apps/agent-micropython/usb/clear_slot.py")
+clear_slot_and_flat_layout('$SLOT', [$(printf "'%s'," "$MICROPYTHON_SLOT_STATE" "${FLAT_LAYOUT_FILES[@]}")])"
 # The slot state is removed first and written last, so a deploy cut short boots nothing rather than half a slot.
 (cd "$DEVICE" && mpremote exec "$REFUSE_IF_WATCHDOG_ARMED" + exec "$CLEAR_SLOT_AND_FLAT_LAYOUT" \
   + cp "${MICROPYTHON_AGENT_CODE[@]}" :"$SLOT/" \

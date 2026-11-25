@@ -1,0 +1,96 @@
+import hashlib
+import json
+import subprocess
+from pathlib import Path
+
+from slot_installer import SlotInstaller
+from slots import SlotStore
+
+APP_DIRECTORY = Path(__file__).resolve().parents[1]
+REPOSITORY = APP_DIRECTORY.parents[1]
+DEVICE_DIRECTORY = APP_DIRECTORY / "device"
+FILE_LISTS = ("MICROPYTHON_BOOTLOADER", "MICROPYTHON_AGENT_CODE", "MICROPYTHON_NODE_CONFIG")
+# Untracked, as it holds the Wi-Fi password, so its tracked template stands in for it.
+FILES_MADE_FROM_TEMPLATES = {"credentials.example.py": "credentials.py"}
+BUNDLED_VERSION = "1.2.1"
+RUNNING_VERSION = "1.2.0"
+BOARD = "pico_w"
+BUNDLE_URL = "http://elantris:7000/api/agent-releases/agent-micropython/" + BUNDLED_VERSION
+
+
+def read_file_list(list_name):
+    script = 'source "$1"; printf "%%s\\n" "${%s[@]}"' % list_name
+    output = subprocess.run(
+        ["bash", "-c", script, "bash", str(APP_DIRECTORY / "agent-files.sh")],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return output.split()
+
+
+def list_tracked_device_modules():
+    output = subprocess.run(
+        ["git", "-C", str(DEVICE_DIRECTORY), "ls-files", "*.py"], check=True, capture_output=True, text=True
+    ).stdout
+    return {FILES_MADE_FROM_TEMPLATES.get(path, path) for path in output.split() if "/" not in path}
+
+
+def build_bundle(output_directory):
+    script = """
+        source "$1/apps/agent-micropython/agent-files.sh"
+        source "$1/tools/lib/agent-bundle.sh"
+        mkdir -p "$2/files"
+        copy_agent_files "$1" agent-micropython "$2/files" "$3"
+        write_bundle_manifest "$2" agent-micropython "$3"
+    """
+    subprocess.run(
+        ["bash", "-c", script, "bash", str(REPOSITORY), str(output_directory), BUNDLED_VERSION], check=True
+    )
+
+
+class BundleOnDisk:
+    """Serves a bundle directory at the URLs the server's agent-releases route gives it."""
+
+    def __init__(self, bundle_directory):
+        self.bundle_directory = bundle_directory
+
+    def fetch(self, url, write_chunk, max_bytes):
+        relative_path = url[len(BUNDLE_URL) + 1 :]
+        write_chunk((self.bundle_directory / relative_path).read_bytes())
+
+
+def test_every_device_module_is_in_exactly_one_file_list():
+    listed = [name for list_name in FILE_LISTS for name in read_file_list(list_name)]
+
+    assert sorted(listed) == sorted(set(listed))
+    assert set(listed) == list_tracked_device_modules()
+
+
+def test_a_bundle_from_the_deploy_installs_into_a_slot_that_can_boot(tmp_path):
+    bundle_directory = tmp_path / "bundle"
+    build_bundle(bundle_directory)
+    manifest_bytes = (bundle_directory / "manifest.json").read_bytes()
+    board_root = tmp_path / "board"
+    board_root.mkdir()
+    store = SlotStore(str(board_root))
+    store.write({"active": "a", "pending": None, "outcome": None})
+    (board_root / "a").mkdir()
+    installer = SlotInstaller(store, BundleOnDisk(bundle_directory), BOARD, RUNNING_VERSION)
+    command = {
+        "id": "update-1",
+        "version": BUNDLED_VERSION,
+        "manifestUrl": BUNDLE_URL + "/manifest.json",
+        "manifestSha256": hashlib.sha256(manifest_bytes).hexdigest(),
+    }
+
+    assert installer.install(command, lambda state: None) == "b"
+
+    slot = board_root / "b"
+    for module in read_file_list("MICROPYTHON_AGENT_CODE"):
+        assert (slot / module).read_bytes() == (DEVICE_DIRECTORY / module).read_bytes()
+    assert (slot / "board.py").read_bytes() == (DEVICE_DIRECTORY / "boards" / (BOARD + ".py")).read_bytes()
+    assert (slot / "deployed_version.py").read_text() == 'AGENT_VERSION = "%s"\n' % BUNDLED_VERSION
+    for module in read_file_list("MICROPYTHON_BOOTLOADER") + read_file_list("MICROPYTHON_NODE_CONFIG"):
+        assert not (slot / module).exists()
+    assert json.loads(manifest_bytes)["contractMinor"] == 2

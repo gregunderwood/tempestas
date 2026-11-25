@@ -6,6 +6,7 @@ from fakes import FakeClock
 from http_fetch import (
     CHUNK_BYTES,
     FETCH_DEADLINE_MILLISECONDS,
+    SOCKET_TIMEOUT_SECONDS,
     FetchFailed,
     HttpFetcher,
     split_url,
@@ -14,6 +15,8 @@ from http_fetch import (
 MANIFEST_URL = "http://elantris:7000/api/agent-releases/agent-micropython/1.2.1/manifest.json"
 BODY = b'{"app": "agent-micropython"}'
 MAX_BYTES = 1024
+WATCHDOG_TIMEOUT_SECONDS = 8
+FEED = "feed"
 
 
 def build_response(body, status_line=b"HTTP/1.1 200 OK", headers=None):
@@ -29,20 +32,25 @@ class FakeConnection:
         self.sent = b""
         self.address = None
         self.is_closed = False
+        self.events = []
 
     def settimeout(self, seconds):
         self.timeout_seconds = seconds
 
     def connect(self, address):
+        self.events.append("connect")
         self.address = address
 
     def write(self, data):
+        self.events.append("write")
         self.sent += data
 
     def readline(self):
+        self.events.append("readline")
         return self.response.readline()
 
     def read(self, size):
+        self.events.append("read")
         if self.clock is not None:
             self.clock.advance_seconds(self.seconds_per_read)
         return self.response.read(size)
@@ -57,6 +65,7 @@ class FakeSocketModule:
         self.looked_up = []
 
     def getaddrinfo(self, host, port):
+        self.connection.events.append("getaddrinfo")
         self.looked_up.append((host, port))
         return [(2, 1, 0, "", (host, port))]
 
@@ -69,6 +78,7 @@ class FakeTls:
         self.wrapped_for = None
 
     def wrap_socket(self, connection, server_hostname):
+        connection.events.append("handshake")
         self.wrapped_for = server_hostname
         return connection
 
@@ -85,6 +95,7 @@ class Fetch:
 
     def feed(self):
         self.feeds += 1
+        self.connection.events.append(FEED)
 
     def __call__(self, url=MANIFEST_URL, max_bytes=MAX_BYTES):
         self.fetcher.fetch(url, self.received.extend, max_bytes)
@@ -184,3 +195,14 @@ def test_splits_a_url_into_what_the_socket_needs(url, expected):
 def test_refuses_a_url_it_cannot_fetch(url):
     with pytest.raises(FetchFailed):
         split_url(url)
+
+
+def test_feeds_the_watchdog_before_every_socket_operation_so_none_can_outlast_it():
+    fetch = Fetch(build_response(BODY, headers=[b"Server: elantris", b"Content-Length: %d" % len(BODY)]))
+
+    fetch(url="https://elantris:7000/manifest.json")
+
+    events = fetch.connection.events
+    socket_operations = [index for index, event in enumerate(events) if event != FEED]
+    assert all(index > 0 and events[index - 1] == FEED for index in socket_operations)
+    assert SOCKET_TIMEOUT_SECONDS * 2 < WATCHDOG_TIMEOUT_SECONDS

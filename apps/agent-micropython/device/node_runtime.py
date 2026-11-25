@@ -72,11 +72,13 @@ class BrokerPublisher:
         self.undelivered_messages = []
 
     def publish(self, topic, text, is_retained, quality_of_service, should_hold_while_offline):
+        """Returns whether the message went to the broker now, rather than being held or dropped."""
         message = (topic, text, is_retained, quality_of_service)
         if self.client is not None and self.try_publishing(message):
-            return
+            return True
         if should_hold_while_offline:
             self.hold(message)
+        return False
 
     def try_publishing(self, message):
         try:
@@ -276,8 +278,9 @@ def build_relay_lines():
 def build_updates(watchdog, clock):
     store = SlotStore()
     fetcher = HttpFetcher(socket, ssl, watchdog.feed, clock)
-    installer = SlotInstaller(store, fetcher, settings.BOARD, read_agent_version())
-    return NodeUpdates(store, installer, clock, log, machine.reset)
+    running_version = read_agent_version()
+    installer = SlotInstaller(store, fetcher, settings.BOARD, running_version)
+    return NodeUpdates(store, installer, clock, log, machine.reset, running_version)
 
 
 def run():

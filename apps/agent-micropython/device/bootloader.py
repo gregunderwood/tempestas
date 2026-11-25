@@ -11,8 +11,8 @@ GRACE_POLL_MILLISECONDS = 100
 class Board:
     """What the bootloader needs from the chip, passed in so the tests run it under CPython."""
 
-    def __init__(self, sleep_ms, is_bootsel_pressed, reset):
-        self.sleep_ms = sleep_ms
+    def __init__(self, sleep_milliseconds, is_bootsel_pressed, reset):
+        self.sleep_milliseconds = sleep_milliseconds
         self.is_bootsel_pressed = is_bootsel_pressed
         self.reset = reset
 
@@ -43,7 +43,7 @@ def is_safe_mode_requested(board):
     while waited_milliseconds < BOOT_GRACE_MILLISECONDS:
         if board.is_bootsel_pressed():
             return True
-        board.sleep_ms(GRACE_POLL_MILLISECONDS)
+        board.sleep_milliseconds(GRACE_POLL_MILLISECONDS)
         waited_milliseconds += GRACE_POLL_MILLISECONDS
     return False
 

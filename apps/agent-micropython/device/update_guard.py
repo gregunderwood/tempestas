@@ -26,39 +26,41 @@ class UpdateVerdict:
         self.command = command
 
 
-def log_only(reason):
+def refuse_with_log(reason):
     return UpdateVerdict(False, ANSWER_LOG, reason)
 
 
-def alarm(reason, alarm_code):
+def refuse_with_alarm(reason, alarm_code):
     return UpdateVerdict(False, ANSWER_ALARM, reason, alarm_code)
 
 
 def judge_update_command(payload, is_retained, bound_controller, now_seconds, running_app):
     if payload.strip() == b"":
         # Reacting to a clear, even with an alarm, risks a loop.
-        return log_only("empty payload (a retained clear)")
+        return refuse_with_log("empty payload (a retained clear)")
     if is_retained:
-        return alarm("update carried the retain flag", contract.AlarmCode.RETAINED_COMMAND_DROPPED)
+        return refuse_with_alarm(
+            "update carried the retain flag", contract.AlarmCode.RETAINED_COMMAND_DROPPED
+        )
 
     body = parse_json_object(payload)
     if body is None:
-        return log_only("payload is not a JSON object")
+        return refuse_with_log("payload is not a JSON object")
     if contract.read_schema_major(body.get("schema")) != contract.SUPPORTED_MAJOR:
-        return log_only("unsupported schema %r" % body.get("schema"))
+        return refuse_with_log("unsupported schema %r" % body.get("schema"))
 
     ownership_refusal = judge_ownership(body.get("issuedBy"), bound_controller)
     if ownership_refusal is not None:
         return ownership_refusal
     if now_seconds is None:
-        return log_only("clock not set yet, so expiresAt cannot be judged")
+        return refuse_with_log("clock not set yet, so expiresAt cannot be judged")
     expiry_refusal = judge_expiry(body.get("expiresAt"), now_seconds)
     if expiry_refusal is not None:
         return expiry_refusal
 
     command_id = body.get("id")
     if not isinstance(command_id, str) or command_id == "":
-        return log_only("update has no id")
+        return refuse_with_log("update has no id")
     target_problem = describe_target_problem(body, running_app)
     if target_problem is not None:
         return UpdateVerdict(False, ANSWER_FAILED_STATUS, target_problem, command_id=command_id)
@@ -68,9 +70,9 @@ def judge_update_command(payload, is_retained, bound_controller, now_seconds, ru
 def judge_ownership(issued_by, bound_controller):
     # Stricter than gpio/set: an update can wait for the first heartbeat.
     if bound_controller is None:
-        return log_only("no controller is bound yet")
+        return refuse_with_log("no controller is bound yet")
     if issued_by != bound_controller:
-        return alarm(
+        return refuse_with_alarm(
             "issuedBy %s is not the bound controller %s"
             % (json.dumps(issued_by), json.dumps(bound_controller)),
             contract.AlarmCode.CONTROLLER_CONFLICT,
@@ -80,12 +82,12 @@ def judge_ownership(issued_by, bound_controller):
 
 def judge_expiry(expires_at, now_seconds):
     if not isinstance(expires_at, str):
-        return log_only("update has no expiresAt")
+        return refuse_with_log("update has no expiresAt")
     deadline = parse_iso(expires_at)
     if deadline is None:
-        return log_only("unparseable expiresAt %s" % json.dumps(expires_at))
+        return refuse_with_log("unparseable expiresAt %s" % json.dumps(expires_at))
     if deadline < now_seconds:
-        return alarm("update expired", contract.AlarmCode.COMMAND_EXPIRED)
+        return refuse_with_alarm("update expired", contract.AlarmCode.COMMAND_EXPIRED)
     return None
 
 

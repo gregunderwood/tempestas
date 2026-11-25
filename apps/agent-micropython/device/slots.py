@@ -36,7 +36,14 @@ class SlotStore:
                 state = json.load(file)
         except (OSError, ValueError):
             return None
-        return state if is_well_formed(state) else None
+        if not isinstance(state, dict) or state.get("active") not in SLOT_NAMES:
+            return None
+        if not is_countable_pending(state.get("pending"), state["active"]):
+            # Dropped rather than refused, so the known-good slot still boots.
+            state["pending"] = None
+        if not isinstance(state.get("outcome"), dict):
+            state["outcome"] = None
+        return state
 
     def write(self, state):
         # Renamed into place, so a power cut leaves the old state or the new, never half of one.
@@ -71,26 +78,38 @@ class SlotStore:
         self.write(state)
 
 
-def is_well_formed(state):
-    if not isinstance(state, dict) or state.get("active") not in SLOT_NAMES:
-        return False
-    pending = state.get("pending")
-    return pending is None or (isinstance(pending, dict) and pending.get("slot") in SLOT_NAMES)
+def is_countable_pending(pending, active):
+    return (
+        isinstance(pending, dict)
+        and pending.get("slot") in SLOT_NAMES
+        and pending.get("slot") != active
+        and isinstance(pending.get("attempts"), int)
+        and isinstance(pending.get("version"), str)
+        and isinstance(pending.get("commandId"), str)
+    )
 
 
 def choose_slot_to_boot(store):
     state = store.read()
     if state is None:
         return None
-    pending = state.get("pending")
-    if pending is None:
+    if state["pending"] is None:
         return state["active"]
+    try:
+        return count_boot_attempt(store, state)
+    except OSError:
+        # Flash that cannot be written must not leave the node in the REPL, so the known-good slot runs.
+        return state["active"]
+
+
+def count_boot_attempt(store, state):
+    pending = state["pending"]
     if pending["attempts"] >= MAX_BOOT_ATTEMPTS:
         store.abandon_pending(
             "%s did not come up healthy in %d boots" % (pending["version"], MAX_BOOT_ATTEMPTS)
         )
         return state["active"]
-    # Counted before the slot runs, so a hang or a watchdog reset uses up an attempt too.
+    # Counted before the slot runs, so a crash or a watchdog reset uses up an attempt too.
     pending["attempts"] += 1
     store.write(state)
     return pending["slot"]

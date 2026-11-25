@@ -1,8 +1,8 @@
 """An HTTP/1.0 GET streamed in chunks, so no file has to fit in RAM and the watchdog is fed between them."""
 
 DEFAULT_PORTS = {"http": 80, "https": 443}
-# Under the 8 s watchdog, which is fed between socket operations.
-SOCKET_TIMEOUT_SECONDS = 5
+# Well under the 8 s watchdog, which is fed before every socket operation.
+SOCKET_TIMEOUT_SECONDS = 3
 FETCH_DEADLINE_MILLISECONDS = 30000
 CHUNK_BYTES = 1024
 MAX_HEADER_LINE_BYTES = 1024
@@ -54,14 +54,17 @@ class HttpFetcher:
         started_ticks = self.clock.ticks()
         stream = self.open_stream(scheme, host, port)
         try:
+            self.feed_watchdog()
             stream.write(build_request(host, target))
+            self.feed_watchdog()
             require_ok_status(stream.readline(), url)
-            body_length = read_body_length(stream, url)
+            body_length = read_body_length(stream, url, self.feed_watchdog)
             self.copy_body(stream, write_chunk, body_length, max_bytes, started_ticks, url)
         finally:
             stream.close()
 
     def open_stream(self, scheme, host, port):
+        self.feed_watchdog()
         address = self.socket_module.getaddrinfo(host, port)[0][-1]
         connection = self.socket_module.socket()
         connection.settimeout(SOCKET_TIMEOUT_SECONDS)
@@ -69,6 +72,7 @@ class HttpFetcher:
             self.feed_watchdog()
             connection.connect(address)
             if scheme == "https":
+                self.feed_watchdog()
                 # Unverified: the board holds no CA store, and every byte is checked against a pinned sha256.
                 return self.tls_module.wrap_socket(connection, server_hostname=host)
         except BaseException:
@@ -109,15 +113,16 @@ def require_ok_status(status_line, url):
         raise FetchFailed("%s answered %d" % (describe_without_query(url), status))
 
 
-def read_body_length(stream, url):
+def read_body_length(stream, url, feed_watchdog):
     body_length = None
-    for _ in range(MAX_HEADER_LINES):
+    for _header_line_number in range(MAX_HEADER_LINES):
+        feed_watchdog()
         line = stream.readline()
         if not line or line in (b"\r\n", b"\n"):
             return body_length
         if len(line) > MAX_HEADER_LINE_BYTES:
             raise FetchFailed("%s sent a header line too long to read" % describe_without_query(url))
-        name, _, value = line.decode().partition(":")
+        name, _colon, value = line.decode().partition(":")
         name = name.strip().lower()
         value = value.strip()
         if name == "transfer-encoding" and value.lower() != "identity":

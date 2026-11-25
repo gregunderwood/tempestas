@@ -2,7 +2,11 @@ import pytest
 
 from fakes import FakeInstaller
 from iso_time import format_iso
-from node_updates import ANOTHER_UPDATE_IN_PROGRESS, HELLO_REPEAT_MILLISECONDS
+from node_updates import (
+    ANOTHER_UPDATE_IN_PROGRESS,
+    HELLO_REPEAT_MILLISECONDS,
+    PENDING_SLOT_UPTIME_LIMIT_MILLISECONDS,
+)
 from slots import SlotStore
 from test_node_agent import CONTROLLER, NODE_ID, AgentUnderTest
 from update_gate import GATE_MILLISECONDS
@@ -22,9 +26,7 @@ def store(tmp_path):
 
 def start_new_slot_on_its_gate(store):
     store.start_pending("b", "update-1", NEW_VERSION)
-    node = AgentUnderTest(store=store)
-    node.agent.agent_version = NEW_VERSION
-    return node
+    return AgentUnderTest(store=store, running_version=NEW_VERSION)
 
 
 def bring_online(node):
@@ -40,7 +42,7 @@ def heartbeat_naming(node, accepted_version):
 
 
 def run_connected_for(node, seconds):
-    for _ in range(seconds):
+    for _second in range(seconds):
         node.clock.advance_seconds(1)
         node.agent.tend_update(True)
 
@@ -79,7 +81,7 @@ def test_installs_an_update_from_the_bound_controller_and_restarts_into_it(store
 
     send_update(node)
 
-    assert [state for _, state, _ in update_statuses(node)] == [
+    assert [state for _command_id, state, _reason in update_statuses(node)] == [
         "downloading",
         "verifying",
         "installing",
@@ -163,7 +165,7 @@ def test_a_new_slot_the_server_never_takes_rolls_back_and_says_why(store):
     node = start_new_slot_on_its_gate(store)
     bring_online(node)
 
-    for _ in range(GATE_MILLISECONDS // MILLISECONDS_PER_SECOND // HEARTBEAT_INTERVAL_SECONDS):
+    for _heartbeat in range(GATE_MILLISECONDS // MILLISECONDS_PER_SECOND // HEARTBEAT_INTERVAL_SECONDS):
         heartbeat_naming(node, RUNNING_VERSION)
         run_connected_for(node, HEARTBEAT_INTERVAL_SECONDS)
         if node.resets:
@@ -192,7 +194,7 @@ def test_a_new_slot_counts_no_gate_time_while_the_broker_is_away(store):
     node = start_new_slot_on_its_gate(store)
     bring_online(node)
 
-    for _ in range(GATE_MILLISECONDS // MILLISECONDS_PER_SECOND * 2):
+    for _second in range(GATE_MILLISECONDS // MILLISECONDS_PER_SECOND * 2):
         node.clock.advance_seconds(1)
         node.agent.tend_update(False)
 
@@ -231,3 +233,50 @@ def test_an_outcome_is_kept_while_the_server_is_offline(store):
 
     assert update_statuses(node) == []
     assert store.read()["outcome"]["state"] == "rolled-back"
+
+
+def test_a_new_slot_that_never_reaches_the_server_restarts_to_use_a_boot_attempt(store):
+    node = start_new_slot_on_its_gate(store)
+
+    for _second in range(PENDING_SLOT_UPTIME_LIMIT_MILLISECONDS // MILLISECONDS_PER_SECOND):
+        node.clock.advance_seconds(1)
+        node.agent.tend_update(False)
+
+    assert node.resets == [True]
+    assert store.read()["pending"]["slot"] == "b"
+
+
+def test_a_kept_slot_has_no_uptime_limit(store):
+    node = start_new_slot_on_its_gate(store)
+    bring_online(node)
+    heartbeat_naming(node, NEW_VERSION)
+
+    run_connected_for(node, PENDING_SLOT_UPTIME_LIMIT_MILLISECONDS // MILLISECONDS_PER_SECOND * 2)
+
+    assert node.resets == []
+
+
+def test_the_active_slot_opens_no_gate_for_a_pending_slot_it_fell_back_from(store):
+    store.start_pending("b", "update-1", NEW_VERSION)
+    node = AgentUnderTest(store=store, running_version=RUNNING_VERSION)
+    bring_online(node)
+
+    run_connected_for(node, PENDING_SLOT_UPTIME_LIMIT_MILLISECONDS // MILLISECONDS_PER_SECOND * 2)
+
+    assert node.resets == []
+    assert store.read()["pending"]["slot"] == "b"
+
+
+def test_an_outcome_that_did_not_reach_the_broker_is_sent_again_on_the_next_online(store):
+    store.start_pending("b", "update-1", NEW_VERSION)
+    store.abandon_pending("gone")
+    node = AgentUnderTest(store=store)
+    node.publisher.is_delivering = False
+
+    node.deliver("server", {"state": "online"}, is_retained=True)
+    assert store.read()["outcome"]["state"] == "rolled-back"
+    node.publisher.is_delivering = True
+    node.deliver("server", {"state": "online"}, is_retained=True)
+
+    assert update_statuses(node) == [("update-1", "rolled-back", "gone")] * 2
+    assert store.read()["outcome"] is None

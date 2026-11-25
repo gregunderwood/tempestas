@@ -150,7 +150,7 @@ class NodeAgent:
         payload["state"] = state
         if reason is not None:
             payload["reason"] = reason
-        self.send("updateStatus", contract.build_update_status_topic(self.node_id), payload)
+        return self.send("updateStatus", contract.build_update_status_topic(self.node_id), payload)
 
     def check_deadman(self):
         if self.last_heartbeat_ticks is None or self.is_deadman_tripped:
@@ -208,7 +208,7 @@ class NodeAgent:
     def send(self, message_name, topic, payload):
         quality_of_service, is_retained = contract.QOS[message_name]
         should_hold_while_offline = message_name in contract.HELD_WHILE_OFFLINE
-        self.publisher.publish(
+        return self.publisher.publish(
             topic, json.dumps(payload), is_retained, quality_of_service, should_hold_while_offline
         )
 

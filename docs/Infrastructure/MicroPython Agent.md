@@ -105,7 +105,9 @@ refused quietly, as `gpio/set` is. The full rules are in
 1. **`downloading`.** It fetches the manifest and checks it against `manifestSha256`, then checks
    the bundle has `boards/<settings.BOARD>.py`, clears the other slot, and checks the flash has room
    for a slot the size of the running one, plus 32 KB. Each file is streamed to flash over HTTP/1.0
-   in 1 KB chunks, hashing as it goes and feeding the watchdog between chunks. Each fetch has 30 s.
+   in 1 KB chunks, hashing as it goes. The watchdog is fed before every socket operation, and each
+   waits at most 3 s, so a slow server fails the fetch rather than resetting the board. Each fetch
+   has 30 s.
 2. **`verifying`.** Every file's sha256 must match the manifest.
 3. **`installing`.** Its own board file is copied to `board.py`, and `slots.json` marks the slot
    pending with no boots yet.
@@ -117,9 +119,19 @@ already running.
 
 ### The health gate
 
-The bootloader counts every boot of a pending slot before it runs it, so a crash, a hang the
-watchdog resets, or an exception before the agent starts all use up a boot. After 3 boots it goes
-back to the active slot and records `rolled-back`, "1.2.1 did not come up healthy in 3 boots".
+The bootloader counts every boot of a pending slot before it runs it, so a crash, a watchdog
+reset, or an exception before the agent starts all use up a boot. After 3 boots it goes back to the
+active slot and records `rolled-back`, "1.2.1 did not come up healthy in 3 boots". The agent arms
+the watchdog, so a hang while the slot's modules import, before that, needs a power cycle, which
+still counts as a boot.
+
+A pending slot that has run for 10 minutes without passing its gate resets, so one that never
+reaches the broker, through a Wi-Fi or MQTT bug, still uses up its boots and rolls back within
+about half an hour.
+
+The bootloader cannot be fixed over the air, so it never stops in the REPL over `slots.json`. A
+pending entry it cannot count is dropped, and if the flash refuses the write that counts a boot, it
+runs the active slot. That slot sees a pending version that is not its own and opens no gate.
 
 A pending slot that does run has the same gate as the [Linux agent](Linux%20Agent.md#the-health-gate):
 it must say `hello` and hear a heartbeat naming its own version, within 120 s counted only while
@@ -128,15 +140,17 @@ the broker is connected and the server is online. While heartbeats name another 
 `healthy`. If the 120 s run out, it records `rolled-back` with the gate's reason and resets into the
 previous slot.
 
-Whichever slot runs next sends the recorded outcome on `update/status` once the server is online,
-then clears it.
+Whichever slot runs next sends the recorded outcome on `update/status` once the server is online.
+It clears it only once the broker has taken the message, and otherwise sends it again the next time
+the server is online.
 
 ### Safe mode
 
 Press BOOTSEL during the 5 s boot grace and the bootloader runs no slot, leaving the REPL for USB
 recovery even when both slots are broken. Holding it at power-up does not work: the RP2040's ROM
 reads it first and comes up as the `RPI-RP2` drive instead. Ctrl-C during the grace does the same,
-when a serial console is attached. It needs `rp2.bootsel_button()`, in MicroPython 1.20 and later.
+when a serial console is attached. It needs `rp2.bootsel_button()`, in MicroPython 1.20 and later;
+on firmware without it the board boots its slot as usual, with Ctrl-C as the only way in.
 
 ### What only USB changes
 
@@ -184,7 +198,8 @@ tools/deploy-agent-micropython.sh [/dev/ttyACM0]
 
 It runs the agent's tests, hard-resets the board and catches it inside the bootloader's 5 s grace.
 It removes `slots.json` and any agent files left at the root by the flat layout before slots,
-then clears slot `a`. It copies the agent into `a` with `boards/<settings.BOARD>.py` as `board.py`
+then clears slot `a`, running
+[`usb/clear_slot.py`](../../apps/agent-micropython/usb/clear_slot.py) on the board. It copies the agent into `a` with `boards/<settings.BOARD>.py` as `board.py`
 and a `deployed_version.py` holding the version, copies the bootloader and the node's settings to
 the root, writes `slots.json` making `a` active, and resets again. A deploy cut short leaves no
 `slots.json`, so the bootloader runs nothing and says to deploy again. The board file's
@@ -197,7 +212,8 @@ A new file on the board goes in [`apps/agent-micropython/agent-files.sh`](../../
 this deploy and the server's [release bundles](Deploys.md#agent-release-bundles) both read. Agent code
 goes in `MICROPYTHON_AGENT_CODE`, which is bundled and lands in a slot. A file that holds a node's
 own settings goes in `MICROPYTHON_NODE_CONFIG`, and a bootloader file in `MICROPYTHON_BOOTLOADER`;
-neither is ever bundled.
+neither is ever bundled. The tests fail if a file in `device/` is in no list, or in two, and they
+install a bundle built by the deploy's own bundler into a slot.
 
 The version stamp works as it does for the Linux agent (see "The version a node reports" in
 [Linux Agent](Linux%20Agent.md)). A board flashed by hand reports `0.0.0+dev`.

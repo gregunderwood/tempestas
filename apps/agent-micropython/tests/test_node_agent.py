@@ -3,6 +3,7 @@ import json
 import tempfile
 from types import SimpleNamespace
 
+from agent_version import read_agent_version
 from contract import SERVER_STATUS_TOPIC, AlarmCode
 from ds18b20_probes import Ds18b20Probes
 from fakes import (
@@ -43,8 +44,9 @@ def skip_sleep(milliseconds):
 
 
 class AgentUnderTest:
-    def __init__(self, clock=None, store=None, installer=None):
+    def __init__(self, clock=None, store=None, installer=None, running_version=None):
         self.clock = clock or FakeClock()
+        running_version = running_version or read_agent_version()
         self.store = store or SlotStore(tempfile.mkdtemp())
         self.installer = installer or FakeInstaller()
         self.resets = []
@@ -60,10 +62,13 @@ class AgentUnderTest:
         probes = Ds18b20Probes(FakeBusSensors({AIR_ROM: 3.5}), AIR_PROBE, skip_sleep, RecordingLog())
         probes.start()
         log = RecordingLog()
-        updates = NodeUpdates(self.store, self.installer, self.clock, log, lambda: self.resets.append(True))
+        updates = NodeUpdates(
+            self.store, self.installer, self.clock, log, lambda: self.resets.append(True), running_version
+        )
         self.agent = NodeAgent(
             SETTINGS, self.publisher, self.relay_lines, probes, self.clock, log, "boot-1", updates
         )
+        self.agent.agent_version = running_version
 
     def deliver(self, topic_suffix, payload, is_retained=False):
         topic = SERVER_STATUS_TOPIC if topic_suffix == "server" else NODE_ROOT + topic_suffix

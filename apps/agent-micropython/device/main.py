@@ -9,9 +9,11 @@ import slots
 def is_bootsel_pressed():
     try:
         import rp2
-    except ImportError:
+
+        return rp2.bootsel_button() == 1
+    except Exception:
+        # A firmware without the button must still boot its slot.
         return False
-    return rp2.bootsel_button() == 1
 
 
 board = bootloader.Board(time.sleep_ms, is_bootsel_pressed, machine.reset)
