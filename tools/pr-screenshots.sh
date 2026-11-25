@@ -120,6 +120,9 @@ shoot_checkout() {
     seed_runtime_history "$label"
   fi
   wait_for_readings_and_rules_cycle
+  if $SHOULD_SEED_HISTORY; then
+    seed_reading_history "$label"
+  fi
   start_web "$label"
   take_screenshots "$label"
   stop_stack
@@ -131,6 +134,14 @@ seed_runtime_history() {
   say "Seeding $label with simulated runtime history"
   node "$REPO_ROOT/tools/seed-runtime-history.mjs" "$DATABASE_NAME" >"$WORK_DIR/$label-history.log" 2>&1 ||
     fail_with_log "seeding the runtime history failed" "$label-history.log"
+}
+
+# After the first readings: it seeds only probes that have reported, up to their first real reading.
+seed_reading_history() {
+  local label=$1
+  say "Seeding $label with simulated temperature readings"
+  node "$REPO_ROOT/tools/seed-reading-history.mjs" "$DATABASE_NAME" >"$WORK_DIR/$label-readings.log" 2>&1 ||
+    fail_with_log "seeding the readings failed" "$label-readings.log"
 }
 
 take_screenshots() {

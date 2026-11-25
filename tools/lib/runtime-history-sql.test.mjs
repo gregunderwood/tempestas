@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReplaceHistorySql, quote } from './runtime-history-sql.mjs';
+import { buildReplaceHistorySql } from './runtime-history-sql.mjs';
 
 const NOW = new Date('2026-11-23T20:30:00Z');
 const HISTORY_START = new Date('2026-10-24T07:00:00Z');
@@ -86,11 +86,7 @@ describe('buildReplaceHistorySql', () => {
   });
 });
 
-describe('quote', () => {
-  it('doubles a single quote so a slug cannot end the string', () => {
-    assert.equal(quote("o'brien"), "'o''brien'");
-  });
-
+describe('quoting in the history SQL', () => {
   it('quotes a slug that tries to inject a statement as plain text', () => {
     const history = historyOf({ nodeId: "x'; drop table devices; --" });
     const deletion = statementsOf(

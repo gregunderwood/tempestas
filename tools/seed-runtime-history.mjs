@@ -1,30 +1,34 @@
 #!/usr/bin/env node
 // Writes 30 days of simulated on/off history for every device in a dev or screenshot database.
 // When and how to use it: docs/Testing.md.
-import { spawnSync } from 'node:child_process';
 import {
   DEVELOPMENT_DATABASE_CONTAINER,
   DEVELOPMENT_DATABASE_RULE,
-  DEVELOPMENT_DATABASE_USER,
-  explainDatabaseRefusal,
 } from './lib/development-database.mjs';
-import { buildReplaceHistorySql } from './lib/runtime-history-sql.mjs';
 import {
-  buildSimulatedHistory,
-  HISTORY_DAYS,
-} from './lib/simulated-runtime-history.mjs';
+  explainDevelopmentDatabaseRefusal,
+  readJson,
+  runSql,
+} from './lib/development-database-psql.mjs';
+import { DEFAULT_TIMEZONE, HISTORY_DAYS } from './lib/history-window.mjs';
+import { buildReplaceHistorySql } from './lib/runtime-history-sql.mjs';
+import { buildSimulatedHistory } from './lib/simulated-runtime-history.mjs';
 
-const DEFAULT_TIMEZONE = 'America/Vancouver';
 const USAGE = `Usage: tools/seed-runtime-history.mjs <database>
 
 Replaces the last ${HISTORY_DAYS} days of pin_transitions for every device in <database>, in the
 ${DEVELOPMENT_DATABASE_CONTAINER} container, with simulated history, and moves each device's created_at back to
-its start. Heaters run more at night, one day short-cycles, and one node drops out for a few hours.
+its start. Heaters run more at night, longest on the cold nights; one day short-cycles, and one
+node drops out for a few hours.
 Rerunning replaces the same window again, so it never doubles the history.
 
 ${DEVELOPMENT_DATABASE_RULE}`;
 
-main();
+try {
+  main();
+} catch (error) {
+  fail(error.message);
+}
 
 function main() {
   const databaseName = parseArguments(process.argv.slice(2));
@@ -51,27 +55,12 @@ function parseArguments(argumentsAfterScript) {
 }
 
 function requireDevelopmentDatabase(databaseName) {
-  const refusal = explainDatabaseRefusal(databaseName, readContainerLabels());
+  const refusal = explainDevelopmentDatabaseRefusal(databaseName);
   if (refusal) fail(`${refusal}\n\n${USAGE}`);
 }
 
-function readContainerLabels() {
-  const result = spawnSync(
-    'docker',
-    [
-      'inspect',
-      '--format',
-      '{{json .Config.Labels}}',
-      DEVELOPMENT_DATABASE_CONTAINER,
-    ],
-    { encoding: 'utf8' },
-  );
-  if (result.status !== 0) return null;
-  return JSON.parse(result.stdout);
-}
-
 function readDeviceLines(databaseName) {
-  const deviceLinesJson = runSql(
+  return readJson(
     databaseName,
     `select coalesce(json_agg(line order by line."nodeId", line.pin), '[]')
      from (
@@ -86,34 +75,7 @@ function readDeviceLines(databaseName) {
          join nodes node on node.id = device.node_id
          join zones zone on zone.id = device.zone_id
      ) line`,
-    ['-tAX'],
   );
-  return JSON.parse(deviceLinesJson);
-}
-
-function runSql(databaseName, sql, psqlOptions = []) {
-  const result = spawnSync(
-    'docker',
-    [
-      'exec',
-      '-i',
-      DEVELOPMENT_DATABASE_CONTAINER,
-      'psql',
-      '-q',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-U',
-      DEVELOPMENT_DATABASE_USER,
-      '-d',
-      databaseName,
-      ...psqlOptions,
-    ],
-    { input: sql, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-  );
-  if (result.status !== 0) {
-    fail(`psql failed on ${databaseName}: ${result.stderr || result.error}`);
-  }
-  return result.stdout;
 }
 
 function describeWhatWasWritten(databaseName, histories) {
