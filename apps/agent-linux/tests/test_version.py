@@ -5,7 +5,11 @@ from types import ModuleType
 
 import pytest
 
-from tempestas_agent.version import UNSTAMPED_VERSION, read_agent_version
+from tempestas_agent.version import (
+    UNSTAMPED_VERSION,
+    is_installed_from_a_package,
+    read_agent_version,
+)
 from test_agent import make_agent
 
 STAMP_MODULE = "tempestas_agent.deployed_version"
@@ -19,9 +23,11 @@ def unstamped(monkeypatch):
 
 @pytest.fixture
 def stamped_as(monkeypatch):
-    def stamp(agent_version: str) -> None:
+    def stamp(agent_version: str, is_packaged: bool | None = None) -> None:
         module = ModuleType(STAMP_MODULE)
         module.AGENT_VERSION = agent_version
+        if is_packaged is not None:
+            module.INSTALLED_FROM_A_PACKAGE = is_packaged
         monkeypatch.setitem(sys.modules, STAMP_MODULE, module)
 
     return stamp
@@ -47,3 +53,14 @@ def test_hello_names_the_app_and_the_contract_minor():
     hello = agent.hello_payload()
     assert hello["agentName"] == "agent-linux"
     assert hello["capabilities"]["contractMinor"] == 2
+
+
+def test_only_a_package_stamp_says_it_came_from_a_package(stamped_as):
+    stamped_as("1.0.3")
+    assert not is_installed_from_a_package()
+    stamped_as("1.0.3", is_packaged=True)
+    assert is_installed_from_a_package()
+
+
+def test_a_checkout_is_not_a_package(unstamped):
+    assert not is_installed_from_a_package()

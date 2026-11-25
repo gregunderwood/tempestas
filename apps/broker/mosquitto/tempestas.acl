@@ -80,6 +80,17 @@ topic read tempestas/v1/node/braize/control/heartbeat
 topic read tempestas/v1/node/braize/update
 topic read tempestas/v1/server/status
 
+# Sensor-only; the greenhouse Pi 5 under its new name, installed from the package.
+user taldain
+topic write tempestas/v1/node/taldain/hello
+topic write tempestas/v1/node/taldain/status
+topic write tempestas/v1/node/taldain/sensor/+/sample
+topic write tempestas/v1/node/taldain/alarm
+topic write tempestas/v1/node/taldain/update/status
+topic read tempestas/v1/node/taldain/control/heartbeat
+topic read tempestas/v1/node/taldain/update
+topic read tempestas/v1/server/status
+
 # For loggers and watchers, which cannot borrow a node credential because nodes cannot read.
 user tempestas-observer
 topic read tempestas/v1/#

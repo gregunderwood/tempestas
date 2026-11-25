@@ -1,0 +1,47 @@
+#!/bin/sh
+set -e
+
+SERVICE_USER=tempestas
+CONFIG_DIRECTORY=/etc/tempestas
+UNIT=tempestas-agent.service
+
+create_service_user() {
+  if ! getent passwd "$SERVICE_USER" >/dev/null; then
+    useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$SERVICE_USER"
+  fi
+}
+
+# Only groups the board has: a Pi has both, a bench container neither.
+join_hardware_groups() {
+  for group in gpio i2c; do
+    if getent group "$group" >/dev/null; then
+      usermod --append --groups "$group" "$SERVICE_USER"
+    fi
+  done
+}
+
+# Left alone when it exists, as a leader's holds server.env with its own owner and mode.
+create_config_directory() {
+  if [ ! -d "$CONFIG_DIRECTORY" ]; then
+    install -d -m 0750 -o root -g "$SERVICE_USER" "$CONFIG_DIRECTORY"
+  fi
+}
+
+is_systemd_running() {
+  [ -d /run/systemd/system ]
+}
+
+start_agent() {
+  systemctl daemon-reload
+  systemctl enable "$UNIT" >/dev/null
+  systemctl restart "$UNIT"
+}
+
+if [ "$1" = configure ]; then
+  create_service_user
+  join_hardware_groups
+  create_config_directory
+  if is_systemd_running; then
+    start_agent
+  fi
+fi

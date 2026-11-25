@@ -102,6 +102,10 @@ Each one contradicts what was assumed, and each has a test and a comment next to
 
 ## Deployment
 
+A box can instead install the agent as the `tempestas-agent` package, which is where every node is
+headed: see [Packages](Packages.md). The rest of this section is the hand deploy that elantris and
+patji still use.
+
 ### Every deploy
 
 ```bash

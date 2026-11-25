@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+
+UNIT=tempestas-agent.service
+INSTALL_DIRECTORY=/usr/lib/tempestas/agent
+
+stop_agent() {
+  systemctl stop "$UNIT" || true
+  systemctl disable "$UNIT" >/dev/null || true
+}
+
+# Python run as root, a hand-run tool say, caches bytecode dpkg does not know, which would keep the directory.
+remove_bytecode_caches() {
+  find "$INSTALL_DIRECTORY" -name __pycache__ -type d -prune -exec rm -r {} + 2>/dev/null || true
+}
+
+if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
+  stop_agent
+fi
+remove_bytecode_caches
