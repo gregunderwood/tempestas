@@ -5,10 +5,18 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
+  PrimaryColumn,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { NodeKind, NodeStatus, type NodeCapabilities } from '@tempestas/domain';
+import {
+  NodeKind,
+  NodeStatus,
+  type AgentApp,
+  type NodeCapabilities,
+  type NodeUpdateOutcome,
+  type UpdateState,
+} from '@tempestas/domain';
 import { ZoneEntity } from '../zones/models';
 
 @Entity({ name: 'nodes' })
@@ -67,4 +75,52 @@ export class NodeEntity {
 
   @UpdateDateColumn({ type: 'timestamptz', name: 'updated_at' })
   updatedAt!: Date;
+}
+
+@Entity({ name: 'node_updates' })
+@Index('ix_node_updates_node_started', ['nodeId', 'startedAt'])
+export class NodeUpdateEntity {
+  /** Also the `update` command's id, which the node echoes on every status. */
+  @PrimaryColumn({ type: 'uuid' })
+  id!: string;
+
+  @Column({ type: 'uuid', name: 'node_id' })
+  nodeId!: string;
+
+  @ManyToOne(() => NodeEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({
+    name: 'node_id',
+    foreignKeyConstraintName: 'fk_node_updates_node',
+  })
+  node!: NodeEntity;
+
+  @Column({ type: 'text' })
+  app!: AgentApp;
+
+  @Column({ type: 'text', name: 'from_version', nullable: true })
+  fromVersion!: string | null;
+
+  @Column({ type: 'text', name: 'to_version' })
+  toVersion!: string;
+
+  @Column({ type: 'boolean', name: 'is_roll_back' })
+  isRollBack!: boolean;
+
+  @Column({ type: 'text', name: 'last_state', nullable: true })
+  lastState!: UpdateState | null;
+
+  @Column({ type: 'text' })
+  outcome!: NodeUpdateOutcome;
+
+  @Column({ type: 'text', nullable: true })
+  reason!: string | null;
+
+  @Column({ type: 'timestamptz', name: 'started_at' })
+  startedAt!: Date;
+
+  @Column({ type: 'timestamptz', name: 'last_heard_at' })
+  lastHeardAt!: Date;
+
+  @Column({ type: 'timestamptz', name: 'finished_at', nullable: true })
+  finishedAt!: Date | null;
 }

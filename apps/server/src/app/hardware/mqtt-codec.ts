@@ -3,6 +3,7 @@ import {
   MQTT_ROOT,
   MQTT_SCHEMAS,
   schemaMajor,
+  isUpdateStatusPayload,
   type AlarmPayload,
   type GpioLevel,
   type GpioLine,
@@ -16,12 +17,15 @@ import {
   type NodeId,
   type SamplePayload,
   type StatusPayload,
+  type UpdateCommandPayload,
+  type UpdateStatusPayload,
 } from '@tempestas/domain';
 import type {
   NodeAvailability,
   NodeHello,
   PinCommand,
   SensorSample,
+  UpdateOrder,
 } from './hardware.service';
 
 // A message that cannot be fully understood is dropped, never partially applied.
@@ -42,6 +46,7 @@ export type NodeTopicKind =
   | 'heartbeat'
   | 'alarm'
   | 'update'
+  | 'update-status'
   | 'unknown';
 
 /** Topics only this server may publish; anything else on them is a controller conflict. */
@@ -90,6 +95,7 @@ const FIXED_SUBTOPIC_KINDS = new Map<string, NodeTopicKind>([
   ['control/heartbeat', 'heartbeat'],
   ['alarm', 'alarm'],
   ['update', 'update'],
+  ['update/status', 'update-status'],
 ]);
 
 /** `tempestas/v1/node/elantris/sensor/scd4x-0/sample` -> its parts, or null. */
@@ -293,6 +299,20 @@ export function decodeResult(
   return { ok: true, value: payload };
 }
 
+export function decodeUpdateStatus(
+  raw: Record<string, unknown>,
+): Decoded<UpdateStatusPayload> {
+  const schemaFailure = checkSchema(raw, MQTT_SCHEMAS.updateStatus);
+  if (schemaFailure) return schemaFailure;
+  if (!isUpdateStatusPayload(raw)) {
+    return {
+      ok: false,
+      reason: 'update status without an id and a known state',
+    };
+  }
+  return { ok: true, value: raw };
+}
+
 export function verifyResult(
   result: GpioResultPayload,
   requested: readonly PinCommand[],
@@ -402,6 +422,26 @@ export function buildGpioSync(
     epoch,
     dryRun,
     intent: [...intent],
+  };
+}
+
+export function buildUpdate(
+  seed: EnvelopeSeed,
+  issuedBy: string,
+  order: UpdateOrder,
+  ttlMs: number,
+): UpdateCommandPayload {
+  return {
+    schema: MQTT_SCHEMAS.update,
+    node: seed.nodeId,
+    ts: seed.now.toISOString(),
+    id: order.id,
+    issuedBy,
+    expiresAt: new Date(seed.now.getTime() + ttlMs).toISOString(),
+    app: order.app,
+    version: order.version,
+    manifestUrl: order.manifestUrl,
+    manifestSha256: order.manifestSha256,
   };
 }
 

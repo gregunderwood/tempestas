@@ -6,8 +6,11 @@ import {
 } from '@nestjs/common';
 import { Subject, type Observable } from 'rxjs';
 import {
+  AgentApp,
   ApiErrorCode,
+  MQTT_CONTRACT_MINOR,
   NodeKind,
+  UpdateState,
   type NodeCapabilities,
   type NodeId,
 } from '@tempestas/domain';
@@ -19,6 +22,8 @@ import {
   type PinCommand,
   type PinStateReport,
   type SensorSample,
+  type UpdateOrder,
+  type UpdateStatusReport,
 } from './hardware.service';
 import { MINUTES_PER_DAY } from '../common/time-units';
 import { toPinKey } from './pin-key';
@@ -35,8 +40,17 @@ const ON_LEVEL_ACTIVE_LOW = 0;
 
 const DEFAULT_TICK_MS = 10_000;
 const SIM_CONTRACT_VERSION = 1;
-const SIM_AGENT_NAME = 'simulator';
-const SIM_AGENT_VERSION = '0.0.0-sim';
+const SIM_LINUX_AGENT_VERSION = '1.1.0';
+// The MicroPython agent does not take `update` yet, so its stand-in must not either.
+const SIM_MICROPYTHON_CONTRACT_MINOR = 0;
+const SIM_MICROPYTHON_AGENT_VERSION = '1.0.8';
+const UPDATE_STEP_MS = 1_500;
+const STATES_BEFORE_RESTART = [
+  UpdateState.Downloading,
+  UpdateState.Verifying,
+  UpdateState.Installing,
+  UpdateState.Restarting,
+];
 
 // Measured on the greenhouse on 2026-09-10: a shape model, not a fitted one.
 const OUTDOOR_CO2_PPM = 420;
@@ -120,6 +134,9 @@ export class FakeHardwareService
   private readonly availability = new Subject<NodeAvailability>();
   private readonly hello = new Subject<NodeHello>();
   private readonly pinStates = new Subject<PinStateReport>();
+  private readonly updateStatuses = new Subject<UpdateStatusReport>();
+  private readonly agentVersionByNode = new Map<NodeId, string>();
+  private readonly updateTimers = new Set<NodeJS.Timeout>();
   private readonly levelByPin = new Map<string, number>();
   private readonly lastReports = new Map<string, PinStateReport>();
   private readonly sequenceByNode = new Map<NodeId, number>();
@@ -150,6 +167,8 @@ export class FakeHardwareService
   readonly hello$: Observable<NodeHello> = this.hello.asObservable();
   readonly pinStates$: Observable<PinStateReport> =
     this.pinStates.asObservable();
+  readonly updateStatuses$: Observable<UpdateStatusReport> =
+    this.updateStatuses.asObservable();
 
   // `hello` is not retained, so announcing before every onModuleInit has subscribed would be lost.
   onApplicationBootstrap(): void {
@@ -175,6 +194,8 @@ export class FakeHardwareService
   onModuleDestroy(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    for (const updateTimer of this.updateTimers) clearTimeout(updateTimer);
+    this.updateTimers.clear();
   }
 
   /** Lets tests drive an arbitrary node announcing itself, including unknown ones. */
@@ -210,6 +231,10 @@ export class FakeHardwareService
     for (const command of commands) await this.setPin(nodeId, command);
   }
 
+  async sendUpdate(nodeId: NodeId, order: UpdateOrder): Promise<void> {
+    this.playUpdateThrough(this.requireNode(nodeId), order);
+  }
+
   getPin(nodeId: NodeId, pin: number): number | undefined {
     return this.levelByPin.get(toPinKey(nodeId, pin));
   }
@@ -232,14 +257,7 @@ export class FakeHardwareService
 
   // Typed failures, so an ordinary condition in local dev is never an opaque 500.
   private requireExposedPin(nodeId: NodeId, pin: number): FakeNodeSpec {
-    const node = this.nodes.find((candidate) => candidate.nodeId === nodeId);
-    if (!node) {
-      throw new HardwareError(
-        ApiErrorCode.HardwareUnreachable,
-        `Unknown simulated node ${nodeId}; the fake driver only knows ` +
-          this.nodes.map((known) => known.nodeId).join(', '),
-      );
-    }
+    const node = this.requireNode(nodeId);
     if (!node.pins.includes(pin)) {
       throw new HardwareError(
         ApiErrorCode.PinNotAvailable,
@@ -249,10 +267,50 @@ export class FakeHardwareService
     return node;
   }
 
+  private requireNode(nodeId: NodeId): FakeNodeSpec {
+    const node = this.nodes.find((candidate) => candidate.nodeId === nodeId);
+    if (!node) {
+      throw new HardwareError(
+        ApiErrorCode.HardwareUnreachable,
+        `Unknown simulated node ${nodeId}; the fake driver only knows ` +
+          this.nodes.map((known) => known.nodeId).join(', '),
+      );
+    }
+    return node;
+  }
+
+  private playUpdateThrough(node: FakeNodeSpec, order: UpdateOrder): void {
+    STATES_BEFORE_RESTART.forEach((state, step) =>
+      this.scheduleAfterUpdateSteps(step + 1, () =>
+        this.reportUpdate(node.nodeId, order.id, state),
+      ),
+    );
+    this.scheduleAfterUpdateSteps(STATES_BEFORE_RESTART.length + 1, () => {
+      this.agentVersionByNode.set(node.nodeId, order.version);
+      this.hello.next(this.helloFor(node));
+      this.reportUpdate(node.nodeId, order.id, UpdateState.Healthy);
+    });
+  }
+
+  private scheduleAfterUpdateSteps(steps: number, action: () => void): void {
+    const updateTimer = setTimeout(() => {
+      this.updateTimers.delete(updateTimer);
+      action();
+    }, steps * UPDATE_STEP_MS);
+    this.updateTimers.add(updateTimer);
+  }
+
+  private reportUpdate(nodeId: NodeId, id: string, state: UpdateState): void {
+    this.updateStatuses.next({ nodeId, id, state, reason: null });
+  }
+
   private helloFor(spec: FakeNodeSpec): NodeHello {
     const isEsp32 = spec.nodeId === SIM_ESP32_NODE_ID;
     const capabilities: NodeCapabilities = {
       contractVersion: SIM_CONTRACT_VERSION,
+      contractMinor: isEsp32
+        ? SIM_MICROPYTHON_CONTRACT_MINOR
+        : MQTT_CONTRACT_MINOR,
       ...(spec.pins.length
         ? { gpio: { pins: spec.pins, supportsReadback: true } }
         : {}),
@@ -271,8 +329,10 @@ export class FakeHardwareService
     return {
       nodeId: spec.nodeId,
       kind: isEsp32 ? NodeKind.Esp32 : NodeKind.RaspberryPi,
-      agentName: SIM_AGENT_NAME,
-      agentVersion: SIM_AGENT_VERSION,
+      agentName: isEsp32 ? AgentApp.MicroPython : AgentApp.Linux,
+      agentVersion:
+        this.agentVersionByNode.get(spec.nodeId) ??
+        (isEsp32 ? SIM_MICROPYTHON_AGENT_VERSION : SIM_LINUX_AGENT_VERSION),
       capabilities,
       bootId: `sim-${Date.now()}`,
       receivedAt: new Date(),

@@ -7,6 +7,7 @@ import {
   type SystemStatus,
   type Zone,
   type ZoneHistoryReport,
+  NO_UPDATE_SUMMARY,
 } from '@tempestas/domain';
 
 export const NODE_SLUG = 'elantris';
@@ -27,6 +28,7 @@ export function buildNode(): Node {
     agentName: 'agent-linux',
     agentVersion: '1.0.0',
     availableUpdate: null,
+    updateSummary: NO_UPDATE_SUMMARY,
     contractStanding: 'current',
     capabilities: {
       contractVersion: 1,

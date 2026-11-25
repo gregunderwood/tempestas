@@ -107,8 +107,10 @@ HardwareService (abstract)  ──fake──►  FakeHardwareService   closed-lo
 
 ### The hardware seam
 
-`HardwareService` is an abstract class with `setPin`, `syncPins`, and three observables —
-`samples$`, `availability$`, `hello$`. Every consumer injects the abstract class.
+`HardwareService` is an abstract class with `setPin`, `syncPins` and `sendUpdate`, and the
+observables `samples$`, `availability$`, `hello$`, `pinStates$` and `updateStatuses$`. Every
+consumer injects the abstract class. The fake plays an update through in a few seconds and says
+hello again on the new version, so the node page can be tried without a node.
 
 - **Nothing outside `app/hardware/` may import `mqtt`.** Not `@nestjs/microservices` either: its
   envelope and pattern routing would make the contract harder for a 60-line Python script to speak

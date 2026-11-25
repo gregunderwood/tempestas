@@ -54,7 +54,7 @@ Vitest globals are on: `describe`, `it`, `expect` and `vi` need no import.
 
 ### The e2e smoke test
 
-`apps/web-e2e` holds one Cypress spec, [../apps/web-e2e/src/e2e/smoke.cy.ts](../apps/web-e2e/src/e2e/smoke.cy.ts).
+The smoke test is one Cypress spec, [../apps/web-e2e/src/e2e/smoke.cy.ts](../apps/web-e2e/src/e2e/smoke.cy.ts).
 It checks that the shell loads, that the dashboard shows a node card, and that the rail and the
 phone menu both reach Zones and Nodes. It needs no server, broker or database:
 
@@ -77,6 +77,30 @@ npx nx e2e web-e2e     # starts nx serve web itself, runs headless, 15 to 40 s
   fail on the Pi, and a dev server start makes it the slowest target by far.
 - **From a VS Code terminal, unset `ELECTRON_RUN_AS_NODE`.** VS Code exports it, and Cypress then
   fails to start with `bad option: --no-sandbox`. Use `env -u ELECTRON_RUN_AS_NODE npx nx e2e web-e2e`.
+
+### Use cases on a real stack
+
+The smoke test stubs the server, so it cannot show a behaviour that runs through it, such as
+updating a node. The specs in [../apps/web-e2e/src/stack](../apps/web-e2e/src/stack) drive those
+use cases through the page against a real server instead:
+
+```bash
+tools/e2e-stack.sh                         # every stack spec, headless, about 2 minutes in all
+tools/e2e-stack.sh --spec src/stack/node-update.cy.ts --headed
+```
+
+- **It starts the same throwaway stack as the PR screenshots**, from
+  [../tools/lib/fake-stack.sh](../tools/lib/fake-stack.sh): a database `tempestas_e2e_stack`, the
+  zones copied from the dev database, the server with `HARDWARE_DRIVER=fake`, both simulated nodes
+  admitted, and `nx serve web` proxied to it. Ports 7030 and 4230, or `E2E_STACK_SERVER_PORT` and
+  `E2E_STACK_WEB_PORT`. It tears everything down, even on failure.
+- **It offers fake `agent-linux` releases 1.1.0 and 1.1.1**, written by
+  [../tools/lib/write-fake-agent-releases.mjs](../tools/lib/write-fake-agent-releases.mjs), with
+  `AGENT_RELEASES_URL` set, so the simulated Pi is offered an update and then a roll back.
+- **The specs share one server**, so they run in order and leave it as they found it: the update
+  spec rolls the Pi back to 1.1.0.
+- **Options after the script name go to `cypress run`**, such as `--spec` or `--headed`.
+- **It is not in the gate**, for the same reasons as the smoke test, and it needs Docker.
 
 ### Screenshots on a PR
 

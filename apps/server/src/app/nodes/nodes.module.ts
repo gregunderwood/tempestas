@@ -7,20 +7,26 @@ import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';
 import { NodesController } from './nodes.controller';
 import { NodesService } from './nodes.service';
-import { NodeEntity } from './models';
+import { NodeEntity, NodeUpdateEntity } from './models';
+import { NodeUpdatesService } from './node-updates.service';
 
 @Module({
   imports: [
     AgentReleasesModule,
     TypeOrmModule.forFeature([
       NodeEntity,
+      NodeUpdateEntity,
       DeviceEntity,
       SensorReadingEntity,
       ZoneEntity,
     ]),
   ],
   controllers: [NodesController],
-  providers: [NodesService, { provide: Clock, useClass: SystemClock }],
+  providers: [
+    NodesService,
+    NodeUpdatesService,
+    { provide: Clock, useClass: SystemClock },
+  ],
   exports: [NodesService],
 })
 export class NodesModule {}

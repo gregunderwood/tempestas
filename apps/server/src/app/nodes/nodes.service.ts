@@ -14,6 +14,7 @@ import {
   ApiErrorCode,
   describeAgent,
   NodeStatus,
+  NO_UPDATE_SUMMARY,
   type Node,
   type NodeCapabilities,
   type NodeId,
@@ -31,6 +32,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { SensorReadingEntity } from '../readings/models';
 import { ZoneEntity } from '../zones/models';
 import { NodeEntity } from './models';
+import { NodeUpdatesService } from './node-updates.service';
 import type { NodeOperatorFieldsDto } from './dto/node-operator-fields.dto';
 import type { AdmitNodeDto } from './dto/admit-node.dto';
 import type { UpdateNodeDto } from './dto/update-node.dto';
@@ -123,6 +125,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     private readonly realtime: RealtimeGateway,
     private readonly clock: Clock,
     private readonly agentReleases: AgentReleasesService,
+    private readonly nodeUpdates: NodeUpdatesService,
   ) {}
 
   onModuleInit(): void {
@@ -134,6 +137,11 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     this.subscriptions.add(
       this.hardware.availability$.subscribe((availability) =>
         this.enqueue(() => this.handleAvailability(availability)),
+      ),
+    );
+    this.subscriptions.add(
+      this.nodeUpdates.changes$.subscribe(() =>
+        this.enqueue(() => this.republishAll()),
       ),
     );
   }
@@ -387,6 +395,19 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
 
   private async publishNodeState(entity: NodeEntity): Promise<Node> {
     const [node] = await this.decorate([entity]);
+    this.publishDecorated(entity, node);
+    return node;
+  }
+
+  private async republishAll(): Promise<void> {
+    const entities = await this.nodes.find({ order: { slug: 'ASC' } });
+    const decorated = await this.decorate(entities);
+    entities.forEach((entity, index) =>
+      this.publishDecorated(entity, decorated[index]),
+    );
+  }
+
+  private publishDecorated(entity: NodeEntity, node: Node): void {
     this.realtime.publishNodeState(node);
     this.publishedLiveness.set(node.id, {
       evidence: {
@@ -396,7 +417,6 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       },
       isPublishedOnline: node.online,
     });
-    return node;
   }
 
   private async republishNode(id: string): Promise<void> {
@@ -430,15 +450,27 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     return zone.id;
   }
 
-  // Two grouped aggregates, so the nodes list stays three round-trips however many nodes exist.
+  // Grouped queries, so the nodes list costs the same round-trips however many nodes exist.
   private async decorate(nodes: NodeEntity[]): Promise<Node[]> {
     if (nodes.length === 0) return [];
     const ids = nodes.map((node) => node.id);
     const deviceCounts = await this.countDevicesByNode(ids);
     const latestReadings = await this.findLatestReadingByNode(ids);
     const now = this.clock.now();
+    const candidates = nodes.map((node) => ({
+      node,
+      isOnline: isNodeOnline(
+        {
+          online: node.online,
+          lastSeenAt: node.lastSeenAt,
+          latestReadingAt: latestReadings.get(node.id) ?? null,
+        },
+        now,
+      ),
+    }));
+    const updateSummaries = await this.nodeUpdates.summarize(candidates);
 
-    return nodes.map((node) => {
+    return candidates.map(({ node, isOnline }) => {
       const latestReadingAt = latestReadings.get(node.id) ?? null;
       return {
         id: node.id,
@@ -447,19 +479,13 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
         location: node.location,
         kind: node.kind,
         status: node.status,
-        online: isNodeOnline(
-          {
-            online: node.online,
-            lastSeenAt: node.lastSeenAt,
-            latestReadingAt,
-          },
-          now,
-        ),
+        online: isOnline,
         lastSeenAt: node.lastSeenAt?.toISOString() ?? null,
         agentName: node.agentName,
         agentVersion: node.agentVersion,
         contractStanding: findContractStanding(node.capabilities),
         availableUpdate: this.agentReleases.findAvailableUpdate(node),
+        updateSummary: updateSummaries.get(node.id) ?? NO_UPDATE_SUMMARY,
         capabilities: node.capabilities,
         zoneId: node.zoneId,
         deviceCount: deviceCounts.get(node.id) ?? 0,

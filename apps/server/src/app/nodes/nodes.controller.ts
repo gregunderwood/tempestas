@@ -11,13 +11,18 @@ import {
 } from '@nestjs/common';
 import type { Node } from '@tempestas/domain';
 import { NodesService } from './nodes.service';
+import { NodeUpdatesService } from './node-updates.service';
 import { AdmitNodeDto } from './dto/admit-node.dto';
 import { UpdateNodeDto } from './dto/update-node.dto';
+import { NodeUpdateRequestDto } from './dto/node-update-request.dto';
 
 // No POST: a node exists by announcing itself on MQTT, and the only thing a human does is admit it.
 @Controller('nodes')
 export class NodesController {
-  constructor(private readonly nodes: NodesService) {}
+  constructor(
+    private readonly nodes: NodesService,
+    private readonly nodeUpdates: NodeUpdatesService,
+  ) {}
 
   @Get()
   findAll(): Promise<Node[]> {
@@ -50,6 +55,26 @@ export class NodesController {
   @HttpCode(200)
   disable(@Param('id', ParseUUIDPipe) id: string): Promise<Node> {
     return this.nodes.disable(id);
+  }
+
+  @Post(':id/update')
+  @HttpCode(202)
+  async startUpdate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() request: NodeUpdateRequestDto,
+  ): Promise<Node> {
+    await this.nodeUpdates.updateToOffered(id, request.version);
+    return this.nodes.findOne(id);
+  }
+
+  @Post(':id/roll-back')
+  @HttpCode(202)
+  async rollBack(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() request: NodeUpdateRequestDto,
+  ): Promise<Node> {
+    await this.nodeUpdates.rollBack(id, request.version);
+    return this.nodes.findOne(id);
   }
 
   @Delete(':id')

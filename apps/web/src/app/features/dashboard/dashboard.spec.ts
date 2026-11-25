@@ -15,6 +15,7 @@ import {
   type ReadingsQuery,
   type RulesCycle,
   type SystemStatus,
+  NO_UPDATE_SUMMARY,
 } from '@tempestas/domain';
 import { ApiService } from '../../core/api.service';
 import { RealtimeService } from '../../core/realtime.service';
@@ -83,6 +84,7 @@ function node(slug: string, sensors: Record<string, MetricKey[]>): Node {
     agentVersion: null,
     contractStanding: 'current',
     availableUpdate: null,
+    updateSummary: NO_UPDATE_SUMMARY,
     capabilities: {
       contractVersion: 1,
       hasRtc: true,

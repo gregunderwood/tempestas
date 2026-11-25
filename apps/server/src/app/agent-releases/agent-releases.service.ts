@@ -61,7 +61,7 @@ export class AgentReleasesService implements OnModuleInit {
   }
 
   findAvailableUpdate(agent: RunningAgent): string | null {
-    if (!canTakeUpdateCommand(agent)) {
+    if (describeWhyNotUpdatable(agent) !== null) {
       return null;
     }
     const newest = this.findNewestRelease(
@@ -98,11 +98,17 @@ export class AgentReleasesService implements OnModuleInit {
 }
 
 // An agent older than contract 1.0 sends no name, and one before 1.1 never subscribes to `update`.
-function canTakeUpdateCommand(agent: RunningAgent): boolean {
-  return (
-    isAgentApp(agent.agentName) &&
-    isOnContractWithUpdateCommand(agent.capabilities)
-  );
+export function describeWhyNotUpdatable(agent: RunningAgent): string | null {
+  if (agent.agentName === null) {
+    return 'This agent is too old to name itself. Deploy it by hand once.';
+  }
+  if (!isAgentApp(agent.agentName)) {
+    return `${agent.agentName} is not updated from here.`;
+  }
+  if (!isOnContractWithUpdateCommand(agent.capabilities)) {
+    return `This agent needs contract ${UPDATE_COMMAND_CONTRACT.major}.${UPDATE_COMMAND_CONTRACT.minor} to update from here. Deploy it by hand once.`;
+  }
+  return null;
 }
 
 function isOnContractWithUpdateCommand(

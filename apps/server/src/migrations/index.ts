@@ -17,3 +17,4 @@ export { HumidityIsOptional1794977000000 } from './1794977000000-HumidityIsOptio
 export { AddPicoNodeKind1795220722652 } from './1795220722652-AddPicoNodeKind';
 export { AddNodeAgentName1795330000000 } from './1795330000000-AddNodeAgentName';
 export { AddDeviceInputBtuPerHour1795488489699 } from './1795488489699-AddDeviceInputBtuPerHour';
+export { AddNodeUpdates1795546658688 } from './1795546658688-AddNodeUpdates';

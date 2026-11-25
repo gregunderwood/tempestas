@@ -1,7 +1,7 @@
 import type { AgentApp } from '../hardware/mqtt-contract';
 
 const AGENT_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.+-]+)?$/;
-const RELEASED_AGENT_VERSION = /^\d+\.\d+\.\d+$/;
+export const RELEASED_AGENT_VERSION = /^\d+\.\d+\.\d+$/;
 export const SHA256_HEX = /^[0-9a-f]{64}$/;
 
 export interface AgentVersionNumbers {

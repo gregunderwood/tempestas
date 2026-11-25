@@ -35,11 +35,18 @@ import { ApiService } from '../../core/api.service';
 import { PageHeading } from '../../core/page-heading';
 import { injectLiveDevices } from '../../core/live-devices';
 import { injectLiveNodes } from '../../core/live-nodes';
+import { refreshAfterSuccess } from '../../core/refresh-after-success';
 import { injectLiveReadings } from '../../core/live-readings';
 import { Gauge } from '../../shared/gauge/gauge';
 import { metricsFor, nodeMetrics } from '../../shared/metrics';
 import { LONGEST_TIMEOUT_MILLISECONDS } from '../../shared/time';
 import { isHeldOffByInterlock } from '../devices/device-hold';
+import { NodeUpdateCard, type UpdateConfirmation } from './node-update-card';
+
+interface SentUpdate {
+  nodeId: string;
+  lastUpdateIdBefore: string | null;
+}
 
 // Each refresh is three periods of aggregates on an SD card; a reading arrives every 10 s.
 export const STATS_REFRESH_THROTTLE_MILLISECONDS = 60_000;
@@ -99,7 +106,7 @@ function describeNodeHeading(slug: string, node: Node | null) {
 
 @Component({
   selector: 'temp-node-detail',
-  imports: [MatCardModule, DatePipe, RouterLink, Gauge],
+  imports: [MatCardModule, DatePipe, RouterLink, Gauge, NodeUpdateCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <nav class="crumb"><a routerLink="/nodes">← All nodes</a></nav>
@@ -129,6 +136,14 @@ function describeNodeHeading(slug: string, node: Node | null) {
         }
       </mat-card-content>
     </mat-card>
+
+    @if (node(); as shownNode) {
+      <temp-node-update-card
+        [node]="shownNode"
+        [isSending]="isSendingUpdate(shownNode)"
+        (confirmed)="sendUpdate(shownNode, $event)"
+      />
+    }
 
     @if (devices().length > 0) {
       <mat-card appearance="outlined">
@@ -418,8 +433,10 @@ export class NodeDetail {
 
   private readonly liveReadings = injectLiveReadings().readings;
   private readonly allDevices = injectLiveDevices().devices;
-  private readonly nodes = injectLiveNodes().nodes;
+  private readonly liveNodes = injectLiveNodes();
+  private readonly nodes = this.liveNodes.nodes;
   protected readonly stats = signal<DayNightStats | null>(null);
+  private readonly sentUpdate = signal<SentUpdate | null>(null);
   protected readonly isHeldOffByInterlock = isHeldOffByInterlock;
 
   protected readonly node = computed(
@@ -466,6 +483,33 @@ export class NodeDetail {
   protected formatFigure(value: number | null, digitsInfo: string): string {
     if (value === null) return ABSENT_FIGURE;
     return this.decimalPipe.transform(value, digitsInfo) ?? ABSENT_FIGURE;
+  }
+
+  protected sendUpdate(
+    node: Node,
+    { action, version }: UpdateConfirmation,
+  ): void {
+    const request =
+      action === 'update'
+        ? this.api.updateNode(node.id, { version })
+        : this.api.rollBackNode(node.id, { version });
+    this.sentUpdate.set({
+      nodeId: node.id,
+      lastUpdateIdBefore: node.updateSummary.lastUpdate?.id ?? null,
+    });
+    refreshAfterSuccess(
+      request.pipe(tap({ error: () => this.sentUpdate.set(null) })),
+      this.liveNodes.refresh,
+    );
+  }
+
+  // Until the node itself shows the new update, or the button would come back before its progress.
+  protected isSendingUpdate(node: Node): boolean {
+    const sent = this.sentUpdate();
+    return (
+      sent?.nodeId === node.id &&
+      (node.updateSummary.lastUpdate?.id ?? null) === sent.lastUpdateIdBefore
+    );
   }
 
   protected findLastSwitchedAt(device: Device): string | null {

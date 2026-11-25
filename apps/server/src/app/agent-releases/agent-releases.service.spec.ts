@@ -1,6 +1,7 @@
 import { AgentApp, type NodeCapabilities } from '@tempestas/domain';
 import {
   AgentReleasesService,
+  describeWhyNotUpdatable,
   type RunningAgent,
 } from './agent-releases.service';
 import {
@@ -124,5 +125,30 @@ describe('AgentReleasesService.findAvailableUpdate', () => {
         linuxAgent({ agentVersion: '1.1.3-dev+ecdbbe7' }),
       ),
     ).toBe('1.1.4');
+  });
+});
+
+describe('describeWhyNotUpdatable', () => {
+  const agent = (overrides: Partial<RunningAgent>): RunningAgent => ({
+    agentName: AgentApp.Linux,
+    agentVersion: '1.1.0',
+    capabilities: ON_CONTRACT_1_1,
+    ...overrides,
+  });
+
+  it('says nothing for an agent that takes the update command', () => {
+    expect(describeWhyNotUpdatable(agent({}))).toBeNull();
+  });
+
+  it.each([
+    ['one too old to name itself', agent({ agentName: null }), 'too old'],
+    ['an app it does not know', agent({ agentName: 'esphome' }), 'esphome'],
+    [
+      'one on contract 1.0',
+      agent({ capabilities: { ...ON_CONTRACT_1_1, contractMinor: 0 } }),
+      'needs contract 1.1',
+    ],
+  ])('explains %s', (_case, running, reason) => {
+    expect(describeWhyNotUpdatable(running)).toContain(reason);
   });
 });

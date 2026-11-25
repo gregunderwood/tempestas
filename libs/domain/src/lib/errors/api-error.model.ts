@@ -12,6 +12,11 @@ export enum ApiErrorCode {
   HardwareUnreachable = 'HARDWARE_UNREACHABLE',
   /** Not a fault: the operator is on a follower, and the fix is to promote it. */
   ControllerIsFollower = 'CONTROLLER_IS_FOLLOWER',
+  /** The server has no address to give nodes for its release bundles. */
+  UpdatesNotConfigured = 'UPDATES_NOT_CONFIGURED',
+  UpdateNotAvailable = 'UPDATE_NOT_AVAILABLE',
+  /** One node at a time, so a bad release cannot take out every node at once. */
+  UpdateInProgress = 'UPDATE_IN_PROGRESS',
   ValidationFailed = 'VALIDATION_FAILED',
   NotFound = 'NOT_FOUND',
 }

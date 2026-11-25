@@ -196,6 +196,10 @@ is running again. `failed` means it never got that far and nothing changed. Both
 never acts on that `id` again. That holds for a refusal that would pass, such as another update in
 progress, so the server retries with a new `id`.
 
+The server sends an `update` only when someone presses the button on the node page, and keeps
+every status it hears against that `id`. How it decides when to send one, and what it shows, is in
+[Nodes](Nodes.md#updating-a-node-from-the-web).
+
 A node installs every file the manifest lists at its path, with one exception. A MicroPython bundle
 carries every board under `boards/`, and the node also installs `boards/<its board>.py` as
 `board.py`, which is what the code imports, as the hand deploy does. Without it, a fix to a board

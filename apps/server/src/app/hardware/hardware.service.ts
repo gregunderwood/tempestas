@@ -1,13 +1,15 @@
 import type { Observable } from 'rxjs';
 import type {
+  AgentApp,
   ApiErrorCode,
   GpioLevel,
   NodeCapabilities,
   NodeId,
   NodeKind,
+  UpdateState,
 } from '@tempestas/domain';
 
-// Keeps drivers free of HTTP; `DevicesService` maps the code to a status, never a bare 500.
+// Keeps drivers free of HTTP; `translateHardwareError` maps the code to a status, never a bare 500.
 export class HardwareError extends Error {
   constructor(
     readonly code: ApiErrorCode,
@@ -68,6 +70,21 @@ export interface PinCommand {
   label?: string;
 }
 
+export interface UpdateOrder {
+  id: string;
+  app: AgentApp;
+  version: string;
+  manifestUrl: string;
+  manifestSha256: string;
+}
+
+export interface UpdateStatusReport {
+  nodeId: NodeId;
+  id: string;
+  state: UpdateState;
+  reason: string | null;
+}
+
 // The single seam to physical hardware; see docs/Architecture.md, "The hardware seam".
 export abstract class HardwareService {
   /** Whether this server is the one allowed to command. */
@@ -79,9 +96,13 @@ export abstract class HardwareService {
   /** Re-assert the full desired state of a node's pins. */
   abstract syncPins(nodeId: NodeId, commands: PinCommand[]): Promise<void>;
 
+  /** Resolves once the broker has the command. Progress arrives on `updateStatuses$`. */
+  abstract sendUpdate(nodeId: NodeId, order: UpdateOrder): Promise<void>;
+
   abstract readonly samples$: Observable<SensorSample>;
   abstract readonly availability$: Observable<NodeAvailability>;
   abstract readonly hello$: Observable<NodeHello>;
+  abstract readonly updateStatuses$: Observable<UpdateStatusReport>;
 
   /** Every line-state report, including the dead-man and failsafe changes nobody asked for. */
   abstract readonly pinStates$: Observable<PinStateReport>;

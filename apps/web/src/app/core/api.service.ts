@@ -9,6 +9,7 @@ import type {
   EquipmentRuntimeQuery,
   EquipmentRuntimeReport,
   Node,
+  NodeUpdateRequest,
   Reading,
   ReadingStats,
   ReadingsQuery,
@@ -36,6 +37,14 @@ export class ApiService {
 
   disableNode(id: string): Observable<Node> {
     return this.postToApi<Node>(`/nodes/${id}/disable`);
+  }
+
+  updateNode(id: string, request: NodeUpdateRequest): Observable<Node> {
+    return this.postToApi<Node>(`/nodes/${id}/update`, request);
+  }
+
+  rollBackNode(id: string, request: NodeUpdateRequest): Observable<Node> {
+    return this.postToApi<Node>(`/nodes/${id}/roll-back`, request);
   }
 
   devices(options: RequestOptions = {}): Observable<Device[]> {

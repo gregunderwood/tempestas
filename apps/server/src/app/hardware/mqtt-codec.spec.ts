@@ -1,18 +1,22 @@
 import {
+  AgentApp,
   MQTT_SCHEMAS,
   NodeKind,
+  UpdateState,
   type GpioResultPayload,
 } from '@tempestas/domain';
 import {
   buildGpioSet,
   buildGpioSync,
   buildStatus,
+  buildUpdate,
   decodeAlarm,
   decodeGpioState,
   decodeHello,
   decodeResult,
   decodeSample,
   decodeStatus,
+  decodeUpdateStatus,
   isCommandTopicKind,
   parseJson,
   parseNodeTopic,
@@ -73,6 +77,7 @@ describe('parseNodeTopic', () => {
     ['tempestas/v1/node/elantris/control/heartbeat', 'heartbeat'],
     ['tempestas/v1/node/elantris/alarm', 'alarm'],
     ['tempestas/v1/node/elantris/update', 'update'],
+    ['tempestas/v1/node/elantris/update/status', 'update-status'],
   ])('parses %s as %s', (topic, kind) => {
     expect(parseNodeTopic(topic)).toEqual({ nodeId: 'elantris', kind });
   });
@@ -508,6 +513,35 @@ describe('builders', () => {
     });
   });
 
+  it('builds an update that expires and names this server as its issuer', () => {
+    const payload = buildUpdate(
+      { nodeId: 'patji', now: NOW },
+      'nestjs-1',
+      {
+        id: 'update-1',
+        app: AgentApp.Linux,
+        version: '1.1.1',
+        manifestUrl:
+          'http://elantris:7000/api/agent-releases/agent-linux/1.1.1/manifest.json',
+        manifestSha256: 'a'.repeat(64),
+      },
+      30_000,
+    );
+    expect(payload).toEqual({
+      schema: MQTT_SCHEMAS.update,
+      node: 'patji',
+      ts: NOW.toISOString(),
+      id: 'update-1',
+      issuedBy: 'nestjs-1',
+      expiresAt: '2026-01-10T12:00:30.000Z',
+      app: AgentApp.Linux,
+      version: '1.1.1',
+      manifestUrl:
+        'http://elantris:7000/api/agent-releases/agent-linux/1.1.1/manifest.json',
+      manifestSha256: 'a'.repeat(64),
+    });
+  });
+
   it('builds the server status the LWT uses', () => {
     expect(buildStatus('server', 'offline', NOW)).toEqual({
       schema: MQTT_SCHEMAS.status,
@@ -553,6 +587,33 @@ describe('decodeResult', () => {
     ).toMatchObject({
       ok: false,
     });
+  });
+});
+
+describe('decodeUpdateStatus', () => {
+  const status = {
+    schema: MQTT_SCHEMAS.updateStatus,
+    node: 'patji',
+    ts: '2026-01-10T12:00:00Z',
+    id: 'update-1',
+    state: UpdateState.RolledBack,
+    reason: 'no heartbeat after the restart',
+  };
+
+  it('accepts a status with an id and a known state', () => {
+    expect(decodeUpdateStatus(status)).toEqual({ ok: true, value: status });
+  });
+
+  it('refuses a state the contract does not name', () => {
+    expect(decodeUpdateStatus({ ...status, state: 'exploded' })).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it('refuses another contract major', () => {
+    expect(
+      decodeUpdateStatus({ ...status, schema: 'updateStatus/2' }),
+    ).toMatchObject({ ok: false });
   });
 });
 

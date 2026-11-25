@@ -1,3 +1,5 @@
+import type { NodeUpdateSummary } from './node-update.model';
+
 /** The node's slug. Immutable after admission: it is the MQTT topic segment. */
 export type NodeId = string;
 
@@ -73,6 +75,7 @@ export interface Node {
   contractStanding: ContractStanding;
   /** The newest released version this node could be updated to from the web, or null. */
   availableUpdate: string | null;
+  updateSummary: NodeUpdateSummary;
   capabilities: NodeCapabilities;
   zoneId: string | null;
   deviceCount: number;

@@ -15,6 +15,8 @@ import type { ZoneEntity } from '../zones/models';
 import { NodesService, ONLINE_SWEEP_INTERVAL_MS } from './nodes.service';
 import { NODE_OFFLINE_AFTER_MS } from './node-registry';
 import type { NodeEntity } from './models';
+import type { NodeUpdatesService } from './node-updates.service';
+import { EMPTY } from 'rxjs';
 import { AgentReleasesService } from '../agent-releases/agent-releases.service';
 import {
   makeAgentReleasesRoot,
@@ -22,6 +24,11 @@ import {
 } from '../agent-releases/agent-release-bundles.fixtures';
 
 const NO_AGENT_RELEASES_DIRECTORY = '/nonexistent/agent-releases';
+
+const nodeUpdatesWithNoHistory = {
+  changes$: EMPTY,
+  summarize: async () => new Map(),
+} as unknown as NodeUpdatesService;
 
 const AT = new Date('2026-01-10T12:00:00Z');
 
@@ -159,6 +166,7 @@ function makeService(
     realtime,
     clock,
     agentReleases,
+    nodeUpdatesWithNoHistory,
   );
   return {
     service,

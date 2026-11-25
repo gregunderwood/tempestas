@@ -1,9 +1,18 @@
 import { EventEmitter } from 'node:events';
 import { ConfigService } from '@nestjs/config';
 import { connect } from 'mqtt';
-import { mqttTopics } from '@tempestas/domain';
+import {
+  AgentApp,
+  ApiErrorCode,
+  MQTT_SCHEMAS,
+  mqttQos,
+  mqttTopics,
+  UpdateState,
+} from '@tempestas/domain';
+import { firstValueFrom } from 'rxjs';
 import { FixedClock } from '../common/clock';
 import { MqttHardwareService } from './mqtt-hardware.service';
+import type { UpdateOrder } from './hardware.service';
 
 vi.mock('mqtt', () => ({ connect: vi.fn() }));
 
@@ -55,6 +64,12 @@ class FakeBrokerClient extends EventEmitter {
     const oldest = this.pendingSubscriptions.shift();
     if (!oldest) throw new Error('No subscribe is waiting for its SUBACK');
     return oldest;
+  }
+
+  deliver(topic: string, payload: unknown): void {
+    this.emit('message', topic, Buffer.from(JSON.stringify(payload)), {
+      retain: false,
+    });
   }
 
   hasAnnouncedServerStatus(): boolean {
@@ -147,5 +162,114 @@ describe('MqttHardwareService on a broker connect', () => {
       expect.any(String),
       expect.objectContaining({ resubscribe: false }),
     );
+  });
+});
+
+const ORDER: UpdateOrder = {
+  id: '6f1c9e1e-8f7e-4a43-9c55-0d6f1d9b2b11',
+  app: AgentApp.Linux,
+  version: '1.1.1',
+  manifestUrl:
+    'http://elantris:7000/api/agent-releases/agent-linux/1.1.1/manifest.json',
+  manifestSha256: 'b'.repeat(64),
+};
+
+describe('MqttHardwareService updates', () => {
+  let brokerClient: FakeBrokerClient;
+
+  function startService(role: string): MqttHardwareService {
+    const service = new MqttHardwareService(
+      new ConfigService({ CONTROLLER_ROLE: role }),
+      new FixedClock(NOW),
+    );
+    service.onApplicationBootstrap();
+    return service;
+  }
+
+  beforeEach(() => {
+    brokerClient = new FakeBrokerClient();
+    vi.mocked(connect).mockReturnValue(
+      brokerClient as unknown as ReturnType<typeof connect>,
+    );
+  });
+
+  it('publishes the update on the node topic, never retained', async () => {
+    const service = startService('leader');
+    brokerClient.connected = true;
+
+    await service.sendUpdate('patji', ORDER);
+
+    const [topic, body, options] = brokerClient.publishAsync.mock
+      .calls[0] as unknown as [string, string, unknown];
+    expect(topic).toBe(mqttTopics.update('patji'));
+    expect(options).toEqual(mqttQos.update);
+    expect(JSON.parse(body)).toMatchObject({
+      schema: MQTT_SCHEMAS.update,
+      id: ORDER.id,
+      version: '1.1.1',
+      manifestUrl: ORDER.manifestUrl,
+    });
+    await service.onModuleDestroy();
+  });
+
+  it('refuses to send an update from a follower', async () => {
+    const service = startService('follower');
+
+    await expect(service.sendUpdate('patji', ORDER)).rejects.toMatchObject({
+      code: ApiErrorCode.ControllerIsFollower,
+    });
+    expect(brokerClient.publishAsync).not.toHaveBeenCalled();
+    await service.onModuleDestroy();
+  });
+
+  it('refuses while the broker is disconnected, as mqtt.js would hold the command and send it late', async () => {
+    const service = startService('leader');
+
+    await expect(service.sendUpdate('patji', ORDER)).rejects.toMatchObject({
+      code: ApiErrorCode.HardwareUnreachable,
+    });
+    expect(brokerClient.publishAsync).not.toHaveBeenCalled();
+    await service.onModuleDestroy();
+  });
+
+  it('gives up on a publish the broker never acknowledges', async () => {
+    vi.useFakeTimers();
+    const service = startService('leader');
+    brokerClient.connected = true;
+    brokerClient.publishAsync.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+
+    const sending = service.sendUpdate('patji', ORDER);
+    const refused = expect(sending).rejects.toMatchObject({
+      code: ApiErrorCode.HardwareUnreachable,
+      message: expect.stringContaining('did not acknowledge'),
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await refused;
+    vi.useRealTimers();
+    await service.onModuleDestroy();
+  });
+
+  it('passes on what a node reports about its update', async () => {
+    const service = startService('leader');
+    const reported = firstValueFrom(service.updateStatuses$);
+
+    brokerClient.deliver(mqttTopics.updateStatus('patji'), {
+      schema: MQTT_SCHEMAS.updateStatus,
+      node: 'patji',
+      ts: NOW.toISOString(),
+      id: ORDER.id,
+      state: UpdateState.Installing,
+    });
+
+    await expect(reported).resolves.toEqual({
+      nodeId: 'patji',
+      id: ORDER.id,
+      state: UpdateState.Installing,
+      reason: null,
+    });
+    await service.onModuleDestroy();
   });
 });
