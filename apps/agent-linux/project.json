@@ -11,7 +11,10 @@
     },
     "format": {
       "executor": "nx:run-commands",
-      "options": { "command": "uv run ruff format .", "cwd": "apps/agent-linux" }
+      "options": {
+        "command": "uv run ruff format .",
+        "cwd": "apps/agent-linux"
+      }
     },
     "test": {
       "executor": "nx:run-commands",
@@ -19,7 +22,16 @@
     },
     "serve": {
       "executor": "nx:run-commands",
-      "options": { "command": "uv run tempestas-agent --simulated", "cwd": "apps/agent-linux" }
+      "options": {
+        "command": "uv run tempestas-agent --simulated",
+        "cwd": "apps/agent-linux"
+      }
+    },
+    "package": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tools/check-agent-deb.sh \"$(tools/build-agent-deb.sh)\""
+      }
     }
   }
 }

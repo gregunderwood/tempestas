@@ -35,7 +35,7 @@ from .update_gate import (
     roll_back_gate,
     settle_update_on_start,
 )
-from .version import AGENT_NAME, read_agent_version
+from .version import AGENT_NAME, is_installed_from_a_package, read_agent_version
 from .world_client import WorldClient
 
 log = logging.getLogger("tempestas.agent")
@@ -67,6 +67,9 @@ FINAL_UPDATE_STATES = frozenset(
 NOT_INSTALLED_FROM_A_RELEASE = (
     "this agent was not installed from a release, so it cannot update itself; "
     "run tools/deploy-agent-linux.sh"
+)
+INSTALLED_FROM_A_PACKAGE = (
+    "this agent was installed from a package, so it updates through apt, not a bundle"
 )
 
 
@@ -661,9 +664,14 @@ class Agent:
         if gate is not None:
             gate.stop_watching(self._clock())
 
+    def _explain_why_it_cannot_install_bundles(self) -> str:
+        if is_installed_from_a_package():
+            return INSTALLED_FROM_A_PACKAGE
+        return NOT_INSTALLED_FROM_A_RELEASE
+
     def _claim_update_or_explain_refusal(self, command_id: str) -> str | None:
         if self.installer is None:
-            return NOT_INSTALLED_FROM_A_RELEASE
+            return self._explain_why_it_cannot_install_bundles()
         if self.is_stopping or self.restart_requested.is_set():
             return STOPPING
         if not self._is_update_settled:

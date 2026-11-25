@@ -19,6 +19,7 @@ from tempestas_agent import contract
 from tempestas_agent.agent import (
     ANOTHER_UPDATE_IN_PROGRESS,
     HELLO_REPEAT_S,
+    INSTALLED_FROM_A_PACKAGE,
     LAST_OUTCOME_UNDELIVERED,
     LAST_UPDATE_UNSETTLED,
     NOT_INSTALLED_FROM_A_RELEASE,
@@ -126,6 +127,16 @@ def test_says_why_it_cannot_update_when_not_installed_from_a_release(monkeypatch
     agent.on_update(build_fresh_update(), is_retained=False)
 
     assert update_statuses(agent) == [(contract.UpdateState.FAILED, NOT_INSTALLED_FROM_A_RELEASE)]
+
+
+def test_a_packaged_agent_says_it_updates_through_apt(monkeypatch):
+    monkeypatch.setattr("tempestas_agent.agent.is_installed_from_a_package", lambda: True)
+    agent, _ = make_agent()
+    agent.on_heartbeat(HEARTBEAT)
+
+    agent.on_update(build_fresh_update(), is_retained=False)
+
+    assert update_statuses(agent) == [(contract.UpdateState.FAILED, INSTALLED_FROM_A_PACKAGE)]
 
 
 def test_reports_an_update_for_another_app_as_failed(monkeypatch, tmp_path):

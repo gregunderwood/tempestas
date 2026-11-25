@@ -1,0 +1,57 @@
+# The packaged agent's unit; see docs/Infrastructure/Packages.md. systemd/tempestas-agent.service is the hand-deployed one.
+
+[Unit]
+Description=tempestas node agent
+# %% is a literal % - systemd reads a bare % as a specifier and drops the line.
+Documentation=https://github.com/gregunderwood/tempestas/blob/main/docs/Infrastructure/Packages.md
+After=network-online.target mosquitto.service
+Wants=network-online.target
+# Skipped, not failed, until a human writes the config: claiming relay pins is never the package's call.
+ConditionPathExists=/etc/tempestas/agent.toml
+ConditionPathExists=/etc/tempestas/agent.env
+
+# In [Unit], not [Service]: under [Service] systemd ignores them with "Unknown key".
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=tempestas
+Group=tempestas
+SupplementaryGroups=i2c gpio
+
+# The system interpreter, so the distro's compiled lgpio is importable; the pure-Python dependencies ride in vendor/.
+ExecStart=/usr/bin/python3 -m tempestas_agent --config /etc/tempestas/agent.toml
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/usr/lib/tempestas/agent:/usr/lib/tempestas/agent/vendor
+EnvironmentFile=/etc/tempestas/agent.env
+
+RuntimeDirectory=tempestas
+RuntimeDirectoryMode=0755
+
+# A hung loop fails the run; 6x the longest pass.
+WatchdogSec=60
+
+# Never Restart=always; RestartSec is how long a killed agent leaves its pads unsupervised.
+Restart=on-failure
+RestartSec=5
+
+OOMScoreAdjust=-900
+MemoryMin=64M
+
+StandardOutput=journal
+StandardError=journal
+
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+# No PrivateDevices=yes: it would hide /dev/i2c-1 and /dev/gpiochip0 from the agent.
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -22,6 +22,7 @@ every list below, and why "it compiles and the tests pass" is not the bar here.
 - Socket events to the browser → Read [./docs/Infrastructure/Realtime.md](./docs/Infrastructure/Realtime.md)
 - A schema change → Read [./docs/Infrastructure/Migrations.md](./docs/Infrastructure/Migrations.md)
 - Deploying, releases, rolling back → Read [./docs/Infrastructure/Deploys.md](./docs/Infrastructure/Deploys.md)
+- Packages, `.deb`s, installing with apt → Read [./docs/Infrastructure/Packages.md](./docs/Infrastructure/Packages.md)
 - Thresholds, hysteresis, the control law, DST → Read [./docs/Rules and Climate.md](./docs/Rules%20and%20Climate.md)
 - Pins, polarity, relays, the SCD4x sensor, the boot window → Read [./docs/Hardware.md](./docs/Hardware.md)
 - The Angular dashboard, error handling, the banner → Read [./docs/Web App.md](./docs/Web%20App.md)

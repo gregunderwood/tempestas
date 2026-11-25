@@ -65,3 +65,18 @@ jobs:
         run: |
           uv run ruff check .
           uv run pytest -q
+
+  linux-agent-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # Full history: the package carries the agent's version, which counts commits.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Build the agent .deb and install it on bookworm and trixie
+        run: tools/check-agent-deb.sh "$(tools/build-agent-deb.sh)"
