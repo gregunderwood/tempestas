@@ -3,6 +3,7 @@ import {
   IsEnum,
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsPositive,
   IsString,
@@ -22,7 +23,7 @@ import { GPIO_LEVELS, MAX_GPIO_PIN, MIN_GPIO_PIN } from './gpio-constraints';
 // Written out rather than derived, to avoid pulling in @nestjs/mapped-types.
 export class UpdateDeviceDto implements UpdateDevicePayload {
   @IsOptional() @IsUUID() zoneId?: string;
-  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
   @IsOptional() @IsString() description?: string | null;
   @IsOptional()
   @IsInt()

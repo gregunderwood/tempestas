@@ -2,7 +2,7 @@ import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Subject } from 'rxjs';
 import { DivergenceLog } from '../common/divergence-log';
 import type { NodeHello, PinStateReport } from '../hardware/hardware.service';
-import type { Repository } from 'typeorm';
+import type { FindOneOptions, Repository } from 'typeorm';
 import {
   ApiErrorCode,
   DeviceRole,
@@ -67,6 +67,7 @@ function makeService(
   const mocks = {
     findOne: vi.fn().mockResolvedValue(device),
     find: vi.fn().mockResolvedValue([device]),
+    findOneBy: vi.fn().mockResolvedValue(null),
     save: vi.fn(async (device: DeviceEntity) => device),
     remove: vi.fn(async (device: DeviceEntity) => device),
     create: vi.fn(
@@ -418,10 +419,185 @@ describe('DevicesService mutations', () => {
     expect(setPin).not.toHaveBeenCalled();
   });
 
+  it('publishes an edit, so every open page shows it', async () => {
+    const { service, publishDeviceState } = makeService(burner());
+    await service.update('dev-1', { name: 'Burner' });
+    expect(publishDeviceState).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Burner' }),
+    );
+  });
+
+  it('publishes a new device', async () => {
+    const { service, publishDeviceState } = makeService(burner());
+    await service.create({
+      nodeId: 'elantris',
+      name: 'Extra Relay',
+      gpio: 12,
+      onDelayDuration: 0,
+      onLevel: 0,
+    });
+    expect(publishDeviceState).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Extra Relay' }),
+    );
+  });
+
   it('removes a device', async () => {
     const { service, mocks } = makeService(burner());
     await service.remove('dev-1');
     expect(mocks.remove).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DevicesService remapping a relay', () => {
+  const burnerOnElantris = (overrides: Partial<DeviceEntity> = {}) =>
+    burner({ node: NODE, ...overrides });
+  const runningSince = new Date('2026-01-10T11:00:00Z');
+
+  it.each([
+    ['pin', { gpio: 12 }],
+    ['on level', { onLevel: 1 as const }],
+  ])(
+    'refuses to change the %s of a device that is on, and switches nothing',
+    async (_change, edit) => {
+      const { service, setPin, save } = makeService(
+        burnerOnElantris({ onAt: runningSince }),
+      );
+      await expect(service.update('dev-1', edit)).rejects.toMatchObject({
+        response: { code: ApiErrorCode.DeviceAlreadyOn },
+      });
+      expect(save).not.toHaveBeenCalled();
+      expect(setPin).not.toHaveBeenCalled();
+    },
+  );
+
+  it('lets a device that is on keep its pin and on level while other fields change', async () => {
+    const { service } = makeService(burnerOnElantris({ onAt: runningSince }));
+    const dto = await service.update('dev-1', {
+      name: 'Burner',
+      gpio: 16,
+      onLevel: 0,
+    });
+    expect(dto).toMatchObject({ name: 'Burner', isOn: true });
+  });
+
+  it('moves a device that is off to another exposed pin without switching anything', async () => {
+    const { service, setPin } = makeService(burnerOnElantris());
+    const dto = await service.update('dev-1', { gpio: 12 });
+    expect(dto.gpio).toBe(12);
+    expect(setPin).not.toHaveBeenCalled();
+  });
+
+  it('refuses a pin the node does not expose', async () => {
+    const { service, save } = makeService(burnerOnElantris());
+    await expect(service.update('dev-1', { gpio: 17 })).rejects.toMatchObject({
+      response: { code: ApiErrorCode.PinNotAvailable },
+    });
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('refuses a pin another device already uses, and names it', async () => {
+    const { service, mocks, save } = makeService(burnerOnElantris());
+    mocks.findOneBy.mockResolvedValue({ id: 'dev-2', name: 'Exhaust Fan' });
+    await expect(service.update('dev-1', { gpio: 20 })).rejects.toMatchObject({
+      response: {
+        code: ApiErrorCode.PinNotAvailable,
+        message: 'Pin 20 on "elantris" is already used by Exhaust Fan',
+      },
+    });
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('refuses to create a device on a pin another device already uses', async () => {
+    const { service, mocks, save } = makeService(burner());
+    mocks.findOneBy.mockResolvedValue({ id: 'dev-1', name: 'CO2 Generator' });
+    await expect(
+      service.create({
+        nodeId: 'elantris',
+        name: 'Second burner',
+        gpio: 16,
+        onDelayDuration: 0,
+        onLevel: 0,
+      }),
+    ).rejects.toMatchObject({
+      response: { code: ApiErrorCode.PinNotAvailable },
+    });
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  // The relay has not moved; only what its level means has.
+  it('reads the pin under the new on level straight away', async () => {
+    const pinAtHigh: PinStateReport = {
+      nodeId: 'elantris',
+      pin: 16,
+      level: 1,
+      known: true,
+      observedAt: new Date(NOW.getTime() - 60_000),
+      live: true,
+    };
+    const { service, setPin } = makeService(
+      burnerOnElantris(),
+      undefined,
+      NODE,
+      pinAtHigh,
+    );
+    const dto = await service.update('dev-1', { onLevel: 1 });
+    expect(dto.isOn).toBe(true);
+    expect(setPin).not.toHaveBeenCalled();
+  });
+
+  // After a restart the last report is the retained replay, older than the row's own offAt.
+  it.each([
+    ['on level', { onLevel: 1 as const }, 16],
+    ['pin', { gpio: 12 }, 12],
+  ])(
+    'reads a retained replay older than the row after a %s change',
+    async (_change, edit, reportedPin) => {
+      const turnedOffAt = new Date(NOW.getTime() - 60_000);
+      const replay: PinStateReport = {
+        nodeId: 'elantris',
+        pin: reportedPin,
+        level: reportedPin === 16 ? 1 : 0,
+        known: true,
+        observedAt: new Date(turnedOffAt.getTime() - 1_000),
+        live: false,
+      };
+      const { service } = makeService(
+        burnerOnElantris({ onAt: runningSince, offAt: turnedOffAt }),
+        undefined,
+        NODE,
+        replay,
+      );
+      const dto = await service.update('dev-1', edit);
+      expect(dto.isOn).toBe(true);
+    },
+  );
+
+  it('refuses a remap that queued behind a turn-on, and leaves the pin where it is', async () => {
+    let storedRow = burnerOnElantris();
+    let finishCommand: () => void = () => undefined;
+    const slowSetPin = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishCommand = resolve;
+        }),
+    );
+    const { service, mocks } = makeService(storedRow, slowSetPin);
+    mocks.findOne.mockImplementation(async () => ({ ...storedRow }));
+    mocks.save.mockImplementation(async (row: DeviceEntity) => {
+      storedRow = { ...row };
+      return row;
+    });
+
+    const turningOn = service.turnOn('dev-1');
+    const remapping = service.update('dev-1', { gpio: 12 });
+    await vi.waitFor(() => expect(slowSetPin).toHaveBeenCalled());
+    finishCommand();
+
+    await expect(turningOn).resolves.toMatchObject({ isOn: true, gpio: 16 });
+    await expect(remapping).rejects.toMatchObject({
+      response: { code: ApiErrorCode.DeviceAlreadyOn },
+    });
+    expect(storedRow).toMatchObject({ gpio: 16, onAt: NOW });
   });
 });
 
@@ -643,5 +819,202 @@ describe('DevicesService reconciliation during its own command', () => {
       ]);
       service.onModuleDestroy();
     });
+  });
+});
+
+// A correction loads and saves the whole row, so it takes the device's turn like an edit or a switch.
+describe('DevicesService reconciliation alongside edits and switches', () => {
+  interface HeldLoad {
+    release: () => void;
+  }
+
+  function harness() {
+    let storedRow = burner({ node: NODE });
+    const heldLoads: HeldLoad[] = [];
+    let holdNextLoad = false;
+    const pinStates = new Subject<PinStateReport>();
+    const divergences = new DivergenceLog();
+    const publishDeviceState = vi.fn();
+    const loadStoredRow = vi.fn((query: FindOneOptions<DeviceEntity>) => {
+      const askedPin = (query.where as { gpio?: number }).gpio;
+      const isElsewhere = askedPin !== undefined && askedPin !== storedRow.gpio;
+      if (isElsewhere) return Promise.resolve(null);
+      const snapshot = { ...storedRow };
+      if (!holdNextLoad) return Promise.resolve(snapshot);
+      holdNextLoad = false;
+      return new Promise<DeviceEntity | null>((resolve) => {
+        heldLoads.push({ release: () => resolve(snapshot) });
+      });
+    });
+    const findDeviceOnPinForClaim = vi.fn().mockResolvedValue(null);
+    const deviceRepository = {
+      findOne: loadStoredRow,
+      findOneBy: findDeviceOnPinForClaim,
+      save: vi.fn(async (row: DeviceEntity) => {
+        storedRow = { ...row };
+        return row;
+      }),
+    } as unknown as Repository<DeviceEntity>;
+    const setPin = vi.fn().mockResolvedValue(undefined);
+    const hardware = {
+      setPin,
+      lastPinReport: vi.fn().mockReturnValue(null),
+      pinStates$: pinStates.asObservable(),
+      hello$: new Subject<NodeHello>().asObservable(),
+    } as unknown as HardwareService;
+    const service = new DevicesService(
+      deviceRepository,
+      {
+        find: vi.fn().mockResolvedValue([{ ...NODE, bootId: 'boot-1' }]),
+      } as unknown as Repository<NodeEntity>,
+      hardware,
+      new FixedClock(NOW),
+      { publishDeviceState } as unknown as RealtimeGateway,
+      divergences,
+    );
+    return {
+      service,
+      pinStates,
+      divergences,
+      publishDeviceState,
+      loadStoredRow,
+      setPin,
+      heldLoads,
+      holdNextLoad: () => {
+        holdNextLoad = true;
+      },
+      findDeviceOnPinForClaim,
+      storedRow: () => storedRow,
+      replaceStoredRow: (row: DeviceEntity) => {
+        storedRow = row;
+      },
+    };
+  }
+
+  const reportAtLevel = (level: 0 | 1): PinStateReport => ({
+    nodeId: NODE.slug,
+    pin: 16,
+    level,
+    known: true,
+    observedAt: NOW,
+    live: true,
+  });
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('reads a report under an on level changed while it waited, and does not put the old one back', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.holdNextLoad();
+    const editing = stack.service.update('dev-1', { onLevel: 1 });
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    // Level 0 is on under the old active-LOW mapping, off under the new one.
+    stack.pinStates.next(reportAtLevel(0));
+    await settle();
+    stack.heldLoads[0].release();
+    await editing;
+    await settle();
+
+    expect(stack.storedRow()).toMatchObject({ onLevel: 1, onAt: null });
+    expect(stack.divergences.since(new Date(0))).toHaveLength(0);
+    expect(stack.publishDeviceState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ onLevel: 1, isOn: false }),
+    );
+    stack.service.onModuleDestroy();
+  });
+
+  it('refuses a remap queued behind a correction to on, and leaves the pin where it is', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.pinStates.next(reportAtLevel(0));
+    await vi.waitFor(() => expect(stack.loadStoredRow).toHaveBeenCalled());
+    stack.holdNextLoad();
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    const remapping = stack.service.update('dev-1', { gpio: 12 });
+    stack.heldLoads[0].release();
+
+    await expect(remapping).rejects.toMatchObject({
+      response: { code: ApiErrorCode.DeviceAlreadyOn },
+    });
+    expect(stack.storedRow()).toMatchObject({ gpio: 16, onAt: NOW });
+    stack.service.onModuleDestroy();
+  });
+
+  it('ignores a report that a later command of ours overtook', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.holdNextLoad();
+    const turningOn = stack.service.turnOn('dev-1');
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    // Taken while the relay was still off, before the command reached the node.
+    stack.pinStates.next(reportAtLevel(1));
+    await settle();
+    stack.heldLoads[0].release();
+    await turningOn;
+    await settle();
+
+    expect(stack.storedRow()).toMatchObject({ onAt: NOW, offAt: null });
+    expect(stack.divergences.since(new Date(0))).toHaveLength(0);
+    stack.service.onModuleDestroy();
+  });
+  it('still reads a waiting report when the command ahead of it never reached the node', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.setPin.mockRejectedValueOnce(new Error('node unreachable'));
+    stack.holdNextLoad();
+    const turningOn = stack.service.turnOn('dev-1');
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    stack.pinStates.next(reportAtLevel(0));
+    await settle();
+    stack.heldLoads[0].release();
+    await expect(turningOn).rejects.toBeDefined();
+    await settle();
+
+    expect(stack.storedRow()).toMatchObject({ onAt: NOW });
+    expect(stack.divergences.since(new Date(0))).toHaveLength(1);
+    stack.service.onModuleDestroy();
+  });
+
+  it('drops a waiting report once an edit ahead of it moved the device off that pin', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.holdNextLoad();
+    const remapping = stack.service.update('dev-1', { gpio: 12 });
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    stack.pinStates.next(reportAtLevel(0));
+    await settle();
+    stack.heldLoads[0].release();
+    await remapping;
+    await settle();
+
+    expect(stack.storedRow()).toMatchObject({ gpio: 12, onAt: null });
+    expect(stack.divergences.since(new Date(0))).toHaveLength(0);
+    stack.service.onModuleDestroy();
+  });
+  it('leaves alone a device that took the pin while the report waited', async () => {
+    const stack = harness();
+    await stack.service.onModuleInit();
+    stack.findDeviceOnPinForClaim.mockResolvedValue({ id: 'dev-3' });
+    stack.holdNextLoad();
+    const refusedEdit = stack.service.update('dev-1', { gpio: 20 });
+    await vi.waitFor(() => expect(stack.heldLoads).toHaveLength(1));
+
+    stack.pinStates.next(reportAtLevel(0));
+    await settle();
+    stack.replaceStoredRow(
+      burner({ id: 'dev-2', name: 'Exhaust Fan', node: NODE }),
+    );
+    stack.heldLoads[0].release();
+    await expect(refusedEdit).rejects.toBeInstanceOf(ConflictException);
+    await settle();
+
+    expect(stack.storedRow()).toMatchObject({ id: 'dev-2', onAt: null });
+    expect(stack.divergences.since(new Date(0))).toHaveLength(0);
+    stack.service.onModuleDestroy();
   });
 });

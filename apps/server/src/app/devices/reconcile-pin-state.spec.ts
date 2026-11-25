@@ -1,6 +1,7 @@
 import { isOn } from './device-state';
 import {
   correctionPatch,
+  reconcileNewMapping,
   reconcilePinState,
   type PinObservation,
   type ReconcileTarget,
@@ -180,5 +181,46 @@ describe('reconcilePinState with a node clock that is behind', () => {
       action: 'none',
       reason: 'hardware and the row agree',
     });
+  });
+});
+
+describe('reconcileNewMapping', () => {
+  const turnedOffAt = instant('2026-09-10T20:30:00Z');
+  const offRow = () =>
+    device({ onAt: instant('2026-09-10T20:00:00Z'), offAt: turnedOffAt });
+
+  // The on level flipped after a restart: the retained replay predates the row's own offAt.
+  it('believes a retained replay older than the row, and dates the turn-on after offAt', () => {
+    const verdict = reconcileNewMapping(
+      { ...offRow(), onLevel: 1 },
+      seen(1, instant('2026-09-10T20:29:59Z')),
+      NOW,
+    );
+    expect(verdict).toMatchObject({
+      action: 'correct',
+      hardwareOn: true,
+      at: NOW,
+    });
+    if (verdict.action !== 'correct') throw new Error('unreachable');
+    expect(isOn({ ...offRow(), ...correctionPatch(verdict) })).toBe(true);
+  });
+
+  it('keeps the node timestamp when the replay is newer than the row', () => {
+    const observedAt = instant('2026-09-10T20:45:00Z');
+    const verdict = reconcileNewMapping(
+      { ...offRow(), onLevel: 1 },
+      seen(1, observedAt),
+      NOW,
+    );
+    expect(verdict).toMatchObject({ action: 'correct', at: observedAt });
+  });
+
+  it('changes nothing when the level is unknown', () => {
+    const verdict = reconcileNewMapping(
+      offRow(),
+      seen(null, instant('2026-09-10T20:45:00Z')),
+      NOW,
+    );
+    expect(verdict.action).toBe('none');
   });
 });

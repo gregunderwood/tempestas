@@ -30,11 +30,24 @@ import { DeviceEntity } from './models';
 import type { CreateDeviceDto } from './dto/create-device.dto';
 import type { UpdateDeviceDto } from './dto/update-device.dto';
 import { canTurnOn, canTurnOnAt, isOn } from './device-state';
-import { correctionPatch, reconcilePinState } from './reconcile-pin-state';
+import {
+  correctionPatch,
+  reconcileNewMapping,
+  reconcilePinState,
+  type Reconciliation,
+} from './reconcile-pin-state';
 import { findDeviceOnPin } from './find-device-on-pin';
 import { NodeBoots } from './node-boots';
+import { PerDeviceQueue } from './per-device-queue';
 
 type Direction = 'on' | 'off';
+type Correction = Extract<Reconciliation, { action: 'correct' }>;
+
+interface ReportArrival {
+  report: PinStateReport;
+  isFirstReportSinceBoot: boolean;
+  commandsSentBefore: number;
+}
 
 // The single owner of the on/off interlocks; every switch funnels through `drive()`.
 @Injectable()
@@ -44,6 +57,9 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
   private readonly nodeBoots = new NodeBoots();
   // Our own command's `gpio/state` must not be reconciled as a divergence; see docs/Safety.md 3c.
   private readonly pinsMidCommand = new Set<string>();
+  private readonly commandCountsByPin = new Map<string, number>();
+  // Edits, switches and corrections of one device run in turn, or a save writes back stale columns.
+  private readonly deviceWrites = new PerDeviceQueue();
 
   constructor(
     @InjectRepository(DeviceEntity)
@@ -110,6 +126,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
   async create(dto: CreateDeviceDto): Promise<Device> {
     const node = await this.findNodeBySlug(dto.nodeId);
     assertPinAvailable(node, dto.gpio);
+    await this.assertPinUnclaimed(node, dto.gpio);
 
     const row = this.devices.create({
       ...dto,
@@ -124,21 +141,17 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
 
     const saved = await this.devices.save(row);
     saved.node = node;
-    return this.toDto(saved);
+    return this.publishSaved(saved);
   }
 
-  async update(id: string, dto: UpdateDeviceDto): Promise<Device> {
-    const row = await this.findOneEntity(id);
-    Object.assign(row, dto);
-    return this.toDto(await this.devices.save(row));
+  update(id: string, dto: UpdateDeviceDto): Promise<Device> {
+    return this.deviceWrites.runInTurn(id, () => this.applyEdit(id, dto));
   }
 
-  async setRulesEnabled(id: string, rulesEnabled: boolean): Promise<Device> {
-    const row = await this.findOneEntity(id);
-    row.rulesEnabled = rulesEnabled;
-    const dto = this.toDto(await this.devices.save(row));
-    this.realtime.publishDeviceState(dto);
-    return dto;
+  setRulesEnabled(id: string, rulesEnabled: boolean): Promise<Device> {
+    return this.deviceWrites.runInTurn(id, () =>
+      this.applyRulesEnabled(id, rulesEnabled),
+    );
   }
 
   async remove(id: string): Promise<void> {
@@ -146,24 +159,30 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     await this.devices.remove(row);
   }
 
-  async turnOn(id: string): Promise<Device> {
-    const device = await this.findOneEntity(id);
-    assertIsOff(device);
-    assertCooldownOver(device, this.clock.now());
-    return this.drive(device, device.onLevel, 'on');
+  turnOn(id: string): Promise<Device> {
+    return this.deviceWrites.runInTurn(id, async () => {
+      const device = await this.findOneEntity(id);
+      assertIsOff(device);
+      assertCooldownOver(device, this.clock.now());
+      return this.drive(device, device.onLevel, 'on');
+    });
   }
 
   /** Bypasses the cooldown, but NOT the already-on check. */
-  async forceOn(id: string): Promise<Device> {
-    const device = await this.findOneEntity(id);
-    assertIsOff(device);
-    return this.drive(device, device.onLevel, 'on');
+  forceOn(id: string): Promise<Device> {
+    return this.deviceWrites.runInTurn(id, async () => {
+      const device = await this.findOneEntity(id);
+      assertIsOff(device);
+      return this.drive(device, device.onLevel, 'on');
+    });
   }
 
-  async turnOff(id: string): Promise<Device> {
-    const device = await this.findOneEntity(id);
-    assertIsOn(device);
-    return this.drive(device, offLevelOf(device), 'off');
+  turnOff(id: string): Promise<Device> {
+    return this.deviceWrites.runInTurn(id, async () => {
+      const device = await this.findOneEntity(id);
+      assertIsOn(device);
+      return this.drive(device, offLevelOf(device), 'off');
+    });
   }
 
   toDto(row: DeviceEntity): Device {
@@ -197,33 +216,55 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
   }
 
   private reconcileInBackground(report: PinStateReport): void {
+    const pinKey = toPinKey(report.nodeId, report.pin);
     // Decided as the report arrives, before any await can reorder it behind a later one.
-    const isFirstReportSinceBoot = this.nodeBoots.isFirstReportSinceBoot(
+    const arrival: ReportArrival = {
+      report,
+      isFirstReportSinceBoot: this.nodeBoots.isFirstReportSinceBoot(
+        report.nodeId,
+        report.pin,
+      ),
+      commandsSentBefore: this.commandsSentTo(pinKey),
+    };
+    // Caught here so one failure cannot end the subscription.
+    void this.reconcile(arrival).catch((error: unknown) => {
+      this.logger.error(
+        `Reconciling ${report.nodeId} pin ${report.pin} failed: ${String(error)}`,
+      );
+    });
+  }
+
+  private async reconcile(arrival: ReportArrival): Promise<void> {
+    const { report } = arrival;
+    if (this.pinsMidCommand.has(toPinKey(report.nodeId, report.pin))) return;
+
+    const deviceOnPin = await findDeviceOnPin(
+      this.devices,
       report.nodeId,
       report.pin,
     );
-    // Caught here so one failure cannot end the subscription.
-    void this.reconcile(report, isFirstReportSinceBoot).catch(
-      (error: unknown) => {
-        this.logger.error(
-          `Reconciling ${report.nodeId} pin ${report.pin} failed: ${String(error)}`,
-        );
-      },
+    if (!deviceOnPin) return;
+
+    // Loaded and saved in the device's turn, or an edit or switch in between is quietly undone.
+    await this.deviceWrites.runInTurn(deviceOnPin.id, () =>
+      this.correctFromReport(deviceOnPin.id, arrival),
     );
   }
 
-  private async reconcile(
-    report: PinStateReport,
-    isFirstReportSinceBoot: boolean,
+  private async correctFromReport(
+    deviceId: string,
+    arrival: ReportArrival,
   ): Promise<void> {
-    if (this.pinsMidCommand.has(toPinKey(report.nodeId, report.pin))) return;
+    if (this.wasOvertakenByCommand(arrival)) return;
 
+    const { report } = arrival;
     const device = await findDeviceOnPin(
       this.devices,
       report.nodeId,
       report.pin,
     );
-    if (!device) return;
+    const isStillOnPin = device?.id === deviceId;
+    if (!isStillOnPin) return;
 
     const now = this.clock.now();
     const verdict = reconcilePinState(device, report, now);
@@ -232,6 +273,28 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     Object.assign(device, correctionPatch(verdict));
     await this.devices.save(device);
 
+    this.reportDivergence(device, arrival, verdict, now);
+    this.realtime.publishDeviceState(this.toDto(device));
+  }
+
+  // A report taken before our own later command describes the pin as it was, however live it is.
+  private wasOvertakenByCommand(arrival: ReportArrival): boolean {
+    const { report, commandsSentBefore } = arrival;
+    const pinKey = toPinKey(report.nodeId, report.pin);
+    return this.commandsSentTo(pinKey) !== commandsSentBefore;
+  }
+
+  private commandsSentTo(pinKey: string): number {
+    return this.commandCountsByPin.get(pinKey) ?? 0;
+  }
+
+  private reportDivergence(
+    device: DeviceEntity,
+    arrival: ReportArrival,
+    verdict: Correction,
+    now: Date,
+  ): void {
+    const { report, isFirstReportSinceBoot } = arrival;
     this.divergences.record({
       deviceName: device.name,
       nodeId: report.nodeId,
@@ -249,12 +312,58 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
         `${device.name} (${report.nodeId} pin ${report.pin}) changed when ` +
           `${report.nodeId} restarted and claimed its fail-safe level: ${correction}`,
       );
-    } else {
-      this.logger.error(
-        `DIVERGENCE on ${device.name} (${report.nodeId} pin ${report.pin}): ${correction}`,
-      );
+      return;
     }
-    this.realtime.publishDeviceState(this.toDto(device));
+    this.logger.error(
+      `DIVERGENCE on ${device.name} (${report.nodeId} pin ${report.pin}): ${correction}`,
+    );
+  }
+
+  // Saving switches nothing; a remapped pin is read under its new mapping straight away.
+  private async applyEdit(id: string, dto: UpdateDeviceDto): Promise<Device> {
+    const row = await this.findOneEntity(id);
+    const isRemapping = changesRelayMapping(row, dto);
+    if (isRemapping) assertIsOffForRemapping(row);
+    if (dto.gpio !== undefined && dto.gpio !== row.gpio) {
+      assertPinAvailable(row.node, dto.gpio);
+      await this.assertPinUnclaimed(row.node, dto.gpio);
+    }
+
+    Object.assign(row, dto);
+    if (isRemapping) this.seedFromLastReport(row, row.node, row.gpio);
+    return this.publishSaved(await this.devices.save(row));
+  }
+
+  private async applyRulesEnabled(
+    id: string,
+    rulesEnabled: boolean,
+  ): Promise<Device> {
+    const row = await this.findOneEntity(id);
+    row.rulesEnabled = rulesEnabled;
+    return this.publishSaved(await this.devices.save(row));
+  }
+
+  private publishSaved(row: DeviceEntity): Device {
+    const device = this.toDto(row);
+    this.realtime.publishDeviceState(device);
+    return device;
+  }
+
+  // Checked here so a clash is a 409 naming the device, not a 500 from the unique constraint.
+  private async assertPinUnclaimed(
+    node: NodeEntity,
+    pin: number,
+  ): Promise<void> {
+    const occupant = await this.devices.findOneBy({
+      nodeId: node.id,
+      gpio: pin,
+    });
+    if (!occupant) return;
+    throw new ConflictException({
+      code: ApiErrorCode.PinNotAvailable,
+      message: `Pin ${pin} on "${node.slug}" is already used by ${occupant.name}`,
+      details: { usedBy: occupant.id },
+    });
   }
 
   // `nodeId` on the wire is the node slug; the foreign key is the node's uuid.
@@ -278,7 +387,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     const report = this.hardware.lastPinReport(node.slug, pin);
     if (!report) return;
 
-    const verdict = reconcilePinState(row, report, this.clock.now());
+    const verdict = reconcileNewMapping(row, report, this.clock.now());
     if (verdict.action !== 'correct') return;
 
     Object.assign(row, correctionPatch(verdict));
@@ -308,6 +417,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       this.pinsMidCommand.delete(pinKey);
       throw translateHardwareError(error);
     }
+    this.commandCountsByPin.set(pinKey, this.commandsSentTo(pinKey) + 1);
 
     stampTransition(device, direction, this.clock.now());
     try {
@@ -332,6 +442,25 @@ function assertPinAvailable(node: NodeEntity, pin: number): void {
     code: ApiErrorCode.PinNotAvailable,
     message: `Node "${node.slug}" does not expose GPIO pin ${pin}`,
     details: { availablePins: pins },
+  });
+}
+
+function changesRelayMapping(
+  device: DeviceEntity,
+  dto: UpdateDeviceDto,
+): boolean {
+  const changesPin = dto.gpio !== undefined && dto.gpio !== device.gpio;
+  const changesOnLevel =
+    dto.onLevel !== undefined && dto.onLevel !== device.onLevel;
+  return changesPin || changesOnLevel;
+}
+
+// Moving an energised device would leave its old relay on with nothing tracking it.
+function assertIsOffForRemapping(device: DeviceEntity): void {
+  if (!isOn(device)) return;
+  throw new ConflictException({
+    code: ApiErrorCode.DeviceAlreadyOn,
+    message: `${device.name} is on; turn it off before changing its pin or on level`,
   });
 }
 

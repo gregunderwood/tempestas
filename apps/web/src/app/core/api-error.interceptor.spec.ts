@@ -76,6 +76,22 @@ describe('apiErrorInterceptor', () => {
     expect(opened[0].message).toContain('Cannot reach the controller');
   });
 
+  it('shows every field the server refused', () => {
+    http.put('/api/devices/x', {}).subscribe({ error: () => undefined });
+    controller.expectOne('/api/devices/x').flush(
+      {
+        message: ['name should not be empty', 'gpio must be an integer'],
+        error: 'Bad Request',
+        statusCode: 400,
+      },
+      { status: 400, statusText: 'Bad Request' },
+    );
+
+    expect(opened[0].message).toBe(
+      'name should not be empty; gpio must be an integer',
+    );
+  });
+
   it('falls back to the status code when there is no usable body', () => {
     http.get('/api/nodes').subscribe({ error: () => undefined });
     controller

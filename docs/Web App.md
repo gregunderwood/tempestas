@@ -384,6 +384,24 @@ Device and node state are deliberately **not** cached or replayed by the server 
 reason. Readings and system status are, because for those a stale-but-present value beats an empty
 screen.
 
+## Adding and editing a device
+
+`/devices` adds and edits devices in a dialog (`features/devices/device-form-dialog.ts`) that saves
+through `POST /api/devices` and `PUT /api/devices/:id`. Saving switches nothing. Its limits are the
+server's: a whole, positive BTU/hr rating up to `MAX_INPUT_BTU_PER_HOUR` (blank means none), a whole
+on delay of 0 or more, and only the pins the node exposes that no other device uses.
+
+The pin and the on level decide which relay a device drives and what "on" means, so:
+
+- a new device has no on level until one is chosen;
+- an edit that changes either says what it does before saving;
+- a device that is **on** cannot change either. The dialog locks both fields, and the server
+  refuses with `DEVICE_ALREADY_ON`, because moving an energised device would leave its old relay
+  running with nothing tracking it. Turn it off first. See [Safety](Safety.md) 3d.
+
+After a remap the server reads the pin's last reported level under the new mapping straight away,
+so a device whose on level flipped may show as on without anything having switched.
+
 ## Patterns to follow
 
 ### ✅ Type every call from the shared library

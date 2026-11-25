@@ -40,7 +40,17 @@ export function describeRequestFailure(error: HttpErrorResponse): string {
   if (isControllerUnreachable(error)) return UNREACHABLE_MESSAGE;
   const body = error.error as Partial<ApiError> | string | null;
   if (hasServerMessage(body)) return body.message;
+  if (hasValidationMessages(body)) return body.message.join('; ');
   return `Request failed (HTTP ${error.status})`;
+}
+
+// Nest's validation pipe answers with one message per refused field.
+function hasValidationMessages(body: unknown): body is { message: string[] } {
+  if (body === null || typeof body !== 'object') return false;
+  const message = (body as { message?: unknown }).message;
+  return (
+    Array.isArray(message) && message.every((line) => typeof line === 'string')
+  );
 }
 
 function isControllerUnreachable(error: HttpErrorResponse): boolean {

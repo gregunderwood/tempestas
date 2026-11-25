@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Device } from '@tempestas/domain';
 import { recordDevicePush, type PushedDevice } from './device-pushes';
-import { applyNewerPushes } from './live-devices';
+import { applyNewerPushes, findNewestUnlistedPushAt } from './live-devices';
 
 const device = (id: string, isOn: boolean): Device =>
   ({ id, name: id, isOn }) as Device;
@@ -67,5 +67,42 @@ describe('applyNewerPushes', () => {
       pushesOf([device('ghost', true), 9_000]),
     );
     expect(merged).toEqual(fetched.payload);
+  });
+});
+
+describe('findNewestUnlistedPushAt', () => {
+  const fetched = { payload: [device('heater', false)], requestedAt: 1_000 };
+
+  it('asks for a refetch when a device added after the fetch is pushed', () => {
+    expect(
+      findNewestUnlistedPushAt(
+        fetched,
+        pushesOf([device('fan', false), 2_000]),
+      ),
+    ).toBe(2_000);
+  });
+
+  it('does not ask again once a later fetch has been sent', () => {
+    expect(
+      findNewestUnlistedPushAt(
+        { ...fetched, requestedAt: 3_000 },
+        pushesOf([device('fan', false), 2_000]),
+      ),
+    ).toBeNull();
+  });
+
+  it('does not ask for a push about a device already listed', () => {
+    expect(
+      findNewestUnlistedPushAt(
+        fetched,
+        pushesOf([device('heater', true), 2_000]),
+      ),
+    ).toBeNull();
+  });
+
+  it('waits for the first fetch', () => {
+    expect(
+      findNewestUnlistedPushAt(null, pushesOf([device('fan', false), 2_000])),
+    ).toBeNull();
   });
 });

@@ -54,3 +54,16 @@ describe('the burner input rating on a device', () => {
     },
   );
 });
+
+describe('the name of a device', () => {
+  it('may not be blank, on create or on edit', () => {
+    expect(failedFieldsOfCreate({ ...VALID_DEVICE, name: '' })).toEqual([
+      'name',
+    ]);
+    expect(failedFieldsOfUpdate({ name: '' })).toEqual(['name']);
+  });
+
+  it('may be left out of an edit', () => {
+    expect(failedFieldsOfUpdate({ onDelayDuration: 600 })).toEqual([]);
+  });
+});
