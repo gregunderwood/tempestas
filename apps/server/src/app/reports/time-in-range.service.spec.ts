@@ -1,6 +1,11 @@
 import type { ConfigService } from '@nestjs/config';
 import type { Repository } from 'typeorm';
-import { DeviceRole, type Node, type Reading } from '@tempestas/domain';
+import {
+  DeviceRole,
+  type MetricKey,
+  type Node,
+  type Reading,
+} from '@tempestas/domain';
 import { FixedClock } from '../common/clock';
 import type { NodesService } from '../nodes/nodes.service';
 import type {
@@ -55,19 +60,24 @@ const NODES: Partial<Node>[] = [
 ];
 
 interface ExtremeQuery {
-  direction: 'coldest' | 'warmest';
+  direction: 'lowest' | 'highest';
+  metric: MetricKey;
   window: ReadingWindow;
   nodeSlugs: readonly string[];
 }
 
-function readingOf(temperature: number): Reading {
+function readingOf(
+  temperature: number,
+  humidity: number,
+  co2: number,
+): Reading {
   return {
     id: `reading-${temperature}`,
     nodeId: 'elantris',
     sensorId: 'scd41',
     temperature,
-    humidity: null,
-    co2: null,
+    humidity,
+    co2,
     createdAt: '2026-11-24T12:00:00.000Z',
   };
 }
@@ -96,19 +106,21 @@ function makeService({
       bucketQueries.push(query);
       return buckets;
     },
-    findColdestReading: async (
+    findLowestReading: async (
       window: ReadingWindow,
       nodeSlugs: readonly string[],
+      metric: MetricKey,
     ) => {
-      extremeQueries.push({ direction: 'coldest', window, nodeSlugs });
-      return readingOf(2);
+      extremeQueries.push({ direction: 'lowest', metric, window, nodeSlugs });
+      return readingOf(2, 40, 420);
     },
-    findWarmestReading: async (
+    findHighestReading: async (
       window: ReadingWindow,
       nodeSlugs: readonly string[],
+      metric: MetricKey,
     ) => {
-      extremeQueries.push({ direction: 'warmest', window, nodeSlugs });
-      return readingOf(31);
+      extremeQueries.push({ direction: 'highest', metric, window, nodeSlugs });
+      return readingOf(31, 85, 1450);
     },
   } as unknown as ReadingsService;
   const config = {
@@ -166,20 +178,29 @@ describe('TimeInRangeService.buildTimeInRange', () => {
     ]);
   });
 
-  it('takes the coldest reading of a night and the warmest of a day', async () => {
+  it('takes the lowest temperature and humidity of a night, and the highest temperature, humidity and CO2 of a day', async () => {
     const { service, extremeQueries } = makeService();
     const [greenhouse] = (await service.buildTimeInRange({ days: 1 })).zones;
     const [today, lastNight] = greenhouse.periods;
-    expect([today.kind, today.extreme?.temperatureC]).toEqual(['day', 31]);
-    expect([lastNight.kind, lastNight.extreme?.temperatureC]).toEqual([
-      'night',
-      2,
-    ]);
+    expect(today.kind).toBe('day');
+    expect(today.extremes.temperature?.value).toBe(31);
+    expect(today.extremes.humidity?.value).toBe(85);
+    expect(today.extremes.co2?.value).toBe(1450);
+    expect(lastNight.kind).toBe('night');
+    expect(lastNight.extremes.temperature?.value).toBe(2);
+    expect(lastNight.extremes.humidity?.value).toBe(40);
+    expect(lastNight.extremes.co2).toBeNull();
     expect(
       extremeQueries
         .filter((query) => query.nodeSlugs.includes('elantris'))
-        .map((query) => query.direction),
-    ).toEqual(['warmest', 'coldest']);
+        .map((query) => `${query.direction} ${query.metric}`),
+    ).toEqual([
+      'highest temperature',
+      'highest humidity',
+      'highest co2',
+      'lowest temperature',
+      'lowest humidity',
+    ]);
   });
 
   it("leaves another zone's probes out of a zone's hours", async () => {

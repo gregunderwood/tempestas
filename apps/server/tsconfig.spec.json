@@ -14,6 +14,7 @@
     "src/**/*.d.ts",
     "vitest.config.ts",
     "src/migrations/round-trip/**/*.ts",
+    "src/**/*.round-trip.ts",
     "vitest.round-trip.config.ts"
   ]
 }

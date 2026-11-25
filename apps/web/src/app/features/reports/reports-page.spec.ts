@@ -161,11 +161,20 @@ function greenhouseTimeInRange(): ZoneTimeInRange {
         hoursInRange: 9,
         hoursAbove: 3,
         hoursWithoutReadings: 0,
-        extreme: {
-          temperatureC: 33.4,
-          at: '2026-09-09T21:00:00.000Z',
-          nodeId: 'elantris',
-          sensorId: 'scd41',
+        extremes: {
+          temperature: {
+            value: 33.4,
+            at: '2026-09-09T21:00:00.000Z',
+            nodeId: 'elantris',
+            sensorId: 'scd41',
+          },
+          humidity: null,
+          co2: {
+            value: 1450,
+            at: '2026-09-09T15:00:00.000Z',
+            nodeId: 'elantris',
+            sensorId: 'scd41',
+          },
         },
       },
     ],
@@ -416,13 +425,14 @@ describe('ReportsPage', () => {
       const card = page.querySelector('temp-time-in-range-card');
       expect(card?.textContent).toContain('Greenhouse');
       expect(card?.textContent).toContain(
-        'No lower bound: no heater or heat tape rule here.',
+        'No lower bound: no always-on heater or heat tape thermostat here.',
       );
       expect(card?.textContent).toContain(
         "Above: over the exhaust fan's 30 °C on-setpoint, read from the average of every probe.",
       );
       expect(card?.textContent).toContain('Days: 75% in range, 25% above');
       expect(card?.textContent).toContain('High 33.4 °C at 15:00');
+      expect(card?.textContent).toContain('High 1450 ppm CO₂ at 09:00');
     });
 
     it('leaves out the column for a side with no bound', () => {

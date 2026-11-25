@@ -11,7 +11,10 @@ export default defineConfig({
     watch: false,
     globals: true,
     environment: 'node',
-    include: ['src/migrations/round-trip/**/*.round-trip.ts'],
+    include: [
+      'src/migrations/round-trip/**/*.round-trip.ts',
+      'src/app/**/*.round-trip.ts',
+    ],
     globalSetup: ['src/migrations/round-trip/throwaway-postgres.ts'],
     // Each migration builds on the one before, so later failures would only repeat the first.
     bail: 1,

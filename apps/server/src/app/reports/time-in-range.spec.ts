@@ -2,18 +2,18 @@ import { DeviceRole, type Reading } from '@tempestas/domain';
 import type { HeldTemperatureBucketRow } from '../readings/readings.service';
 import {
   summariseZoneTimeInRange,
-  type PeriodWithExtreme,
+  type PeriodWithExtremes,
   type ZoneTimeInRangeInput,
 } from './time-in-range';
 import type { ZoneBand } from './zone-band';
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
-const NIGHT: PeriodWithExtreme = {
+const NIGHT: PeriodWithExtremes = {
   kind: 'night',
   from: new Date('2026-11-23T02:00:00Z'),
   to: new Date('2026-11-23T03:00:00Z'),
   inProgress: false,
-  extreme: null,
+  extremeReadings: { temperature: null, humidity: null, co2: null },
 };
 
 const HEAT_AND_FAN: ZoneBand = {
@@ -171,7 +171,7 @@ describe('summariseZoneTimeInRange', () => {
     expect(period.hoursWithoutReadings).toBe(1);
   });
 
-  it("carries the period's extreme reading, and the zone's band", () => {
+  it("carries the period's extreme readings, and the zone's band", () => {
     const coldest: Reading = {
       id: 'reading-1',
       nodeId: 'patji',
@@ -181,7 +181,14 @@ describe('summariseZoneTimeInRange', () => {
       co2: null,
       createdAt: '2026-11-23T02:40:00.000Z',
     };
-    const summary = summarise({ periods: [{ ...NIGHT, extreme: coldest }] });
+    const summary = summarise({
+      periods: [
+        {
+          ...NIGHT,
+          extremeReadings: { temperature: coldest, humidity: null, co2: null },
+        },
+      ],
+    });
     expect(summary.lowerBounds).toEqual(HEAT_AND_FAN.lowerBounds);
     expect(summary.upperBounds).toEqual(HEAT_AND_FAN.upperBounds);
     expect(summary.periods[0]).toMatchObject({
@@ -189,12 +196,41 @@ describe('summariseZoneTimeInRange', () => {
       from: '2026-11-23T02:00:00.000Z',
       to: '2026-11-23T03:00:00.000Z',
       inProgress: false,
-      extreme: {
-        temperatureC: 1.5,
-        at: '2026-11-23T02:40:00.000Z',
-        nodeId: 'patji',
-        sensorId: 'pipes',
+      extremes: {
+        temperature: {
+          value: 1.5,
+          at: '2026-11-23T02:40:00.000Z',
+          nodeId: 'patji',
+          sensorId: 'pipes',
+        },
+        humidity: null,
+        co2: null,
       },
     });
+  });
+
+  it('leaves out an extreme reading that has no value for its metric', () => {
+    const noHumidity: Reading = {
+      id: 'reading-2',
+      nodeId: 'patji',
+      sensorId: 'pipes',
+      temperature: 3,
+      humidity: null,
+      co2: null,
+      createdAt: '2026-11-23T02:40:00.000Z',
+    };
+    const [period] = summarise({
+      periods: [
+        {
+          ...NIGHT,
+          extremeReadings: {
+            temperature: null,
+            humidity: noHumidity,
+            co2: null,
+          },
+        },
+      ],
+    }).periods;
+    expect(period.extremes.humidity).toBeNull();
   });
 });

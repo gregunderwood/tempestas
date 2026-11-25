@@ -1,6 +1,7 @@
 import {
   DeviceRole,
   type PeriodExtreme,
+  type PeriodExtremes,
   type TimeInRangePeriod,
   type ZoneTimeInRange,
 } from '@tempestas/domain';
@@ -12,10 +13,15 @@ import {
 } from './time-in-range-rows';
 
 const NIGHT_LOW: PeriodExtreme = {
-  temperatureC: 1.46,
+  value: 1.46,
   at: '2026-11-23T12:05:00.000Z',
   nodeId: 'patji',
   sensorId: 'pipes',
+};
+const NIGHT_EXTREMES: PeriodExtremes = {
+  temperature: NIGHT_LOW,
+  humidity: null,
+  co2: null,
 };
 
 function period(overrides: Partial<TimeInRangePeriod> = {}): TimeInRangePeriod {
@@ -28,7 +34,7 @@ function period(overrides: Partial<TimeInRangePeriod> = {}): TimeInRangePeriod {
     hoursInRange: 8,
     hoursAbove: 0,
     hoursWithoutReadings: 3,
-    extreme: NIGHT_LOW,
+    extremes: NIGHT_EXTREMES,
     ...overrides,
   };
 }
@@ -61,21 +67,29 @@ describe('buildPeriodRows', () => {
   it("labels a night by the date it began, with its low in the zone's time", () => {
     const [row] = buildPeriodRows(pumphouse([period()]));
     expect(row.label).toBe('Sun 22 Nov, night');
-    expect(row.extreme).toBe('Low 1.5 °C at 06:05');
+    expect(row.extremes).toEqual(['Low 1.5 °C at 06:05']);
   });
 
-  it('labels the running day and gives its high', () => {
+  it('labels the running day and gives its highs, one line per metric reported', () => {
     const [row] = buildPeriodRows(
       pumphouse([
         period({
           kind: 'day',
           inProgress: true,
-          extreme: { ...NIGHT_LOW, temperatureC: 12 },
+          extremes: {
+            temperature: { ...NIGHT_LOW, value: 12 },
+            humidity: { ...NIGHT_LOW, value: 81.6 },
+            co2: { ...NIGHT_LOW, value: 1450 },
+          },
         }),
       ]),
     );
     expect(row.label).toBe('Sun 22 Nov, day (today)');
-    expect(row.extreme).toBe('High 12.0 °C at 06:05');
+    expect(row.extremes).toEqual([
+      'High 12.0 °C at 06:05',
+      'High 82% humidity at 06:05',
+      'High 1450 ppm CO₂ at 06:05',
+    ]);
   });
 
   it('shows the hours, and the share of the period with no readings', () => {
@@ -88,8 +102,14 @@ describe('buildPeriodRows', () => {
   });
 
   it('says when a period had no readings at all', () => {
-    const [row] = buildPeriodRows(pumphouse([period({ extreme: null })]));
-    expect(row.extreme).toBe('No readings');
+    const [row] = buildPeriodRows(
+      pumphouse([
+        period({
+          extremes: { temperature: null, humidity: null, co2: null },
+        }),
+      ]),
+    );
+    expect(row.extremes).toEqual(['No readings']);
   });
 });
 
@@ -102,10 +122,10 @@ describe('describeLowerBound and describeUpperBound', () => {
 
   it('says so when a side has no bound, instead of inventing one', () => {
     expect(describeUpperBound(pumphouse([]))).toBe(
-      'No upper bound: no exhaust fan rule here.',
+      'No upper bound: no always-on exhaust fan thermostat here.',
     );
     expect(describeLowerBound(pumphouse([], { lowerBounds: [] }))).toBe(
-      'No lower bound: no heater or heat tape rule here.',
+      'No lower bound: no always-on heater or heat tape thermostat here.',
     );
   });
 });

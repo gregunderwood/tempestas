@@ -25,7 +25,11 @@ import type { PeriodRow } from './time-in-range-rows';
           @for (row of rows(); track row.from) {
             <tr>
               <th scope="row">{{ row.label }}</th>
-              <td>{{ row.extreme }}</td>
+              <td>
+                @for (extreme of row.extremes; track $index) {
+                  <span class="range-periods__extreme">{{ extreme }}</span>
+                }
+              </td>
               @if (hasLowerBound()) {
                 <td class="range-periods__hours">{{ row.below }}</td>
               }
@@ -55,6 +59,9 @@ import type { PeriodRow } from './time-in-range-rows';
       text-align: left;
       vertical-align: top;
       padding: 0.2rem 0.4rem;
+    }
+    .range-periods__extreme {
+      display: block;
     }
     .range-periods th[scope='row'] {
       font-weight: normal;

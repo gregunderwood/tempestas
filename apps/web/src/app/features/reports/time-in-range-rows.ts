@@ -1,9 +1,11 @@
 import type {
   BandBound,
+  MetricKey,
   PeriodKind,
   TimeInRangePeriod,
   ZoneTimeInRange,
 } from '@tempestas/domain';
+import { METRIC_ORDER } from '../../shared/metrics';
 import { MILLISECONDS_PER_MINUTE, MINUTES_PER_HOUR } from '../../shared/time';
 import {
   buildZoneFormatter,
@@ -16,7 +18,8 @@ import { formatHours } from './runtime-trend';
 export interface PeriodRow {
   from: string;
   label: string;
-  extreme: string;
+  /** One line per metric the zone's probes reported. */
+  extremes: string[];
   below: string;
   inRange: string;
   above: string;
@@ -43,6 +46,11 @@ const PERIOD_DATE_FORMAT: Intl.DateTimeFormatOptions = {
   weekday: 'short',
   day: 'numeric',
   month: 'short',
+};
+const EXTREME_VALUE_FORMATS: Record<MetricKey, (value: number) => string> = {
+  temperature: (temperatureC) => `${temperatureC.toFixed(1)} °C`,
+  humidity: (humidity) => `${Math.round(humidity)}% humidity`,
+  co2: (co2Ppm) => `${Math.round(co2Ppm)} ppm CO₂`,
 };
 const MILLISECONDS_PER_HOUR = MINUTES_PER_HOUR * MILLISECONDS_PER_MINUTE;
 const PERCENT = 100;
@@ -79,7 +87,7 @@ export function buildPeriodRows(zone: ZoneTimeInRange): PeriodRow[] {
   return zone.periods.map((period) => ({
     from: period.from,
     label: labelPeriod(period, formatDate),
-    extreme: describeExtreme(period, formatClock),
+    extremes: describeExtremes(period, formatClock),
     below: formatHours(period.hoursBelow),
     inRange: formatHours(period.hoursInRange),
     above: formatHours(period.hoursAbove),
@@ -91,14 +99,14 @@ export function buildPeriodRows(zone: ZoneTimeInRange): PeriodRow[] {
 
 export function describeLowerBound(zone: ZoneTimeInRange): string {
   if (!hasLowerBound(zone)) {
-    return 'No lower bound: no heater or heat tape rule here.';
+    return 'No lower bound: no always-on heater or heat tape thermostat here.';
   }
   return `Below: under ${zone.lowerBounds.map(describeBound).join(', or ')}.`;
 }
 
 export function describeUpperBound(zone: ZoneTimeInRange): string {
   if (!hasUpperBound(zone)) {
-    return 'No upper bound: no exhaust fan rule here.';
+    return 'No upper bound: no always-on exhaust fan thermostat here.';
   }
   return `Above: over ${zone.upperBounds.map(describeBound).join(', or ')}.`;
 }
@@ -141,13 +149,19 @@ function labelPeriod(
   return period.inProgress ? `${label} (${wording.running})` : label;
 }
 
-function describeExtreme(
+// Every reading carries a temperature, so a period without one had no readings at all.
+function describeExtremes(
   period: TimeInRangePeriod,
   formatClock: ClockFormatter,
-): string {
-  if (period.extreme === null) return 'No readings';
-  const { temperatureC, at } = period.extreme;
-  return `${PERIOD_WORDING[period.kind].extreme} ${temperatureC.toFixed(1)} °C at ${formatClock(Date.parse(at))}`;
+): string[] {
+  if (period.extremes.temperature === null) return ['No readings'];
+  const direction = PERIOD_WORDING[period.kind].extreme;
+  return METRIC_ORDER.flatMap((metric) => {
+    const extreme = period.extremes[metric];
+    if (extreme === null) return [];
+    const value = EXTREME_VALUE_FORMATS[metric](extreme.value);
+    return [`${direction} ${value} at ${formatClock(Date.parse(extreme.at))}`];
+  });
 }
 
 function measurePeriodHours(period: TimeInRangePeriod): number {

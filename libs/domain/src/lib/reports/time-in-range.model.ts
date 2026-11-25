@@ -23,12 +23,20 @@ export interface BandBound {
   sensorSource: SensorSource;
 }
 
-/** The coldest reading of a night, or the warmest of a day. */
+/** One metric's lowest reading of a night, or its highest of a day. */
 export interface PeriodExtreme {
-  temperatureC: number;
+  value: number;
   at: string;
   nodeId: NodeId;
   sensorId: string;
+}
+
+/** Each null when no probe in the zone reported that metric in the period. */
+export interface PeriodExtremes {
+  temperature: PeriodExtreme | null;
+  humidity: PeriodExtreme | null;
+  /** By day only, when plants take it up: null at night. */
+  co2: PeriodExtreme | null;
 }
 
 export interface TimeInRangePeriod {
@@ -41,8 +49,7 @@ export interface TimeInRangePeriod {
   hoursAbove: number;
   /** The rest of the period, so a gap is never counted as in range. */
   hoursWithoutReadings: number;
-  /** Lowest at night, highest by day; null when no probe in the zone reported. */
-  extreme: PeriodExtreme | null;
+  extremes: PeriodExtremes;
 }
 
 export interface ZoneTimeInRange {

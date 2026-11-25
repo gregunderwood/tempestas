@@ -1,6 +1,8 @@
 import type {
   BandBound,
+  MetricKey,
   PeriodExtreme,
+  PeriodExtremes,
   Reading,
   SensorSource,
   TimeInRangePeriod,
@@ -17,16 +19,18 @@ import type { ReportPeriod } from './report-periods';
 import type { ReportZone } from './report-zone';
 import type { ZoneBand } from './zone-band';
 
-export interface PeriodWithExtreme extends ReportPeriod {
-  /** The coldest reading of a night, the warmest of a day. */
-  extreme: Reading | null;
+export type PeriodExtremeReadings = Record<MetricKey, Reading | null>;
+
+export interface PeriodWithExtremes extends ReportPeriod {
+  /** Each metric's lowest reading of a night, its highest of a day. */
+  extremeReadings: PeriodExtremeReadings;
 }
 
 export interface ZoneTimeInRangeInput {
   zone: ReportZone;
   band: ZoneBand;
   /** Newest first. */
-  periods: readonly PeriodWithExtreme[];
+  periods: readonly PeriodWithExtremes[];
   /** This zone's probes only, every period in one window. */
   temperatureBuckets: readonly HeldTemperatureBucketRow[];
 }
@@ -64,7 +68,7 @@ export function summariseZoneTimeInRange(
 }
 
 function summarisePeriod(
-  period: PeriodWithExtreme,
+  period: PeriodWithExtremes,
   zoneBuckets: readonly ZoneBucket[],
   band: ZoneBand,
 ): TimeInRangePeriod {
@@ -91,7 +95,7 @@ function summarisePeriod(
     hoursInRange: toHours(heldMsByPosition.inRange),
     hoursAbove: toHours(heldMsByPosition.above),
     hoursWithoutReadings: toHours(Math.max(0, periodMs - heldMs)),
-    extreme: period.extreme ? toPeriodExtreme(period.extreme) : null,
+    extremes: toPeriodExtremes(period.extremeReadings),
   };
 }
 
@@ -166,9 +170,22 @@ function isWithinPeriod(instantMs: number, period: ReportPeriod): boolean {
   return instantMs >= period.from.getTime() && instantMs < period.to.getTime();
 }
 
-function toPeriodExtreme(reading: Reading): PeriodExtreme {
+function toPeriodExtremes(readings: PeriodExtremeReadings): PeriodExtremes {
   return {
-    temperatureC: reading.temperature,
+    temperature: toPeriodExtreme(readings.temperature, 'temperature'),
+    humidity: toPeriodExtreme(readings.humidity, 'humidity'),
+    co2: toPeriodExtreme(readings.co2, 'co2'),
+  };
+}
+
+function toPeriodExtreme(
+  reading: Reading | null,
+  metric: MetricKey,
+): PeriodExtreme | null {
+  const value = reading?.[metric];
+  if (reading === null || value === null || value === undefined) return null;
+  return {
+    value,
     at: reading.createdAt,
     nodeId: reading.nodeId,
     sensorId: reading.sensorId,

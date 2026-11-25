@@ -145,14 +145,17 @@ daylight and per night period, newest first, the running one included.
 - **A reading holds until the next one from its probe, for at most
   `TIME_IN_RANGE_LONGEST_HELD_MINUTES`, 1 minute.** Computed in SQL with `LEAD` over
   `sensor_readings` and summed into 5-minute buckets per probe, each probe's average judged against
-  the band. A stretch counts for as long as any of the zone's probes held in it.
+  the band. A hold that runs past its bucket's end goes on in the next bucket, so a node that never
+  missed a sample has no hours without readings. A stretch counts for as long as any of the zone's
+  probes held in it.
 - **Hours without readings** are the rest of the period, so a gap is never counted as in range.
-- **The extreme is the night's lowest reading and the day's highest**, the exact reading, with its
-  probe and time.
+- **Each period has its extremes**, each the exact reading with its probe and time: a night's lowest
+  temperature and humidity, and a day's highest temperature, humidity and CO2. A metric no probe
+  reported is left out.
 
-Humidity and CO2 are not in it: nothing in `rules_config` bands humidity, and CO2's only numbers are
-the burner's enrichment dead band, which switches the burner rather than describing where the air
-should sit.
+Only temperature has hours below, in range and above: nothing in `rules_config` bands humidity, and
+CO2's only numbers are the burner's enrichment dead band, which switches the burner rather than
+describing where the air should sit.
 
 ## When to update this file
 

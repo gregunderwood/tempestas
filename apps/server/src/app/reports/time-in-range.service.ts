@@ -6,7 +6,9 @@ import {
   TIME_IN_RANGE_BUCKET_MINUTES,
   TIME_IN_RANGE_DEFAULT_DAYS,
   TIME_IN_RANGE_LONGEST_HELD_MINUTES,
+  type MetricKey,
   type Node,
+  type PeriodKind,
   type Reading,
   type TimeInRangeQuery,
   type TimeInRangeReport,
@@ -31,9 +33,23 @@ import {
 import type { ReportZone } from './report-zone';
 import {
   summariseZoneTimeInRange,
-  type PeriodWithExtreme,
+  type PeriodExtremeReadings,
+  type PeriodWithExtremes,
 } from './time-in-range';
 import { findZoneBand, type ZoneBand } from './zone-band';
+
+type ExtremeDirection = 'lowest' | 'highest';
+
+interface ExtremesSought {
+  direction: ExtremeDirection;
+  metrics: readonly MetricKey[];
+}
+
+// Night's risk is the cold and day's the heat; CO2 only matters while plants take it up.
+const EXTREMES_SOUGHT: Record<PeriodKind, ExtremesSought> = {
+  night: { direction: 'lowest', metrics: ['temperature', 'humidity'] },
+  day: { direction: 'highest', metrics: ['temperature', 'humidity', 'co2'] },
+};
 
 interface ZoneWithPeriods {
   zone: ReportZone;
@@ -133,7 +149,7 @@ export class TimeInRangeService {
       band: zoneWithPeriods.band,
       periods: await Promise.all(
         zoneWithPeriods.periods.map((period) =>
-          this.attachExtreme(period, zone.nodeIds),
+          this.attachExtremes(period, zone.nodeIds),
         ),
       ),
       temperatureBuckets: temperatureBuckets.filter((bucket) =>
@@ -142,20 +158,37 @@ export class TimeInRangeService {
     });
   }
 
-  private async attachExtreme(
+  private async attachExtremes(
     period: ReportPeriod,
     nodeSlugs: readonly string[],
-  ): Promise<PeriodWithExtreme> {
-    return { ...period, extreme: await this.findExtreme(period, nodeSlugs) };
+  ): Promise<PeriodWithExtremes> {
+    const sought = EXTREMES_SOUGHT[period.kind];
+    const extremeReadings: PeriodExtremeReadings = {
+      temperature: null,
+      humidity: null,
+      co2: null,
+    };
+    await Promise.all(
+      sought.metrics.map(async (metric) => {
+        extremeReadings[metric] = await this.findExtreme(
+          period,
+          nodeSlugs,
+          metric,
+          sought.direction,
+        );
+      }),
+    );
+    return { ...period, extremeReadings };
   }
 
-  // Night's risk is the cold and day's the heat.
   private findExtreme(
     period: ReportPeriod,
     nodeSlugs: readonly string[],
+    metric: MetricKey,
+    direction: ExtremeDirection,
   ): Promise<Reading | null> {
-    return period.kind === 'night'
-      ? this.readings.findColdestReading(period, nodeSlugs)
-      : this.readings.findWarmestReading(period, nodeSlugs);
+    return direction === 'lowest'
+      ? this.readings.findLowestReading(period, nodeSlugs, metric)
+      : this.readings.findHighestReading(period, nodeSlugs, metric);
   }
 }

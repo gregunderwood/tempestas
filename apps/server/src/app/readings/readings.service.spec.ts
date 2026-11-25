@@ -242,6 +242,7 @@ describe('ReadingsService.findColdestReading', () => {
       'reading.createdAt >= :from',
       'reading.createdAt <= :to',
       'node.slug IN (:...nodeSlugs)',
+      'reading.temperature IS NOT NULL',
     ]);
     expect(parameters).toMatchObject({
       ...WINDOW,
@@ -257,23 +258,44 @@ describe('ReadingsService.findColdestReading', () => {
   });
 });
 
-describe('ReadingsService.findWarmestReading', () => {
+describe('ReadingsService.findHighestReading', () => {
   const WINDOW = {
     from: new Date('2026-11-23T14:00:00Z'),
     to: new Date('2026-11-24T02:00:00Z'),
   };
 
-  it("takes the highest temperature among the zone's nodes", async () => {
+  it("takes the highest CO2 among the zone's nodes, skipping probes with none", async () => {
     const { service, conditions, orderings } = makeServiceRecordingQueries();
-    expect(await service.findWarmestReading(WINDOW, ['elantris'])).toBeNull();
+    expect(
+      await service.findHighestReading(WINDOW, ['elantris'], 'co2'),
+    ).toBeNull();
     expect(conditions).toContain('node.slug IN (:...nodeSlugs)');
-    expect(orderings).toEqual([['reading.temperature', 'DESC']]);
+    expect(conditions).toContain('reading.co2 IS NOT NULL');
+    expect(orderings).toEqual([['reading.co2', 'DESC']]);
   });
 
   it('asks nothing for a zone with no nodes', async () => {
     const { service, conditions } = makeServiceRecordingQueries();
-    expect(await service.findWarmestReading(WINDOW, [])).toBeNull();
+    expect(
+      await service.findHighestReading(WINDOW, [], 'temperature'),
+    ).toBeNull();
     expect(conditions).toEqual([]);
+  });
+});
+
+describe('ReadingsService.findLowestReading', () => {
+  it('takes the lowest humidity, skipping probes with none', async () => {
+    const { service, conditions, orderings } = makeServiceRecordingQueries();
+    await service.findLowestReading(
+      {
+        from: new Date('2026-11-23T02:00:00Z'),
+        to: new Date('2026-11-23T14:00:00Z'),
+      },
+      ['patji'],
+      'humidity',
+    );
+    expect(conditions).toContain('reading.humidity IS NOT NULL');
+    expect(orderings).toEqual([['reading.humidity', 'ASC']]);
   });
 });
 

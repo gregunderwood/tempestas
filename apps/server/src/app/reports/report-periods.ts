@@ -2,13 +2,15 @@ import type { PeriodKind } from '@tempestas/domain';
 import { resolveSegments } from '../readings/daylight-segments';
 import type { Daylight } from '../readings/zone-daylight';
 
-export interface NightWindow {
+export interface PeriodWindow {
   from: Date;
   to: Date;
   inProgress: boolean;
 }
 
-export interface ReportPeriod extends NightWindow {
+export type NightWindow = PeriodWindow;
+
+export interface ReportPeriod extends PeriodWindow {
   kind: PeriodKind;
 }
 
@@ -60,7 +62,7 @@ function listRecentPeriods(
 }
 
 export function findEarliestStart(
-  periods: readonly NightWindow[],
+  periods: readonly PeriodWindow[],
   now: Date,
 ): Date {
   const starts = periods.map((period) => period.from.getTime());
