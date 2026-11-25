@@ -24,15 +24,22 @@ class HealthGate:
 
     def __init__(self, pending: PendingUpdate):
         self.pending = pending
-        self.has_said_hello = False
-        self.has_heard_heartbeat = False
+        self.hello_version: str | None = None
+        self.has_server_accepted_hello = False
+        self.has_heard_versions_named = False
+        # One string, so the main loop never reads half of a refusal the MQTT thread is writing.
+        self.last_refusal: str | None = None
         self.is_start_recorded = False
         self._watched_seconds = 0.0
         self._watching_since: float | None = None
         self._clock_lock = threading.Lock()
 
-    def note_hello(self) -> None:
-        self.has_said_hello = True
+    @property
+    def has_said_hello(self) -> bool:
+        return self.hello_version is not None
+
+    def note_hello(self, agent_version: str) -> None:
+        self.hello_version = agent_version
 
     def start_watching(self, now: float) -> None:
         with self._clock_lock:
@@ -50,20 +57,54 @@ class HealthGate:
             running = 0.0 if self._watching_since is None else now - self._watching_since
             return self._watched_seconds + running
 
-    def note_heartbeat(self) -> None:
+    def note_heartbeat(self, heartbeat: dict) -> None:
+        accepted_version_field = contract.HEARTBEAT_ACCEPTED_VERSION_FIELD
+        if accepted_version_field in heartbeat:
+            self.has_heard_versions_named = True
         # Before our hello, a heartbeat proves only the broker.
-        if self.has_said_hello:
-            self.has_heard_heartbeat = True
+        if not self.has_said_hello:
+            return
+        if accepted_version_field in heartbeat:
+            self._note_named_version(heartbeat[accepted_version_field])
+        else:
+            self._note_heartbeat_without_a_version()
+
+    def _note_named_version(self, accepted_version: object) -> None:
+        if accepted_version == self.hello_version:
+            self.has_server_accepted_hello = True
+        else:
+            self.last_refusal = describe_what_server_accepted(accepted_version)
+
+    def _note_heartbeat_without_a_version(self) -> None:
+        # Only a pre-1.2 server omits the version, so once one was named this proves nothing.
+        if self.has_heard_versions_named:
+            self.last_refusal = "it stopped naming the version it accepted"
+        else:
+            self.has_server_accepted_hello = True
 
     def is_passed(self) -> bool:
-        return self.has_said_hello and self.has_heard_heartbeat
+        return self.has_server_accepted_hello
+
+    def is_refused(self) -> bool:
+        return not self.is_passed() and self.last_refusal is not None
 
     def is_overdue(self, now: float) -> bool:
         return not self.is_passed() and self.read_watched_seconds(now) >= GATE_SECONDS
 
     def describe_failure(self) -> str:
         version = self.pending.version
-        return f"{version} heard no heartbeat in {GATE_SECONDS}s with the server online"
+        refusal = self.last_refusal
+        if refusal is None:
+            return f"{version} heard no heartbeat in {GATE_SECONDS}s with the server online"
+        return f"the server did not accept {version}'s hello in {GATE_SECONDS}s: {refusal}"
+
+
+def describe_what_server_accepted(accepted_version: object) -> str:
+    if accepted_version is None:
+        return "it has accepted no hello from this node"
+    if not isinstance(accepted_version, str) or not accepted_version:
+        return f"it named {accepted_version!r}, which is not a version"
+    return f"it still names {accepted_version}"
 
 
 def settle_update_on_start(
@@ -142,7 +183,7 @@ def prune_after_update(layout: ReleaseLayout, pending: PendingUpdate) -> list[st
     )
 
 
-def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
+def roll_back_gate(layout: ReleaseLayout, gate: HealthGate, reason: str) -> UpdateOutcome:
     pending = gate.pending
     if not layout.locate_release(pending.previous_release).is_dir():
         # Better a failing release than `current` pointing at nothing.
@@ -151,17 +192,14 @@ def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
             UpdateOutcome(
                 pending.command_id,
                 contract.UpdateState.FAILED,
-                f"{gate.describe_failure()}, and {pending.previous_release} to roll back to"
-                " is missing, so it stays",
+                f"{reason}, and {pending.previous_release} to roll back to is missing, so it stays",
             ),
         )
     # Switched first, so a crash before the outcome reads as a failed start.
     layout.switch_current_to(pending.previous_release)
     return record_outcome(
         layout,
-        UpdateOutcome(
-            pending.command_id, contract.UpdateState.ROLLED_BACK, gate.describe_failure()
-        ),
+        UpdateOutcome(pending.command_id, contract.UpdateState.ROLLED_BACK, reason),
     )
 
 

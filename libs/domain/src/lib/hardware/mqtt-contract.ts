@@ -5,7 +5,7 @@ export const MQTT_CONTRACT_VERSION = 'v1' as const;
 
 /** Semver for the contract: a major changes it, a minor only adds to it. Agents version as major.minor.patch. */
 export const MQTT_CONTRACT_MAJOR = 1;
-export const MQTT_CONTRACT_MINOR = 1;
+export const MQTT_CONTRACT_MINOR = 2;
 /** The contract that added `update`: a node on an older one never subscribes to it. */
 export const UPDATE_COMMAND_CONTRACT = { major: 1, minor: 1 } as const;
 export const MQTT_ROOT = `tempestas/${MQTT_CONTRACT_VERSION}` as const;
@@ -68,6 +68,13 @@ export interface HelloPayload extends MqttEnvelope {
   capabilities: NodeCapabilities;
   /** Changes on every restart, so the server can detect a bounce. */
   bootId: string;
+}
+
+export interface HeartbeatPayload extends MqttEnvelope {
+  controller: string;
+  epoch: number;
+  /** Added in 1.2, so an update's health gate passes only once the server took the new release's hello. */
+  agentVersion: string | null;
 }
 
 export type AvailabilityState = 'online' | 'offline';

@@ -98,11 +98,11 @@ tools/e2e-stack.sh --spec apps/web-e2e/src/stack/node-update.cy.ts --headed
   zones copied from the dev database, the server with `HARDWARE_DRIVER=fake`, both simulated nodes
   admitted, and `nx serve web` proxied to it. Ports 7030 and 4230, or `E2E_STACK_SERVER_PORT` and
   `E2E_STACK_WEB_PORT`. It tears everything down, even on failure.
-- **It offers fake `agent-linux` releases 1.1.0 and 1.1.1**, written by
+- **It offers fake `agent-linux` releases 1.2.0 and 1.2.1**, written by
   [../tools/lib/write-fake-agent-releases.mjs](../tools/lib/write-fake-agent-releases.mjs), with
   `AGENT_RELEASES_URL` set, so the simulated Pi is offered an update and then a roll back.
 - **The specs share one server**, so they run in order and leave it as they found it: the update
-  spec rolls the Pi back to 1.1.0.
+  spec rolls the Pi back to 1.2.0.
 - **It runs only the specs in `src/stack/`**, with
   [../apps/web-e2e/cypress.stack.config.ts](../apps/web-e2e/cypress.stack.config.ts).
 - **Options after the script name go to `cypress run`**, such as `--spec` or `--headed`. Cypress

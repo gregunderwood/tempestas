@@ -55,6 +55,8 @@ PENDING_RECORD_LOST = (
     "its pending record was lost before its health gate finished, so {version} stays"
 )
 STOP_SWITCH_WAIT_S = 10.0
+# Long enough for the server to store a hello, short enough for several tries inside the gate.
+HELLO_REPEAT_S = 20.0
 RELEASE_ROOT_ABOVE_MODULE = 2
 # At import: `current` may be switched later.
 LOADED_RELEASE = Path(__file__).resolve().parents[RELEASE_ROOT_ABOVE_MODULE]
@@ -194,6 +196,7 @@ class Agent:
         self.sample_sequence = 0
         self.bound_controller: str | None = None
         self.last_heartbeat_at: float | None = None
+        self.last_hello_at: float | None = None
         self.is_deadman_tripped = False
 
     def capabilities(self) -> dict:
@@ -299,8 +302,19 @@ class Agent:
                 contract.AlarmCode.DEADMAN_CLEARED, SEVERITY_INFO, "heartbeats resumed"
             )
         gate = self.update_gate
-        if gate is not None:
-            gate.note_heartbeat()
+        if gate is None:
+            return
+        gate.note_heartbeat(body)
+        if self._should_repeat_hello(gate):
+            log.info("the server has not taken this release's hello - saying hello again")
+            self.say_hello()
+
+    def _should_repeat_hello(self, gate: HealthGate) -> bool:
+        return gate.is_refused() and self._is_hello_repeat_due()
+
+    def _is_hello_repeat_due(self) -> bool:
+        last_hello_at = self.last_hello_at
+        return last_hello_at is not None and self._clock() - last_hello_at >= HELLO_REPEAT_S
 
     def on_server_status(self, payload: bytes, is_retained: bool) -> None:
         try:
@@ -336,10 +350,13 @@ class Agent:
     def say_hello(self) -> None:
         topic = contract.build_hello_topic(self.config.node_id)
         delivery = self.publish("hello", topic, self.hello_payload())
+        if not has_left_this_node(delivery):
+            return
+        self.last_hello_at = self._clock()
         # Read once: the main loop may drop the gate meanwhile.
         gate = self.update_gate
-        if gate is not None and has_left_this_node(delivery):
-            gate.note_hello()
+        if gate is not None:
+            gate.note_hello(self.agent_version)
             if self.is_server_online:
                 gate.start_watching(self._clock())
 
@@ -615,10 +632,12 @@ class Agent:
             log.error("could not prune old releases: %s", error)
 
     def _fail_update_gate(self, gate: HealthGate) -> None:
-        log.error("update gate failed: %s - rolling back", gate.describe_failure())
+        # Described once, so a heartbeat arriving meanwhile cannot split the log from the record.
+        reason = gate.describe_failure()
+        log.error("update gate failed: %s - rolling back", reason)
         try:
             # Unsent: the previous release reports it after the restart.
-            self.outcome_to_report = roll_back_gate(self.layout, gate)
+            self.outcome_to_report = roll_back_gate(self.layout, gate, reason)
         finally:
             if self._has_switched_back(gate):
                 self.request_restart()

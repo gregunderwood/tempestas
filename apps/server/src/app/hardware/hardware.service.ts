@@ -99,6 +99,9 @@ export abstract class HardwareService {
   /** Resolves once the broker has the command. Progress arrives on `updateStatuses$`. */
   abstract sendUpdate(nodeId: NodeId, order: UpdateOrder): Promise<void>;
 
+  /** Called once the hello is stored, so heartbeats name a version only the registry has taken. */
+  abstract recordAcceptedHello(hello: NodeHello): void;
+
   abstract readonly samples$: Observable<SensorSample>;
   abstract readonly availability$: Observable<NodeAvailability>;
   abstract readonly hello$: Observable<NodeHello>;

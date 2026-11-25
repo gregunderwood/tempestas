@@ -15,6 +15,7 @@ import {
   mqttQos,
   mqttTopics,
   type GpioResultPayload,
+  type HeartbeatPayload,
   type NodeId,
 } from '@tempestas/domain';
 import { Clock } from '../common/clock';
@@ -65,7 +66,7 @@ const COMMAND_TTL_MS = 15_000;
 const UPDATE_COMMAND_TTL_MS = 30_000;
 const UPDATE_PUBLISH_TIMEOUT_MS = 5_000;
 /** The node's dead-man counts these. Missing them is what makes it fail safe. */
-const HEARTBEAT_INTERVAL_MS = 5_000;
+export const HEARTBEAT_INTERVAL_MS = 5_000;
 const WARN_THROTTLE_MS = 5 * 60 * 1000;
 const CONFLICT_ALARM_WINDOW_MS = 10_000;
 const RECONNECT_PERIOD_MS = 2_000;
@@ -111,6 +112,7 @@ export class MqttHardwareService
   private readonly lastReports = new Map<string, PinStateReport>();
   private readonly isOnlineByNode = new Map<NodeId, boolean>();
   private readonly knownNodes = new Set<NodeId>();
+  private readonly acceptedAgentVersionByNode = new Map<NodeId, string>();
   private readonly lastActedAt = new Map<string, number>();
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private commandCount = 0;
@@ -218,6 +220,10 @@ export class MqttHardwareService
 
   lastPinReport(nodeId: NodeId, pin: number): PinStateReport | null {
     return this.lastReports.get(toPinKey(nodeId, pin)) ?? null;
+  }
+
+  recordAcceptedHello(hello: NodeHello): void {
+    this.acceptedAgentVersionByNode.set(hello.nodeId, hello.agentVersion);
   }
 
   private buildClientOptions(): IClientOptions & { clientId: string } {
@@ -720,16 +726,21 @@ export class MqttHardwareService
     for (const nodeId of this.knownNodes) {
       client.publish(
         mqttTopics.heartbeat(nodeId),
-        JSON.stringify({
-          schema: MQTT_SCHEMAS.heartbeat,
-          node: nodeId,
-          ts: this.clock.now().toISOString(),
-          controller: this.controllerId,
-          epoch: this.epoch,
-        }),
+        JSON.stringify(this.buildHeartbeat(nodeId)),
         mqttQos.heartbeat,
       );
     }
+  }
+
+  private buildHeartbeat(nodeId: NodeId): HeartbeatPayload {
+    return {
+      schema: MQTT_SCHEMAS.heartbeat,
+      node: nodeId,
+      ts: this.clock.now().toISOString(),
+      controller: this.controllerId,
+      epoch: this.epoch,
+      agentVersion: this.acceptedAgentVersionByNode.get(nodeId) ?? null,
+    };
   }
 
   private logAlarm(

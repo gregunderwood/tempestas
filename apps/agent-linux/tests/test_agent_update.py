@@ -18,6 +18,7 @@ from release_fixtures import (
 from tempestas_agent import contract
 from tempestas_agent.agent import (
     ANOTHER_UPDATE_IN_PROGRESS,
+    HELLO_REPEAT_S,
     LAST_OUTCOME_UNDELIVERED,
     LAST_UPDATE_UNSETTLED,
     NOT_INSTALLED_FROM_A_RELEASE,
@@ -27,7 +28,7 @@ from tempestas_agent.agent import (
 from tempestas_agent.release_installer import ReleaseInstaller, UpdateFailed
 from tempestas_agent.release_layout import PendingUpdate, UpdateOutcome
 from tempestas_agent.update_gate import GATE_SECONDS
-from test_agent import PUBLISH_NO_CONNECTION, make_agent
+from test_agent import PUBLISH_NO_CONNECTION, PUBLISH_QUEUED, make_agent
 from test_update_command import SERVER, build_update
 
 UPDATE_STATUS_TOPIC = contract.build_update_status_topic("bench")
@@ -70,6 +71,20 @@ def make_updating_agent(monkeypatch, tmp_path, installer=None):
     agent.settle_update()
     agent.on_heartbeat(HEARTBEAT)
     return agent, clock
+
+
+HEARTBEAT_INTERVAL_S = 5
+
+
+def count_hellos(agent) -> int:
+    hello_topic = contract.build_hello_topic(agent.config.node_id)
+    return sum(1 for topic, *_ in agent.client.published if topic == hello_topic)
+
+
+def encode_heartbeat_naming(accepted_version: str | None) -> bytes:
+    heartbeat = {"controller": SERVER, "epoch": 1}
+    heartbeat[contract.HEARTBEAT_ACCEPTED_VERSION_FIELD] = accepted_version
+    return json.dumps(heartbeat).encode()
 
 
 def update_statuses(agent) -> list[tuple[str, str | None]]:
@@ -218,6 +233,7 @@ def test_a_stop_reports_the_failure_an_install_recorded_rather_than_the_stop(mon
 
 def start_new_release_on_its_gate(tmp_path):
     agent, clock = make_agent()
+    agent.agent_version = NEW_RELEASE
     agent.layout = make_layout(tmp_path)
     agent.layout.locate_release(NEW_RELEASE).mkdir()
     agent.layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
@@ -238,6 +254,124 @@ def test_a_new_release_reports_healthy_once_it_has_said_hello_and_heard_a_heartb
     assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
     assert agent.layout.read_pending() is None
     assert agent.update_gate is None
+
+
+def test_a_new_release_rolls_back_when_the_server_never_accepts_its_hello(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+
+    agent.say_hello()
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert agent.layout.read_current_release() == RUNNING_RELEASE
+    assert agent.restart_requested.is_set()
+    assert agent.layout.read_outcome().reason.startswith(
+        f"the server did not accept {NEW_RELEASE}'s hello"
+    )
+
+
+def test_a_new_release_rolls_back_when_the_server_names_no_accepted_hello(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+
+    agent.say_hello()
+    agent.on_heartbeat(encode_heartbeat_naming(None))
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert agent.layout.read_current_release() == RUNNING_RELEASE
+    assert agent.layout.read_outcome().reason.endswith("it has accepted no hello from this node")
+
+
+def test_a_new_release_says_hello_again_when_the_server_has_not_taken_it(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
+    assert count_hellos(agent) == 1
+    clock.advance(HELLO_REPEAT_S)
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
+    assert count_hellos(agent) == 2
+    agent.on_heartbeat(encode_heartbeat_naming(NEW_RELEASE))
+    agent.tend_update()
+
+    assert count_hellos(agent) == 2
+    assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
+
+
+def test_a_repeated_hello_that_never_left_does_not_put_off_the_next_try(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+    clock.advance(HELLO_REPEAT_S)
+    agent.client.publish_rc = PUBLISH_NO_CONNECTION
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
+
+    agent.client.publish_rc = PUBLISH_QUEUED
+    clock.advance(HEARTBEAT_INTERVAL_S)
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
+
+    assert count_hellos(agent) == 3
+
+
+def test_a_new_release_says_hello_again_when_the_server_has_accepted_none(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    clock.advance(HELLO_REPEAT_S)
+    agent.on_heartbeat(encode_heartbeat_naming(None))
+
+    assert count_hellos(agent) == 2
+
+
+def test_a_new_release_never_repeats_its_hello_to_a_server_before_1_2(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    clock.advance(HELLO_REPEAT_S)
+    agent.on_heartbeat(HEARTBEAT)
+
+    assert count_hellos(agent) == 1
+
+
+@pytest.mark.parametrize("heartbeat_offset_s", range(HEARTBEAT_INTERVAL_S))
+def test_a_gate_refused_throughout_reports_the_refusal_whenever_it_runs_out(
+    tmp_path, heartbeat_offset_s
+):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    for second in range(2 * GATE_SECONDS):
+        if agent.update_gate is None:
+            break
+        if second % HEARTBEAT_INTERVAL_S == heartbeat_offset_s:
+            agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
+        agent.tend_update()
+        clock.advance(1)
+
+    assert count_hellos(agent) > 1
+    assert agent.layout.read_outcome().reason.endswith(f"it still names {RUNNING_RELEASE}")
+
+
+def test_a_refusal_survives_the_hello_said_when_the_server_comes_back(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
+
+    agent.on_server_status(SERVER_ONLINE_AGAIN, is_retained=False)
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert agent.layout.read_outcome().reason.endswith(f"it still names {RUNNING_RELEASE}")
+
+
+def test_a_new_release_is_healthy_once_the_server_names_it_in_a_heartbeat(tmp_path):
+    agent, _ = start_new_release_on_its_gate(tmp_path)
+
+    agent.say_hello()
+    agent.on_heartbeat(encode_heartbeat_naming(NEW_RELEASE))
+    agent.tend_update()
+
+    assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
 
 
 def test_a_healthy_update_is_kept_until_the_broker_has_it(tmp_path):

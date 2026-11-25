@@ -46,4 +46,4 @@ def test_hello_names_the_app_and_the_contract_minor():
     agent, _ = make_agent()
     hello = agent.hello_payload()
     assert hello["agentName"] == "agent-linux"
-    assert hello["capabilities"]["contractMinor"] == 1
+    assert hello["capabilities"]["contractMinor"] == 2

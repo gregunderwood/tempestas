@@ -21,7 +21,9 @@ SCHEMAS = {
 
 SUPPORTED_MAJOR = 1
 # May trail the TypeScript minor, never lead it.
-MQTT_CONTRACT_MINOR = 1
+MQTT_CONTRACT_MINOR = 2
+# Added in 1.2, so a heartbeat without it comes from an older server.
+HEARTBEAT_ACCEPTED_VERSION_FIELD = "agentVersion"
 
 
 def build_node_root(node_id: str) -> str:

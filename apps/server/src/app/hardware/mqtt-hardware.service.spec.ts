@@ -1,4 +1,3 @@
-import { EventEmitter } from 'node:events';
 import { ConfigService } from '@nestjs/config';
 import { connect } from 'mqtt';
 import {
@@ -11,71 +10,19 @@ import {
 } from '@tempestas/domain';
 import { firstValueFrom } from 'rxjs';
 import { FixedClock } from '../common/clock';
-import { MqttHardwareService } from './mqtt-hardware.service';
+import {
+  HEARTBEAT_INTERVAL_MS,
+  MqttHardwareService,
+} from './mqtt-hardware.service';
 import type { UpdateOrder } from './hardware.service';
+import {
+  buildHelloPayload,
+  FakeBrokerClient,
+} from './fake-broker-client.fixtures';
 
 vi.mock('mqtt', () => ({ connect: vi.fn() }));
 
 const NOW = new Date('2026-11-21T12:00:00Z');
-
-interface PendingSubscription {
-  acknowledge: () => void;
-  refuse: (error: Error) => void;
-}
-
-class FakeBrokerClient extends EventEmitter {
-  readonly publishedTopics: string[] = [];
-  connected = false;
-  private readonly pendingSubscriptions: PendingSubscription[] = [];
-
-  readonly subscribeAsync = vi.fn(
-    () =>
-      new Promise<void>((acknowledge, refuse) => {
-        this.pendingSubscriptions.push({ acknowledge, refuse });
-      }),
-  );
-
-  readonly publishAsync = vi.fn(async (topic: string) => {
-    this.publishedTopics.push(topic);
-  });
-
-  readonly endAsync = vi.fn(async () => undefined);
-
-  connectToBroker(): void {
-    this.connected = true;
-    this.emit('connect');
-  }
-
-  loseConnection(): void {
-    this.connected = false;
-    this.takeOldestSubscription().refuse(new Error('Connection closed'));
-    this.emit('close');
-  }
-
-  acknowledgeSubscribe(): void {
-    this.takeOldestSubscription().acknowledge();
-  }
-
-  refuseSubscribe(error: Error): void {
-    this.takeOldestSubscription().refuse(error);
-  }
-
-  private takeOldestSubscription(): PendingSubscription {
-    const oldest = this.pendingSubscriptions.shift();
-    if (!oldest) throw new Error('No subscribe is waiting for its SUBACK');
-    return oldest;
-  }
-
-  deliver(topic: string, payload: unknown): void {
-    this.emit('message', topic, Buffer.from(JSON.stringify(payload)), {
-      retain: false,
-    });
-  }
-
-  hasAnnouncedServerStatus(): boolean {
-    return this.publishedTopics.includes(mqttTopics.serverStatus);
-  }
-}
 
 async function settlePendingWork(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
@@ -271,5 +218,98 @@ describe('MqttHardwareService updates', () => {
       reason: null,
     });
     await service.onModuleDestroy();
+  });
+});
+
+describe('MqttHardwareService heartbeats', () => {
+  let brokerClient: FakeBrokerClient;
+  let service: MqttHardwareService;
+
+  function storeEachHello(): void {
+    service.hello$.subscribe((accepted) =>
+      service.recordAcceptedHello(accepted),
+    );
+  }
+
+  async function sendHeartbeats(): Promise<Record<string, unknown>[]> {
+    brokerClient.publish.mockClear();
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+    return brokerClient.publish.mock.calls
+      .filter(([topic]) => topic === mqttTopics.heartbeat('patji'))
+      .map(([, body]) => JSON.parse(body as string));
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    brokerClient = new FakeBrokerClient();
+    vi.mocked(connect).mockReturnValue(
+      brokerClient as unknown as ReturnType<typeof connect>,
+    );
+    service = new MqttHardwareService(
+      new ConfigService({ CONTROLLER_ROLE: 'leader' }),
+      new FixedClock(NOW),
+    );
+    service.onApplicationBootstrap();
+    brokerClient.connectToBroker();
+    await vi.advanceTimersByTimeAsync(0);
+    brokerClient.acknowledgeSubscribe();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  afterEach(async () => {
+    await service.onModuleDestroy();
+    vi.useRealTimers();
+  });
+
+  it('names the agent version once the registry has stored its hello', async () => {
+    storeEachHello();
+    brokerClient.deliver(mqttTopics.hello('patji'), buildHelloPayload());
+
+    const [heartbeat] = await sendHeartbeats();
+
+    expect(heartbeat).toMatchObject({
+      schema: MQTT_SCHEMAS.heartbeat,
+      node: 'patji',
+      agentVersion: '1.2.0',
+    });
+  });
+
+  it('names no version for a hello the registry has not stored', async () => {
+    brokerClient.deliver(mqttTopics.hello('patji'), buildHelloPayload());
+
+    const [heartbeat] = await sendHeartbeats();
+
+    expect(heartbeat.agentVersion).toBeNull();
+  });
+
+  it('moves on to the new release once its hello is stored', async () => {
+    storeEachHello();
+    brokerClient.deliver(
+      mqttTopics.hello('patji'),
+      buildHelloPayload({ agentVersion: '1.1.0' }),
+    );
+    const [beforeUpdate] = await sendHeartbeats();
+    brokerClient.deliver(
+      mqttTopics.hello('patji'),
+      buildHelloPayload({ agentVersion: '1.2.0', bootId: 'boot-2' }),
+    );
+
+    const [afterUpdate] = await sendHeartbeats();
+
+    expect(beforeUpdate.agentVersion).toBe('1.1.0');
+    expect(afterUpdate.agentVersion).toBe('1.2.0');
+  });
+
+  it('keeps naming the last stored version when a later hello is refused', async () => {
+    storeEachHello();
+    brokerClient.deliver(mqttTopics.hello('patji'), buildHelloPayload());
+    brokerClient.deliver(
+      mqttTopics.hello('patji'),
+      buildHelloPayload({ agentVersion: '1.2.1', bootId: '' }),
+    );
+
+    const [heartbeat] = await sendHeartbeats();
+
+    expect(heartbeat.agentVersion).toBe('1.2.0');
   });
 });

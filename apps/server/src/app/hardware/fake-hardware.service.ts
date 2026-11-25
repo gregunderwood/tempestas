@@ -40,7 +40,7 @@ const ON_LEVEL_ACTIVE_LOW = 0;
 
 const DEFAULT_TICK_MS = 10_000;
 const SIM_CONTRACT_VERSION = 1;
-const SIM_LINUX_AGENT_VERSION = '1.1.0';
+const SIM_LINUX_AGENT_VERSION = '1.2.0';
 // The MicroPython agent does not take `update` yet, so its stand-in must not either.
 const SIM_MICROPYTHON_CONTRACT_MINOR = 0;
 const SIM_MICROPYTHON_AGENT_VERSION = '1.0.8';
@@ -233,6 +233,11 @@ export class FakeHardwareService
 
   async sendUpdate(nodeId: NodeId, order: UpdateOrder): Promise<void> {
     this.playUpdateThrough(this.requireNode(nodeId), order);
+  }
+
+  // The simulated agents never wait on a heartbeat, so there is nothing to record.
+  recordAcceptedHello(): void {
+    return;
   }
 
   getPin(nodeId: NodeId, pin: number): number | undefined {

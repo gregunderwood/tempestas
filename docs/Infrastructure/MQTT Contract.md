@@ -125,6 +125,15 @@ interface MqttEnvelope {
   world without commanding it.
 - **`gpio/result`** — per-line `requested` / `readback` / `ok`. A `setPin` resolves only on a
   successful readback; the caller must not persist a state change otherwise.
+- **`control/heartbeat`** — `controller` and `epoch`, every 5 s from the leader to every node it
+  has heard from. A node binds to the controller that heartbeats at it and counts heartbeats for
+  its dead-man. From 1.2 it also carries `agentVersion`: the version in the last `hello` the server
+  accepted from that node, or `null` if it has accepted none. Accepted means the node registry has
+  stored it, not just that it arrived. A Linux agent's update gate passes only on its own version,
+  so a release whose `hello` the server refuses is rolled back. A heartbeat without the field comes
+  from a server before 1.2, and the gate takes it only until some heartbeat has carried the field.
+  The field names a version, not a particular `hello`, and the server keeps it in memory: it is
+  `null` again after a restart until each node says `hello`, and stays after a node is deleted.
 - **`alarm`** — an `AlarmCode` plus severity. Never retained: a retained alarm resurrects a cleared
   fault.
 - **`update`** (1.1) — `id`, `issuedBy`, `expiresAt`, `app`, `version`, `manifestUrl`,

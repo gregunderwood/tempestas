@@ -255,7 +255,7 @@ could never be commanded at all.
 
 ## The update command
 
-The agent reports contract minor 1 and subscribes to `update`. The refusals above apply to it,
+The agent reports contract minor 2 and subscribes to `update`. The refusals above apply to it,
 except that it refuses every update until a controller is bound, and it also refuses an update
 for another app or another contract major with an `update/status` of `failed`. The full rules
 are in [MQTT Contract](MQTT%20Contract.md#the-update-command), and what happens to an accepted
@@ -282,8 +282,19 @@ A graceful stop drives every line to its failsafe before the exit, so the five s
 ### The health gate
 
 The new release finds `pending.json` naming itself and has `GATE_SECONDS`, 120, to prove itself:
-a `hello`, then a heartbeat from the server after that `hello`. A heartbeat means the broker, the
-credentials and the server's view of the node all work.
+a `hello`, then a heartbeat from the server after that `hello` that names the new version as the
+one it accepted, which the server does only once it has stored that `hello`. That means the
+broker, the credentials and the server's view of the node all work, and that the server took this
+release's `hello`, not just any message from the node. A heartbeat still naming the old version,
+or none, does not count. If the gate runs out that way, the reason says so: "the server did not
+accept 1.2.1's hello in 120s: it still names 1.2.0". A server from before contract 1.2 names no
+version, and then any heartbeat after the `hello` passes, unless an earlier heartbeat did name one.
+
+A `hello` the server failed to store, for example in a database blip, would otherwise fail the
+gate, as nothing else sends it again. So while heartbeats name another version, `null` or nothing
+after naming one, the agent says `hello` again on the next heartbeat at least `HELLO_REPEAT_S`,
+20 s, after the last one, until the gate settles. The failure reason names the last refusal
+heard, even if heartbeats stopped after it.
 
 The 120 s count only while the broker is connected and the server is online. The clock runs once
 the node has said `hello` and the server is known to be online, and stops when the server reports
@@ -349,13 +360,13 @@ them, so a change to the units or the script needs a deploy, or these lines by h
 
 On real systemd (a user unit mirroring this one), a local broker, and bundles served over http:
 
-| Scenario                                  | Result                                                                 |
-| ----------------------------------------- | ---------------------------------------------------------------------- |
-| Update to a working release               | `downloading` → `restarting`, `hello` from the new version, `healthy`  |
-| Update to a release that crashes on start | Rolled back on its first failed run; the previous release says why     |
-| Update that never gets a heartbeat        | Gate failed at 120 s, switched back, `rolled-back` "sent no heartbeat" |
-| Update to the version already running     | `failed`, "this node already runs 1.1.4"; nothing changed              |
-| Exit 75 without `SuccessExitStatus=75`    | The good update was rolled back at once: the reason the line is there  |
+| Scenario                                  | Result                                                                  |
+| ----------------------------------------- | ----------------------------------------------------------------------- |
+| Update to a working release               | `downloading` → `restarting`, `hello` from the new version, `healthy`   |
+| Update to a release that crashes on start | Rolled back on its first failed run; the previous release says why      |
+| Update that never gets a heartbeat        | Gate failed at 120 s, switched back, `rolled-back` "heard no heartbeat" |
+| Update to the version already running     | `failed`, "this node already runs 1.1.4"; nothing changed               |
+| Exit 75 without `SuccessExitStatus=75`    | The good update was rolled back at once: the reason the line is there   |
 
 ## Announcing line state
 

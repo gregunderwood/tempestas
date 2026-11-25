@@ -26,6 +26,14 @@ from tempestas_agent.update_gate import (
 
 STARTED_AT = 1000.0
 PENDING = PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE)
+HEARTBEAT_FROM_A_1_1_SERVER = {"controller": "ctl", "epoch": 1}
+
+
+def build_heartbeat_naming(accepted_version: object) -> dict:
+    return {
+        **HEARTBEAT_FROM_A_1_1_SERVER,
+        contract.HEARTBEAT_ACCEPTED_VERSION_FIELD: accepted_version,
+    }
 
 
 def install_new_release(layout) -> None:
@@ -128,7 +136,8 @@ def test_a_failed_gate_with_nothing_to_roll_back_to_keeps_the_release_and_says_s
     install_new_release(layout)
     shutil.rmtree(layout.locate_release(RUNNING_RELEASE))
 
-    outcome = roll_back_gate(layout, HealthGate(PENDING))
+    gate = HealthGate(PENDING)
+    outcome = roll_back_gate(layout, gate, gate.describe_failure())
 
     assert layout.read_current_release() == NEW_RELEASE
     assert layout.read_pending() is None
@@ -146,21 +155,89 @@ def test_an_outcome_left_by_the_last_run_is_still_owed(tmp_path):
 
 def test_the_gate_passes_on_a_heartbeat_after_hello():
     gate = HealthGate(PENDING)
-    gate.note_hello()
-    gate.note_heartbeat()
+    gate.note_hello(NEW_RELEASE)
+    gate.note_heartbeat(HEARTBEAT_FROM_A_1_1_SERVER)
     assert gate.is_passed() is True
+
+
+def test_the_gate_passes_on_a_heartbeat_naming_the_version_the_server_accepted():
+    gate = HealthGate(PENDING)
+    gate.note_hello(NEW_RELEASE)
+    gate.note_heartbeat(build_heartbeat_naming(NEW_RELEASE))
+    assert gate.is_passed() is True
+
+
+def test_a_server_still_naming_the_old_version_has_not_accepted_the_new_hello():
+    gate = HealthGate(PENDING)
+    gate.note_hello(NEW_RELEASE)
+    gate.start_watching(STARTED_AT)
+    gate.note_heartbeat(build_heartbeat_naming(RUNNING_RELEASE))
+
+    assert gate.is_passed() is False
+    assert gate.is_overdue(STARTED_AT + GATE_SECONDS) is True
+    assert gate.describe_failure() == (
+        f"the server did not accept {NEW_RELEASE}'s hello in {GATE_SECONDS}s: "
+        f"it still names {RUNNING_RELEASE}"
+    )
+
+
+def test_a_server_that_accepted_no_hello_does_not_pass_the_gate():
+    gate = HealthGate(PENDING)
+    gate.note_hello(NEW_RELEASE)
+    gate.note_heartbeat(build_heartbeat_naming(None))
+
+    assert gate.is_passed() is False
+    assert gate.describe_failure().endswith("it has accepted no hello from this node")
+
+
+def test_a_heartbeat_sent_before_the_server_read_the_hello_does_not_spoil_a_later_one():
+    gate = HealthGate(PENDING)
+    gate.note_hello(NEW_RELEASE)
+    gate.note_heartbeat(build_heartbeat_naming(RUNNING_RELEASE))
+    gate.note_heartbeat(build_heartbeat_naming(NEW_RELEASE))
+    assert gate.is_passed() is True
+
+
+def test_a_heartbeat_without_a_version_does_not_pass_once_the_server_has_named_versions():
+    gate = HealthGate(PENDING)
+    gate.note_hello(NEW_RELEASE)
+    gate.note_heartbeat(build_heartbeat_naming(RUNNING_RELEASE))
+    gate.note_heartbeat(HEARTBEAT_FROM_A_1_1_SERVER)
+
+    assert gate.is_passed() is False
+    assert gate.describe_failure().endswith("it stopped naming the version it accepted")
+
+
+def test_a_version_named_before_hello_still_rules_out_heartbeats_without_one():
+    gate = HealthGate(PENDING)
+    gate.note_heartbeat(build_heartbeat_naming(RUNNING_RELEASE))
+    gate.note_hello(NEW_RELEASE)
+    gate.note_heartbeat(HEARTBEAT_FROM_A_1_1_SERVER)
+
+    assert gate.is_passed() is False
+    assert gate.describe_failure().endswith("it stopped naming the version it accepted")
+
+
+@pytest.mark.parametrize("named", [5, "", ["1.2.0"]])
+def test_a_heartbeat_naming_something_that_is_not_a_version_says_so(named):
+    gate = HealthGate(PENDING)
+    gate.note_hello(NEW_RELEASE)
+    gate.note_heartbeat(build_heartbeat_naming(named))
+
+    assert gate.is_passed() is False
+    assert gate.describe_failure().endswith(f"it named {named!r}, which is not a version")
 
 
 def test_a_heartbeat_before_hello_does_not_pass_the_gate():
     gate = HealthGate(PENDING)
-    gate.note_heartbeat()
-    gate.note_hello()
+    gate.note_heartbeat(HEARTBEAT_FROM_A_1_1_SERVER)
+    gate.note_hello(NEW_RELEASE)
     assert gate.is_passed() is False
 
 
 def test_the_gate_is_overdue_only_once_its_time_is_up():
     gate = HealthGate(PENDING)
-    gate.note_hello()
+    gate.note_hello(NEW_RELEASE)
     gate.start_watching(STARTED_AT)
     assert gate.is_overdue(STARTED_AT + GATE_SECONDS - 1) is False
     assert gate.is_overdue(STARTED_AT + GATE_SECONDS) is True
@@ -197,7 +274,7 @@ def test_a_failed_gate_puts_the_previous_release_back_and_records_why(tmp_path):
     install_new_release(layout)
     gate = HealthGate(PENDING)
 
-    roll_back_gate(layout, gate)
+    roll_back_gate(layout, gate, gate.describe_failure())
 
     assert layout.read_current_release() == RUNNING_RELEASE
     assert layout.read_pending() is None
