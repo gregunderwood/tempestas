@@ -8,6 +8,7 @@ import { ZoneEntity } from '../zones/models';
 import { FreezeMarginService } from './freeze-margin.service';
 import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
+import { TimeInRangeService } from './time-in-range.service';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ReportsService } from './reports.service';
   providers: [
     ReportsService,
     FreezeMarginService,
+    TimeInRangeService,
     { provide: Clock, useClass: SystemClock },
   ],
 })

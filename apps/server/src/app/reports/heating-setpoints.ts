@@ -16,7 +16,9 @@ export const DEFAULT_FREEZE_WARNING_C = 3;
 // The coldest probe, the cautious reading when the rules cannot say which one heat follows.
 export const FALLBACK_SENSOR_SOURCE: SensorSource = 'min';
 
-export type HeatOnBelowByRole = Partial<Record<DeviceRole, number>>;
+export type ThermostatMode = ThermostatRule['mode'];
+export type OnAtByRole = Partial<Record<DeviceRole, number>>;
+export type HeatOnBelowByRole = OnAtByRole;
 export type SensorSourceByRole = Partial<Record<DeviceRole, SensorSource>>;
 
 export interface FreezeWarning {
@@ -30,24 +32,33 @@ export interface RoleOnBelow {
 }
 
 export function findHeatOnBelowByRole(rulesConfig: unknown): HeatOnBelowByRole {
+  return findThermostatOnAtByRole(rulesConfig, HEATING_ROLES, 'heat');
+}
+
+export function findThermostatOnAtByRole(
+  rulesConfig: unknown,
+  roles: readonly DeviceRole[],
+  mode: ThermostatMode,
+): OnAtByRole {
   const parsed = parseZoneRulesConfig(rulesConfig);
   if (parsed.ok === false) return {};
-  const byRole: HeatOnBelowByRole = {};
-  for (const role of HEATING_ROLES) {
+  const byRole: OnAtByRole = {};
+  for (const role of roles) {
     const rule = parsed.config.rules[role];
-    if (rule && isHeatThermostat(rule)) byRole[role] = rule.onAtC;
+    if (rule && isAlwaysOnThermostat(rule, mode)) byRole[role] = rule.onAtC;
   }
   return byRole;
 }
 
 export function findSensorSourceByRole(
   rulesConfig: unknown,
+  roles: readonly DeviceRole[] = HEATING_ROLES,
 ): SensorSourceByRole {
   const parsed = parseZoneRulesConfig(rulesConfig);
   if (parsed.ok === false) return {};
   const { rules, sensorPolicy } = parsed.config;
   const byRole: SensorSourceByRole = {};
-  for (const role of HEATING_ROLES) {
+  for (const role of roles) {
     byRole[role] = (rules[role]?.sensor ?? sensorPolicy.default).source;
   }
   return byRole;
@@ -82,7 +93,10 @@ export function resolveFreezeWarning(
   return { belowC: Math.max(...setpoints), isFromRules: true };
 }
 
-// A daylight thermostat is off at night by design, so only a plain one says when heat is owed.
-function isHeatThermostat(rule: RoleRule): rule is ThermostatRule {
-  return rule.kind === 'thermostat' && rule.mode === 'heat';
+// A daylight thermostat is off at night by design, so only a plain one holds its setpoint around the clock.
+function isAlwaysOnThermostat(
+  rule: RoleRule,
+  mode: ThermostatMode,
+): rule is ThermostatRule {
+  return rule.kind === 'thermostat' && rule.mode === mode;
 }

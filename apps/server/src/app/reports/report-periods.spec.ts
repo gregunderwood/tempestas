@@ -1,5 +1,8 @@
 import { DateTime } from 'luxon';
-import { listRecentNights } from './night-windows';
+import {
+  listRecentDayAndNightPeriods,
+  listRecentNights,
+} from './report-periods';
 
 const TIMEZONE = 'America/Edmonton';
 const DAYLIGHT = { startTime: '07:00', endTime: '17:00', timezone: TIMEZONE };
@@ -41,6 +44,38 @@ describe('listRecentNights', () => {
         atLocal('2026-11-24T12:00'),
         { ...DAYLIGHT, endTime: DAYLIGHT.startTime },
         3,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('listRecentDayAndNightPeriods', () => {
+  it('alternates day and night, newest first, two per day', () => {
+    const periods = listRecentDayAndNightPeriods(
+      atLocal('2026-11-24T12:00'),
+      DAYLIGHT,
+      2,
+    );
+    expect(
+      periods.map((period) => [
+        period.kind,
+        localLabel(period.from),
+        period.inProgress,
+      ]),
+    ).toEqual([
+      ['day', '11-24 07:00', true],
+      ['night', '11-23 17:00', false],
+      ['day', '11-23 07:00', false],
+      ['night', '11-22 17:00', false],
+    ]);
+  });
+
+  it('has no periods for a zero-length daylight window', () => {
+    expect(
+      listRecentDayAndNightPeriods(
+        atLocal('2026-11-24T12:00'),
+        { ...DAYLIGHT, endTime: DAYLIGHT.startTime },
+        2,
       ),
     ).toEqual([]);
   });

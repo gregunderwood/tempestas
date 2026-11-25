@@ -67,6 +67,62 @@ export interface TemperatureBucketRow {
   sampleCount: number;
 }
 
+export interface HeldTemperatureBucketRow {
+  nodeId: string;
+  sensorId: string;
+  at: Date;
+  averageC: number;
+  /** How long this probe's readings in the bucket held, each until the next or the longest hold. */
+  heldMs: number;
+}
+
+interface RawHeldTemperatureBucket {
+  nodeId: string;
+  sensorId: string;
+  at: Date;
+  averageC: string;
+  heldMs: string;
+}
+
+export interface HeldTemperatureBucketsQuery {
+  window: ReadingWindow;
+  bucketMinutes: number;
+  longestHeldMinutes: number;
+  nodeSlugs: readonly string[];
+}
+
+// Each reading holds until the next one from its probe, cut at the longest hold and at its bucket's end.
+const HELD_TEMPERATURE_BUCKETS_SQL = `
+  WITH samples AS (
+    SELECT node.slug AS node_slug,
+           reading.sensor_id,
+           reading.created_at,
+           reading.temperature,
+           date_bin(make_interval(mins => $1), reading.created_at, TIMESTAMPTZ 'epoch') AS bucket_at,
+           LEAD(reading.created_at) OVER (
+             PARTITION BY reading.node_id, reading.sensor_id ORDER BY reading.created_at
+           ) AS next_at
+      FROM sensor_readings reading
+      JOIN nodes node ON node.id = reading.node_id
+     WHERE reading.created_at >= $2
+       AND reading.created_at <= $3
+       AND node.slug = ANY($4::text[])
+  )
+  SELECT node_slug AS "nodeId",
+         sensor_id AS "sensorId",
+         bucket_at AS "at",
+         AVG(temperature) AS "averageC",
+         SUM(EXTRACT(EPOCH FROM LEAST(
+           COALESCE(next_at, $3),
+           created_at + make_interval(mins => $5),
+           bucket_at + make_interval(mins => $1)
+         ) - created_at)) * 1000 AS "heldMs"
+    FROM samples
+   GROUP BY node_slug, sensor_id, bucket_at
+   ORDER BY bucket_at DESC
+   LIMIT $6
+`;
+
 interface RawTemperatureBucket {
   nodeId: string;
   sensorId: string;
@@ -213,15 +269,49 @@ export class ReadingsService {
     return rows.reverse().map(toTemperatureBucketRow);
   }
 
-  // Ties go to the latest, as every other extreme here does.
-  async findColdestReading(
+  // Newest first under the limit, like bucketTemperatures, and handed back oldest first.
+  async bucketHeldTemperatures(
+    query: HeldTemperatureBucketsQuery,
+  ): Promise<HeldTemperatureBucketRow[]> {
+    if (query.nodeSlugs.length === 0) return [];
+    const rows: RawHeldTemperatureBucket[] = await this.readings.query(
+      HELD_TEMPERATURE_BUCKETS_SQL,
+      [
+        query.bucketMinutes,
+        query.window.from,
+        query.window.to,
+        query.nodeSlugs,
+        query.longestHeldMinutes,
+        countBucketRowsAllowed(query.window, query.bucketMinutes),
+      ],
+    );
+    return rows.reverse().map(toHeldTemperatureBucketRow);
+  }
+
+  findColdestReading(
     window: ReadingWindow,
     nodeSlugs: readonly string[],
+  ): Promise<Reading | null> {
+    return this.findTemperatureExtreme(window, nodeSlugs, 'ASC');
+  }
+
+  findWarmestReading(
+    window: ReadingWindow,
+    nodeSlugs: readonly string[],
+  ): Promise<Reading | null> {
+    return this.findTemperatureExtreme(window, nodeSlugs, 'DESC');
+  }
+
+  // Ties go to the latest, as every other extreme here does.
+  private async findTemperatureExtreme(
+    window: ReadingWindow,
+    nodeSlugs: readonly string[],
+    direction: SortDirection,
   ): Promise<Reading | null> {
     if (nodeSlugs.length === 0) return null;
     const row = await this.queryWindow(window)
       .andWhere('node.slug IN (:...nodeSlugs)', { nodeSlugs })
-      .orderBy('reading.temperature', 'ASC')
+      .orderBy('reading.temperature', direction)
       .addOrderBy('reading.createdAt', 'DESC')
       .limit(1)
       .getOne();
@@ -361,6 +451,19 @@ function toTemperatureBucketRow(
     lowestC: Number(raw.lowestC),
     highestC: Number(raw.highestC),
     sampleCount: Number(raw.sampleCount),
+  };
+}
+
+// Postgres returns AVG and SUM as strings.
+function toHeldTemperatureBucketRow(
+  raw: RawHeldTemperatureBucket,
+): HeldTemperatureBucketRow {
+  return {
+    nodeId: raw.nodeId,
+    sensorId: raw.sensorId,
+    at: new Date(raw.at),
+    averageC: roundTo(Number(raw.averageC), AVERAGE_DECIMALS),
+    heldMs: Math.round(Number(raw.heldMs)),
   };
 }
 

@@ -100,7 +100,7 @@ export function describeSensorPolicy(policy: SensorPolicy): string {
   return `Controls on ${describeSensorSource(String(policy.source))}${staleAfter}`;
 }
 
-function describeSensorSource(source: string): string {
+export function describeSensorSource(source: string): string {
   const aggregateDescription = AGGREGATE_SOURCE_DESCRIPTIONS.get(source);
   if (aggregateDescription) return aggregateDescription;
   const nodeSlug = readNodeSlug(source);

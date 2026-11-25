@@ -18,6 +18,8 @@ import type {
   ReadingsQuery,
   RulesEvaluation,
   RulesCycle,
+  TimeInRangeQuery,
+  TimeInRangeReport,
   UpdateDevicePayload,
   Zone,
   ZoneHistoryReport,
@@ -26,7 +28,7 @@ import type {
 const API_ROOT = '/api';
 
 type QueryParameters =
-  ReadingsQuery | EquipmentRuntimeQuery | FreezeMarginQuery;
+  ReadingsQuery | EquipmentRuntimeQuery | FreezeMarginQuery | TimeInRangeQuery;
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -126,6 +128,17 @@ export class ApiService {
   ): Observable<FreezeMarginReport> {
     return this.getFromApi<FreezeMarginReport>(
       '/reports/freeze-margin',
+      options,
+      query,
+    );
+  }
+
+  fetchTimeInRange(
+    query: TimeInRangeQuery = {},
+    options: RequestOptions = {},
+  ): Observable<TimeInRangeReport> {
+    return this.getFromApi<TimeInRangeReport>(
+      '/reports/time-in-range',
       options,
       query,
     );

@@ -10,12 +10,11 @@ import {
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCardModule } from '@angular/material/card';
 import { ApiService } from '../../core/api.service';
-import { injectLiveSource } from '../../core/live-source';
+import { injectLiveSource, type LiveSource } from '../../core/live-source';
 import { RealtimeService } from '../../core/realtime.service';
 import { openBrowserStorage } from '../../shared/arrange/card-order';
 import { EquipmentRuntimeCard } from './equipment-runtime-card';
 import { FreezeMarginCard } from './freeze-margin-card';
-import { findReadingDueARefresh } from './freeze-margin-refresh';
 import {
   labelPropaneUnit,
   PROPANE_UNITS,
@@ -24,12 +23,15 @@ import {
   type PropaneUnit,
 } from './propane-units';
 import { ReportLoadStatus } from './report-load-status';
+import {
+  findReadingDueARefresh,
+  FREEZE_MARGIN_REFRESH_MILLISECONDS,
+  TIME_IN_RANGE_REFRESH_MILLISECONDS,
+  type ZoneReadingsReport,
+} from './report-refresh';
+import { TimeInRangeCard } from './time-in-range-card';
 
-const UPCOMING_REPORTS: readonly string[] = [
-  'Time in range',
-  'CO2 enrichment',
-  'Node health',
-];
+const UPCOMING_REPORTS: readonly string[] = ['CO2 enrichment', 'Node health'];
 
 @Component({
   selector: 'temp-reports-page',
@@ -39,6 +41,7 @@ const UPCOMING_REPORTS: readonly string[] = [
     EquipmentRuntimeCard,
     FreezeMarginCard,
     ReportLoadStatus,
+    TimeInRangeCard,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -101,6 +104,28 @@ const UPCOMING_REPORTS: readonly string[] = [
         }
       </div>
     </section>
+    <section aria-labelledby="time-in-range-heading" class="temp-time-in-range">
+      <h2 id="time-in-range-heading">Time in range</h2>
+      <p class="temp-muted">
+        Hours each day and each night spent where the zone's rules are set to
+        hold it: below a heat rule's on-setpoint, above the fan's, or between,
+        with the night's low and the day's high.
+      </p>
+      <temp-report-load-status
+        [state]="timeInRangeState()"
+        subject="time in range"
+      />
+      @if (
+        timeInRangeState() !== 'loading' && timeInRangeZones().length === 0
+      ) {
+        <p class="temp-muted">No zone has a node yet.</p>
+      }
+      <div class="temp-card-grid temp-time-in-range-cards">
+        @for (zone of timeInRangeZones(); track zone.zoneId) {
+          <temp-time-in-range-card [zone]="zone" />
+        }
+      </div>
+    </section>
     <mat-card appearance="outlined" class="temp-upcoming">
       <mat-card-content>
         <p>Still to come:</p>
@@ -130,10 +155,12 @@ const UPCOMING_REPORTS: readonly string[] = [
     .temp-runtime-cards {
       --temp-card-min-width: 22rem;
     }
-    .temp-freeze-margin-cards {
+    .temp-freeze-margin-cards,
+    .temp-time-in-range-cards {
       --temp-card-min-width: 40rem;
     }
     .temp-freeze-margin,
+    .temp-time-in-range,
     .temp-upcoming {
       margin-top: 1.5rem;
     }
@@ -156,6 +183,9 @@ export class ReportsPage {
   private readonly freezeMarginSource = injectLiveSource((options) =>
     this.api.fetchFreezeMargin({}, options),
   );
+  private readonly timeInRangeSource = injectLiveSource((options) =>
+    this.api.fetchTimeInRange({}, options),
+  );
   private readonly browserStorage = openBrowserStorage();
 
   readonly upcomingReports = UPCOMING_REPORTS;
@@ -174,13 +204,25 @@ export class ReportsPage {
     () => this.freezeMarginSource.latest()?.payload.zones ?? [],
   );
 
+  protected readonly timeInRangeState = this.timeInRangeSource.sourceState;
+  protected readonly timeInRangeZones = computed(
+    () => this.timeInRangeSource.latest()?.payload.zones ?? [],
+  );
+
   protected readonly hasPropaneEstimate = computed(() =>
     this.runtimeDevices().some((device) => device.totalPropaneLitres !== null),
   );
 
   constructor() {
     this.refreshWhenADeviceSwitchesOrANodeComesAndGoes();
-    this.refreshFreezeMarginAsHeatedZonesReport();
+    this.refreshAsReadingsArrive(
+      this.freezeMarginSource,
+      FREEZE_MARGIN_REFRESH_MILLISECONDS,
+    );
+    this.refreshAsReadingsArrive(
+      this.timeInRangeSource,
+      TIME_IN_RANGE_REFRESH_MILLISECONDS,
+    );
   }
 
   protected choosePropaneUnit(unit: PropaneUnit): void {
@@ -203,20 +245,24 @@ export class ReportsPage {
     });
   }
 
-  // Tonight's row drifts colder without any heat switching, so readings refresh it too.
-  private refreshFreezeMarginAsHeatedZonesReport(): void {
+  // The running period moves with every reading, with nothing switching.
+  private refreshAsReadingsArrive(
+    source: LiveSource<ZoneReadingsReport>,
+    refreshMilliseconds: number,
+  ): void {
     let refreshedForReadingAtMs = 0;
     effect(() => {
-      const report = this.freezeMarginSource.latest()?.payload;
+      const report = source.latest()?.payload;
       if (!report) return;
       const dueReadingMs = findReadingDueARefresh(
         report,
         Object.values(this.realtime.readings()),
         refreshedForReadingAtMs,
+        refreshMilliseconds,
       );
       if (dueReadingMs === null) return;
       refreshedForReadingAtMs = dueReadingMs;
-      untracked(() => this.freezeMarginSource.refresh());
+      untracked(() => source.refresh());
     });
   }
 }

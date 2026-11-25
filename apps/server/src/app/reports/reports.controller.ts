@@ -2,17 +2,21 @@ import { Controller, Get, Query } from '@nestjs/common';
 import type {
   EquipmentRuntimeReport,
   FreezeMarginReport,
+  TimeInRangeReport,
 } from '@tempestas/domain';
 import { EquipmentRuntimeQueryDto } from './dto/equipment-runtime-query.dto';
 import { FreezeMarginQueryDto } from './dto/freeze-margin-query.dto';
+import { TimeInRangeQueryDto } from './dto/time-in-range-query.dto';
 import { FreezeMarginService } from './freeze-margin.service';
 import { ReportsService } from './reports.service';
+import { TimeInRangeService } from './time-in-range.service';
 
 @Controller('reports')
 export class ReportsController {
   constructor(
     private readonly reports: ReportsService,
     private readonly freezeMargin: FreezeMarginService,
+    private readonly timeInRange: TimeInRangeService,
   ) {}
 
   @Get('equipment-runtime')
@@ -27,5 +31,12 @@ export class ReportsController {
     @Query() query: FreezeMarginQueryDto,
   ): Promise<FreezeMarginReport> {
     return this.freezeMargin.buildFreezeMargin(query);
+  }
+
+  @Get('time-in-range')
+  buildTimeInRange(
+    @Query() query: TimeInRangeQueryDto,
+  ): Promise<TimeInRangeReport> {
+    return this.timeInRange.buildTimeInRange(query);
   }
 }
