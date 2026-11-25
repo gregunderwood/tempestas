@@ -4,7 +4,13 @@ import json
 import pytest
 
 from http_fetch import FetchFailed
-from slot_installer import FREE_FLASH_MARGIN_BYTES, SlotInstaller, UpdateFailed, build_file_url
+from slot_installer import (
+    FREE_FLASH_MARGIN_BYTES,
+    ROOT_ONLY_FILES,
+    SlotInstaller,
+    UpdateFailed,
+    build_file_url,
+)
 from slots import SlotStore
 
 RUNNING_VERSION = "1.2.0"
@@ -161,6 +167,18 @@ def test_refuses_a_manifest_listing_a_path_outside_the_slot(tmp_path, path):
     install = Install(tmp_path, serve_bundle(manifest))
 
     assert "not a safe path" in fail_install(install, build_command(manifest))
+
+
+@pytest.mark.parametrize("path", ROOT_ONLY_FILES)
+def test_refuses_a_bundle_carrying_a_file_only_usb_changes(tmp_path, path):
+    files = dict(BUNDLE_FILES, **{path: b"NODE_ID = 'someone-else'\n"})
+    manifest = build_manifest(files)
+    install = Install(tmp_path, serve_bundle(manifest, files))
+
+    assert fail_install(install, build_command(manifest)) == (
+        "the bundle carries %s, which only a USB deploy changes" % path
+    )
+    assert not (tmp_path / "b").exists()
 
 
 def test_refuses_a_manifest_for_another_version(tmp_path):

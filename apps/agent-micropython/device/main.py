@@ -5,16 +5,13 @@ import machine
 import bootloader
 import slots
 
-
-def is_bootsel_pressed():
-    try:
-        import rp2
-
-        return rp2.bootsel_button() == 1
-    except Exception:
-        # A firmware without the button must still boot its slot.
-        return False
+# Held here, as a timer that is garbage collected never fires.
+started_timers = []
 
 
-board = bootloader.Board(time.sleep_ms, is_bootsel_pressed, machine.reset)
+def start_one_shot_timer(milliseconds, callback):
+    started_timers.append(machine.Timer(mode=machine.Timer.ONE_SHOT, period=milliseconds, callback=callback))
+
+
+board = bootloader.Board(time.sleep_ms, bootloader.is_bootsel_pressed, machine.reset, start_one_shot_timer)
 bootloader.boot(board, slots.SlotStore(), bootloader.run_slot_from, print)

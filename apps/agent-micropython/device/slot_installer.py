@@ -24,6 +24,8 @@ STAT_SIZE = 6
 STATVFS_FRAGMENT_SIZE = 1
 STATVFS_AVAILABLE_BLOCKS = 4
 COPY_CHUNK_BYTES = 1024
+# The slot is first on sys.path, so a slot copy of these would replace the node's own.
+ROOT_ONLY_FILES = ("main.py", "bootloader.py", "slots.py", "settings.py", "credentials.py")
 
 
 class UpdateFailed(Exception):
@@ -150,6 +152,8 @@ def describe_manifest_problem(manifest, version):
     for listed_file in files:
         if not is_listed_file_well_formed(listed_file):
             return "the manifest lists %s, not a safe path with a sha256" % json.dumps(listed_file)
+        if listed_file["path"] in ROOT_ONLY_FILES:
+            return "the bundle carries %s, which only a USB deploy changes" % listed_file["path"]
     return None
 
 

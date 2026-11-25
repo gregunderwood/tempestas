@@ -17,6 +17,11 @@ so a dead node leaves them **on**, the same as patji in the [Pumphouse](../Pumph
 > reconnect, server-offline failsafe, the dead-man tripping at 600 s and clearing, a watchdog
 > reboot, a broker restart, and a Wi-Fi drop with a new DHCP lease. Running on elantris since
 > 2026-11-20, admitted and under rule control; the lamp tests wait for the wiring.
+>
+> Slots bench-tested on braize (2026-11-24) against elantris, with bundles served from a laptop and
+> installed from the REPL with the watchdog armed: the USB deploy onto slots, a 17-file install in
+> about 10 s, a good release kept by its gate, and a release that crashes on start rolled back after
+> 3 boots, each outcome sent and cleared. An update sent by the server has not run on a board yet.
 
 ## Key files
 
@@ -114,8 +119,8 @@ refused quietly, as `gpio/set` is. The full rules are in
 4. **`restarting`**, then a reset.
 
 Anything that fails clears the other slot and answers `failed` with the reason; the running slot
-never changed. An update is refused while a new slot is still on its gate, and for the version
-already running.
+never changed. An update is refused while a new slot is still on its gate, for the version already
+running, and for a bundle that carries a file only USB changes, such as `settings.py`.
 
 ### The health gate
 
@@ -125,13 +130,16 @@ active slot and records `rolled-back`, "1.2.1 did not come up healthy in 3 boots
 the watchdog, so a hang while the slot's modules import, before that, needs a power cycle, which
 still counts as a boot.
 
-A pending slot that has run for 10 minutes without passing its gate resets, so one that never
-reaches the broker, through a Wi-Fi or MQTT bug, still uses up its boots and rolls back within
-about half an hour.
+The bootloader also starts a 10-minute one-shot timer for a pending slot, which resets the board
+if `slots.json` still names that slot pending. So a release that never reaches its own gate, through
+a Wi-Fi or MQTT bug, a main loop that stops tending it, or a `deployed_version.py` that differs from
+the command, still uses up its boots and rolls back within about half an hour.
 
-The bootloader cannot be fixed over the air, so it never stops in the REPL over `slots.json`. A
-pending entry it cannot count is dropped, and if the flash refuses the write that counts a boot, it
-runs the active slot. That slot sees a pending version that is not its own and opens no gate.
+The bootloader cannot be fixed over the air, so it runs a slot whenever `slots.json` names a usable
+active one. A pending entry it cannot count is dropped, and if the flash refuses the write that
+counts a boot, it runs the active slot, with no timer. That slot sees a pending version that is not
+its own and opens no gate. Only a missing or unreadable `slots.json` stops it in the REPL, saying to
+deploy again.
 
 A pending slot that does run has the same gate as the [Linux agent](Linux%20Agent.md#the-health-gate):
 it must say `hello` and hear a heartbeat naming its own version, within 120 s counted only while
@@ -155,8 +163,15 @@ on firmware without it the board boots its slot as usual, with Ctrl-C as the onl
 ### What only USB changes
 
 The bootloader, `settings.py` and `credentials.py`. A bootloader change still raises the agent's
-version, since it lives in the agent, but an update leaves the old one in place; the bootloader
-reads `slots.json` and nothing else from the agent, so keep that file's shape stable.
+version, since it lives in the agent, but an update leaves the old one in place. So:
+
+- Raise `BOOTLOADER_VERSION` in `bootloader.py` with any change to it or `slots.py`. The boot banner
+  prints it, which is the only way to tell which bootloader a node has.
+- Keep `slots.json`'s shape stable: the bootloader reads it and nothing else from the agent.
+- Slot code may use only the `slots.py` names pinned in
+  [`tests/test_agent_files.py`](../../apps/agent-micropython/tests/test_agent_files.py), as every
+  node keeps the `slots.py` of its last USB deploy. Adding one to that list means a USB deploy of
+  every node before a release that uses it.
 
 ## Running the tests
 

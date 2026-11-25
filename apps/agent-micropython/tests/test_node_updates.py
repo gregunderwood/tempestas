@@ -2,11 +2,7 @@ import pytest
 
 from fakes import FakeInstaller
 from iso_time import format_iso
-from node_updates import (
-    ANOTHER_UPDATE_IN_PROGRESS,
-    HELLO_REPEAT_MILLISECONDS,
-    PENDING_SLOT_UPTIME_LIMIT_MILLISECONDS,
-)
+from node_updates import ANOTHER_UPDATE_IN_PROGRESS, HELLO_REPEAT_MILLISECONDS
 from slots import SlotStore
 from test_node_agent import CONTROLLER, NODE_ID, AgentUnderTest
 from update_gate import GATE_MILLISECONDS
@@ -235,33 +231,12 @@ def test_an_outcome_is_kept_while_the_server_is_offline(store):
     assert store.read()["outcome"]["state"] == "rolled-back"
 
 
-def test_a_new_slot_that_never_reaches_the_server_restarts_to_use_a_boot_attempt(store):
-    node = start_new_slot_on_its_gate(store)
-
-    for _second in range(PENDING_SLOT_UPTIME_LIMIT_MILLISECONDS // MILLISECONDS_PER_SECOND):
-        node.clock.advance_seconds(1)
-        node.agent.tend_update(False)
-
-    assert node.resets == [True]
-    assert store.read()["pending"]["slot"] == "b"
-
-
-def test_a_kept_slot_has_no_uptime_limit(store):
-    node = start_new_slot_on_its_gate(store)
-    bring_online(node)
-    heartbeat_naming(node, NEW_VERSION)
-
-    run_connected_for(node, PENDING_SLOT_UPTIME_LIMIT_MILLISECONDS // MILLISECONDS_PER_SECOND * 2)
-
-    assert node.resets == []
-
-
 def test_the_active_slot_opens_no_gate_for_a_pending_slot_it_fell_back_from(store):
     store.start_pending("b", "update-1", NEW_VERSION)
     node = AgentUnderTest(store=store, running_version=RUNNING_VERSION)
     bring_online(node)
 
-    run_connected_for(node, PENDING_SLOT_UPTIME_LIMIT_MILLISECONDS // MILLISECONDS_PER_SECOND * 2)
+    run_connected_for(node, GATE_MILLISECONDS // MILLISECONDS_PER_SECOND * 2)
 
     assert node.resets == []
     assert store.read()["pending"]["slot"] == "b"
@@ -280,3 +255,17 @@ def test_an_outcome_that_did_not_reach_the_broker_is_sent_again_on_the_next_onli
 
     assert update_statuses(node) == [("update-1", "rolled-back", "gone")] * 2
     assert store.read()["outcome"] is None
+
+
+def test_a_gate_that_passed_but_could_not_be_written_stays_open(store, monkeypatch):
+    node = start_new_slot_on_its_gate(store)
+    bring_online(node)
+
+    def refuse_to_write(state):
+        raise OSError(28)
+
+    monkeypatch.setattr(store, "write", refuse_to_write)
+    with pytest.raises(OSError):
+        heartbeat_naming(node, NEW_VERSION)
+
+    assert node.agent.updates.gate is not None

@@ -4,31 +4,41 @@ import sys
 
 import slots
 
+# Raised whenever this file or slots.py changes, so a node's boot log says which bootloader it has.
+BOOTLOADER_VERSION = 2
 BOOT_GRACE_MILLISECONDS = 5000
 GRACE_POLL_MILLISECONDS = 100
+# Here rather than in the slot, so a release that never reaches its own gate still uses up its boots.
+PENDING_SLOT_DEADLINE_MILLISECONDS = 600000
+MILLISECONDS_PER_MINUTE = 60000
 
 
 class Board:
     """What the bootloader needs from the chip, passed in so the tests run it under CPython."""
 
-    def __init__(self, sleep_milliseconds, is_bootsel_pressed, reset):
+    def __init__(self, sleep_milliseconds, is_bootsel_pressed, reset, start_one_shot_timer):
         self.sleep_milliseconds = sleep_milliseconds
         self.is_bootsel_pressed = is_bootsel_pressed
         self.reset = reset
+        self.start_one_shot_timer = start_one_shot_timer
 
 
 def boot(board, store, run_slot, log):
     log(
-        "tempestas agent starts in %d s; Ctrl-C or BOOTSEL keeps the REPL" % (BOOT_GRACE_MILLISECONDS // 1000)
+        "tempestas bootloader %d: the agent starts in %d s; Ctrl-C or BOOTSEL keeps the REPL"
+        % (BOOTLOADER_VERSION, BOOT_GRACE_MILLISECONDS // 1000)
     )
     if is_safe_mode_requested(board):
         log("safe mode: BOOTSEL was pressed, so no slot runs")
         return
     slot = slots.choose_slot_to_boot(store)
     if slot is None:
-        log("no %s: deploy with tools/deploy-agent-micropython.sh" % slots.STATE_FILE)
+        log("no usable %s: deploy with tools/deploy-agent-micropython.sh" % slots.STATE_FILE)
         return
-    log("booting slot %s" % slot)
+    if is_pending(store, slot):
+        start_pending_deadline(board, store, slot, log)
+    else:
+        log("booting slot %s" % slot)
     try:
         run_slot(store.locate(slot))
     except Exception as error:
@@ -46,6 +56,32 @@ def is_safe_mode_requested(board):
         board.sleep_milliseconds(GRACE_POLL_MILLISECONDS)
         waited_milliseconds += GRACE_POLL_MILLISECONDS
     return False
+
+
+def is_pending(store, slot):
+    state = store.read()
+    return state is not None and state["pending"] is not None and state["pending"]["slot"] == slot
+
+
+def start_pending_deadline(board, store, slot, log):
+    deadline_minutes = PENDING_SLOT_DEADLINE_MILLISECONDS // MILLISECONDS_PER_MINUTE
+    log("booting pending slot %s; it resets in %d min unless kept" % (slot, deadline_minutes))
+
+    def reset_if_still_pending(timer):
+        if is_pending(store, slot):
+            board.reset()
+
+    board.start_one_shot_timer(PENDING_SLOT_DEADLINE_MILLISECONDS, reset_if_still_pending)
+
+
+def is_bootsel_pressed():
+    try:
+        import rp2
+
+        return rp2.bootsel_button() == 1
+    except Exception:
+        # A firmware without the button must still boot its slot.
+        return False
 
 
 def run_slot_from(slot_directory):

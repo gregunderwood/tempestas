@@ -1,9 +1,11 @@
+import ast
 import hashlib
 import json
 import subprocess
 from pathlib import Path
 
-from slot_installer import SlotInstaller
+import slots
+from slot_installer import ROOT_ONLY_FILES, SlotInstaller
 from slots import SlotStore
 
 APP_DIRECTORY = Path(__file__).resolve().parents[1]
@@ -16,6 +18,17 @@ BUNDLED_VERSION = "1.2.1"
 RUNNING_VERSION = "1.2.0"
 BOARD = "pico_w"
 BUNDLE_URL = "http://elantris:7000/api/agent-releases/agent-micropython/" + BUNDLED_VERSION
+# A node keeps the slots.py of its last USB deploy, so a release may use only what every node has.
+FROZEN_SLOTS_MODULE_NAMES = {"SlotStore", "find_other_slot", "join_path"}
+FROZEN_SLOT_STORE_NAMES = {
+    "abandon_pending",
+    "clear_outcome",
+    "keep_pending",
+    "locate",
+    "read",
+    "root",
+    "start_pending",
+}
 
 
 def read_file_list(list_name):
@@ -94,3 +107,39 @@ def test_a_bundle_from_the_deploy_installs_into_a_slot_that_can_boot(tmp_path):
     for module in read_file_list("MICROPYTHON_BOOTLOADER") + read_file_list("MICROPYTHON_NODE_CONFIG"):
         assert not (slot / module).exists()
     assert json.loads(manifest_bytes)["contractMinor"] == 2
+
+
+def test_only_the_bootloader_and_node_config_are_kept_out_of_a_slot():
+    root_files = read_file_list("MICROPYTHON_BOOTLOADER") + read_file_list("MICROPYTHON_NODE_CONFIG")
+    assert sorted(ROOT_ONLY_FILES) == sorted(root_files)
+
+
+def list_frozen_names_used(module_path):
+    module_names, store_names = set(), set()
+    for node in ast.walk(ast.parse(module_path.read_text())):
+        if isinstance(node, ast.ImportFrom) and node.module == "slots":
+            module_names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.Attribute) and is_named(node.value, "slots"):
+            module_names.add(node.attr)
+        elif isinstance(node, ast.Attribute) and is_named(node.value, "store"):
+            store_names.add(node.attr)
+    return module_names, store_names
+
+
+def is_named(expression, name):
+    if isinstance(expression, ast.Name):
+        return expression.id == name
+    return isinstance(expression, ast.Attribute) and expression.attr == name
+
+
+def test_slot_code_uses_only_the_frozen_slots_interface():
+    for module in read_file_list("MICROPYTHON_AGENT_CODE"):
+        module_names, store_names = list_frozen_names_used(DEVICE_DIRECTORY / module)
+        assert module_names <= FROZEN_SLOTS_MODULE_NAMES, module
+        assert store_names <= FROZEN_SLOT_STORE_NAMES, module
+
+
+def test_the_frozen_slots_interface_exists():
+    store = SlotStore()
+    assert all(hasattr(slots, name) for name in FROZEN_SLOTS_MODULE_NAMES)
+    assert all(hasattr(store, name) for name in FROZEN_SLOT_STORE_NAMES)

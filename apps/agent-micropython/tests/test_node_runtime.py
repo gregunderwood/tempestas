@@ -231,3 +231,61 @@ def test_a_client_dropped_by_its_own_handler_is_not_dropped_twice(runtime):
     runtime.publisher.client = ClientDroppedMidMessage()
     runtime.connection.serve_pending_messages()
     assert sum("dropping" in line for line in runtime.module.log.lines) == 1
+
+
+class LoopEnded(Exception):
+    pass
+
+
+class TendingAgent:
+    def __init__(self):
+        self.tended_while_connected = []
+
+    def publish_readings(self):
+        pass
+
+    def check_deadman(self):
+        pass
+
+    def tend_update(self, is_connected):
+        self.tended_while_connected.append(is_connected)
+
+
+def end_the_loop(milliseconds):
+    raise LoopEnded()
+
+
+@pytest.mark.parametrize("client", [None, FakeClient()])
+def test_each_pass_of_the_main_loop_tends_the_update_gate(runtime, monkeypatch, client):
+    agent = TendingAgent()
+    runtime.publisher.client = client
+    runtime.connection.keep_up = lambda: None
+    runtime.connection.resync_clock_while_online = lambda: None
+    runtime.connection.serve_pending_messages = lambda: None
+    monkeypatch.setattr(runtime.module, "time", types.SimpleNamespace(sleep_ms=end_the_loop))
+
+    with pytest.raises(LoopEnded):
+        runtime.module.run_forever(FakeWatchdog(), runtime.clock, agent, runtime.connection)
+
+    assert agent.tended_while_connected == [client is not None]
+
+
+def test_builds_the_update_chain_for_this_board_and_version(runtime, monkeypatch):
+    import settings
+    from agent_version import read_agent_version
+
+    monkeypatch.setattr(runtime.module, "machine", types.SimpleNamespace(reset=lambda: None))
+    watchdog = FakeWatchdog()
+
+    updates = runtime.module.build_updates(watchdog, runtime.clock)
+
+    assert updates.installer.board_name == settings.BOARD
+    assert updates.installer.running_version == read_agent_version()
+    assert updates.installer.fetcher.feed_watchdog == watchdog.feed
+    assert updates.gate is None
+
+
+def test_says_whether_a_message_reached_the_broker(runtime):
+    assert not runtime.publisher.publish("topic", "{}", False, 1, False)
+    runtime.publisher.client = FakeClient()
+    assert runtime.publisher.publish("topic", "{}", False, 1, False)
