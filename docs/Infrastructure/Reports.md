@@ -133,7 +133,8 @@ times looks like one that ran all week. Per admitted node, over the last 30 days
 - **Reboots** are changes of `boot_id` from one reading to the next, stamped at the first reading of
   the new boot. A null boot id predates the column and proves nothing, and the dev seeder's
   `seeded-history` rows are left out, so the seed meeting the first real reading is not a reboot. A
-  reboot that left a long enough silence is a gap as well.
+  reboot that left a long enough silence is a gap as well. The Linux agent makes a new boot id each
+  time its process starts, so a restart of the agent, including every update, counts as a reboot.
 - **Agent version changes** are the `node_updates` rows that finished `healthy`. Only updates run
   from the Nodes page are recorded; an agent installed by hand or by a deploy script changes
   `agent_version` on the node with no history, so it is not listed.

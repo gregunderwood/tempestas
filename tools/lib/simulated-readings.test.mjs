@@ -12,6 +12,7 @@ const TIMEZONE = 'America/Vancouver';
 const NOW = new Date('2026-11-23T20:30:00Z');
 const FIRST_REAL_READING_AT = new Date('2026-11-23T20:00:00Z');
 const MINUTES_PER_DAY = 24 * 60;
+const MILLISECONDS_PER_MINUTE = 60 * 1000;
 const SEED_SCRIPT = fileURLToPath(
   new URL('../seed-reading-history.mjs', import.meta.url),
 );
@@ -170,9 +171,11 @@ describe('buildSimulatedReadings', () => {
       now: NOW,
     });
     const outage = findOutage(NOW, TIMEZONE);
+    const outageMinutes =
+      (outage.until - outage.from) / MILLISECONDS_PER_MINUTE;
     const duringOutage = (rows) =>
       rows.filter((row) => isDuringOutage(row.createdAt, outage));
-    assert.equal(duringOutage(steadyNode.rows).length, 210);
+    assert.equal(duringOutage(steadyNode.rows).length, outageMinutes);
     assert.equal(duringOutage(outageNode.rows).length, 0);
   });
 
