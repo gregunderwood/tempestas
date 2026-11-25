@@ -148,6 +148,12 @@ daylight and per night period, newest first, the running one included.
   the band. A hold that runs past its bucket's end goes on in the next bucket, so a node that never
   missed a sample has no hours without readings. A stretch counts for as long as any of the zone's
   probes held in it.
+- **The 1-minute cap assumes every node samples at least once a minute.** A node sampling less
+  often shows part of each period as without readings. Holding for each node's own
+  `sampleIntervalMs` would lift that.
+- **A bucket goes to the period that holds its start.** A daylight edge off the 5-minute grid,
+  such as `06:02`, gives the whole `06:00` bucket to the night, and the day then starts with a
+  few minutes without readings.
 - **Hours without readings** are the rest of the period, so a gap is never counted as in range.
 - **Each period has its extremes**, each the exact reading with its probe and time: a night's lowest
   temperature and humidity, and a day's highest temperature, humidity and CO2. A metric no probe
