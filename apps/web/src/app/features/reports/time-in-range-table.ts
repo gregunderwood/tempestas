@@ -47,12 +47,15 @@ import type { PeriodRow } from './time-in-range-rows';
       text-align: left;
       vertical-align: top;
       padding: 0.2rem 0.4rem;
-      white-space: nowrap;
     }
     .range-periods th[scope='row'] {
       font-weight: normal;
     }
-    .range-periods .range-periods__hours {
+    .range-periods td.range-periods__hours {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .range-periods th.range-periods__hours {
       text-align: right;
     }
   `,
