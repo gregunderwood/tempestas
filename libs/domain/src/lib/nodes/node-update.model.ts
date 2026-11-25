@@ -1,6 +1,5 @@
 import type { UpdateState } from '../hardware/mqtt-contract';
 
-/** How an update started from the web ended, or that it has not yet. */
 export enum NodeUpdateOutcome {
   InProgress = 'in-progress',
   Healthy = 'healthy',
@@ -10,7 +9,6 @@ export enum NodeUpdateOutcome {
   TimedOut = 'timed-out',
 }
 
-/** One update the server sent a node, keyed by the command's id. */
 export interface NodeUpdate {
   id: string;
   fromVersion: string | null;
@@ -23,11 +21,9 @@ export interface NodeUpdate {
   finishedAt: string | null;
 }
 
-/** What the node page needs to offer an update or a roll back, and to show the last one. */
 export interface NodeUpdateSummary {
   /** Why this node's agent never takes an update from the web, so "up to date" would mislead. */
   notUpdatableBecause: string | null;
-  /** Why neither button may be pressed right now, or null when they may. */
   blockedBecause: string | null;
   /** The version the node ran before its last healthy update, while that bundle is still offered. */
   rollBackVersion: string | null;

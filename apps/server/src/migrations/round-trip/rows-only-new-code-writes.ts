@@ -194,8 +194,8 @@ export const ROWS_ONLY_NEW_CODE_WRITES = new Map<string, RowsOnlyNewCodeWrites>(
       {
         statements: [
           {
-            sql: `INSERT INTO node_updates (id, node_id, app, to_version, is_roll_back, outcome, started_at)
-                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)`,
+            sql: `INSERT INTO node_updates (id, node_id, app, to_version, is_roll_back, outcome, started_at, last_heard_at)
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $6)`,
             parameters: [
               NODE_ID,
               'agent-linux',

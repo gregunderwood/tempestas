@@ -109,13 +109,13 @@ file (ESPHome has native MQTT and built-in SCD4x support) rather than a code cha
 ## The API
 
 ```
-GET    /api/nodes                # includes deviceCount, latestReadingAt, availableUpdate and updates
+GET    /api/nodes                # includes deviceCount, latestReadingAt, availableUpdate and updateSummary
 GET    /api/nodes/:id
 PUT    /api/nodes/:id            # displayName, location, zoneId — nothing else
 POST   /api/nodes/:id/admit      # optional { zoneId, displayName, location }
 POST   /api/nodes/:id/disable
 POST   /api/nodes/:id/update     # { version }: sends the node its availableUpdate
-POST   /api/nodes/:id/roll-back  # { version }: sends the node updates.rollBackVersion
+POST   /api/nodes/:id/roll-back  # { version }: sends the node updateSummary.rollBackVersion
 DELETE /api/nodes/:id            # pending only
 ```
 
@@ -136,25 +136,27 @@ bundles it comes from are listed at `GET /api/agent-releases`; see
   5 s is a `503`. mqtt.js would otherwise keep the command and send it after reconnecting, past its
   expiry, while the request hung.
 - **Published first, saved once the broker has it**, so a failed send leaves no row behind to
-  block the other nodes.
+  block the other nodes. If the save itself fails, the node is already updating: the server logs
+  the update's id as an error.
 - **One node at a time.** The server refuses with `409 UPDATE_IN_PROGRESS` while any node's update
   is still in progress, so a bad release cannot take out every node at once. Two quick presses are
   queued, so the second sees the first.
 - **Only an admitted, online node, from the leader**, and only once `AGENT_RELEASES_URL` is set to
-  an http(s) address (`409 UPDATES_NOT_CONFIGURED`): it is the address the node downloads the
+  a plain http(s) server address, with no path, query or user name (`409 UPDATES_NOT_CONFIGURED`): it is the address the node downloads the
   bundle from, as the node sees the server. Online is the derived `online` the page shows, not the
-  stored flag, so a node whose agent hung is not sent an update. `updates.blockedBecause` says
+  stored flag, so a node whose agent hung is not sent an update. `updateSummary.blockedBecause` says
   which of these stands in the way, so the page disables the button and says why before anyone
   presses it.
-- **A node that can never take an update from here says why** in `updates.notUpdatableBecause`:
+- **A node that can never take an update from here says why** in `updateSummary.notUpdatableBecause`:
   an agent too old to name itself, one that is not an agent this server bundles, or one before
   contract 1.1. The page shows that instead of "Up to date."
 - **Every update is a row in `node_updates`**, keyed by the command's `id`: from and to versions,
   whether it was a roll back, the last state the node reported, the outcome and its reason. A
   status is matched by `id` and by the node it came from, so a node cannot report on another's
-  update. `updates.lastUpdate` is the newest row.
-- **Five minutes with no final state is `timed-out`**, with the last state heard as the reason, and
-  frees the next update. The node may still finish: a final state it sends later replaces the
+  update. `updateSummary.lastUpdate` is the newest row.
+- **Five minutes without a word from the node is `timed-out`**, counted from the last status, with
+  the last state heard as the reason, and frees the next update. A slow download that still
+  reports is not cut off. The node may still finish: a final state it sends later replaces the
   time-out, since the node knows what happened and the server only stopped waiting.
 - **Roll back** sends the version the node ran before its last healthy update, while that bundle
   is still offered. It is offered only straight after that update: once the node has moved on, or

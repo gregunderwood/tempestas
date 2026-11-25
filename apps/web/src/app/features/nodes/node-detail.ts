@@ -15,6 +15,7 @@ import {
   BehaviorSubject,
   combineLatest,
   filter,
+  finalize,
   switchMap,
   tap,
   throttleTime,
@@ -135,6 +136,7 @@ function describeNodeHeading(slug: string, node: Node | null) {
     @if (node(); as shownNode) {
       <temp-node-update-card
         [node]="shownNode"
+        [isSending]="sendingUpdateTo() === shownNode.id"
         (confirmed)="sendUpdate(shownNode, $event)"
       />
     }
@@ -430,6 +432,7 @@ export class NodeDetail {
   private readonly liveNodes = injectLiveNodes();
   private readonly nodes = this.liveNodes.nodes;
   protected readonly stats = signal<DayNightStats | null>(null);
+  protected readonly sendingUpdateTo = signal<string | null>(null);
   protected readonly isHeldOffByInterlock = isHeldOffByInterlock;
 
   protected readonly node = computed(
@@ -486,7 +489,11 @@ export class NodeDetail {
       action === 'update'
         ? this.api.updateNode(node.id, { version })
         : this.api.rollBackNode(node.id, { version });
-    refreshAfterSuccess(request, this.liveNodes.refresh);
+    this.sendingUpdateTo.set(node.id);
+    refreshAfterSuccess(
+      request.pipe(finalize(() => this.sendingUpdateTo.set(null))),
+      this.liveNodes.refresh,
+    );
   }
 
   protected findLastSwitchedAt(device: Device): string | null {

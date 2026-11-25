@@ -115,8 +115,8 @@ export const ROWS_ADDED_AFTER = new Map<string, Statement[]>([
     AddNodeUpdates1795546658688.name,
     [
       {
-        sql: `INSERT INTO node_updates (id, node_id, app, from_version, to_version, is_roll_back, last_state, outcome, started_at, finished_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        sql: `INSERT INTO node_updates (id, node_id, app, from_version, to_version, is_roll_back, last_state, outcome, started_at, last_heard_at, finished_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         parameters: [
           NODE_UPDATE_ID,
           NODE_ID,
@@ -127,6 +127,7 @@ export const ROWS_ADDED_AFTER = new Map<string, Statement[]>([
           'healthy',
           'healthy',
           '2026-11-24T12:00:00Z',
+          '2026-11-24T12:01:00Z',
           '2026-11-24T12:01:00Z',
         ],
       },

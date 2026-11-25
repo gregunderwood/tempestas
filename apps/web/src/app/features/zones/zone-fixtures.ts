@@ -101,7 +101,7 @@ export function node(slug: string, zoneId: string | null): Node {
     agentVersion: null,
     contractStanding: 'current',
     availableUpdate: null,
-    updates: NO_UPDATE_SUMMARY,
+    updateSummary: NO_UPDATE_SUMMARY,
     capabilities: {
       contractVersion: 1,
       hasRtc: true,

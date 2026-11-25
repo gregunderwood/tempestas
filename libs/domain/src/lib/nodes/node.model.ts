@@ -75,7 +75,7 @@ export interface Node {
   contractStanding: ContractStanding;
   /** The newest released version this node could be updated to from the web, or null. */
   availableUpdate: string | null;
-  updates: NodeUpdateSummary;
+  updateSummary: NodeUpdateSummary;
   capabilities: NodeCapabilities;
   zoneId: string | null;
   deviceCount: number;

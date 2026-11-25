@@ -125,7 +125,7 @@ The deploy also bundles each agent, for the server to offer the nodes through th
 - **A node downloads from `AGENT_RELEASES_URL`**, set in `/etc/tempestas/server.env` to the
   server's address as the nodes reach it, such as `http://192.168.2.70:7000`. The server cannot
   work it out: behind a proxy or on a second interface, its own idea of its address is not the
-  nodes'. Until it is set to an http(s) address, the node page disables the update button and says
+  nodes'. Until it is set to a plain http(s) address, scheme, host and port only, the node page disables the update button and says
   why, and the server logs it at startup. See
   [Updating a node from the web](Nodes.md#updating-a-node-from-the-web).
 

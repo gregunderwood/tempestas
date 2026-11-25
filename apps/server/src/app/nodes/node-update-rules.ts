@@ -9,9 +9,9 @@ import { MILLISECONDS_PER_SECOND } from '../common/time-units';
 import type { UpdateStatusReport } from '../hardware/hardware.service';
 import type { NodeEntity, NodeUpdateEntity } from './models';
 
-const FINAL_STATE_WAIT_MINUTES = 5;
-export const FINAL_STATE_WAIT_MS =
-  FINAL_STATE_WAIT_MINUTES * 60 * MILLISECONDS_PER_SECOND;
+const SILENCE_LIMIT_MINUTES = 5;
+export const SILENCE_LIMIT_MS =
+  SILENCE_LIMIT_MINUTES * 60 * MILLISECONDS_PER_SECOND;
 
 const OUTCOME_OF_FINAL_STATE: Partial<Record<UpdateState, NodeUpdateOutcome>> =
   {
@@ -21,7 +21,6 @@ const OUTCOME_OF_FINAL_STATE: Partial<Record<UpdateState, NodeUpdateOutcome>> =
   };
 
 const RELEASES_URL_SCHEMES = new Set(['http:', 'https:']);
-const TRAILING_SLASHES = /\/+$/;
 
 export interface UpdateRefusal {
   code: ApiErrorCode;
@@ -30,11 +29,9 @@ export interface UpdateRefusal {
 
 export type ReleasesAddress = { url: string } | { problem: string };
 
-/** What decides whether a node may be sent an update right now. */
 export interface UpdateConditions {
   releasesUrlProblem: string | null;
   isLeader: boolean;
-  /** The one update any node is still running, with the slug of that node. */
   updateInProgress: { nodeSlug: string } | null;
 }
 
@@ -53,20 +50,33 @@ export function readReleasesAddress(setting: string): ReleasesAddress {
         'Set AGENT_RELEASES_URL on the server, so nodes know where to download releases.',
     };
   }
-  if (!isHttpUrl(trimmed)) {
+  const url = parseUrl(trimmed);
+  if (!url || !isServerAddress(url)) {
     return {
-      problem: `AGENT_RELEASES_URL "${trimmed}" is not an http(s) address, such as http://192.168.2.70:7000.`,
+      problem: `AGENT_RELEASES_URL "${trimmed}" is not a plain http(s) server address, such as http://192.168.2.70:7000.`,
     };
   }
-  return { url: trimmed.replace(TRAILING_SLASHES, '') };
+  return { url: url.origin };
 }
 
-function isHttpUrl(candidate: string): boolean {
+function parseUrl(candidate: string): URL | null {
   try {
-    return RELEASES_URL_SCHEMES.has(new URL(candidate).protocol);
+    return new URL(candidate);
   } catch {
-    return false;
+    return null;
   }
+}
+
+// The manifest path is appended whole, and the address is published to every node.
+function isServerAddress(url: URL): boolean {
+  return (
+    RELEASES_URL_SCHEMES.has(url.protocol) &&
+    url.pathname === '/' &&
+    url.search === '' &&
+    url.hash === '' &&
+    url.username === '' &&
+    url.password === ''
+  );
 }
 
 // Checked for the button as well as the request, so the page says why before anyone presses it.
@@ -142,16 +152,18 @@ export function applyUpdateStatus(
   const finalOutcome = OUTCOME_OF_FINAL_STATE[status.state];
   update.lastState = status.state;
   update.reason = status.reason;
+  update.lastHeardAt = now;
   if (finalOutcome) {
     update.outcome = finalOutcome;
     update.finishedAt = now;
   }
 }
 
+// Counted from the last status, so a slow download that still reports is not given up on.
 export function isStalled(update: NodeUpdateEntity, now: Date): boolean {
   return (
     update.outcome === NodeUpdateOutcome.InProgress &&
-    now.getTime() - update.startedAt.getTime() >= FINAL_STATE_WAIT_MS
+    now.getTime() - update.lastHeardAt.getTime() >= SILENCE_LIMIT_MS
   );
 }
 
@@ -159,8 +171,8 @@ export function timeOut(update: NodeUpdateEntity, now: Date): void {
   update.outcome = NodeUpdateOutcome.TimedOut;
   update.finishedAt = now;
   update.reason = update.lastState
-    ? `No final state within ${FINAL_STATE_WAIT_MINUTES} minutes. The last state heard was "${update.lastState}".`
-    : `No final state within ${FINAL_STATE_WAIT_MINUTES} minutes, and nothing was heard from the node.`;
+    ? `Nothing heard for ${SILENCE_LIMIT_MINUTES} minutes. The last state heard was "${update.lastState}".`
+    : `Nothing heard from the node within ${SILENCE_LIMIT_MINUTES} minutes of sending.`;
 }
 
 export function toNodeUpdate(update: NodeUpdateEntity): NodeUpdate {

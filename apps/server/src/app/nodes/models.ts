@@ -118,6 +118,9 @@ export class NodeUpdateEntity {
   @Column({ type: 'timestamptz', name: 'started_at' })
   startedAt!: Date;
 
+  @Column({ type: 'timestamptz', name: 'last_heard_at' })
+  lastHeardAt!: Date;
+
   @Column({ type: 'timestamptz', name: 'finished_at', nullable: true })
   finishedAt!: Date | null;
 }

@@ -15,8 +15,9 @@ export class AddNodeUpdates1795546658688 implements MigrationInterface {
         "last_state"   text,
         "outcome"      text        NOT NULL,
         "reason"       text,
-        "started_at"   timestamptz NOT NULL,
-        "finished_at"  timestamptz,
+        "started_at"    timestamptz NOT NULL,
+        "last_heard_at" timestamptz NOT NULL,
+        "finished_at"   timestamptz,
         CONSTRAINT "fk_node_updates_node" FOREIGN KEY ("node_id")
           REFERENCES "nodes" ("id") ON DELETE CASCADE
       )

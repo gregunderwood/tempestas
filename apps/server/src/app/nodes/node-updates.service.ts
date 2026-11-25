@@ -16,7 +16,6 @@ import { Subject, Subscription, type Observable } from 'rxjs';
 import {
   ApiErrorCode,
   NodeUpdateOutcome,
-  type AgentApp,
   type NodeUpdateSummary,
 } from '@tempestas/domain';
 import {
@@ -27,6 +26,7 @@ import { Clock } from '../common/clock';
 import { describeError } from '../common/describe-error';
 import {
   HardwareService,
+  type UpdateOrder,
   type UpdateStatusReport,
 } from '../hardware/hardware.service';
 import { translateHardwareError } from '../hardware/hardware-http-error';
@@ -70,7 +70,7 @@ export class NodeUpdatesService implements OnModuleInit, OnModuleDestroy {
   private readonly releasesAddress: ReleasesAddress;
   private queue: Promise<unknown> = Promise.resolve();
 
-  /** Fires when any node's update summary may have changed, including the one-at-a-time block. */
+  // Also fires when only the one-at-a-time block changed, which touches every node's summary.
   readonly changes$: Observable<void> = this.changes.asObservable();
 
   constructor(
@@ -172,50 +172,79 @@ export class NodeUpdatesService implements OnModuleInit, OnModuleDestroy {
 
   // Published before it is saved: the queue holds the node's first status until the save is done.
   private async send(node: NodeEntity, target: UpdateTarget): Promise<void> {
+    await this.refuseIfBlocked(node);
+    const order = this.buildOrder(target.version, node.agentName);
+    await this.publish(node, order);
+    await this.recordStarted(node, order, target);
+    this.logger.warn(
+      `Sent "${node.slug}" ${target.isRollBack ? 'a roll back' : 'an update'} from ${node.agentVersion} to ${target.version} (update ${order.id})`,
+    );
+    this.changes.next();
+  }
+
+  private async refuseIfBlocked(node: NodeEntity): Promise<void> {
     const candidate = { node, isOnline: await this.isOnline(node) };
     const refusal = findUpdateRefusal(candidate, await this.readConditions());
     if (refusal) throw new ConflictException(refusal);
+  }
 
-    const app = node.agentName as AgentApp;
-    const bundle = this.agentReleases.findBundle(app, target.version);
+  private buildOrder(version: string, agentName: string | null): UpdateOrder {
+    const bundle = agentName
+      ? this.agentReleases.findBundle(agentName, version)
+      : undefined;
     if (!bundle || !('url' in this.releasesAddress)) {
       throw new ConflictException({
         code: ApiErrorCode.UpdateNotAvailable,
-        message: `${app} ${target.version} is not offered.`,
+        message: `${agentName} ${version} is not offered.`,
       });
     }
+    return {
+      id: randomUUID(),
+      app: bundle.release.app,
+      version,
+      manifestUrl: this.releasesAddress.url + bundle.release.manifestPath,
+      manifestSha256: bundle.release.manifestSha256,
+    };
+  }
 
-    const id = randomUUID();
+  private async publish(node: NodeEntity, order: UpdateOrder): Promise<void> {
     try {
-      await this.hardware.sendUpdate(node.slug, {
-        id,
-        app,
-        version: target.version,
-        manifestUrl: this.releasesAddress.url + bundle.release.manifestPath,
-        manifestSha256: bundle.release.manifestSha256,
-      });
+      await this.hardware.sendUpdate(node.slug, order);
     } catch (error: unknown) {
       throw translateHardwareError(error);
     }
-    await this.updates.save(
-      this.updates.create({
-        id,
-        nodeId: node.id,
-        app,
-        fromVersion: node.agentVersion,
-        toVersion: target.version,
-        isRollBack: target.isRollBack,
-        lastState: null,
-        outcome: NodeUpdateOutcome.InProgress,
-        reason: null,
-        startedAt: this.clock.now(),
-        finishedAt: null,
-      }),
-    );
-    this.logger.warn(
-      `Sent "${node.slug}" ${target.isRollBack ? 'a roll back' : 'an update'} from ${node.agentVersion} to ${target.version} (update ${id})`,
-    );
-    this.changes.next();
+  }
+
+  // The node is already updating, so a lost row must at least leave its id in the log.
+  private async recordStarted(
+    node: NodeEntity,
+    order: UpdateOrder,
+    target: UpdateTarget,
+  ): Promise<void> {
+    const now = this.clock.now();
+    try {
+      await this.updates.save(
+        this.updates.create({
+          id: order.id,
+          nodeId: node.id,
+          app: order.app,
+          fromVersion: node.agentVersion,
+          toVersion: order.version,
+          isRollBack: target.isRollBack,
+          lastState: null,
+          outcome: NodeUpdateOutcome.InProgress,
+          reason: null,
+          startedAt: now,
+          lastHeardAt: now,
+          finishedAt: null,
+        }),
+      );
+    } catch (error: unknown) {
+      this.logger.error(
+        `Sent "${node.slug}" update ${order.id} to ${order.version}, but could not record it: ${describeError(error)}`,
+      );
+      throw error;
+    }
   }
 
   private async recordStatus(status: UpdateStatusReport): Promise<void> {

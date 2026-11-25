@@ -13,7 +13,7 @@ import { NodeUpdateCard, type UpdateConfirmation } from './node-update-card';
 
 function node(
   overrides: Partial<Node> = {},
-  updates: Partial<NodeUpdateSummary> = {},
+  updateSummary: Partial<NodeUpdateSummary> = {},
 ): Node {
   return {
     id: 'patji-id',
@@ -24,7 +24,7 @@ function node(
     agentName: 'agent-linux',
     agentVersion: '1.1.0',
     availableUpdate: '1.1.1',
-    updates: { ...NO_UPDATE_SUMMARY, ...updates },
+    updateSummary: { ...NO_UPDATE_SUMMARY, ...updateSummary },
     ...overrides,
   } as unknown as Node;
 }
@@ -68,6 +68,10 @@ function renderCard(shown: Node) {
     render: () => fixture.detectChanges(),
     show(next: Node) {
       fixture.componentRef.setInput('node', next);
+      fixture.detectChanges();
+    },
+    showSending(isSending: boolean) {
+      fixture.componentRef.setInput('isSending', isSending);
       fixture.detectChanges();
     },
   };
@@ -186,6 +190,31 @@ describe('NodeUpdateCard', () => {
 
     expect(card.textContent).not.toContain('fail-safe levels');
     expect(findButton('Update to 1.1.1')?.disabled).toBe(true);
+  });
+
+  it('does not bring a dropped confirmation back once the block lifts', () => {
+    const { card, findButton, render, show } = renderCard(node());
+
+    findButton('Update to 1.1.1')?.click();
+    render();
+    show(node({}, { blockedBecause: '"elantris" is updating.' }));
+    show(node());
+
+    expect(card.textContent).not.toContain('fail-safe levels');
+    expect(findButton('Update to 1.1.1')?.disabled).toBe(false);
+  });
+
+  it('offers no button while the request is on its way, so it cannot be sent twice', () => {
+    const { card, findButton, showSending } = renderCard(node());
+
+    showSending(true);
+
+    expect(card.textContent).toContain('Sending…');
+    expect(findButton('Update to 1.1.1')).toBeUndefined();
+
+    showSending(false);
+
+    expect(findButton('Update to 1.1.1')).toBeDefined();
   });
 
   it('says why a node that cannot update from here is not offered one', () => {

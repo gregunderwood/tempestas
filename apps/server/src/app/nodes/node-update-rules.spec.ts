@@ -9,12 +9,12 @@ import type { UpdateStatusReport } from '../hardware/hardware.service';
 import type { NodeEntity, NodeUpdateEntity } from './models';
 import {
   applyUpdateStatus,
-  FINAL_STATE_WAIT_MS,
   findRollBackVersion,
   findUpdateRefusal,
   isNewsAbout,
   isStalled,
   readReleasesAddress,
+  SILENCE_LIMIT_MS,
   timeOut,
   type UpdateConditions,
 } from './node-update-rules';
@@ -52,6 +52,7 @@ function update(overrides: Partial<NodeUpdateEntity> = {}): NodeUpdateEntity {
     outcome: NodeUpdateOutcome.InProgress,
     reason: null,
     startedAt: STARTED_AT,
+    lastHeardAt: STARTED_AT,
     finishedAt: null,
     ...overrides,
   } as NodeUpdateEntity;
@@ -131,14 +132,18 @@ describe('readReleasesAddress', () => {
     });
   });
 
-  it.each(['192.168.2.70:7000', 'ftp://elantris/releases', 'not a url'])(
-    'refuses %s, which no node could download from',
-    (setting) => {
-      expect(readReleasesAddress(setting)).toEqual({
-        problem: expect.stringContaining('is not an http(s) address'),
-      });
-    },
-  );
+  it.each([
+    '192.168.2.70:7000',
+    'ftp://elantris/releases',
+    'not a url',
+    'http://192.168.2.70:7000/api',
+    'http://192.168.2.70:7000/?mirror=1',
+    'http://tempestas:secret@192.168.2.70:7000',
+  ])('refuses %s, which is not a plain server address', (setting) => {
+    expect(readReleasesAddress(setting)).toEqual({
+      problem: expect.stringContaining('is not a plain http(s) server address'),
+    });
+  });
 });
 
 describe('findRollBackVersion', () => {
@@ -212,6 +217,7 @@ describe('applyUpdateStatus', () => {
     expect(inProgress).toMatchObject({
       lastState: UpdateState.Installing,
       outcome: NodeUpdateOutcome.InProgress,
+      lastHeardAt: LATER,
       finishedAt: null,
     });
   });
@@ -234,14 +240,20 @@ describe('applyUpdateStatus', () => {
 });
 
 describe('stalled updates', () => {
-  const waitedOut = new Date(STARTED_AT.getTime() + FINAL_STATE_WAIT_MS);
+  const waitedOut = new Date(STARTED_AT.getTime() + SILENCE_LIMIT_MS);
 
-  it('stalls only once the wait has passed', () => {
+  it('stalls only once the node has been silent for the limit', () => {
     expect(isStalled(update(), LATER)).toBe(false);
     expect(isStalled(update(), waitedOut)).toBe(true);
     expect(
       isStalled(update({ outcome: NodeUpdateOutcome.Healthy }), waitedOut),
     ).toBe(false);
+  });
+
+  it('counts from the last status, so a slow update that still reports is not cut off', () => {
+    const stillReporting = update({ lastHeardAt: LATER });
+
+    expect(isStalled(stillReporting, waitedOut)).toBe(false);
   });
 
   it('times out with the last state heard', () => {
@@ -261,6 +273,6 @@ describe('stalled updates', () => {
 
     timeOut(silent, waitedOut);
 
-    expect(silent.reason).toContain('nothing was heard');
+    expect(silent.reason).toContain('Nothing heard from the node');
   });
 });

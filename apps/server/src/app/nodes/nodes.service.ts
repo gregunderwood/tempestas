@@ -485,7 +485,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
         agentVersion: node.agentVersion,
         contractStanding: findContractStanding(node.capabilities),
         availableUpdate: this.agentReleases.findAvailableUpdate(node),
-        updates: updateSummaries.get(node.id) ?? NO_UPDATE_SUMMARY,
+        updateSummary: updateSummaries.get(node.id) ?? NO_UPDATE_SUMMARY,
         capabilities: node.capabilities,
         zoneId: node.zoneId,
         deviceCount: deviceCounts.get(node.id) ?? 0,

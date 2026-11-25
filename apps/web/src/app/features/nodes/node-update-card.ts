@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   input,
   output,
   signal,
@@ -17,6 +18,7 @@ import {
   type Node,
   type NodeUpdate,
 } from '@tempestas/domain';
+
 export type UpdateAction = 'update' | 'roll-back';
 
 export interface UpdateConfirmation {
@@ -53,6 +55,9 @@ const OUTCOME_LABELS: Record<NodeUpdateOutcome, string> = {
             <strong>{{ update.lastState ?? 'sent' }}</strong>
           </p>
           <mat-progress-bar mode="indeterminate" />
+        } @else if (isSending()) {
+          <p class="progress" role="status">Sending…</p>
+          <mat-progress-bar mode="indeterminate" />
         } @else if (shownConfirmation(); as pending) {
           <p class="caution">
             {{ node().displayName }} restarts, and its relays go to their
@@ -76,7 +81,7 @@ const OUTCOME_LABELS: Record<NodeUpdateOutcome, string> = {
                 Update to {{ version }}
               </button>
             }
-            @if (node().updates.rollBackVersion; as version) {
+            @if (node().updateSummary.rollBackVersion; as version) {
               <button
                 mat-stroked-button
                 [disabled]="isBlocked()"
@@ -86,10 +91,10 @@ const OUTCOME_LABELS: Record<NodeUpdateOutcome, string> = {
               </button>
             }
           </div>
-          @if (node().updates.blockedBecause; as reason) {
+          @if (node().updateSummary.blockedBecause; as reason) {
             <p class="blocked">{{ reason }}</p>
           }
-        } @else if (node().updates.notUpdatableBecause; as reason) {
+        } @else if (node().updateSummary.notUpdatableBecause; as reason) {
           <p class="quiet">{{ reason }}</p>
         } @else {
           <p class="quiet">Up to date.</p>
@@ -149,41 +154,41 @@ const OUTCOME_LABELS: Record<NodeUpdateOutcome, string> = {
 })
 export class NodeUpdateCard {
   readonly node = input.required<Node>();
+  readonly isSending = input(false);
   readonly confirmed = output<UpdateConfirmation>();
 
   protected readonly confirmation = signal<PendingConfirmation | null>(null);
 
-  // Hidden once it no longer matches this node's offer, so a stale version is never confirmed.
   protected readonly shownConfirmation = computed(() => {
     const pending = this.confirmation();
-    if (!pending || this.isBlocked()) return null;
-    if (pending.nodeId !== this.node().id) return null;
-    return this.findOffered(pending.action) === pending.version
-      ? pending
-      : null;
+    return pending && this.isStillOffered(pending) ? pending : null;
   });
 
   protected readonly agent = computed(() => describeAgent(this.node()));
 
   protected readonly updateInProgress = computed(() => {
-    const lastUpdate = this.node().updates.lastUpdate;
+    const lastUpdate = this.node().updateSummary.lastUpdate;
     return isUpdateInProgress(lastUpdate) ? lastUpdate : null;
   });
 
   protected readonly finishedUpdate = computed(() => {
-    const lastUpdate = this.node().updates.lastUpdate;
+    const lastUpdate = this.node().updateSummary.lastUpdate;
     return isUpdateInProgress(lastUpdate) ? null : lastUpdate;
   });
 
   protected readonly hasAction = computed(
     () =>
       this.node().availableUpdate !== null ||
-      this.node().updates.rollBackVersion !== null,
+      this.node().updateSummary.rollBackVersion !== null,
   );
 
   protected readonly isBlocked = computed(
-    () => this.node().updates.blockedBecause !== null,
+    () => this.node().updateSummary.blockedBecause !== null,
   );
+
+  constructor() {
+    effect(() => this.dropStaleConfirmation());
+  }
 
   protected ask(action: UpdateAction, version: string): void {
     this.confirmation.set({ action, version, nodeId: this.node().id });
@@ -194,10 +199,25 @@ export class NodeUpdateCard {
     this.confirmed.emit({ action, version });
   }
 
+  // Dropped, not just hidden, so it does not come back unasked once the block lifts.
+  private dropStaleConfirmation(): void {
+    if (this.confirmation() && !this.shownConfirmation()) {
+      this.confirmation.set(null);
+    }
+  }
+
+  private isStillOffered(pending: PendingConfirmation): boolean {
+    return (
+      !this.isBlocked() &&
+      pending.nodeId === this.node().id &&
+      this.findOffered(pending.action) === pending.version
+    );
+  }
+
   private findOffered(action: UpdateAction): string | null {
     return action === 'update'
       ? this.node().availableUpdate
-      : this.node().updates.rollBackVersion;
+      : this.node().updateSummary.rollBackVersion;
   }
 
   protected labelAction(pending: PendingConfirmation): string {

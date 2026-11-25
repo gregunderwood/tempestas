@@ -143,7 +143,8 @@ has an **Update to X** button. Pressing it first says what will happen: the node
 relays go to their fail-safe levels for a few seconds, and it goes back to what it runs now if the
 new version does not come up healthy. The confirmation goes away if the offer changes, the update
 becomes blocked or the page moves to another node, and the request carries the version confirmed,
-so a version nobody saw is never sent. Then progress follows the node's own reports over
+so a version nobody saw is never sent. While the request is on its way the card says "Sending…"
+instead of offering the button again. Then progress follows the node's own reports over
 `node:state`, and the result and its reason stay on the card. **Roll back to Y** appears straight
 after a healthy update. When the server would refuse, the buttons are disabled and the card says
 why. A node that cannot update from here, such as a MicroPython agent before contract 1.1, says so

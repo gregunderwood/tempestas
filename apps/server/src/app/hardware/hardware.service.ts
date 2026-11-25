@@ -70,7 +70,6 @@ export interface PinCommand {
   label?: string;
 }
 
-/** Which release a node should install, and where it finds the manifest. */
 export interface UpdateOrder {
   id: string;
   app: AgentApp;

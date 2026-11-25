@@ -279,7 +279,6 @@ export class FakeHardwareService
     return node;
   }
 
-  // As an agent would: progress, then a restart that says hello on the new version.
   private playUpdateThrough(node: FakeNodeSpec, order: UpdateOrder): void {
     STATES_BEFORE_RESTART.forEach((state, step) =>
       this.scheduleAfterUpdateSteps(step + 1, () =>

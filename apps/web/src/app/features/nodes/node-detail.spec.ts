@@ -5,7 +5,7 @@ import {
   signal,
 } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { of, type Observable } from 'rxjs';
+import { of, Subject, type Observable } from 'rxjs';
 import type {
   DayNightStats,
   Device,
@@ -120,7 +120,7 @@ function node(overrides: Partial<Node> = {}): Node {
     status: NodeStatus.Admitted,
     online: true,
     availableUpdate: null,
-    updates: NO_UPDATE_SUMMARY,
+    updateSummary: NO_UPDATE_SUMMARY,
     ...overrides,
   } as unknown as Node;
 }
@@ -220,6 +220,28 @@ describe('NodeDetail', () => {
     clickButton(page, 'Update to 1.1.1');
 
     expect(updateNode).toHaveBeenCalledWith('n1', { version: '1.1.1' });
+  });
+
+  it('says it is sending until the server answers', async () => {
+    const answer = new Subject<Node>();
+    const page = renderNodeDetail({
+      node: node({ availableUpdate: '1.1.1' }),
+      updateNode: () => answer,
+    });
+    const appRef = TestBed.inject(ApplicationRef);
+
+    clickButton(page, 'Update to 1.1.1');
+    await appRef.whenStable();
+    clickButton(page, 'Update to 1.1.1');
+    await appRef.whenStable();
+
+    expect(page.textContent).toContain('Sending…');
+
+    answer.next(node());
+    answer.complete();
+    await appRef.whenStable();
+
+    expect(page.textContent).not.toContain('Sending…');
   });
 
   it('names itself in the top bar, with its kind and whether it is online', () => {

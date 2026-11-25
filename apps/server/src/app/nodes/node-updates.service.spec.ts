@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Subject } from 'rxjs';
 import { FindOperator, type Repository } from 'typeorm';
@@ -18,11 +19,12 @@ import { FixedClock } from '../common/clock';
 import {
   HardwareError,
   type HardwareService,
+  type UpdateOrder,
   type UpdateStatusReport,
 } from '../hardware/hardware.service';
 import type { SensorReadingEntity } from '../readings/models';
 import type { NodeEntity, NodeUpdateEntity } from './models';
-import { FINAL_STATE_WAIT_MS } from './node-update-rules';
+import { SILENCE_LIMIT_MS } from './node-update-rules';
 import { NodeUpdatesService } from './node-updates.service';
 
 const NOW = new Date('2026-11-24T12:00:00Z');
@@ -149,7 +151,16 @@ async function makeService({
     await deliver({ nodeId: 'patji', id: update.id, state, reason });
   }
 
-  return { service, updateRows, sendUpdate, clock, changes, report, deliver };
+  return {
+    service,
+    updateRows,
+    updateRepository,
+    sendUpdate,
+    clock,
+    changes,
+    report,
+    deliver,
+  };
 }
 
 async function settle(): Promise<void> {
@@ -170,6 +181,7 @@ describe('NodeUpdatesService.updateToOffered', () => {
       isRollBack: false,
       outcome: NodeUpdateOutcome.InProgress,
       startedAt: NOW,
+      lastHeardAt: NOW,
     });
     expect(sendUpdate).toHaveBeenCalledWith('patji', {
       id: updateRows[0].id,
@@ -251,6 +263,31 @@ describe('NodeUpdatesService.updateToOffered', () => {
     expect(changes).not.toHaveBeenCalled();
   });
 
+  it('logs the id of an update it sent but could not record', async () => {
+    const { service, updateRepository, sendUpdate } = await makeService();
+    vi.mocked(updateRepository.save).mockRejectedValueOnce(
+      new Error('database gone'),
+    );
+    const logError = vi
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+
+    await expect(
+      service.updateToOffered('patji-uuid', '1.1.1'),
+    ).rejects.toThrow('database gone');
+
+    const [, order] = sendUpdate.mock.lastCall as unknown as [
+      string,
+      UpdateOrder,
+    ];
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `update ${order.id} to 1.1.1, but could not record it`,
+      ),
+    );
+    logError.mockRestore();
+  });
+
   it('refuses a version the operator did not confirm', async () => {
     const { service, sendUpdate } = await makeService();
 
@@ -285,7 +322,9 @@ describe('NodeUpdatesService.updateToOffered', () => {
     ).rejects.toMatchObject({
       response: {
         code: ApiErrorCode.UpdatesNotConfigured,
-        message: expect.stringContaining('is not an http(s) address'),
+        message: expect.stringContaining(
+          'is not a plain http(s) server address',
+        ),
       },
     });
   });
@@ -392,7 +431,7 @@ describe('NodeUpdatesService status tracking', () => {
     const { service, updateRows, clock, sendUpdate } = await makeService();
     await service.updateToOffered('patji-uuid', '1.1.1');
 
-    clock.set(new Date(NOW.getTime() + FINAL_STATE_WAIT_MS));
+    clock.set(new Date(NOW.getTime() + SILENCE_LIMIT_MS));
     await service.sweepStalledUpdates();
 
     expect(updateRows[0].outcome).toBe(NodeUpdateOutcome.TimedOut);
