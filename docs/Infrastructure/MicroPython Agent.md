@@ -20,6 +20,7 @@ so a dead node leaves them **on**, the same as patji in the [Pumphouse](../Pumph
 
 ## Key files
 
+- [../../apps/agent-micropython/device/main.py](../../apps/agent-micropython/device/main.py), [bootloader.py](../../apps/agent-micropython/device/bootloader.py) and [slots.py](../../apps/agent-micropython/device/slots.py) — the bootloader: the boot grace, safe mode, which slot runs and how many boots it has had. Never updated over the air
 - [../../apps/agent-micropython/device/node_agent.py](../../apps/agent-micropython/device/node_agent.py) — announce, judge commands, dead-man, readings; no hardware imports
 - [../../apps/agent-micropython/device/node_runtime.py](../../apps/agent-micropython/device/node_runtime.py) — boot, Wi-Fi, NTP, the broker connection, the main loop, the watchdog
 - [../../apps/agent-micropython/device/command_guard.py](../../apps/agent-micropython/device/command_guard.py) — every reason a `gpio/set` is refused
@@ -28,6 +29,7 @@ so a dead node leaves them **on**, the same as patji in the [Pumphouse](../Pumph
 - [../../apps/agent-micropython/device/boards/](../../apps/agent-micropython/device/boards/) — one file per board, for everything the chip decides: pin readback, Wi-Fi power saving, whether the watchdog is armed
 - [../../apps/agent-micropython/device/ds18b20_probes.py](../../apps/agent-micropython/device/ds18b20_probes.py) — the probes, pinned by ROM, refusing the chip's fake readings
 - [../../apps/agent-micropython/device/contract.py](../../apps/agent-micropython/device/contract.py) — the MicroPython mirror of the contract
+- [../../apps/agent-micropython/device/node_updates.py](../../apps/agent-micropython/device/node_updates.py) — an update from command to outcome: [update_guard.py](../../apps/agent-micropython/device/update_guard.py) judges it, [slot_installer.py](../../apps/agent-micropython/device/slot_installer.py) fills the other slot over [http_fetch.py](../../apps/agent-micropython/device/http_fetch.py), and [update_gate.py](../../apps/agent-micropython/device/update_gate.py) decides whether the new slot stays
 - [../../apps/agent-micropython/device/settings.py](../../apps/agent-micropython/device/settings.py) — node id, board, broker, pins, probes, failsafe levels
 - [../../tools/deploy-agent-micropython.sh](../../tools/deploy-agent-micropython.sh) — copy it onto the board over USB
 
@@ -77,15 +79,70 @@ A `gpio/sync` is subscribed to but never applied, as on the Linux agent: only a 
 a line. The Pico logs each one it ignores, so a sync sent to it shows up on the serial console
 rather than vanishing.
 
-## The update command
+## Updates over the air
 
-Contract 1.1 adds `update` and `update/status`, and `contract.py` carries their topics, schemas,
-QoS and the `UpdateState` values, matched against the Linux agent's. The agent still reports
-contract minor 0, because it does not subscribe to `update` yet; it raises the minor when it does.
-Then it judges an update as it judges `gpio/set`, including refusing quietly until NTP has set the
-clock, except that it refuses every update until a controller is bound, and refuses an
-update for another app or another contract major with an `update/status` of `failed`. The full
-rules are in [MQTT Contract](MQTT%20Contract.md#the-update-command).
+The agent runs from one of two slots on the flash, `/a` and `/b`. An update fills the slot that is
+not running, and the bootloader switches to it only once every file is verified:
+
+```
+/main.py /bootloader.py /slots.py   the bootloader, only ever replaced over USB
+/settings.py /credentials.py        this node's own, never in a bundle
+/slots.json                         which slot is active, which is pending, and the last outcome
+/a/  /b/                            the agent, its board.py and its deployed_version.py
+```
+
+### The update command
+
+It reports contract minor 2, so it takes `update` (1.1) and reads the accepted version in a
+heartbeat (1.2). It judges an update as the Linux agent does, and
+[tests/test_update_guard.py](../../apps/agent-micropython/tests/test_update_guard.py) holds the
+two judges to the same answers. The one addition is the clock: until NTP has set it, an update is
+refused quietly, as `gpio/set` is. The full rules are in
+[MQTT Contract](MQTT%20Contract.md#the-update-command).
+
+### Installing into the other slot
+
+1. **`downloading`.** It fetches the manifest and checks it against `manifestSha256`, then checks
+   the bundle has `boards/<settings.BOARD>.py`, clears the other slot, and checks the flash has room
+   for a slot the size of the running one, plus 32 KB. Each file is streamed to flash over HTTP/1.0
+   in 1 KB chunks, hashing as it goes and feeding the watchdog between chunks. Each fetch has 30 s.
+2. **`verifying`.** Every file's sha256 must match the manifest.
+3. **`installing`.** Its own board file is copied to `board.py`, and `slots.json` marks the slot
+   pending with no boots yet.
+4. **`restarting`**, then a reset.
+
+Anything that fails clears the other slot and answers `failed` with the reason; the running slot
+never changed. An update is refused while a new slot is still on its gate, and for the version
+already running.
+
+### The health gate
+
+The bootloader counts every boot of a pending slot before it runs it, so a crash, a hang the
+watchdog resets, or an exception before the agent starts all use up a boot. After 3 boots it goes
+back to the active slot and records `rolled-back`, "1.2.1 did not come up healthy in 3 boots".
+
+A pending slot that does run has the same gate as the [Linux agent](Linux%20Agent.md#the-health-gate):
+it must say `hello` and hear a heartbeat naming its own version, within 120 s counted only while
+the broker is connected and the server is online. While heartbeats name another version it says
+`hello` again, at most every 20 s. If it passes, `slots.json` makes it the active slot and records
+`healthy`. If the 120 s run out, it records `rolled-back` with the gate's reason and resets into the
+previous slot.
+
+Whichever slot runs next sends the recorded outcome on `update/status` once the server is online,
+then clears it.
+
+### Safe mode
+
+Press BOOTSEL during the 5 s boot grace and the bootloader runs no slot, leaving the REPL for USB
+recovery even when both slots are broken. Holding it at power-up does not work: the RP2040's ROM
+reads it first and comes up as the `RPI-RP2` drive instead. Ctrl-C during the grace does the same,
+when a serial console is attached. It needs `rp2.bootsel_button()`, in MicroPython 1.20 and later.
+
+### What only USB changes
+
+The bootloader, `settings.py` and `credentials.py`. A bootloader change still raises the agent's
+version, since it lives in the agent, but an update leaves the old one in place; the bootloader
+reads `slots.json` and nothing else from the agent, so keep that file's shape stable.
 
 ## Running the tests
 
@@ -125,17 +182,22 @@ for file in *.py; do uv tool run --from mpy-cross mpy-cross -o /tmp/check.mpy "$
 tools/deploy-agent-micropython.sh [/dev/ttyACM0]
 ```
 
-It runs the agent's tests, hard-resets the board, catches it inside `main.py`'s 5 s boot grace,
-copies the agent, `boards/<settings.BOARD>.py` as `board.py` and a `deployed_version.py` holding
-the version, and resets again. The board
-file's `refuse_if_watchdog_armed()` runs first, so a deploy that missed the grace stops before it
+It runs the agent's tests, hard-resets the board and catches it inside the bootloader's 5 s grace.
+It removes `slots.json` and any agent files left at the root by the flat layout before slots,
+then clears slot `a`. It copies the agent into `a` with `boards/<settings.BOARD>.py` as `board.py`
+and a `deployed_version.py` holding the version, copies the bootloader and the node's settings to
+the root, writes `slots.json` making `a` active, and resets again. A deploy cut short leaves no
+`slots.json`, so the bootloader runs nothing and says to deploy again. The board file's
+`refuse_if_watchdog_armed()` runs first, so a deploy that missed the grace stops before it
 copies anything. Watch it with
 `uv tool run mpremote connect /dev/ttyACM0 resume repl` — `resume` stops mpremote from
 interrupting the agent.
 
 A new file on the board goes in [`apps/agent-micropython/agent-files.sh`](../../apps/agent-micropython/agent-files.sh), which
-this deploy and the server's [release bundles](Deploys.md#agent-release-bundles) both read; one that
-holds a node's own settings goes in `MICROPYTHON_NODE_CONFIG`, so it is never bundled.
+this deploy and the server's [release bundles](Deploys.md#agent-release-bundles) both read. Agent code
+goes in `MICROPYTHON_AGENT_CODE`, which is bundled and lands in a slot. A file that holds a node's
+own settings goes in `MICROPYTHON_NODE_CONFIG`, and a bootloader file in `MICROPYTHON_BOOTLOADER`;
+neither is ever bundled.
 
 The version stamp works as it does for the Linux agent (see "The version a node reports" in
 [Linux Agent](Linux%20Agent.md)). A board flashed by hand reports `0.0.0+dev`.
@@ -154,8 +216,9 @@ timeout range differs, and its Wi-Fi takes no `pm` setting.
   will not catch a float creeping back in.
 - **`ticks_diff` wraps after about 6.2 days.** Only compare stamps that are refreshed more often
   than that. `FakeClock` wraps the same way, so the tests can show it.
-- **Firmware modules shadow `/lib`.** `sys.path` is `['', '.frozen', '/lib']`, so the agent's
-  files sit at the root, and the MQTT client is `tempestas_mqtt`, a name no firmware freezes in.
+- **Firmware modules shadow `/lib`.** `sys.path` is `['', '.frozen', '/lib']`. The bootloader puts
+  the running slot first, so a slot's files win over anything at the root, and the MQTT client is
+  `tempestas_mqtt`, a name no firmware freezes in.
 - **The watchdog survives Ctrl-C.** Interrupt a running agent and the board resets itself 8 s later.
   To work in the REPL, reset the board and press Ctrl-C during the boot grace.
 - **`credentials.py` sits in plain text on the Pico's flash.** Anyone with a USB cable can read it.
@@ -178,5 +241,5 @@ timeout range differs, and its Wi-Fi takes no `pm` setting.
 
 - A guard, the dead-man or the failsafe behaviour changes
 - A pin, a probe, the relay board or a board file changes
-- The deploy script or the install steps change
+- The deploy script, the install steps, the slot layout or the update gate change
 - The rate guard is ported, or the node kind gets its own value

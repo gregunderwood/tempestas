@@ -1,10 +1,18 @@
 import time
 
-import node_runtime
+import machine
 
-BOOT_GRACE_SECONDS = 5
+import bootloader
+import slots
 
-# The watchdog cannot be stopped once armed, so a deploy has to catch the board before run().
-print("tempestas agent starts in %d s; Ctrl-C keeps the REPL" % BOOT_GRACE_SECONDS)
-time.sleep(BOOT_GRACE_SECONDS)
-node_runtime.run()
+
+def is_bootsel_pressed():
+    try:
+        import rp2
+    except ImportError:
+        return False
+    return rp2.bootsel_button() == 1
+
+
+board = bootloader.Board(time.sleep_ms, is_bootsel_pressed, machine.reset)
+bootloader.boot(board, slots.SlotStore(), bootloader.run_slot_from, print)

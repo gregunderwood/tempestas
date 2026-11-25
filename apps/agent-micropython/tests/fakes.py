@@ -159,3 +159,23 @@ class RecordingLog:
 
     def __call__(self, message):
         self.lines.append(message)
+
+
+class FakeInstaller:
+    """Records each install, and fails with a reason when given one."""
+
+    def __init__(self, slot="b", failure=None):
+        self.slot = slot
+        self.failure = failure
+        self.installed_commands = []
+
+    def install(self, command, report):
+        from slot_installer import UpdateFailed
+
+        report("downloading")
+        if self.failure is not None:
+            raise UpdateFailed(self.failure)
+        report("verifying")
+        report("installing")
+        self.installed_commands.append(command)
+        return self.slot
