@@ -15,4 +15,5 @@ export * from './lib/health/health.model';
 export * from './lib/ui/gauge-metrics';
 export * from './lib/reports/equipment-runtime.model';
 export * from './lib/reports/freeze-margin.model';
+export * from './lib/reports/node-health.model';
 export * from './lib/reports/time-in-range.model';

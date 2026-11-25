@@ -3,10 +3,11 @@
 ## What it is
 
 Summaries the raw tables never gave: how hard each device worked, how it cycled, how close the
-pumphouse came to freezing, and how long each zone spent where its rules are set to hold it. One server module, `apps/server/src/app/reports`, with one endpoint per
-report, the response types in `libs/domain/src/lib/reports`, and a section per report on the web
-Reports screen. Equipment runtime was the first, freeze margin the second and time in range the
-third; the next reports follow the same shape.
+pumphouse came to freezing, how long each zone spent where its rules are set to hold it, and which
+nodes went quiet or rebooted. One server module, `apps/server/src/app/reports`, with one endpoint
+per report, the response types in `libs/domain/src/lib/reports`, and a section per report on the
+web Reports screen. Equipment runtime was the first, freeze margin the second, time in range the
+third and node health the fourth; the next reports follow the same shape.
 
 ## Key files
 
@@ -25,6 +26,10 @@ third; the next reports follow the same shape.
 - [../../apps/server/src/app/reports/report-periods.ts](../../apps/server/src/app/reports/report-periods.ts) — a zone's recent nights, or days and nights, from its daylight window
 - [../../apps/server/src/app/reports/time-in-range.service.ts](../../apps/server/src/app/reports/time-in-range.service.ts) — finds the zones with nodes, their periods, held readings and extremes
 - [../../apps/web/src/app/features/reports/time-in-range-card.ts](../../apps/web/src/app/features/reports/time-in-range-card.ts) — the card, one per zone with a node
+- [../../apps/server/src/app/readings/reading-breaks.ts](../../apps/server/src/app/readings/reading-breaks.ts) — the gaps and boot changes in `sensor_readings`, found in Postgres
+- [../../apps/server/src/app/reports/node-health.ts](../../apps/server/src/app/reports/node-health.ts) — breaks and updates to each node's gaps, reboots and version changes, pure
+- [../../apps/server/src/app/reports/node-health.service.ts](../../apps/server/src/app/reports/node-health.service.ts) — loads the admitted nodes, their breaks and their healthy updates
+- [../../apps/web/src/app/features/reports/node-health-card.ts](../../apps/web/src/app/features/reports/node-health-card.ts) — the card, one per admitted node
 
 ## The API
 
@@ -32,6 +37,7 @@ third; the next reports follow the same shape.
 GET /api/reports/equipment-runtime?days=     per device per day; days defaults to 30, caps at 90
 GET /api/reports/freeze-margin?nights=       per heated zone per night; nights defaults to 30, caps at 90
 GET /api/reports/time-in-range?days=         per zone per day and night; days defaults to 30, caps at 90
+GET /api/reports/node-health?days=           per admitted node; days defaults to 30, caps at 90
 ```
 
 ## Equipment runtime
@@ -163,7 +169,34 @@ Only temperature has hours below, in range and above: nothing in `rules_config` 
 CO2's only numbers are the burner's enrichment dead band, which switches the burner rather than
 describing where the air should sit.
 
+## Node health
+
+A night with no readings otherwise just disappears from the averages, and a node that rebooted five
+times looks like one that ran all week. Per admitted node, over the last 30 days, newest first:
+
+- **Gaps** are silences longer than `NODE_HEALTH_GAP_MINUTES`, 5 minutes, between one reading from
+  the node and the next, any sensor. That is 30 samples at the Linux agent's 10 s interval. The
+  threshold is the same for every node, so one set to sample less often than every 5 minutes would
+  show a gap between every pair of readings. A silence that runs up to now is an ongoing gap. Postgres walks the
+  readings with `LAG`, so a month of 10 s samples never reaches Node.
+- **Reboots** are changes of `boot_id` from one reading to the next, stamped at the first reading of
+  the new boot. A null boot id predates the column and proves nothing, and the dev seeder's
+  `seeded-history` rows are left out, so the seed meeting the first real reading is not a reboot. A
+  reboot that left a long enough silence is a gap as well. The Linux agent makes a new boot id each
+  time its process starts, so a restart of the agent, including every update, counts as a reboot.
+- **Agent version changes** are the `node_updates` rows that finished `healthy`. Only updates run
+  from the Nodes page are recorded; an agent installed by hand or by a deploy script changes
+  `agent_version` on the node with no history, so it is not listed.
+- **Stale-sensor holds are not recorded.** When a role's sensors go stale the rules hold its last
+  state and only log it, so this report cannot list those periods. Recording them is
+  [#182](https://github.com/gregunderwood/tempestas/issues/182).
+- A gap that straddles the start of the window is not counted, and a node with no sensors has no
+  readings to read gaps or reboots from; its card lists updates only.
+
+The other reports should mark periods with gaps rather than average over them; this report is where
+the gaps themselves are listed.
+
 ## When to update this file
 
 - A report is added, or a default or cap changes
-- The runtime, freeze margin or time in range rules above change
+- The runtime, freeze margin, time in range or node health rules above change

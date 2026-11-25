@@ -6,6 +6,7 @@ import {
   type DeviceRuntime,
   type EquipmentRuntimeReport,
   type FreezeMarginReport,
+  type NodeHealthReport,
   type Reading,
   type TimeInRangeReport,
   type ZoneFreezeMargin,
@@ -181,6 +182,32 @@ function greenhouseTimeInRange(): ZoneTimeInRange {
   };
 }
 
+function nodeHealthReport(): NodeHealthReport {
+  return {
+    days: 30,
+    generatedAt: '2026-09-09T19:00:00Z',
+    nodes: [
+      {
+        nodeId: 'patji',
+        nodeName: 'Pumphouse Pi',
+        timezone: 'America/Edmonton',
+        hasSensors: true,
+        firstReadingAt: '2026-08-10T19:00:00Z',
+        gaps: [
+          {
+            from: '2026-09-01T07:30:00.000Z',
+            to: '2026-09-01T11:00:00.000Z',
+            minutes: 210,
+            isOngoing: false,
+          },
+        ],
+        reboots: [{ at: '2026-09-01T11:00:00.000Z' }],
+        versionChanges: [],
+      },
+    ],
+  };
+}
+
 function timeInRangeReport(zones: ZoneTimeInRange[]): TimeInRangeReport {
   return { days: 30, generatedAt: '2026-09-09T19:00:00Z', zones };
 }
@@ -188,6 +215,7 @@ function timeInRangeReport(zones: ZoneTimeInRange[]): TimeInRangeReport {
 interface ReportAnswers {
   freezeMargin?: Observable<FreezeMarginReport>[];
   timeInRange?: Observable<TimeInRangeReport>[];
+  nodeHealth?: Observable<NodeHealthReport>[];
 }
 
 interface RenderedReportsPage {
@@ -195,17 +223,19 @@ interface RenderedReportsPage {
   requestCount(): number;
   freezeMarginRequestCount(): number;
   timeInRangeRequestCount(): number;
+  nodeHealthRequestCount(): number;
   render(): void;
   realtime: ReturnType<typeof fakeRealtime>;
 }
 
 function renderReportsPage(
   answers: Observable<EquipmentRuntimeReport>[],
-  { freezeMargin = [], timeInRange = [] }: ReportAnswers = {},
+  { freezeMargin = [], timeInRange = [], nodeHealth = [] }: ReportAnswers = {},
 ): RenderedReportsPage {
   let requests = 0;
   let freezeMarginRequests = 0;
   let timeInRangeRequests = 0;
+  let nodeHealthRequests = 0;
   const realtime = fakeRealtime();
   TestBed.configureTestingModule({
     imports: [ReportsPage],
@@ -226,6 +256,10 @@ function renderReportsPage(
             timeInRangeRequests += 1;
             return timeInRange.shift() ?? NEVER;
           },
+          fetchNodeHealth: () => {
+            nodeHealthRequests += 1;
+            return nodeHealth.shift() ?? NEVER;
+          },
         },
       },
       { provide: RealtimeService, useValue: realtime },
@@ -238,6 +272,7 @@ function renderReportsPage(
     requestCount: () => requests,
     freezeMarginRequestCount: () => freezeMarginRequests,
     timeInRangeRequestCount: () => timeInRangeRequests,
+    nodeHealthRequestCount: () => nodeHealthRequests,
     render: () => {
       TestBed.tick();
       fixture.detectChanges();
@@ -258,7 +293,7 @@ describe('ReportsPage', () => {
     const listed = Array.from(page.querySelectorAll('li')).map((item) =>
       item.textContent?.trim(),
     );
-    expect(listed).toEqual(['CO2 enrichment', 'Node health']);
+    expect(listed).toEqual(['CO2 enrichment']);
   });
 
   it('shows a card per device with its totals and shortest run', () => {
@@ -460,6 +495,7 @@ describe('ReportsPage', () => {
         'Equipment runtime',
         'Freeze margin',
         'Time in range',
+        'Node health',
       ]);
     });
 
@@ -496,6 +532,78 @@ describe('ReportsPage', () => {
         timeInRange: [throwError(() => new Error('offline'))],
       });
       expect(page.textContent).toContain('Could not load the time in range.');
+    });
+  });
+
+  describe('node health', () => {
+    it("shows a card per node with its gaps and reboots in the node's timezone", () => {
+      const { page } = renderReportsPage([NEVER], {
+        nodeHealth: [of(nodeHealthReport())],
+      });
+      const card = page.querySelector('temp-node-health-card');
+      expect(card?.textContent).toContain('Pumphouse Pi');
+      expect(card?.textContent).toContain(
+        'patji · 3 h 30 min without readings',
+      );
+      expect(card?.textContent).toContain(
+        '1 gap, 1 reboot, no agent updates in the last 30 days.',
+      );
+      const rows = Array.from(card?.querySelectorAll('tbody tr') ?? [], (row) =>
+        Array.from(row.children, (cell) => cell.textContent?.trim()).join(
+          ' | ',
+        ),
+      );
+      expect(rows).toEqual([
+        'Tue 1 Sept, 05:00 | Rebooted | —',
+        'Tue 1 Sept, 01:30 | No readings | 3 h 30 min',
+      ]);
+    });
+
+    it('names a node once when its name is its slug', () => {
+      const report = nodeHealthReport();
+      report.nodes[0] = { ...report.nodes[0], nodeName: 'patji', gaps: [] };
+      const { page } = renderReportsPage([NEVER], {
+        nodeHealth: [of(report)],
+      });
+      expect(
+        page.querySelector('temp-node-health-card mat-card-subtitle')
+          ?.textContent,
+      ).toBe('');
+    });
+
+    it('says stale-sensor holds are not recorded', () => {
+      const { page } = renderReportsPage([NEVER]);
+      expect(page.textContent).toContain(
+        'Times the rules held a device because its sensors were stale are not recorded yet',
+      );
+    });
+
+    it('says so when there are no admitted nodes', () => {
+      const { page } = renderReportsPage([NEVER], {
+        nodeHealth: [of({ ...nodeHealthReport(), nodes: [] })],
+      });
+      expect(page.textContent).toContain('No admitted nodes yet.');
+    });
+
+    it('says it could not load node health when the request fails', () => {
+      const { page } = renderReportsPage([NEVER], {
+        nodeHealth: [throwError(() => new Error('offline'))],
+      });
+      expect(page.textContent).toContain('Could not load the node health.');
+    });
+
+    it('fetches again when a node goes quiet or comes back, not when a device switches', () => {
+      const rendered = renderReportsPage([NEVER], {
+        nodeHealth: [of(nodeHealthReport()), of(nodeHealthReport())],
+      });
+      rendered.render();
+      expect(rendered.nodeHealthRequestCount()).toBe(1);
+      pushDevice(rendered.realtime, device());
+      rendered.render();
+      expect(rendered.nodeHealthRequestCount()).toBe(1);
+      pushNode(rendered.realtime, { ...node('patji', null), online: false });
+      rendered.render();
+      expect(rendered.nodeHealthRequestCount()).toBe(2);
     });
   });
 

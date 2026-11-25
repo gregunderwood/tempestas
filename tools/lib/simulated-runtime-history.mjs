@@ -1,11 +1,8 @@
 // Pure: builds pin_transitions rows for devices, from their wiring and a `now`. No database here.
 import { DateTime } from 'luxon';
-import {
-  findHistoryStart,
-  HISTORY_DAYS,
-  startOfLocalDay,
-} from './history-window.mjs';
+import { findHistoryStart, HISTORY_DAYS } from './history-window.mjs';
 import { seededRandom } from './seeded-random.mjs';
+import { chooseOutageNode, findOutage } from './simulated-outage.mjs';
 import { simulateProbeClimate } from './simulated-readings.mjs';
 import {
   buildSourceTemperature,
@@ -22,9 +19,6 @@ const NIGHT_STARTS_AT = { hour: 20, minute: 0 };
 const SHORT_CYCLING_DAYS_AGO = 6;
 const SHORT_CYCLING_FROM = { hour: 10, minute: 0 };
 const SHORT_CYCLING_UNTIL = { hour: 14, minute: 0 };
-const OUTAGE_DAYS_AGO = 12;
-const OUTAGE_FROM = { hour: 1, minute: 30 };
-const OUTAGE_UNTIL = { hour: 5, minute: 0 };
 const JITTER_FRACTION = 0.3;
 const COLDEST_NIGHT_FACTOR = 1.4;
 const MILDEST_NIGHT_FACTOR = 0.7;
@@ -67,7 +61,7 @@ const DEFAULT_DUTY = {
  * @returns {LineHistory[]}
  */
 export function buildSimulatedHistory({ lines, probes = [], now }) {
-  const outageNodeId = chooseOutageNode(lines);
+  const outageNodeId = chooseOutageNode(lines.map((line) => line.nodeId));
   const probeClimates = probes.map((probe) => ({
     probe,
     ...simulateProbeClimate(probe, now),
@@ -115,11 +109,6 @@ function findFailingLines(followers) {
       return zoneLines.filter((line) => line.role === failingRole);
     }),
   );
-}
-
-// The first node by slug, so the outage lands on the same node every run.
-function chooseOutageNode(lines) {
-  return lines.map((line) => line.nodeId).sort()[0];
 }
 
 function buildLineHistory(line, now, { hasOutage, zoneThermostat, isFailing }) {
@@ -328,14 +317,6 @@ function dropRepeatedStates(rows) {
   return rows.filter(
     (row, index) => index === 0 || !isSameState(rows[index - 1], row),
   );
-}
-
-function findOutage(now, timezone) {
-  const day = startOfLocalDay(now, timezone).minus({ days: OUTAGE_DAYS_AGO });
-  return {
-    from: day.set(OUTAGE_FROM).toJSDate(),
-    until: day.set(OUTAGE_UNTIL).toJSDate(),
-  };
 }
 
 // As the server writes it: unknown when the node drops, then whatever the relay is doing when it returns.

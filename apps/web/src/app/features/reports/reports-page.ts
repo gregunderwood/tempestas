@@ -15,6 +15,7 @@ import { RealtimeService } from '../../core/realtime.service';
 import { openBrowserStorage } from '../../shared/arrange/card-order';
 import { EquipmentRuntimeCard } from './equipment-runtime-card';
 import { FreezeMarginCard } from './freeze-margin-card';
+import { NodeHealthCard } from './node-health-card';
 import {
   labelPropaneUnit,
   PROPANE_UNITS,
@@ -31,7 +32,7 @@ import {
 } from './report-refresh';
 import { TimeInRangeCard } from './time-in-range-card';
 
-const UPCOMING_REPORTS: readonly string[] = ['CO2 enrichment', 'Node health'];
+const UPCOMING_REPORTS: readonly string[] = ['CO2 enrichment'];
 
 @Component({
   selector: 'temp-reports-page',
@@ -40,6 +41,7 @@ const UPCOMING_REPORTS: readonly string[] = ['CO2 enrichment', 'Node health'];
     MatCardModule,
     EquipmentRuntimeCard,
     FreezeMarginCard,
+    NodeHealthCard,
     ReportLoadStatus,
     TimeInRangeCard,
   ],
@@ -126,6 +128,32 @@ const UPCOMING_REPORTS: readonly string[] = ['CO2 enrichment', 'Node health'];
         }
       </div>
     </section>
+    <section aria-labelledby="node-health-heading" class="temp-node-health">
+      <h2 id="node-health-heading">Node health</h2>
+      <p class="temp-muted">
+        Per node: gaps in its readings, reboots, and agent updates run from the
+        Nodes page. Times the rules held a device because its sensors were stale
+        are not recorded yet, so they cannot be listed here.
+      </p>
+      <temp-report-load-status
+        [state]="nodeHealthState()"
+        subject="node health"
+      />
+      @if (nodeHealthReport(); as report) {
+        @if (report.nodes.length === 0) {
+          <p class="temp-muted">No admitted nodes yet.</p>
+        }
+        <div class="temp-card-grid temp-node-health-cards">
+          @for (node of report.nodes; track node.nodeId) {
+            <temp-node-health-card
+              [node]="node"
+              [days]="report.days"
+              [generatedAt]="report.generatedAt"
+            />
+          }
+        </div>
+      }
+    </section>
     <mat-card appearance="outlined" class="temp-upcoming">
       <mat-card-content>
         <p>Still to come:</p>
@@ -159,8 +187,12 @@ const UPCOMING_REPORTS: readonly string[] = ['CO2 enrichment', 'Node health'];
     .temp-time-in-range-cards {
       --temp-card-min-width: 40rem;
     }
+    .temp-node-health-cards {
+      --temp-card-min-width: 22rem;
+    }
     .temp-freeze-margin,
     .temp-time-in-range,
+    .temp-node-health,
     .temp-upcoming {
       margin-top: 1.5rem;
     }
@@ -186,6 +218,9 @@ export class ReportsPage {
   private readonly timeInRangeSource = injectLiveSource((options) =>
     this.api.fetchTimeInRange({}, options),
   );
+  private readonly nodeHealthSource = injectLiveSource((options) =>
+    this.api.fetchNodeHealth({}, options),
+  );
   private readonly browserStorage = openBrowserStorage();
 
   readonly upcomingReports = UPCOMING_REPORTS;
@@ -209,6 +244,11 @@ export class ReportsPage {
     () => this.timeInRangeSource.latest()?.payload.zones ?? [],
   );
 
+  protected readonly nodeHealthState = this.nodeHealthSource.sourceState;
+  protected readonly nodeHealthReport = computed(
+    () => this.nodeHealthSource.latest()?.payload ?? null,
+  );
+
   protected readonly hasPropaneEstimate = computed(() =>
     this.runtimeDevices().some((device) => device.totalPropaneLitres !== null),
   );
@@ -223,6 +263,7 @@ export class ReportsPage {
       this.timeInRangeSource,
       TIME_IN_RANGE_REFRESH_MILLISECONDS,
     );
+    this.refreshNodeHealthWhenANodeChanges();
   }
 
   protected choosePropaneUnit(unit: PropaneUnit): void {
@@ -242,6 +283,15 @@ export class ReportsPage {
         this.runtimeSource.refresh();
         this.freezeMarginSource.refresh();
       });
+    });
+  }
+
+  // A node going quiet, coming back or rebooting announces itself, so its pushes are enough.
+  private refreshNodeHealthWhenANodeChanges(): void {
+    const nodePushesAtStart = this.realtime.nodePushes();
+    effect(() => {
+      if (this.realtime.nodePushes() === nodePushesAtStart) return;
+      untracked(() => this.nodeHealthSource.refresh());
     });
   }
 
