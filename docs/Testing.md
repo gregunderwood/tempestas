@@ -209,17 +209,17 @@ node tools/seed-runtime-history.mjs tempestas   # the everyday dev database
   started by this repo's `docker compose` (it carries the compose service label `db`). Production
   uses the same container and database names but starts its container with `docker run`, so there
   `tempestas` is refused. It only ever reaches the `tempestas-db` container: no MQTT, no GPIO.
-- **Heaters follow the seeded temperatures, as the rules would.** A heater or heat tape whose
-  zone has a heat `thermostat` rule for its role switches by the temperature the readings seeder
+- **Heaters follow the seeded temperatures, as the rules would.** A heater or heat tape under the
+  rules, whose zone owns its role and has a heat `thermostat` rule for it, switches by the temperature the readings seeder
   writes for that zone's probes, read through the rule's sensor source (`min`, `mean`, `node:`...):
   on strictly below `onAtC`, off strictly above `offAtC`, and not back on until the device's
   `onDelayDuration` after it went off. Both seeders compute those temperatures from the same seeded
   functions in `tools/lib/simulated-readings.mjs`, so neither reads the other's rows and the order
   they run in does not matter. After a probe's seed ends, the heater holds that probe's first real
-  reading. A heating role with no such rule, or whose zone has no probe that has reported, runs by
-  the night pattern below and the seeder says so.
+  reading. A heating device switched to manual, or with no such rule, or whose rule has no probe
+  that has reported, runs by the night pattern below and the seeder says so.
 - **One deliberate fault night.** The night 17 days ago, 20:00 to 07:00, the zone's heat tape (or
-  its heater, if it has no heat tape) fails to come on, and goes off if it was on, while the zone
+  its heater, if no heat tape there follows a thermostat) fails to come on, and goes off if it was on, while the zone
   drops to about 0.6 °C. The heater in a zone with both still comes on. The freeze-margin report
   flags that night as heat off while cold. The night 4 days ago is as cold, with every heat source
   on, so it shows the heat on and still close to freezing instead.

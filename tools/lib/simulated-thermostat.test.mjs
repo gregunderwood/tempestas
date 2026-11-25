@@ -16,6 +16,7 @@ const MILLISECONDS_PER_MINUTE = 60_000;
 const START_MS = Date.parse('2026-11-01T00:00:00Z');
 const THERMOSTAT = { onAtC: 4, offAtC: 6, source: 'min' };
 const PUMPHOUSE_RULES = {
+  enabledRoles: ['heater', 'heat_tape'],
   sensorPolicy: { default: { source: 'min', maxAgeMs: 120000 } },
   rules: {
     heat_tape: {
@@ -165,6 +166,7 @@ describe('findHeatThermostat', () => {
 
   it('follows nothing for a role with no heat thermostat', () => {
     const greenhouse = {
+      enabledRoles: ['exhaust_fan', 'heater'],
       rules: {
         exhaust_fan: {
           kind: 'thermostat',
@@ -184,16 +186,25 @@ describe('findHeatThermostat', () => {
     assert.equal(findHeatThermostat(greenhouse, 'heater'), null);
     assert.equal(findHeatThermostat(null, 'heater'), null);
   });
+
+  it('follows nothing for a role the rules do not own', () => {
+    const heaterOnly = { ...PUMPHOUSE_RULES, enabledRoles: ['heater'] };
+    assert.equal(findHeatThermostat(heaterOnly, 'heat_tape'), null);
+    assert.notEqual(findHeatThermostat(heaterOnly, 'heater'), null);
+  });
 });
 
 describe('chooseFailingRole', () => {
   it('fails the heat tape when the zone has one, so its heater still comes on', () => {
-    assert.equal(chooseFailingRole(PUMPHOUSE_RULES), 'heat_tape');
+    assert.equal(chooseFailingRole(['heater', 'heat_tape']), 'heat_tape');
   });
 
-  it('fails the heater in a zone with no heat tape', () => {
-    const crawlspace = { rules: { heater: PUMPHOUSE_RULES.rules.heater } };
-    assert.equal(chooseFailingRole(crawlspace), 'heater');
+  it('fails the heater in a zone with no heat tape following a thermostat', () => {
+    assert.equal(chooseFailingRole(['heater']), 'heater');
+  });
+
+  it('fails nothing in a zone with no line following a thermostat', () => {
+    assert.equal(chooseFailingRole([]), null);
   });
 });
 

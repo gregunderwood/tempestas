@@ -22,9 +22,10 @@ export const THERMOSTAT_ROLES = ['heat_tape', 'heater'];
  * @typedef {{ fromMs: number, toMs: number }} Run
  */
 
-/** The role's heat thermostat in the zone's rules, or null when it has none to follow. */
+/** The role's heat thermostat in the zone's rules, or null when the rules don't drive it by one. */
 export function findHeatThermostat(rulesConfig, role) {
   if (!THERMOSTAT_ROLES.includes(role)) return null;
+  if (!isRoleOwned(rulesConfig, role)) return null;
   const rule = rulesConfig?.rules?.[role];
   if (!isHeatThermostat(rule)) return null;
   return {
@@ -37,6 +38,10 @@ export function findHeatThermostat(rulesConfig, role) {
   };
 }
 
+function isRoleOwned(rulesConfig, role) {
+  return rulesConfig?.enabledRoles?.includes(role) ?? false;
+}
+
 function isHeatThermostat(rule) {
   return (
     rule?.kind === 'thermostat' &&
@@ -47,12 +52,8 @@ function isHeatThermostat(rule) {
 }
 
 // One role per zone fails on the fault night, so the freeze-margin report has a night to flag.
-export function chooseFailingRole(rulesConfig) {
-  return (
-    THERMOSTAT_ROLES.find(
-      (role) => findHeatThermostat(rulesConfig, role) !== null,
-    ) ?? null
-  );
+export function chooseFailingRole(followingRoles) {
+  return THERMOSTAT_ROLES.find((role) => followingRoles.includes(role)) ?? null;
 }
 
 export function findFaultNight(now, timezone) {

@@ -75,7 +75,7 @@ function readDeviceLines(databaseName) {
        select device.id as "deviceId", node.slug as "nodeId", device.gpio as pin,
               device.on_level as "onLevel", device.role::text as role,
               device.on_delay_duration as "onDelaySeconds", zone.id as "zoneId",
-              zone.rules_config as "rulesConfig",
+              zone.rules_config as "rulesConfig", device.rules_enabled as "isUnderRules",
               coalesce(zone.rules_config->>'timezone', '${DEFAULT_TIMEZONE}') as timezone,
               (select json_build_object('level', latest.level, 'known', latest.known)
                  from pin_transitions latest
@@ -100,7 +100,7 @@ function describeWhatWasWritten(databaseName, histories) {
       );
     } else if (THERMOSTAT_ROLES.includes(line.role)) {
       console.log(
-        `seed-runtime-history: ${line.nodeId}/${line.pin} (${line.role}) has no heat thermostat with a reporting probe to follow, so it runs by the night pattern.`,
+        `seed-runtime-history: ${line.nodeId}/${line.pin} (${line.role}) is not under a heat thermostat rule with a reporting probe, so it runs by the night pattern.`,
       );
     }
   }

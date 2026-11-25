@@ -6,7 +6,10 @@ import { DateTime } from 'luxon';
 import { HISTORY_DAYS } from './history-window.mjs';
 import { buildSimulatedHistory } from './simulated-runtime-history.mjs';
 import { buildSimulatedReadings } from './simulated-readings.mjs';
-import { FAULT_NIGHT_DAYS_AGO } from './simulated-thermostat.mjs';
+import {
+  FAULT_NIGHT_DAYS_AGO,
+  findFaultNight,
+} from './simulated-thermostat.mjs';
 import { FREEZING_NIGHTS_DAYS_AGO } from './simulated-weather.mjs';
 
 const TIMEZONE = 'America/Vancouver';
@@ -273,6 +276,7 @@ function pumphouseLine(overrides = {}) {
     zoneId: ZONE_ID,
     rulesConfig: PUMPHOUSE_RULES,
     onDelaySeconds: ON_DELAY_SECONDS,
+    isUnderRules: true,
     ...overrides,
   });
 }
@@ -307,13 +311,23 @@ function isSwitchedByThermostat(row) {
   );
 }
 
+const FAULT_NIGHT = findFaultNight(NOW, TIMEZONE);
+const ORDINARY_FREEZING_NIGHT_DAYS_AGO = FREEZING_NIGHTS_DAYS_AGO.find(
+  (daysAgo) => daysAgo !== FAULT_NIGHT_DAYS_AGO,
+);
+
 function isInFaultNight(row) {
-  const local = DateTime.fromJSDate(row.observedAt, { zone: TIMEZONE });
-  const daysAgo = daysAgoOf(row);
-  return (
-    (daysAgo === FAULT_NIGHT_DAYS_AGO && local.hour >= 20) ||
-    (daysAgo === FAULT_NIGHT_DAYS_AGO - 1 && local.hour < 7)
-  );
+  const atMs = row.observedAt.getTime();
+  return atMs >= FAULT_NIGHT.fromMs && atMs < FAULT_NIGHT.toMs;
+}
+
+function findNightWindow(nightDaysAgo) {
+  const daysLater = FAULT_NIGHT_DAYS_AGO - nightDaysAgo;
+  const shift = (atMs) =>
+    DateTime.fromMillis(atMs, { zone: TIMEZONE })
+      .plus({ days: daysLater })
+      .toMillis();
+  return { fromMs: shift(FAULT_NIGHT.fromMs), toMs: shift(FAULT_NIGHT.toMs) };
 }
 
 function stateAt(rows, instant) {
@@ -321,14 +335,10 @@ function stateAt(rows, instant) {
 }
 
 function coldestMomentOfNight(nightDaysAgo) {
-  const evening = DateTime.fromJSDate(NOW, { zone: TIMEZONE })
-    .startOf('day')
-    .minus({ days: nightDaysAgo })
-    .set({ hour: 20 });
-  const morning = evening.plus({ days: 1 }).set({ hour: 7 });
+  const night = findNightWindow(nightDaysAgo);
   let coldest = null;
   for (const [atMs, temperature] of seededTemperatureByMinute) {
-    if (atMs < evening.toMillis() || atMs >= morning.toMillis()) continue;
+    if (atMs < night.fromMs || atMs >= night.toMs) continue;
     if (!coldest || temperature < coldest.temperature) {
       coldest = { at: new Date(atMs), temperature };
     }
@@ -388,7 +398,7 @@ describe('buildSimulatedHistory, for a heating role with a thermostat', () => {
   }
 
   it('has the heat on at the coldest moment of an ordinary freezing night', () => {
-    const coldest = coldestMomentOfNight(4);
+    const coldest = coldestMomentOfNight(ORDINARY_FREEZING_NIGHT_DAYS_AGO);
     assert.ok(coldest.temperature < HEATER.onAtC);
     assert.equal(stateAt(heaterHistory.rows, coldest.at).energised, true);
     assert.equal(stateAt(heatTapeHistory.rows, coldest.at).energised, true);
@@ -418,6 +428,45 @@ describe('buildSimulatedHistory, for a heating role with a thermostat', () => {
     assert.deepEqual(pumphouseHistories(), pumphouseHistories());
   });
 
+  it(`fails the heater on night ${FAULT_NIGHT_DAYS_AGO} when the zone's heat tape rule has no device`, () => {
+    const [heaterOnlyHistory] = buildSimulatedHistory({
+      lines: [pumphouseLine()],
+      probes: [PUMPHOUSE_PROBE],
+      now: NOW,
+    });
+    const coldest = coldestMomentOfNight(FAULT_NIGHT_DAYS_AGO);
+    assert.ok(coldest.temperature < HEATER.onAtC);
+    assert.equal(stateAt(heaterOnlyHistory.rows, coldest.at).energised, false);
+  });
+
+  it('fails the heater when the heat tape falls back for want of a source probe', () => {
+    const tapeReadsAnotherNode = {
+      ...PUMPHOUSE_RULES,
+      rules: {
+        ...PUMPHOUSE_RULES.rules,
+        heat_tape: {
+          ...PUMPHOUSE_RULES.rules.heat_tape,
+          sensor: { source: 'node:elsewhere' },
+        },
+      },
+    };
+    const [heaterHistory, heatTapeHistory] = buildSimulatedHistory({
+      lines: [
+        pumphouseLine({ rulesConfig: tapeReadsAnotherNode }),
+        pumphouseLine({
+          pin: 27,
+          role: 'heat_tape',
+          rulesConfig: tapeReadsAnotherNode,
+        }),
+      ],
+      probes: [PUMPHOUSE_PROBE],
+      now: NOW,
+    });
+    const coldest = coldestMomentOfNight(FAULT_NIGHT_DAYS_AGO);
+    assert.equal(heatTapeHistory.isFollowingThermostat, false);
+    assert.equal(stateAt(heaterHistory.rows, coldest.at).energised, false);
+  });
+
   it('says which lines follow the thermostat', () => {
     assert.deepEqual(
       [
@@ -437,6 +486,24 @@ describe('buildSimulatedHistory, for a heating role with a thermostat', () => {
     assert.equal(history.isFollowingThermostat, false);
     assert.deepEqual(history.rows, historyFor([deviceLine()])[0].rows);
   });
+
+  for (const [reason, overrides] of [
+    ['is switched to manual', { isUnderRules: false }],
+    [
+      'has a role the rules do not own',
+      { rulesConfig: { ...PUMPHOUSE_RULES, enabledRoles: ['heat_tape'] } },
+    ],
+  ]) {
+    it(`falls back to the night pattern for a heater that ${reason}`, () => {
+      const [history] = buildSimulatedHistory({
+        lines: [pumphouseLine(overrides)],
+        probes: [PUMPHOUSE_PROBE],
+        now: NOW,
+      });
+      assert.equal(history.isFollowingThermostat, false);
+      assert.deepEqual(history.rows, historyFor([deviceLine()])[0].rows);
+    });
+  }
 
   it('leaves fans and lights to their daily pattern', () => {
     for (const role of ['exhaust_fan', 'lights']) {
