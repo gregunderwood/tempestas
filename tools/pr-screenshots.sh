@@ -10,13 +10,11 @@ readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly SERVER_PORT="${PR_SCREENSHOTS_SERVER_PORT:-7020}"
 readonly WEB_PORT="${PR_SCREENSHOTS_WEB_PORT:-4220}"
 readonly COMMENT_MARKER="<!-- pr-screenshots -->"
-readonly DESKTOP_WINDOW="1280,860"
-readonly PHONE_WINDOW="390,844"
+readonly FULL_PAGE_SCREENSHOT="$REPO_ROOT/tools/lib/full-page-screenshot.mjs"
 readonly SIDE_BY_SIDE_DESKTOP_WIDTH=400
 readonly SIDE_BY_SIDE_PHONE_WIDTH=180
 readonly AFTER_ONLY_DESKTOP_WIDTH=560
 readonly AFTER_ONLY_PHONE_WIDTH=200
-readonly PAGE_SETTLE_MILLISECONDS=8000
 
 source "$REPO_ROOT/tools/lib/console.sh"
 source "$REPO_ROOT/tools/lib/failure.sh"
@@ -150,22 +148,24 @@ take_screenshots() {
   mkdir -p "$WORK_DIR/shots"
   local page
   for page in "${PAGES[@]}"; do
-    take_screenshot "$page" desktop "$DESKTOP_WINDOW" "$label"
-    take_screenshot "$page" phone "$PHONE_WINDOW" "$label"
+    take_screenshot "$page" desktop "$label"
+    take_screenshot "$page" phone "$label"
   done
 }
 
 take_screenshot() {
-  local page=$1 form_factor=$2 window_size=$3 label=$4
+  local page=$1 form_factor=$2 label=$3
   local file="$WORK_DIR/shots/$(image_name "$page" "$form_factor" "$label")"
-  google-chrome --headless=new --hide-scrollbars --no-first-run --disable-gpu \
-    --user-data-dir="$WORK_DIR/chrome-profile-$label" \
-    --virtual-time-budget="$PAGE_SETTLE_MILLISECONDS" \
-    --window-size="$window_size" \
-    --screenshot="$file" \
-    "http://localhost:$WEB_PORT/${page#/}" >>"$WORK_DIR/chrome.log" 2>&1
-  [[ -s "$file" ]] || fail_with_log "no screenshot of $page at $form_factor width" chrome.log
+  node "$FULL_PAGE_SCREENSHOT" "$form_factor" "http://localhost:$WEB_PORT/${page#/}" "$file" \
+    "$WORK_DIR/chrome-profile-$label" 2>>"$WORK_DIR/chrome.log" ||
+    fail_with_log "no screenshot of $page at $form_factor width" chrome.log
   echo "  $page, $form_factor, $label"
+}
+
+form_factor_width() {
+  local form_factor=$1
+  SCRIPT="$FULL_PAGE_SCREENSHOT" FORM_FACTOR="$form_factor" node --input-type=module \
+    -e 'const { FORM_FACTORS } = await import(process.env.SCRIPT); console.log(FORM_FACTORS[process.env.FORM_FACTOR].width);'
 }
 
 image_name() {
@@ -204,7 +204,7 @@ write_comment_body() {
 }
 
 describe_what_was_taken() {
-  local stack="on a local dev stack (fake hardware driver, simulated nodes), with headless Chrome. Stored on the \`$MEDIA_BRANCH\` branch."
+  local stack="on a local dev stack (fake hardware driver, simulated nodes), with headless Chrome, each the full height of the page. Stored on the \`$MEDIA_BRANCH\` branch."
   if $IS_AFTER_ONLY; then
     echo "Taken at \`${HEAD_SHA:0:7}\` by \`tools/pr-screenshots.sh\` $stack"
   else
@@ -216,13 +216,13 @@ write_before_and_after_table() {
   local image_base=$1 page=$2
   echo "| | Before | After |"
   echo "| --- | --- | --- |"
-  echo "| Desktop, ${DESKTOP_WINDOW%%,*} px | $(image_tag "$image_base" "$page" desktop before "$SIDE_BY_SIDE_DESKTOP_WIDTH") | $(image_tag "$image_base" "$page" desktop after "$SIDE_BY_SIDE_DESKTOP_WIDTH") |"
-  echo "| Phone, ${PHONE_WINDOW%%,*} px | $(image_tag "$image_base" "$page" phone before "$SIDE_BY_SIDE_PHONE_WIDTH") | $(image_tag "$image_base" "$page" phone after "$SIDE_BY_SIDE_PHONE_WIDTH") |"
+  echo "| Desktop, $(form_factor_width desktop) px | $(image_tag "$image_base" "$page" desktop before "$SIDE_BY_SIDE_DESKTOP_WIDTH") | $(image_tag "$image_base" "$page" desktop after "$SIDE_BY_SIDE_DESKTOP_WIDTH") |"
+  echo "| Phone, $(form_factor_width phone) px | $(image_tag "$image_base" "$page" phone before "$SIDE_BY_SIDE_PHONE_WIDTH") | $(image_tag "$image_base" "$page" phone after "$SIDE_BY_SIDE_PHONE_WIDTH") |"
 }
 
 write_after_only_table() {
   local image_base=$1 page=$2
-  echo "| Desktop, ${DESKTOP_WINDOW%%,*} px | Phone, ${PHONE_WINDOW%%,*} px |"
+  echo "| Desktop, $(form_factor_width desktop) px | Phone, $(form_factor_width phone) px |"
   echo "| --- | --- |"
   echo "| $(image_tag "$image_base" "$page" desktop after "$AFTER_ONLY_DESKTOP_WIDTH") | $(image_tag "$image_base" "$page" phone after "$AFTER_ONLY_PHONE_WIDTH") |"
 }
