@@ -9,7 +9,6 @@ readonly USAGE="Usage: tools/pr-screenshots.sh [--after-only] [--history] <pr> <
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly SERVER_PORT="${PR_SCREENSHOTS_SERVER_PORT:-7020}"
 readonly WEB_PORT="${PR_SCREENSHOTS_WEB_PORT:-4220}"
-readonly SCREENSHOTS_BRANCH="pr-screenshots"
 readonly COMMENT_MARKER="<!-- pr-screenshots -->"
 readonly DESKTOP_WINDOW="1280,860"
 readonly PHONE_WINDOW="390,844"
@@ -18,10 +17,11 @@ readonly SIDE_BY_SIDE_PHONE_WIDTH=180
 readonly AFTER_ONLY_DESKTOP_WIDTH=560
 readonly AFTER_ONLY_PHONE_WIDTH=200
 readonly PAGE_SETTLE_MILLISECONDS=8000
-readonly PUSH_ATTEMPTS=3
 
 source "$REPO_ROOT/tools/lib/console.sh"
+source "$REPO_ROOT/tools/lib/failure.sh"
 source "$REPO_ROOT/tools/lib/fake-stack.sh"
+source "$REPO_ROOT/tools/lib/pull-request-media.sh"
 
 readonly TOOL_NAME="pr-screenshots"
 readonly PORT_VARIABLES="PR_SCREENSHOTS_SERVER_PORT and PR_SCREENSHOTS_WEB_PORT"
@@ -31,10 +31,8 @@ PAGES=()
 IS_AFTER_ONLY=false
 SHOULD_SEED_HISTORY=false
 WORK_DIR=""
-HEAD_SHA=""
 BASE_SHA=""
 BASE_CHECKOUT=""
-SCREENSHOTS_CHECKOUT=""
 CHECKOUT=""
 DATABASE_NAME=""
 
@@ -77,18 +75,6 @@ parse_arguments() {
   PULL_REQUEST="$1"
   shift
   PAGES=("$@")
-}
-
-require_pull_request_checked_out() {
-  local pull_request_head
-  pull_request_head="$(gh pr view "$PULL_REQUEST" --json headRefOid --jq .headRefOid)"
-  HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-  if [[ "$HEAD_SHA" != "$pull_request_head" ]]; then
-    fail "this checkout is at ${HEAD_SHA:0:7}, but PR #$PULL_REQUEST is at ${pull_request_head:0:7}. Check out and push the PR's branch first."
-  fi
-  if ! git -C "$REPO_ROOT" diff --quiet HEAD; then
-    fail "this checkout has uncommitted changes, so the screenshots would not show commit ${HEAD_SHA:0:7}."
-  fi
 }
 
 require_databases_absent() {
@@ -176,56 +162,19 @@ image_name() {
   echo "${page//\//-}-$form_factor-$label.png"
 }
 
-# Only ever adds a commit: every posted comment pins its images to a commit on this branch.
 publish_screenshots() {
-  say "Pushing the screenshots to $SCREENSHOTS_BRANCH"
-  git -C "$REPO_ROOT" fetch --quiet origin "$SCREENSHOTS_BRANCH"
-  SCREENSHOTS_CHECKOUT="$WORK_DIR/$SCREENSHOTS_BRANCH"
-  git -C "$REPO_ROOT" worktree add --quiet --detach "$SCREENSHOTS_CHECKOUT" "origin/$SCREENSHOTS_BRANCH"
-  mkdir -p "$SCREENSHOTS_CHECKOUT/$PULL_REQUEST"
-  cp "$WORK_DIR"/shots/*.png "$SCREENSHOTS_CHECKOUT/$PULL_REQUEST/"
-  git -C "$SCREENSHOTS_CHECKOUT" add "$PULL_REQUEST"
-  if git -C "$SCREENSHOTS_CHECKOUT" diff --cached --quiet; then
-    return 0
-  fi
-  git -C "$SCREENSHOTS_CHECKOUT" commit --quiet \
-    -m "chore: screenshots for #$PULL_REQUEST" \
-    -m "Taken at ${HEAD_SHA:0:7} by tools/pr-screenshots.sh."
-  push_screenshots_commit
-}
-
-# Another run may push first; replaying this one commit on top still only appends.
-push_screenshots_commit() {
-  local attempt
-  for attempt in $(seq 1 "$PUSH_ATTEMPTS"); do
-    git -C "$SCREENSHOTS_CHECKOUT" push --quiet origin "HEAD:$SCREENSHOTS_BRANCH" && return 0
-    git -C "$SCREENSHOTS_CHECKOUT" fetch --quiet origin "$SCREENSHOTS_BRANCH"
-    git -C "$SCREENSHOTS_CHECKOUT" rebase --quiet "origin/$SCREENSHOTS_BRANCH"
-  done
-  fail "could not push to $SCREENSHOTS_BRANCH after $PUSH_ATTEMPTS attempts"
+  publish_media "chore: screenshots for #$PULL_REQUEST" "$WORK_DIR"/shots/*.png
 }
 
 post_comment() {
   say "Posting the screenshots on PR #$PULL_REQUEST"
   write_comment_body >"$WORK_DIR/comment.md"
-  local existing_comment
-  existing_comment="$(find_screenshots_comment)"
-  if [[ -n "$existing_comment" ]]; then
-    gh api --silent -X PATCH "repos/{owner}/{repo}/issues/comments/$existing_comment" -F body=@"$WORK_DIR/comment.md"
-  else
-    gh api --silent -X POST "repos/{owner}/{repo}/issues/$PULL_REQUEST/comments" -F body=@"$WORK_DIR/comment.md"
-  fi
-  echo "  $(gh pr view "$PULL_REQUEST" --json url --jq .url)"
-}
-
-find_screenshots_comment() {
-  gh api --paginate "repos/{owner}/{repo}/issues/$PULL_REQUEST/comments" \
-    --jq ".[] | select(.body | startswith(\"$COMMENT_MARKER\")) | .id" | head -n 1
+  post_marked_comment "$COMMENT_MARKER" "$WORK_DIR/comment.md"
 }
 
 write_comment_body() {
   local image_base
-  image_base="https://github.com/$(gh repo view --json nameWithOwner --jq .nameWithOwner)/blob/$(git -C "$SCREENSHOTS_CHECKOUT" rev-parse HEAD)/$PULL_REQUEST"
+  image_base="$(media_url_base blob)"
   echo "$COMMENT_MARKER"
   echo "## Screenshots"
   echo
@@ -244,7 +193,7 @@ write_comment_body() {
 }
 
 describe_what_was_taken() {
-  local stack="on a local dev stack (fake hardware driver, simulated nodes), with headless Chrome. Stored on the \`$SCREENSHOTS_BRANCH\` branch."
+  local stack="on a local dev stack (fake hardware driver, simulated nodes), with headless Chrome. Stored on the \`$MEDIA_BRANCH\` branch."
   if $IS_AFTER_ONLY; then
     echo "Taken at \`${HEAD_SHA:0:7}\` by \`tools/pr-screenshots.sh\` $stack"
   else
@@ -281,19 +230,12 @@ tear_down() {
   for database in "${CREATED_DATABASES[@]}"; do
     docker exec "$DATABASE_CONTAINER" dropdb -U "$DATABASE_USER" --if-exists --force "$database" || true
   done
-  remove_worktree "$SCREENSHOTS_CHECKOUT"
+  remove_worktree "$MEDIA_CHECKOUT"
   remove_worktree "$BASE_CHECKOUT"
   rm -rf "$WORK_DIR"
   warn_if_still_listening "$SERVER_PORT"
   warn_if_still_listening "$WEB_PORT"
   exit "$exit_status"
-}
-
-remove_worktree() {
-  local worktree=$1
-  [[ -n "$worktree" ]] || return 0
-  git -C "$REPO_ROOT" worktree remove --force "$worktree" || true
-  rm -rf "$worktree"
 }
 
 main "$@"

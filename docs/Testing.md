@@ -141,6 +141,44 @@ PR's head commit or if tracked files have changes. It then:
 commit that is no longer reachable breaks the images on every old PR. Prune old folders with a
 new commit instead.
 
+### Video of a PR
+
+A screenshot shows one moment. For a PR about behaviour, such as a press, a confirmation, then a
+node working through an update, the reviewer watches the stack specs run instead:
+
+```bash
+tools/pr-video.sh 164                                    # every stack spec
+tools/pr-video.sh 164 src/stack/node-update.cy.ts        # only these
+tools/pr-video.sh --player-url https://claude.ai/artifact/... 164
+```
+
+Like the screenshots, it runs from the PR's pushed, clean head. It then:
+
+- **records the specs** with `tools/e2e-stack.sh --config video=true`. A failing spec stops it, so
+  only a passing run is posted. The video is 1920 × 1080, so the app shows at full size beside
+  Cypress's log of each command, and `scrollBehavior: 'center'` keeps what a step acts on in view.
+- **notes where each test starts** in its video. The support file in
+  [../apps/web-e2e/src/support/stack.ts](../apps/web-e2e/src/support/stack.ts) reports each test,
+  and the config writes `<spec>.test-starts.json` beside the video. The player and the comment
+  list these as steps.
+- **converts each mp4 to a GIF** with the ffmpeg Cypress ships with, or one on the `PATH`. GitHub
+  plays a GIF inline in a comment but not an mp4 posted through the API.
+- **adds a commit to `pr-screenshots`** with the GIFs and mp4s in `<pr>/`, the same way as the
+  screenshots, and posts or updates one "Video" comment. For each spec, the comment gives its
+  tests as steps, the GIF inline, a slot for the player link, and a link to download the mp4.
+- **writes a player page to `dist/pr-video/<pr>/`**: `index.html` from
+  [../tools/pr-video/player.html](../tools/pr-video/player.html), `videos.json`, and the mp4s. It
+  plays each video with speed from 0.25× to 2×, frame stepping, and a jump to each test.
+
+The script cannot publish the player, because it is a claude.ai artifact. Claude publishes
+`index.html` with `videos.json` and the mp4s as its files, then runs `--player-url`, which puts
+the link in the comment's slot. After a new recording, republish to the same artifact and run
+`--player-url` again, since the new comment has the slot back.
+
+The artifact is private: anyone else reviewing needs it shared from the page's Share menu.
+Nothing removes old videos from `pr-screenshots` or old player pages yet. That is fine while one
+person works on the project.
+
 ### Simulated runtime history
 
 The server stamps every `pin_transitions` row with the real time, so a fresh stack has minutes of

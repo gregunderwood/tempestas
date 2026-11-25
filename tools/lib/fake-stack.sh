@@ -1,4 +1,4 @@
-# Sourced by tools/pr-screenshots.sh and tools/e2e-stack.sh: a throwaway server, fake driver and web app.
+# Sourced by tools/pr-screenshots.sh and tools/e2e-stack.sh, after tools/lib/failure.sh: a throwaway server, fake driver and web app.
 # The caller sets TOOL_NAME, PORT_VARIABLES, SERVER_PORT, WEB_PORT, DATABASE_NAME, CHECKOUT and WORK_DIR.
 
 readonly DATABASE_CONTAINER="tempestas-db"
@@ -237,16 +237,4 @@ run_nx() {
 run_sql() {
   local database=$1 statement=$2
   docker exec "$DATABASE_CONTAINER" psql -qtAX -U "$DATABASE_USER" -d "$database" -c "$statement"
-}
-
-fail() {
-  echo "$TOOL_NAME: $1" >&2
-  exit 1
-}
-
-fail_with_log() {
-  local reason=$1 log_name=$2
-  echo "$TOOL_NAME: $reason. The end of $log_name:" >&2
-  tail -n 30 "$WORK_DIR/$log_name" >&2 || true
-  exit 1
 }

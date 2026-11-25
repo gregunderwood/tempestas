@@ -15,6 +15,7 @@ readonly OFFERED_AGENT_APP="agent-linux"
 readonly OFFERED_AGENT_VERSIONS=(1.1.0 1.1.1)
 
 source "$REPO_ROOT/tools/lib/console.sh"
+source "$REPO_ROOT/tools/lib/failure.sh"
 source "$REPO_ROOT/tools/lib/fake-stack.sh"
 
 readonly TOOL_NAME="e2e-stack"

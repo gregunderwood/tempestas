@@ -83,6 +83,11 @@ Work is tracked on GitHub (`gregunderwood/tempestas`, private) with `gh`.
   PR's base, after is its head. Reviewers compare the two. A state the fake driver cannot produce,
   such as a follower, is shot with the e2e test's stubbed API and fake socket instead. See
   [docs/Testing.md](docs/Testing.md#screenshots-on-a-pr).
+- **A PR about user interaction, or one that adds or changes a stack spec, also posts a video.**
+  Run `tools/pr-video.sh <pr>` from the PR's pushed branch. Then publish the player page it
+  writes as an artifact, and run `tools/pr-video.sh --player-url <url> <pr>`. The comment gives
+  each spec's GIF inline, then a link to the player, then a link to download the mp4. See
+  [docs/Testing.md](docs/Testing.md#video-of-a-pr).
 - **Review in rounds until only nits remain.** A reviewer who did not write the change posts one
   comment headed `Review round N`, rating each finding **blocking** (wrong behaviour, a safety
   regression, the issue not done, the gate failing), **important** (should be fixed before merge
