@@ -14,6 +14,7 @@
     "src/**/*.test.ts",
     "vitest.config.ts",
     "src/migrations/round-trip/**",
+    "src/**/*.postgres.ts",
     "vitest.round-trip.config.ts"
   ]
 }

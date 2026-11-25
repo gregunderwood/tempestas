@@ -45,7 +45,10 @@ scripts there are not checked.
 
 `migration-round-trip` needs Docker: it runs every migration against a throwaway Postgres. Its
 config is [../apps/server/vitest.round-trip.config.ts](../apps/server/vitest.round-trip.config.ts),
-named so the workspace does not pick it up as part of `test`.
+named so the workspace does not pick it up as part of `test`. It also runs any
+`src/**/*.postgres.ts` spec: raw SQL that a mocked repository would pass whatever it said, such
+as the reading-break walk in [reading-breaks.postgres.ts](../apps/server/src/app/readings/reading-breaks.postgres.ts).
+Each such spec creates its own database in the same container.
 
 Vitest globals are on: `describe`, `it`, `expect` and `vi` need no import.
 
@@ -257,6 +260,8 @@ node tools/seed-reading-history.mjs tempestas
   runtime history switches the heaters by these same temperatures. The nights 4 and 17 days ago drop
   to about 0.6 °C, for the freeze-margin report to flag; every other night stays above about 2 °C.
   Humidity and CO2 are written only if the probe has ever reported them, and are null otherwise.
+- **The outage night is a gap.** The first node by slug sends no readings from 01:30 to 05:00 twelve
+  days ago, the same outage the runtime history writes, so the node health report lists it.
 - **Never touches a real reading.** Each seeded row has `boot_id` `seeded-history`. A rerun deletes
   only those rows, for the probes it reseeds, so it never doubles them. Each probe's seed stops just
   before its first real reading at or after the window start, so nothing at or after that reading
