@@ -175,8 +175,9 @@ version, since it lives in the agent, but an update leaves the old one in place.
   `slots.py`, and pin the new digest in
   [`tests/test_agent_files.py`](../../apps/agent-micropython/tests/test_agent_files.py), which fails
   until both are done. The boot banner prints it, which is the only way to tell which bootloader a
-  node has.
+  node has, so checking that every node is on the new one means reading each board's serial console.
 - Keep `slots.json`'s shape stable: the bootloader reads it and nothing else from the agent.
+- Keep `node_runtime.run()`, taking no arguments: the bootloader starts a slot through it.
 - Slot code may use only the `slots.py` names and signatures pinned in the same test, as every node
   keeps the `slots.py` of its last USB deploy. Adding one to that list means a USB deploy of
   every node before a release that uses it.

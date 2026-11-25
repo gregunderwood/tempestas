@@ -35,6 +35,11 @@ FROZEN_SLOT_STORE_SIGNATURES = {
     "start_pending": "(self, slot, command_id, version)",
 }
 FROZEN_SLOT_STORE_ATTRIBUTES = {"root"}
+# The frozen bootloader starts a slot by calling node_runtime.run() with no arguments.
+FROZEN_SLOT_ENTRY = ("node_runtime.py", "run")
+OLDER_NODES_WARNING = (
+    "nodes keep their last USB deploy: USB-deploy every node before a release relies on this"
+)
 FROZEN_SLOTS_MODULE_NAMES = set(FROZEN_SLOTS_MODULE_SIGNATURES)
 FROZEN_SLOT_STORE_NAMES = set(FROZEN_SLOT_STORE_SIGNATURES) | FROZEN_SLOT_STORE_ATTRIBUTES
 FROZEN_FILES = ("main.py", "bootloader.py", "slots.py")
@@ -166,10 +171,21 @@ def test_slot_code_uses_only_the_frozen_slots_interface():
 
 def test_the_frozen_slots_interface_keeps_its_signatures():
     for name, signature in FROZEN_SLOTS_MODULE_SIGNATURES.items():
-        assert str(inspect.signature(getattr(slots, name))) == signature, name
+        assert str(inspect.signature(getattr(slots, name))) == signature, (name, OLDER_NODES_WARNING)
     for name, signature in FROZEN_SLOT_STORE_SIGNATURES.items():
-        assert str(inspect.signature(getattr(SlotStore, name))) == signature, name
-    assert all(hasattr(SlotStore(), name) for name in FROZEN_SLOT_STORE_ATTRIBUTES)
+        assert str(inspect.signature(getattr(SlotStore, name))) == signature, (name, OLDER_NODES_WARNING)
+    assert all(hasattr(SlotStore(), name) for name in FROZEN_SLOT_STORE_ATTRIBUTES), OLDER_NODES_WARNING
+
+
+def test_a_slot_keeps_the_entry_point_the_frozen_bootloader_calls():
+    module, function_name = FROZEN_SLOT_ENTRY
+    tree = ast.parse((DEVICE_DIRECTORY / module).read_text())
+    entry_points = [
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == function_name
+    ]
+    assert len(entry_points) == 1, OLDER_NODES_WARNING
+    arguments = entry_points[0].args
+    assert not (arguments.posonlyargs or arguments.args or arguments.kwonlyargs), OLDER_NODES_WARNING
 
 
 def test_a_change_to_a_frozen_file_raises_the_bootloader_version():
