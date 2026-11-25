@@ -1,4 +1,3 @@
-import { EventEmitter } from 'node:events';
 import { ConfigService } from '@nestjs/config';
 import { connect } from 'mqtt';
 import {
@@ -16,71 +15,14 @@ import {
   MqttHardwareService,
 } from './mqtt-hardware.service';
 import type { UpdateOrder } from './hardware.service';
+import {
+  buildHelloPayload,
+  FakeBrokerClient,
+} from './fake-broker-client.fixtures';
 
 vi.mock('mqtt', () => ({ connect: vi.fn() }));
 
 const NOW = new Date('2026-11-21T12:00:00Z');
-
-interface PendingSubscription {
-  acknowledge: () => void;
-  refuse: (error: Error) => void;
-}
-
-class FakeBrokerClient extends EventEmitter {
-  readonly publishedTopics: string[] = [];
-  connected = false;
-  private readonly pendingSubscriptions: PendingSubscription[] = [];
-
-  readonly subscribeAsync = vi.fn(
-    () =>
-      new Promise<void>((acknowledge, refuse) => {
-        this.pendingSubscriptions.push({ acknowledge, refuse });
-      }),
-  );
-
-  readonly publishAsync = vi.fn(async (topic: string) => {
-    this.publishedTopics.push(topic);
-  });
-
-  readonly publish = vi.fn();
-
-  readonly endAsync = vi.fn(async () => undefined);
-
-  connectToBroker(): void {
-    this.connected = true;
-    this.emit('connect');
-  }
-
-  loseConnection(): void {
-    this.connected = false;
-    this.takeOldestSubscription().refuse(new Error('Connection closed'));
-    this.emit('close');
-  }
-
-  acknowledgeSubscribe(): void {
-    this.takeOldestSubscription().acknowledge();
-  }
-
-  refuseSubscribe(error: Error): void {
-    this.takeOldestSubscription().refuse(error);
-  }
-
-  private takeOldestSubscription(): PendingSubscription {
-    const oldest = this.pendingSubscriptions.shift();
-    if (!oldest) throw new Error('No subscribe is waiting for its SUBACK');
-    return oldest;
-  }
-
-  deliver(topic: string, payload: unknown): void {
-    this.emit('message', topic, Buffer.from(JSON.stringify(payload)), {
-      retain: false,
-    });
-  }
-
-  hasAnnouncedServerStatus(): boolean {
-    return this.publishedTopics.includes(mqttTopics.serverStatus);
-  }
-}
 
 async function settlePendingWork(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
@@ -283,20 +225,6 @@ describe('MqttHardwareService heartbeats', () => {
   let brokerClient: FakeBrokerClient;
   let service: MqttHardwareService;
 
-  function hello(overrides: Record<string, unknown> = {}) {
-    return {
-      schema: MQTT_SCHEMAS.hello,
-      node: 'patji',
-      ts: NOW.toISOString(),
-      kind: 'rpi',
-      agentName: AgentApp.Linux,
-      agentVersion: '1.2.0',
-      bootId: 'boot-1',
-      capabilities: { contractVersion: 1, contractMinor: 2 },
-      ...overrides,
-    };
-  }
-
   function storeEachHello(): void {
     service.hello$.subscribe((accepted) =>
       service.recordAcceptedHello(accepted),
@@ -335,7 +263,7 @@ describe('MqttHardwareService heartbeats', () => {
 
   it('names the agent version once the registry has stored its hello', async () => {
     storeEachHello();
-    brokerClient.deliver(mqttTopics.hello('patji'), hello());
+    brokerClient.deliver(mqttTopics.hello('patji'), buildHelloPayload());
 
     const [heartbeat] = await sendHeartbeats();
 
@@ -347,7 +275,7 @@ describe('MqttHardwareService heartbeats', () => {
   });
 
   it('names no version for a hello the registry has not stored', async () => {
-    brokerClient.deliver(mqttTopics.hello('patji'), hello());
+    brokerClient.deliver(mqttTopics.hello('patji'), buildHelloPayload());
 
     const [heartbeat] = await sendHeartbeats();
 
@@ -358,12 +286,12 @@ describe('MqttHardwareService heartbeats', () => {
     storeEachHello();
     brokerClient.deliver(
       mqttTopics.hello('patji'),
-      hello({ agentVersion: '1.1.0' }),
+      buildHelloPayload({ agentVersion: '1.1.0' }),
     );
     const [beforeUpdate] = await sendHeartbeats();
     brokerClient.deliver(
       mqttTopics.hello('patji'),
-      hello({ agentVersion: '1.2.0', bootId: 'boot-2' }),
+      buildHelloPayload({ agentVersion: '1.2.0', bootId: 'boot-2' }),
     );
 
     const [afterUpdate] = await sendHeartbeats();
@@ -374,10 +302,10 @@ describe('MqttHardwareService heartbeats', () => {
 
   it('keeps naming the last stored version when a later hello is refused', async () => {
     storeEachHello();
-    brokerClient.deliver(mqttTopics.hello('patji'), hello());
+    brokerClient.deliver(mqttTopics.hello('patji'), buildHelloPayload());
     brokerClient.deliver(
       mqttTopics.hello('patji'),
-      hello({ agentVersion: '1.2.1', bootId: '' }),
+      buildHelloPayload({ agentVersion: '1.2.1', bootId: '' }),
     );
 
     const [heartbeat] = await sendHeartbeats();

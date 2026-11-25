@@ -1,13 +1,24 @@
 import { ConflictException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { connect } from 'mqtt';
 import { FixedClock, SystemClock, type Clock } from '../common/clock';
 import type { Repository } from 'typeorm';
 import {
   AgentApp,
+  mqttTopics,
   NodeKind,
   NodeStatus,
   type NodeCapabilities,
 } from '@tempestas/domain';
 import type { HardwareService, NodeHello } from '../hardware/hardware.service';
+import {
+  HEARTBEAT_INTERVAL_MS,
+  MqttHardwareService,
+} from '../hardware/mqtt-hardware.service';
+import {
+  buildHelloPayload,
+  FakeBrokerClient,
+} from '../hardware/fake-broker-client.fixtures';
 import type { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { DeviceEntity } from '../devices/models';
 import type { SensorReadingEntity } from '../readings/models';
@@ -22,6 +33,8 @@ import {
   makeAgentReleasesRoot,
   writeBundle,
 } from '../agent-releases/agent-release-bundles.fixtures';
+
+vi.mock('mqtt', () => ({ connect: vi.fn() }));
 
 const NO_AGENT_RELEASES_DIRECTORY = '/nonexistent/agent-releases';
 
@@ -85,6 +98,7 @@ interface LatestReadingRow {
 interface ServiceCollaborators {
   clock?: Clock;
   agentReleases?: AgentReleasesService;
+  hardware?: HardwareService;
 }
 
 function makeService(
@@ -93,6 +107,7 @@ function makeService(
   {
     clock = new SystemClock(),
     agentReleases = new AgentReleasesService(NO_AGENT_RELEASES_DIRECTORY),
+    hardware,
   }: ServiceCollaborators = {},
 ) {
   const rows = [...initial];
@@ -154,7 +169,7 @@ function makeService(
     ),
   } as unknown as Repository<ZoneEntity>;
   const recordAcceptedHello = vi.fn();
-  const hardware = { recordAcceptedHello } as unknown as HardwareService;
+  const hardwareDouble = { recordAcceptedHello } as unknown as HardwareService;
   const publishNodeState = vi.fn();
   const realtime = { publishNodeState } as unknown as RealtimeGateway;
 
@@ -163,7 +178,7 @@ function makeService(
     deviceRepository,
     readingRepository,
     zoneRepository,
-    hardware,
+    hardware ?? hardwareDouble,
     realtime,
     clock,
     agentReleases,
@@ -273,6 +288,72 @@ describe('NodesService hello ingest', () => {
       displayName: 'The Brain',
       location: 'north end',
     });
+  });
+});
+
+describe('NodesService with the MQTT driver', () => {
+  let brokerClient: FakeBrokerClient;
+  let hardware: MqttHardwareService;
+
+  async function connectAsLeader(): Promise<void> {
+    brokerClient = new FakeBrokerClient();
+    vi.mocked(connect).mockReturnValue(
+      brokerClient as unknown as ReturnType<typeof connect>,
+    );
+    hardware = new MqttHardwareService(
+      new ConfigService({ CONTROLLER_ROLE: 'leader' }),
+      new FixedClock(AT),
+    );
+    hardware.onApplicationBootstrap();
+    brokerClient.connectToBroker();
+    await vi.advanceTimersByTimeAsync(0);
+    brokerClient.acknowledgeSubscribe();
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  async function readNextHeartbeat(): Promise<Record<string, unknown>> {
+    brokerClient.publish.mockClear();
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+    const [heartbeat] = brokerClient.publish.mock.calls
+      .filter(([topic]) => topic === mqttTopics.heartbeat('patji'))
+      .map(([, body]) => JSON.parse(body as string));
+    return heartbeat;
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    await connectAsLeader();
+  });
+
+  afterEach(async () => {
+    await hardware.onModuleDestroy();
+    vi.useRealTimers();
+  });
+
+  it('names the version in the heartbeat once the registry has stored the hello', async () => {
+    const { service, rows } = makeService([], [], { hardware });
+    service.onModuleInit();
+
+    brokerClient.deliver(mqttTopics.hello('patji'), buildHelloPayload());
+    const heartbeat = await readNextHeartbeat();
+
+    expect(rows).toHaveLength(1);
+    expect(heartbeat.agentVersion).toBe('1.2.0');
+    service.onModuleDestroy();
+  });
+
+  it('names no version when the registry fails to store the hello', async () => {
+    const { service, nodeRepository } = makeService([], [], { hardware });
+    vi.mocked(nodeRepository.save).mockRejectedValue(
+      new Error('database is down'),
+    );
+    service.onModuleInit();
+
+    brokerClient.deliver(mqttTopics.hello('patji'), buildHelloPayload());
+    const heartbeat = await readNextHeartbeat();
+
+    expect(heartbeat.agentVersion).toBeNull();
+    service.onModuleDestroy();
   });
 });
 

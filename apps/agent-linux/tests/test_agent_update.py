@@ -78,8 +78,10 @@ def count_hellos(agent) -> int:
     return sum(1 for topic, *_ in agent.client.published if topic == hello_topic)
 
 
-def heartbeat_naming(accepted_version: str | None) -> bytes:
-    return json.dumps({"controller": SERVER, "epoch": 1, "agentVersion": accepted_version}).encode()
+def encode_heartbeat_naming(accepted_version: str | None) -> bytes:
+    heartbeat = {"controller": SERVER, "epoch": 1}
+    heartbeat[contract.HEARTBEAT_ACCEPTED_VERSION_FIELD] = accepted_version
+    return json.dumps(heartbeat).encode()
 
 
 def update_statuses(agent) -> list[tuple[str, str | None]]:
@@ -253,10 +255,9 @@ def test_a_new_release_reports_healthy_once_it_has_said_hello_and_heard_a_heartb
 
 def test_a_new_release_rolls_back_when_the_server_never_accepts_its_hello(tmp_path):
     agent, clock = start_new_release_on_its_gate(tmp_path)
-    still_the_old_release = {"controller": SERVER, "epoch": 1, "agentVersion": RUNNING_RELEASE}
 
     agent.say_hello()
-    agent.on_heartbeat(json.dumps(still_the_old_release).encode())
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
     clock.advance(GATE_SECONDS)
     agent.tend_update()
 
@@ -269,10 +270,9 @@ def test_a_new_release_rolls_back_when_the_server_never_accepts_its_hello(tmp_pa
 
 def test_a_new_release_rolls_back_when_the_server_names_no_accepted_hello(tmp_path):
     agent, clock = start_new_release_on_its_gate(tmp_path)
-    nothing_accepted = {"controller": SERVER, "epoch": 1, "agentVersion": None}
 
     agent.say_hello()
-    agent.on_heartbeat(json.dumps(nothing_accepted).encode())
+    agent.on_heartbeat(encode_heartbeat_naming(None))
     clock.advance(GATE_SECONDS)
     agent.tend_update()
 
@@ -284,24 +284,43 @@ def test_a_new_release_says_hello_again_when_the_server_has_not_taken_it(tmp_pat
     agent, clock = start_new_release_on_its_gate(tmp_path)
     agent.say_hello()
 
-    agent.on_heartbeat(heartbeat_naming(RUNNING_RELEASE))
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
     assert count_hellos(agent) == 1
     clock.advance(HELLO_REPEAT_S)
-    agent.on_heartbeat(heartbeat_naming(RUNNING_RELEASE))
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
     assert count_hellos(agent) == 2
-    agent.on_heartbeat(heartbeat_naming(NEW_RELEASE))
+    agent.on_heartbeat(encode_heartbeat_naming(NEW_RELEASE))
     agent.tend_update()
 
     assert count_hellos(agent) == 2
     assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
 
 
+def test_a_new_release_says_hello_again_when_the_server_has_accepted_none(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    clock.advance(HELLO_REPEAT_S)
+    agent.on_heartbeat(encode_heartbeat_naming(None))
+
+    assert count_hellos(agent) == 2
+
+
+def test_a_new_release_never_repeats_its_hello_to_a_server_before_1_2(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    clock.advance(HELLO_REPEAT_S)
+    agent.on_heartbeat(HEARTBEAT)
+
+    assert count_hellos(agent) == 1
+
+
 def test_a_new_release_is_healthy_once_the_server_names_it_in_a_heartbeat(tmp_path):
     agent, _ = start_new_release_on_its_gate(tmp_path)
-    accepted = {"controller": SERVER, "epoch": 1, "agentVersion": NEW_RELEASE}
 
     agent.say_hello()
-    agent.on_heartbeat(json.dumps(accepted).encode())
+    agent.on_heartbeat(encode_heartbeat_naming(NEW_RELEASE))
     agent.tend_update()
 
     assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]

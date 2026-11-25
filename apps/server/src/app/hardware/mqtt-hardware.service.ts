@@ -112,7 +112,7 @@ export class MqttHardwareService
   private readonly lastReports = new Map<string, PinStateReport>();
   private readonly isOnlineByNode = new Map<NodeId, boolean>();
   private readonly knownNodes = new Set<NodeId>();
-  private readonly acceptedAgentVersions = new Map<NodeId, string>();
+  private readonly acceptedAgentVersionByNode = new Map<NodeId, string>();
   private readonly lastActedAt = new Map<string, number>();
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private commandCount = 0;
@@ -223,7 +223,7 @@ export class MqttHardwareService
   }
 
   recordAcceptedHello(hello: NodeHello): void {
-    this.acceptedAgentVersions.set(hello.nodeId, hello.agentVersion);
+    this.acceptedAgentVersionByNode.set(hello.nodeId, hello.agentVersion);
   }
 
   private buildClientOptions(): IClientOptions & { clientId: string } {
@@ -739,7 +739,7 @@ export class MqttHardwareService
       ts: this.clock.now().toISOString(),
       controller: this.controllerId,
       epoch: this.epoch,
-      agentVersion: this.acceptedAgentVersions.get(nodeId) ?? null,
+      agentVersion: this.acceptedAgentVersionByNode.get(nodeId) ?? null,
     };
   }
 

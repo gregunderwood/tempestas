@@ -40,6 +40,8 @@ class HealthGate:
 
     def note_hello(self, agent_version: str) -> None:
         self.hello_version = agent_version
+        # A refusal answers an earlier hello, so it must not outlive a new one.
+        self.last_refusal = None
 
     def start_watching(self, now: float) -> None:
         with self._clock_lock:
@@ -183,7 +185,7 @@ def prune_after_update(layout: ReleaseLayout, pending: PendingUpdate) -> list[st
     )
 
 
-def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
+def roll_back_gate(layout: ReleaseLayout, gate: HealthGate, reason: str) -> UpdateOutcome:
     pending = gate.pending
     if not layout.locate_release(pending.previous_release).is_dir():
         # Better a failing release than `current` pointing at nothing.
@@ -192,17 +194,14 @@ def roll_back_gate(layout: ReleaseLayout, gate: HealthGate) -> UpdateOutcome:
             UpdateOutcome(
                 pending.command_id,
                 contract.UpdateState.FAILED,
-                f"{gate.describe_failure()}, and {pending.previous_release} to roll back to"
-                " is missing, so it stays",
+                f"{reason}, and {pending.previous_release} to roll back to is missing, so it stays",
             ),
         )
     # Switched first, so a crash before the outcome reads as a failed start.
     layout.switch_current_to(pending.previous_release)
     return record_outcome(
         layout,
-        UpdateOutcome(
-            pending.command_id, contract.UpdateState.ROLLED_BACK, gate.describe_failure()
-        ),
+        UpdateOutcome(pending.command_id, contract.UpdateState.ROLLED_BACK, reason),
     )
 
 

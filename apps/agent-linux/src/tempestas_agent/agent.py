@@ -348,7 +348,8 @@ class Agent:
     def say_hello(self) -> None:
         topic = contract.build_hello_topic(self.config.node_id)
         delivery = self.publish("hello", topic, self.hello_payload())
-        self.last_hello_at = self._clock()
+        if has_left_this_node(delivery):
+            self.last_hello_at = self._clock()
         # Read once: the main loop may drop the gate meanwhile.
         gate = self.update_gate
         if gate is not None and has_left_this_node(delivery):
@@ -628,10 +629,12 @@ class Agent:
             log.error("could not prune old releases: %s", error)
 
     def _fail_update_gate(self, gate: HealthGate) -> None:
-        log.error("update gate failed: %s - rolling back", gate.describe_failure())
+        # Described once, so a heartbeat arriving meanwhile cannot split the log from the record.
+        reason = gate.describe_failure()
+        log.error("update gate failed: %s - rolling back", reason)
         try:
             # Unsent: the previous release reports it after the restart.
-            self.outcome_to_report = roll_back_gate(self.layout, gate)
+            self.outcome_to_report = roll_back_gate(self.layout, gate, reason)
         finally:
             if self._has_switched_back(gate):
                 self.request_restart()
