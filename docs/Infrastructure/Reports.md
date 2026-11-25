@@ -3,10 +3,11 @@
 ## What it is
 
 Summaries the raw tables never gave: how hard each device worked, how it cycled, how close the
-pumphouse came to freezing, and which nodes went quiet or rebooted. One server module, `apps/server/src/app/reports`, with one endpoint per
-report, the response types in `libs/domain/src/lib/reports`, and a section per report on the web
-Reports screen. Equipment runtime was the first, freeze margin the second and node health the
-third; the next reports follow the same shape.
+pumphouse came to freezing, how long each zone spent where its rules are set to hold it, and which
+nodes went quiet or rebooted. One server module, `apps/server/src/app/reports`, with one endpoint
+per report, the response types in `libs/domain/src/lib/reports`, and a section per report on the
+web Reports screen. Equipment runtime was the first, freeze margin the second, time in range the
+third and node health the fourth; the next reports follow the same shape.
 
 ## Key files
 
@@ -20,6 +21,11 @@ third; the next reports follow the same shape.
 - [../../apps/server/src/app/reports/heating-setpoints.ts](../../apps/server/src/app/reports/heating-setpoints.ts) — the warning temperature, borrowed from the zone's heat rules
 - [../../apps/server/src/app/reports/freeze-margin.service.ts](../../apps/server/src/app/reports/freeze-margin.service.ts) — finds the heated zones, their nights, readings and relay spans
 - [../../apps/web/src/app/features/reports/freeze-margin-card.ts](../../apps/web/src/app/features/reports/freeze-margin-card.ts) — the card, one per heated zone
+- [../../apps/server/src/app/reports/time-in-range.ts](../../apps/server/src/app/reports/time-in-range.ts) — a zone's periods to hours below, in range, above and without readings, pure
+- [../../apps/server/src/app/reports/zone-band.ts](../../apps/server/src/app/reports/zone-band.ts) — the band, from the zone's heat and cool thermostat rules
+- [../../apps/server/src/app/reports/report-periods.ts](../../apps/server/src/app/reports/report-periods.ts) — a zone's recent nights, or days and nights, from its daylight window
+- [../../apps/server/src/app/reports/time-in-range.service.ts](../../apps/server/src/app/reports/time-in-range.service.ts) — finds the zones with nodes, their periods, held readings and extremes
+- [../../apps/web/src/app/features/reports/time-in-range-card.ts](../../apps/web/src/app/features/reports/time-in-range-card.ts) — the card, one per zone with a node
 - [../../apps/server/src/app/readings/reading-breaks.ts](../../apps/server/src/app/readings/reading-breaks.ts) — the gaps and boot changes in `sensor_readings`, found in Postgres
 - [../../apps/server/src/app/reports/node-health.ts](../../apps/server/src/app/reports/node-health.ts) — breaks and updates to each node's gaps, reboots and version changes, pure
 - [../../apps/server/src/app/reports/node-health.service.ts](../../apps/server/src/app/reports/node-health.service.ts) — loads the admitted nodes, their breaks and their healthy updates
@@ -30,6 +36,7 @@ third; the next reports follow the same shape.
 ```
 GET /api/reports/equipment-runtime?days=     per device per day; days defaults to 30, caps at 90
 GET /api/reports/freeze-margin?nights=       per heated zone per night; nights defaults to 30, caps at 90
+GET /api/reports/time-in-range?days=         per zone per day and night; days defaults to 30, caps at 90
 GET /api/reports/node-health?days=           per admitted node; days defaults to 30, caps at 90
 ```
 
@@ -120,6 +127,48 @@ newest first, tonight included while it runs.
 The CO2 generator doubles as the greenhouse's night heater, but it is not one of `HEATING_ROLES`, so
 the greenhouse is not in this report.
 
+## Time in range
+
+How long each zone spent where its rules are set to hold it. For every zone with a node, one row per
+daylight and per night period, newest first, the running one included.
+
+- **The band is the rules' own.** Below is under a `heater` or `heat_tape` `thermostat` rule's heat
+  on-setpoint, and above is over an `exhaust_fan` `thermostat` rule's cool on-setpoint, both from
+  `rules_config`, with no per-zone setting of its own. The report measures whether the rules held
+  the zone where they are set to, not where the plants would like to be.
+- **A zone with no heating rule has no lower bound, and one with no cooling rule no upper bound.**
+  The card says so rather than inventing one. The greenhouse's lights (`daylight-thermostat`) and
+  the CO2 generator's night frost protection (`co2-burner`) are not heating rules here, and a
+  `daylight-thermostat` never lends a bound, since it is off by design half the time.
+- **Each bound is read by its rule's own sensor source**, `min`, `max`, `mean`, `node:` or
+  `sensor:`, as the climate resolver picks it. A source with no probe reporting in a stretch falls
+  back to the probe that would trip it first: the coldest for a heat rule, the warmest for a cool one.
+- **Below wins a tie.** A stretch under a heat setpoint by one probe and over a cool one by another
+  counts as below.
+- **Periods are the zone's daylight window**, the same as `/api/readings/stats/day-night`, with the
+  deployment default for a zone with none. There is no combined 24-hour figure, for the reason in
+  [Readings](Readings.md#day-and-night-not-24-hours).
+- **A reading holds until the next one from its probe, for at most
+  `TIME_IN_RANGE_LONGEST_HELD_MINUTES`, 1 minute.** Computed in SQL with `LEAD` over
+  `sensor_readings` and summed into 5-minute buckets per probe, each probe's average judged against
+  the band. A hold that runs past its bucket's end goes on in the next bucket, so a node that never
+  missed a sample has no hours without readings. A stretch counts for as long as its longest-held
+  probe held in it.
+- **The 1-minute cap assumes every node samples at least once a minute.** A node sampling less
+  often shows part of each period as without readings. Holding for each node's own
+  `sampleIntervalMs` would lift that.
+- **A bucket goes to the period that holds its start.** A daylight edge off the 5-minute grid,
+  such as `06:02`, gives the whole `06:00` bucket to the night, and the day then starts with a
+  few minutes without readings.
+- **Hours without readings** are the rest of the period, so a gap is never counted as in range.
+- **Each period has its extremes**, each the exact reading with its probe and time: a night's lowest
+  temperature and humidity, and a day's highest temperature, humidity and CO2. A metric no probe
+  reported is left out.
+
+Only temperature has hours below, in range and above: nothing in `rules_config` bands humidity, and
+CO2's only numbers are the burner's enrichment dead band, which switches the burner rather than
+describing where the air should sit.
+
 ## Node health
 
 A night with no readings otherwise just disappears from the averages, and a node that rebooted five
@@ -150,4 +199,4 @@ the gaps themselves are listed.
 ## When to update this file
 
 - A report is added, or a default or cap changes
-- The runtime, freeze margin or node health rules above change
+- The runtime, freeze margin, time in range or node health rules above change

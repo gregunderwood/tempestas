@@ -20,6 +20,8 @@ import type {
   ReadingsQuery,
   RulesEvaluation,
   RulesCycle,
+  TimeInRangeQuery,
+  TimeInRangeReport,
   UpdateDevicePayload,
   Zone,
   ZoneHistoryReport,
@@ -28,7 +30,11 @@ import type {
 const API_ROOT = '/api';
 
 type QueryParameters =
-  ReadingsQuery | EquipmentRuntimeQuery | FreezeMarginQuery | NodeHealthQuery;
+  | ReadingsQuery
+  | EquipmentRuntimeQuery
+  | FreezeMarginQuery
+  | NodeHealthQuery
+  | TimeInRangeQuery;
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -139,6 +145,17 @@ export class ApiService {
   ): Observable<NodeHealthReport> {
     return this.getFromApi<NodeHealthReport>(
       '/reports/node-health',
+      options,
+      query,
+    );
+  }
+
+  fetchTimeInRange(
+    query: TimeInRangeQuery = {},
+    options: RequestOptions = {},
+  ): Observable<TimeInRangeReport> {
+    return this.getFromApi<TimeInRangeReport>(
+      '/reports/time-in-range',
       options,
       query,
     );

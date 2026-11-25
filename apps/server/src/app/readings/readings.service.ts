@@ -5,6 +5,7 @@ import { Repository, type SelectQueryBuilder } from 'typeorm';
 import {
   ApiErrorCode,
   type DayNightStats,
+  type MetricKey,
   type Reading,
   type ReadingAverages,
   ReadingOrder,
@@ -39,7 +40,6 @@ const CREATED_AT_DIRECTION: Record<ReadingOrder, SortDirection> = {
 };
 
 type SortDirection = 'ASC' | 'DESC';
-type Metric = 'temperature' | 'humidity' | 'co2';
 
 interface RawAverages {
   temperature: string | null;
@@ -52,7 +52,11 @@ interface MetricExtremes {
   highest: Reading | null;
 }
 
-const EXTREME_METRICS: readonly Metric[] = ['temperature', 'humidity', 'co2'];
+const EXTREME_METRICS: readonly MetricKey[] = [
+  'temperature',
+  'humidity',
+  'co2',
+];
 
 const MOST_PROBES_IN_A_HISTORY = 70;
 const AVERAGE_DECIMALS = 2;
@@ -66,6 +70,81 @@ export interface TemperatureBucketRow {
   highestC: number;
   sampleCount: number;
 }
+
+export interface HeldTemperatureBucketRow {
+  nodeId: string;
+  sensorId: string;
+  at: Date;
+  averageC: number;
+  /** How long this probe's readings held in the bucket, counting a hold carried over from the bucket before. */
+  heldMs: number;
+}
+
+interface RawHeldTemperatureBucket {
+  nodeId: string;
+  sensorId: string;
+  at: Date;
+  averageC: string;
+  heldMs: string;
+}
+
+export interface HeldTemperatureBucketsQuery {
+  window: ReadingWindow;
+  bucketMinutes: number;
+  longestHeldMinutes: number;
+  nodeSlugs: readonly string[];
+}
+
+// Each reading holds until its probe's next, for at most the longest hold, and a hold past its bucket's end goes on in the next.
+const HELD_TEMPERATURE_BUCKETS_SQL = `
+  WITH holds AS (
+    SELECT node.slug AS node_slug,
+           reading.sensor_id,
+           reading.created_at,
+           reading.temperature,
+           date_bin(make_interval(mins => $1), reading.created_at, TIMESTAMPTZ 'epoch') AS bucket_at,
+           date_bin(make_interval(mins => $1), reading.created_at, TIMESTAMPTZ 'epoch')
+             + make_interval(mins => $1) AS bucket_end_at,
+           LEAST(
+             COALESCE(
+               LEAD(reading.created_at) OVER (
+                 PARTITION BY reading.node_id, reading.sensor_id ORDER BY reading.created_at
+               ),
+               $3
+             ),
+             reading.created_at + make_interval(mins => $5)
+           ) AS held_until
+      FROM sensor_readings reading
+      JOIN nodes node ON node.id = reading.node_id
+     WHERE reading.created_at >= $2
+       AND reading.created_at <= $3
+       AND node.slug = ANY($4::text[])
+  ),
+  held_pieces AS (
+    SELECT node_slug, sensor_id, bucket_at, temperature,
+           TRUE AS is_bucket_reading,
+           LEAST(held_until, bucket_end_at) - created_at AS held
+      FROM holds
+    UNION ALL
+    SELECT node_slug, sensor_id, bucket_end_at, temperature,
+           FALSE,
+           held_until - bucket_end_at
+      FROM holds
+     WHERE held_until > bucket_end_at
+  )
+  SELECT node_slug AS "nodeId",
+         sensor_id AS "sensorId",
+         bucket_at AS "at",
+         COALESCE(
+           AVG(temperature) FILTER (WHERE is_bucket_reading),
+           AVG(temperature)
+         ) AS "averageC",
+         SUM(EXTRACT(EPOCH FROM held)) * 1000 AS "heldMs"
+    FROM held_pieces
+   GROUP BY node_slug, sensor_id, bucket_at
+   ORDER BY bucket_at DESC
+   LIMIT $6
+`;
 
 interface RawTemperatureBucket {
   nodeId: string;
@@ -213,15 +292,61 @@ export class ReadingsService {
     return rows.reverse().map(toTemperatureBucketRow);
   }
 
-  // Ties go to the latest, as every other extreme here does.
-  async findColdestReading(
+  // Newest first under the limit, like bucketTemperatures, and handed back oldest first.
+  async bucketHeldTemperatures(
+    query: HeldTemperatureBucketsQuery,
+  ): Promise<HeldTemperatureBucketRow[]> {
+    if (query.nodeSlugs.length === 0) return [];
+    const rows: RawHeldTemperatureBucket[] = await this.readings.query(
+      HELD_TEMPERATURE_BUCKETS_SQL,
+      [
+        query.bucketMinutes,
+        query.window.from,
+        query.window.to,
+        query.nodeSlugs,
+        query.longestHeldMinutes,
+        countBucketRowsAllowed(query.window, query.bucketMinutes),
+      ],
+    );
+    return rows.reverse().map(toHeldTemperatureBucketRow);
+  }
+
+  findColdestReading(
     window: ReadingWindow,
     nodeSlugs: readonly string[],
+  ): Promise<Reading | null> {
+    return this.findLowestReading(window, nodeSlugs, 'temperature');
+  }
+
+  findLowestReading(
+    window: ReadingWindow,
+    nodeSlugs: readonly string[],
+    metric: MetricKey,
+  ): Promise<Reading | null> {
+    return this.findNodesExtreme(window, nodeSlugs, metric, 'ASC');
+  }
+
+  findHighestReading(
+    window: ReadingWindow,
+    nodeSlugs: readonly string[],
+    metric: MetricKey,
+  ): Promise<Reading | null> {
+    return this.findNodesExtreme(window, nodeSlugs, metric, 'DESC');
+  }
+
+  // Ties go to the latest, as every other extreme here does.
+  private async findNodesExtreme(
+    window: ReadingWindow,
+    nodeSlugs: readonly string[],
+    metric: MetricKey,
+    direction: SortDirection,
   ): Promise<Reading | null> {
     if (nodeSlugs.length === 0) return null;
     const row = await this.queryWindow(window)
       .andWhere('node.slug IN (:...nodeSlugs)', { nodeSlugs })
-      .orderBy('reading.temperature', 'ASC')
+      // Postgres sorts NULL above every value, so a missing humidity or CO2 would win a DESC ordering.
+      .andWhere(`reading.${metric} IS NOT NULL`)
+      .orderBy(`reading.${metric}`, direction)
       .addOrderBy('reading.createdAt', 'DESC')
       .limit(1)
       .getOne();
@@ -269,7 +394,7 @@ export class ReadingsService {
   private async findExtremes(
     query: ReadingsQuery,
     window: ReadingWindow,
-    metric: Metric,
+    metric: MetricKey,
   ): Promise<MetricExtremes> {
     const [lowest, highest] = await Promise.all([
       this.findExtreme(query, window, metric, 'ASC'),
@@ -281,7 +406,7 @@ export class ReadingsService {
   private async findExtreme(
     query: ReadingsQuery,
     window: ReadingWindow,
-    metric: Metric,
+    metric: MetricKey,
     direction: SortDirection,
   ): Promise<Reading | null> {
     const row = await this.queryReadingsInWindow(query, window)
@@ -361,6 +486,19 @@ function toTemperatureBucketRow(
     lowestC: Number(raw.lowestC),
     highestC: Number(raw.highestC),
     sampleCount: Number(raw.sampleCount),
+  };
+}
+
+// Postgres returns AVG and SUM as strings.
+function toHeldTemperatureBucketRow(
+  raw: RawHeldTemperatureBucket,
+): HeldTemperatureBucketRow {
+  return {
+    nodeId: raw.nodeId,
+    sensorId: raw.sensorId,
+    at: new Date(raw.at),
+    averageC: roundTo(Number(raw.averageC), AVERAGE_DECIMALS),
+    heldMs: Math.round(Number(raw.heldMs)),
   };
 }
 

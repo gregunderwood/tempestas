@@ -28,15 +28,8 @@ import {
   type HeatOnBelowByRole,
   type SensorSourceByRole,
 } from './heating-setpoints';
-import type { NightWindow } from './night-windows';
-
-export interface FreezeMarginZone {
-  id: string;
-  slug: string;
-  displayName: string;
-  timezone: string;
-  nodeIds: string[];
-}
+import type { NightWindow } from './report-periods';
+import type { ReportZone } from './report-zone';
 
 export interface HeatingDevice {
   id: string;
@@ -50,7 +43,7 @@ export interface NightWithColdest extends NightWindow {
 }
 
 export interface ZoneFreezeMarginInput {
-  zone: FreezeMarginZone;
+  zone: ReportZone;
   heatOnBelowByRole: HeatOnBelowByRole;
   sensorSourceByRole: SensorSourceByRole;
   /** This zone's heating devices only. */

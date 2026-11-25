@@ -25,7 +25,7 @@ sometimes with wet hands. Angular 20 standalone components, Angular Material M3,
 - [../apps/web/src/app/shared/arrange/card-order.ts](../apps/web/src/app/shared/arrange/card-order.ts) — card order: a drop or a move, merging a saved order, browser storage
 - [../apps/web/src/app/features/nodes/node-detail.ts](../apps/web/src/app/features/nodes/node-detail.ts) — one node, with its 24-hour statistics
 - [../apps/web/src/app/features/zones/zone-history-view.ts](../apps/web/src/app/features/zones/zone-history-view.ts) — a zone's last 24 hours as chart geometry, pure
-- [../apps/web/src/app/features/reports/reports-page.ts](../apps/web/src/app/features/reports/reports-page.ts) — the reports screen: equipment runtime, freeze margin, node health, and the reports still to come
+- [../apps/web/src/app/features/reports/reports-page.ts](../apps/web/src/app/features/reports/reports-page.ts) — the reports screen: equipment runtime, freeze margin, time in range, node health, and the reports still to come
 - [../apps/web/src/styles.scss](../apps/web/src/styles.scss) — the M3 theme, the rail and hero tokens, and the gauge band colours
 - [../apps/web/proxy.conf.json](../apps/web/proxy.conf.json) — `/api` and `/socket.io` to `:7000` in dev
 
@@ -362,16 +362,21 @@ card per device with its hours on, starts, shortest run and unknown hours, a bar
 day-by-day table. Freeze margin follows: a card per zone with a heater or heat tape, a row per night
 with the coldest reading, the heat at that moment and the hours below the warning, and a red line
 under any night where the heat was off, unknown, or on and not keeping up. The latest week shows;
-earlier nights fold away. Node health comes next: a card per admitted node listing its gaps in
-readings, reboots and agent updates in one timeline, newest first, with the latest seven showing.
-Below them, a card names the reports still to come — time in range and CO2 enrichment — and loses a
-line as each lands.
+earlier nights fold away. Time in range comes next: a card per zone with a node, naming the rules
+that bound it (or saying there is no lower or upper bound), the share of read hours in range for
+nights and for days apart, and a row per daylight and night period with the night's lowest
+temperature and humidity or the day's highest temperature, humidity and CO2, the hours below, in range and above (a side with no bound has no column), and the
+share with no readings. The latest fourteen periods show; earlier ones fold away. Node health comes after it: a card per admitted node listing its gaps in readings, reboots and
+agent updates in one timeline, newest first, with the latest seven showing. Below them, a card names the reports still to come —
+CO2 enrichment — and loses a line as each lands.
 
-A report is fetched once and fetched again whenever a device switches or a node goes offline or
-comes back, so it follows the relays without polling. Freeze margin is also fetched again when a
-heated zone's reading arrives at least one 10-minute bucket past what it last covered, because
-tonight's row drifts colder without any heat switching. Node health is fetched again on any node
-push only, since a node going quiet, coming back or rebooting is what changes it. The server side, and the rules for unknown spans, midnight and offline nodes, are
+Equipment runtime and freeze margin are fetched once and fetched again whenever a device switches
+or a node goes offline or comes back, so they follow the relays without polling. Freeze margin is
+also fetched again when a heated zone's reading arrives at least one 10-minute bucket past what it
+last covered, because tonight's row drifts colder without any heat switching. Time in range follows
+readings only, fetched again once a zone's reading is 15 minutes past what it last covered: it
+reads 30 days of readings, which is a heavy query on the Pi. Node health is fetched again on any
+node push only, since a node going quiet, coming back or rebooting is what changes it. The server side, and the rules for unknown spans, midnight and offline nodes, are
 in [Reports](Infrastructure/Reports.md).
 
 It replaced a Readings screen that listed the latest hundred rows, newest first. `/readings` still

@@ -11,6 +11,7 @@ import { FreezeMarginService } from './freeze-margin.service';
 import { NodeHealthService } from './node-health.service';
 import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
+import { TimeInRangeService } from './time-in-range.service';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ReportsService } from './reports.service';
     ReportsService,
     FreezeMarginService,
     NodeHealthService,
+    TimeInRangeService,
     { provide: Clock, useClass: SystemClock },
   ],
 })
