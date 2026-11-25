@@ -4,7 +4,8 @@
 
 How an existing Home Assistant install observes tempestas — device and sensor state, and an alarm
 path that survives the server dying — plus the decision **not** to move the control law into HA's
-automation engine, and the decision not to build an email or SMS notifier instead.
+automation engine, and the decision not to build an email or SMS notifier instead. It also covers
+the reverse direction: HA's own sensors read into tempestas as an input, never as an output.
 
 The shape in one line: **Home Assistant observes over MQTT. It never publishes to
 `tempestas/v1/node/…`.**
@@ -245,6 +246,65 @@ state. The rule _kinds_ stay out of its reach.
 > continuously and breaks no rule in `drive()`. The DTO must enforce per-field ranges server-side.
 > Without the clamps this seam is more dangerous than the device verbs it was meant to avoid.
 
+## HA as a sensor source
+
+The sections above are tempestas → HA. The reverse direction is worth having for **inputs only**.
+
+HA already speaks to nearly every off-the-shelf sensor: Zigbee2MQTT, Ecowitt gateways, rtl_433
+radios, Shelly, BLE through its proxies. The vendor-MQTT bridge in
+[Off-the-shelf devices](Off-the-shelf%20devices.md) would otherwise re-implement each of those
+dialects. Reading them through HA replaces most of that work with a list of entity ids.
+
+**Why inputs and not outputs.** A sensor cannot energise anything, so the one-owner rule and the
+device-side auto-off that govern plugs do not apply to it. A plug commanded through HA would make
+HA a controller, which the warning at the top of this page rules out. Plugs keep going through
+tempestas' own bridge.
+
+### The shape: a sensor-only bridge node
+
+- HA publishes chosen entities with its built-in `mqtt_statestream` integration, under its own
+  `homeassistant/#` tree, with `publish_timestamps: true`. HA's broker ACL already allows that tree,
+  so **HA's credential does not change** and it still never writes to `tempestas/v1/#`.
+- A bridge process subscribes there and presents itself as an ordinary node, `ha-bridge`: a `hello`
+  whose `NodeCapabilities.sensors` enumerates the configured entities, and samples on the normal
+  `node/{id}/sensor/{s}/sample` topics. It has no `gpio` and accepts no commands.
+- The bridge is a sensor backend on the Linux agent, not a new service. The server needs no change.
+- It goes through the [admission gate](../Safety.md#the-admission-gate) like any node, with its own
+  broker user: read on the statestream subtree, write on `tempestas/v1/node/ha-bridge/#` only.
+
+### Freshness comes from HA's timestamp, never from the bridge
+
+Statestream messages are retained, and a battery sensor that dies is often never marked
+`unavailable` by HA. A bridge that stamped each sample with its own clock would forward a value
+that froze days ago as a fresh reading, which is [Safety](../Safety.md) rule 2 broken by a
+translation layer.
+
+So each sample carries HA's `last_updated` as its measurement time, and `unknown` or `unavailable`
+becomes `valid: false`. `last_updated` only moves when the value changes, so a perfectly steady
+sensor can read as stale. That errs in the safe direction (hold and alarm), and is the reason to
+bridge noisy measurements like temperature rather than ones that sit still.
+
+Battery sensors report every few minutes. Where one feeds a rule, its `maxAgeMs` must allow for
+that interval, or the rule will flap between fresh and stale.
+
+### Which decisions it may feed
+
+An HA-sourced reading has one more failure domain than a native one: HA itself, and every
+integration between it and the device. It is fine for display, history and a zone mean. It is not
+fine for a role whose wrong reading is expensive:
+
+| Role                      | HA-sourced sensor?                                             |
+| ------------------------- | -------------------------------------------------------------- |
+| Display, history, reports | ✅ Yes                                                         |
+| `exhaust_fan`, `lights`   | ✅ Yes; a wrong reading costs ventilation or light, not a crop |
+| `co2_generator`           | ❌ No; keep `"sensor": { "source": "node:elantris" }` pinned   |
+| `heater`, `heat_tape`     | ❌ No; a high reading suppresses frost protection              |
+
+The zone's `sensorPolicy.default` takes the mean of every admitted sensor, so **admitting
+`ha-bridge` into a zone is the decision**, not a later one. Any role that does not pin a source
+will start averaging HA's readings on the next tick. Pin the burner and the heaters before
+admitting it.
+
 ## Why not simply let Home Assistant run the rules
 
 HA has a mature scheduler, a template engine and a trace UI. Using it instead of
@@ -279,6 +339,14 @@ alerting: HA observing is free to fail, because failing means only that a notifi
 
 **And it inverts the architecture.** Whoever runs the rules holds the heartbeat and the `epoch`.
 
+**What HA _can_ match is the device layer.** A plug's own dead-man, its power-on state and an
+independent thermostat backstop (see [Off-the-shelf devices](Off-the-shelf%20devices.md)) work the
+same whoever sends the heartbeat. A careful HA install can have all of them. What it cannot have is
+the decision layer above: one choke point that every command passes through and that can refuse,
+a single controller, rules under test, and a failure direction chosen once rather than in every
+automation. In HA those are properties of each install, as good as whoever wrote its YAML. Here
+they are the default.
+
 ## Enforcement
 
 The rules above hold structurally, not by convention. An MQTT write goes straight to a GPIO pin,
@@ -301,6 +369,15 @@ topic write tempestas/v1/ha/#
 **No write to `tempestas/v1/node/#` at any stage.** A hand-written HA MQTT switch aimed at
 `gpio/set` would also fail `expiresAt` and trip `CONTROLLER_CONFLICT` — but the ACL is what makes it
 impossible rather than merely wrong.
+
+The sensor bridge needs nothing from HA's user. It gets its own, which can read what HA publishes
+and write only as its own node:
+
+```
+user ha-bridge
+topic read homeassistant/statestream/#
+topic write tempestas/v1/node/ha-bridge/#
+```
 
 ## Where it fits
 
@@ -325,6 +402,10 @@ the sense that question rules out. It observes, it routes alarms, and it owns no
   a timer nobody reviewed.
 - **HA entity state must never lead the server's.** Treat every Stage 2 request as one that may be
   refused.
+- **A retained HA state is not a fresh reading.** The sensor bridge takes its timestamp from HA's
+  `last_updated`, never from when it relayed the value.
+- **Admitting `ha-bridge` puts its sensors in every unpinned zone mean.** Pin the burner and the
+  heaters to their native sensors first.
 
 ## When to update this file
 
@@ -333,3 +414,4 @@ the sense that question rules out. It observes, it routes alarms, and it owns no
 - Stage 2 is built, or the setpoint endpoint and its clamps are
 - The Mosquitto ACLs land
 - Home Assistant is given any capability beyond observing
+- The HA sensor bridge is built, or a role starts accepting HA-sourced readings

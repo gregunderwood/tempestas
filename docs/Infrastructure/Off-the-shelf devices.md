@@ -13,7 +13,7 @@ one of the guarantees cannot be recovered by any amount of software on our side.
 
 > [!note] Status
 > Nothing here is built. No `pump`, `moisture` or bridge concept exists in the codebase; `DeviceRole`
-> is still lights, co2_generator and exhaust_fan. Two open questions below are modelling decisions
+> is lights, co2_generator, exhaust_fan, heater and heat_tape. Two open questions below are modelling decisions
 > that want settling **before** any of this reaches the database.
 
 ## Key files
@@ -31,9 +31,9 @@ fix that, and only one of them scales.
 **Not per-device firmware.** ESPHome and Tasmota can both be pushed onto arbitrary topics, so the
 envelope and the topic tree are reachable. What is not reachable in YAML or a rules engine is the
 rest of what a node owes: the `hello`/capabilities handshake, `judge_command`'s refusals, readback
-into `gpio/result`, alarms, and a dead-man that counts heartbeats and drives declared safe levels.
-Re-deriving those per device type is how _"a required node behaviour, not a convention"_ quietly
-stops being true.
+into `gpio/result` and alarms. Re-deriving those per device type is how _"a required node behaviour,
+not a convention"_ quietly stops being true. The dead-man is the one piece firmware can hold, and
+it has to live there; see below.
 
 **A bridge node.** The agent already separates the contract from the hardware behind a backend seam:
 announce, sample, `judge_command`, dead-man and failsafe are backend-agnostic, and the GPIO backend
@@ -61,29 +61,44 @@ expiry, claim-at-failsafe on restart — becomes best-effort. Worse, the cases t
 dead-man correlate with the cases that break reachability: if the bridge lost the brain because the
 network is unwell, it will likely fail to drive the plug safe for the same reason.
 
-Two consequences, both structural:
+Three consequences, all structural:
 
-- **The device needs its own safe-state timer**, independent of the bridge. Tasmota's `PulseTime` and
-  the ESPHome equivalent auto-off after N seconds with no network at all. That is the only layer that
-  survives the failure this section describes, and it can express exactly one safe state: **off**.
+- **The device needs its own dead-man**, independent of the bridge. Firmware with a scripting layer
+  can drive a declared level after N seconds without a heartbeat, with no network at all, and the
+  level can be **on or off**. A bare auto-off timer (`PulseTime`, Shelly's `toggle_after`) only
+  expresses off.
+- **The bridge writes that dead-man, nobody types it.** On adopting a plug, the bridge configures
+  its timeout, its failsafe level from the role, and its power-on state, the same way the agent
+  claims a pin at its declared failsafe level. Then it sends the heartbeat that keeps resetting it.
+  A factory reset clears all of it, so the bridge reconciles it against the device rather than
+  assuming it.
+- **No firmware can change the relay.** Every plug switches through a normally-open relay, so a
+  plug that dies — supply, chip or coil — drops its load whatever the software declared. In
+  hardware, a plug fails **off**, always.
 - **`issuedBy` has no vendor equivalent.** The agent's strongest guard binds commands to the
   heartbeating controller; a Tasmota plug obeys whoever can publish to its command topic. Broker ACLs
   are the only substitute, which makes them load-bearing rather than hygiene.
 
 ## The rule that follows
 
-A device class may live on off-the-shelf hardware **iff its declared safe state is `off`**, because
-`off` is the only safe state cheap firmware can hold on its own.
+A device class may live on off-the-shelf hardware **iff a dead plug is safe**: either its declared
+safe state is `off`, or something independent of the plug covers the load when the plug dies.
 
-| Role                      | Declared safe state                | Off-the-shelf?                            |
-| ------------------------- | ---------------------------------- | ----------------------------------------- |
-| `exhaust_fan`             | **off** — benign either way        | ✅ Yes                                    |
-| A pump (not yet modelled) | **off** — and off is the interlock | ✅ Yes, the best fit of any device        |
-| `lights`                  | brief hold, then off               | ~ Acceptable; the hold is not expressible |
-| `co2_generator`           | **long hold at night**             | ❌ Never                                  |
+| Role                      | Declared safe state                | Off-the-shelf?                                                    |
+| ------------------------- | ---------------------------------- | ----------------------------------------------------------------- |
+| `exhaust_fan`             | **off** — benign either way        | ✅ Yes                                                            |
+| A pump (not yet modelled) | **off** — and off is the interlock | ✅ Yes, the best fit of any device                                |
+| `lights`                  | brief hold, then off               | ✅ Yes; the dead-man's timeout is the hold                        |
+| `heater`, `heat_tape`     | **on**                             | ~ Only with an independent thermostat backstop on a separate load |
+| `co2_generator`           | **long hold at night**             | ❌ Never                                                          |
 
-The burner is excluded twice over: no vendor firmware can express "hold, night-aware", and the one
-timer that does survive a network partition implements the opposite of what a night heater needs.
+**Fail-on loads need a backstop the plug cannot take down.** The plug's dead-man can fail on; its
+relay cannot. For frost protection that means a separate load on a dumb thermostat — a plug-in
+freeze-protection outlet on a small heater, or heat tape with its own thermostat — so a dead plug
+costs efficiency, not pipes. That is why the pumphouse uses NC wiring on its own node instead.
+
+The burner stays excluded. A dead plug at night drops it in exactly the case where off is the
+failure, and no independent backstop exists for a propane appliance's job.
 
 ### The fan is the case worth doing first
 
@@ -97,6 +112,9 @@ roadmap step from the physical rewire, on the one role whose safe state is unamb
 An input cannot energise anything directly, so the admission gate and per-node ACLs are the whole
 story for most of them. Adding temperature and humidity coverage is genuinely low-consequence, and
 the microclimate split between the two boards means more measurement points have real value.
+
+Where Home Assistant already talks to a sensor, reading it through HA can replace a vendor dialect
+in the bridge. See [Home Assistant](Home%20Assistant.md#ha-as-a-sensor-source).
 
 **CO2 is the exception.** The day branch is `t < 26 AND co2 < 1500`: a sensor reading low in the
 afternoon turns a propane burner on. `Safety` rule 4 protects against a _null_ — `+Infinity` keeps
@@ -145,6 +163,8 @@ measurement not worth handing to vendor firmware.
 
 - Check the plug's own rating, and remember the relay contacts are **10 A** feeding 15 A outlets — a
   plug downstream of a relay does not raise that ceiling.
+- A heater runs at full load for hours. Check the plug is rated for that continuously, not just at
+  peak; cheap plugs run hot at 12–13 A.
 - Pumps are inductive; allow headroom for inrush. A peristaltic or small aquarium pump is trivial, a
   submersible or pressure pump is not.
 
@@ -215,9 +235,11 @@ decision.
 ## Pitfalls
 
 - **A dead-man that has to cross a network is not a dead-man.** It is best-effort, and it fails in
-  the same conditions that trigger it. The device's own auto-off is the layer that survives.
-- **`off` is the only safe state cheap firmware can hold.** Every device-class judgement here follows
-  from that one sentence.
+  the same conditions that trigger it. The device's own dead-man is the layer that survives.
+- **Firmware can fail on; the relay cannot.** A plug's dead-man can drive either level, but a dead
+  plug always drops its load. Every device-class judgement here follows from that.
+- **The bridge configures the dead-man.** A plug whose safe state was set by hand is one factory
+  reset away from having none.
 - **A confidently wrong sensor is worse than a null.** Null is handled; plausible-and-wrong is not.
 - **Never trigger irrigation on a moisture threshold.** Gate with it instead.
 - **`issuedBy` does not exist on vendor devices.** Broker ACLs are load-bearing, not hygiene.
