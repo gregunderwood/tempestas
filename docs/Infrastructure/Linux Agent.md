@@ -292,8 +292,8 @@ version, and then any heartbeat after the `hello` passes, unless an earlier hear
 
 A `hello` the server failed to store, for example in a database blip, would otherwise fail the
 gate, as nothing else sends it again. So while heartbeats name another version, `null` or nothing
-after naming one, the agent says `hello` again every `HELLO_REPEAT_S`, 20 s, until the gate
-settles. The failure reason names the last refusal heard, even if heartbeats stopped after it.
+after naming one, the agent says `hello` again on the next heartbeat at least `HELLO_REPEAT_S`,
+20 s, after the last one, until the gate settles. The failure reason names the last refusal heard, even if heartbeats stopped after it.
 
 The 120 s count only while the broker is connected and the server is online. The clock runs once
 the node has said `hello` and the server is known to be online, and stops when the server reports

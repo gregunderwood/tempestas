@@ -73,6 +73,9 @@ def make_updating_agent(monkeypatch, tmp_path, installer=None):
     return agent, clock
 
 
+HEARTBEAT_INTERVAL_S = 5
+
+
 def count_hellos(agent) -> int:
     hello_topic = contract.build_hello_topic(agent.config.node_id)
     return sum(1 for topic, *_ in agent.client.published if topic == hello_topic)
@@ -314,6 +317,37 @@ def test_a_new_release_never_repeats_its_hello_to_a_server_before_1_2(tmp_path):
     agent.on_heartbeat(HEARTBEAT)
 
     assert count_hellos(agent) == 1
+
+
+@pytest.mark.parametrize("heartbeat_offset_s", range(HEARTBEAT_INTERVAL_S))
+def test_a_gate_refused_throughout_reports_the_refusal_whenever_it_runs_out(
+    tmp_path, heartbeat_offset_s
+):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    for second in range(2 * GATE_SECONDS):
+        if agent.update_gate is None:
+            break
+        if second % HEARTBEAT_INTERVAL_S == heartbeat_offset_s:
+            agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
+        agent.tend_update()
+        clock.advance(1)
+
+    assert count_hellos(agent) > 1
+    assert agent.layout.read_outcome().reason.endswith(f"it still names {RUNNING_RELEASE}")
+
+
+def test_a_refusal_survives_the_hello_said_when_the_server_comes_back(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
+
+    agent.on_server_status(SERVER_ONLINE_AGAIN, is_retained=False)
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert agent.layout.read_outcome().reason.endswith(f"it still names {RUNNING_RELEASE}")
 
 
 def test_a_new_release_is_healthy_once_the_server_names_it_in_a_heartbeat(tmp_path):

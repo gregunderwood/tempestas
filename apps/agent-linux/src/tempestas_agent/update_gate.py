@@ -40,8 +40,6 @@ class HealthGate:
 
     def note_hello(self, agent_version: str) -> None:
         self.hello_version = agent_version
-        # A refusal answers an earlier hello, so it must not outlive a new one.
-        self.last_refusal = None
 
     def start_watching(self, now: float) -> None:
         with self._clock_lock:

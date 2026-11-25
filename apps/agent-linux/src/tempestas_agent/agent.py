@@ -310,9 +310,11 @@ class Agent:
             self.say_hello()
 
     def _should_repeat_hello(self, gate: HealthGate) -> bool:
-        if not gate.is_refused():
-            return False
-        return self.last_hello_at is None or self._clock() - self.last_hello_at >= HELLO_REPEAT_S
+        return gate.is_refused() and self._is_hello_repeat_due()
+
+    def _is_hello_repeat_due(self) -> bool:
+        last_hello_at = self.last_hello_at
+        return last_hello_at is not None and self._clock() - last_hello_at >= HELLO_REPEAT_S
 
     def on_server_status(self, payload: bytes, is_retained: bool) -> None:
         try:
@@ -348,11 +350,12 @@ class Agent:
     def say_hello(self) -> None:
         topic = contract.build_hello_topic(self.config.node_id)
         delivery = self.publish("hello", topic, self.hello_payload())
-        if has_left_this_node(delivery):
-            self.last_hello_at = self._clock()
+        if not has_left_this_node(delivery):
+            return
+        self.last_hello_at = self._clock()
         # Read once: the main loop may drop the gate meanwhile.
         gate = self.update_gate
-        if gate is not None and has_left_this_node(delivery):
+        if gate is not None:
             gate.note_hello(self.agent_version)
             if self.is_server_online:
                 gate.start_watching(self._clock())
