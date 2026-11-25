@@ -66,7 +66,7 @@ const COMMAND_TTL_MS = 15_000;
 const UPDATE_COMMAND_TTL_MS = 30_000;
 const UPDATE_PUBLISH_TIMEOUT_MS = 5_000;
 /** The node's dead-man counts these. Missing them is what makes it fail safe. */
-const HEARTBEAT_INTERVAL_MS = 5_000;
+export const HEARTBEAT_INTERVAL_MS = 5_000;
 const WARN_THROTTLE_MS = 5 * 60 * 1000;
 const CONFLICT_ALARM_WINDOW_MS = 10_000;
 const RECONNECT_PERIOD_MS = 2_000;
@@ -473,9 +473,7 @@ export class MqttHardwareService
       `${nodeId}:hello`,
       `Rejected hello from "${nodeId}"`,
     );
-    if (!hello) return;
-    this.acceptedAgentVersions.set(nodeId, hello.agentVersion);
-    this.hello.next(hello);
+    if (hello) this.hello.next(hello);
   }
 
   private receiveStatus(
@@ -728,6 +726,10 @@ export class MqttHardwareService
         mqttQos.heartbeat,
       );
     }
+  }
+
+  recordAcceptedHello(hello: NodeHello): void {
+    this.acceptedAgentVersions.set(hello.nodeId, hello.agentVersion);
   }
 
   private buildHeartbeat(nodeId: NodeId): HeartbeatPayload {

@@ -157,6 +157,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     });
     if (!existing) {
       await this.registerPendingNode(facts);
+      this.hardware.recordAcceptedHello(hello);
       return;
     }
 
@@ -164,6 +165,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     const { patch, outcomes } = patchFromHello(existing, facts);
     Object.assign(existing, patch);
     await this.nodes.save(existing);
+    this.hardware.recordAcceptedHello(hello);
 
     for (const outcome of outcomes) {
       await this.helloOutcomeReporters[outcome]({

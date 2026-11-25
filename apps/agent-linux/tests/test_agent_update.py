@@ -218,6 +218,7 @@ def test_a_stop_reports_the_failure_an_install_recorded_rather_than_the_stop(mon
 
 def start_new_release_on_its_gate(tmp_path):
     agent, clock = make_agent()
+    agent.agent_version = NEW_RELEASE
     agent.layout = make_layout(tmp_path)
     agent.layout.locate_release(NEW_RELEASE).mkdir()
     agent.layout.write_pending(PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE))
@@ -256,9 +257,22 @@ def test_a_new_release_rolls_back_when_the_server_never_accepts_its_hello(tmp_pa
     )
 
 
+def test_a_new_release_rolls_back_when_the_server_names_no_accepted_hello(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    nothing_accepted = {"controller": SERVER, "epoch": 1, "agentVersion": None}
+
+    agent.say_hello()
+    agent.on_heartbeat(json.dumps(nothing_accepted).encode())
+    clock.advance(GATE_SECONDS)
+    agent.tend_update()
+
+    assert agent.layout.read_current_release() == RUNNING_RELEASE
+    assert agent.layout.read_outcome().reason.endswith("it has accepted no hello from this node")
+
+
 def test_a_new_release_is_healthy_once_the_server_names_it_in_a_heartbeat(tmp_path):
     agent, _ = start_new_release_on_its_gate(tmp_path)
-    accepted = {"controller": SERVER, "epoch": 1, "agentVersion": agent.agent_version}
+    accepted = {"controller": SERVER, "epoch": 1, "agentVersion": NEW_RELEASE}
 
     agent.say_hello()
     agent.on_heartbeat(json.dumps(accepted).encode())

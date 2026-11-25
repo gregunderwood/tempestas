@@ -12,7 +12,7 @@ readonly CYPRESS_PROJECT="apps/web-e2e"
 readonly CYPRESS_CONFIG="cypress.stack.config.ts"
 readonly OFFERED_AGENT_APP="agent-linux"
 # The simulated Pi runs the first, so the page offers the second, then a roll back to the first.
-readonly OFFERED_AGENT_VERSIONS=(1.1.0 1.1.1)
+readonly OFFERED_AGENT_VERSIONS=(1.2.0 1.2.1)
 
 source "$REPO_ROOT/tools/lib/console.sh"
 source "$REPO_ROOT/tools/lib/failure.sh"

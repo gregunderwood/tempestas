@@ -29,8 +29,11 @@ PENDING = PendingUpdate("update-1", NEW_RELEASE, RUNNING_RELEASE)
 HEARTBEAT_FROM_A_1_1_SERVER = {"controller": "ctl", "epoch": 1}
 
 
-def heartbeat_naming(accepted_version: str | None) -> dict:
-    return {**HEARTBEAT_FROM_A_1_1_SERVER, contract.HEARTBEAT_ACCEPTED_VERSION: accepted_version}
+def heartbeat_naming(accepted_version: object) -> dict:
+    return {
+        **HEARTBEAT_FROM_A_1_1_SERVER,
+        contract.HEARTBEAT_ACCEPTED_VERSION_FIELD: accepted_version,
+    }
 
 
 def install_new_release(layout) -> None:
@@ -192,6 +195,34 @@ def test_a_heartbeat_sent_before_the_server_read_the_hello_does_not_spoil_a_late
     gate.note_heartbeat(heartbeat_naming(RUNNING_RELEASE))
     gate.note_heartbeat(heartbeat_naming(NEW_RELEASE))
     assert gate.is_passed() is True
+
+
+def test_a_heartbeat_without_a_version_does_not_pass_once_the_server_has_named_versions():
+    gate = HealthGate(PENDING)
+    gate.note_hello(NEW_RELEASE)
+    gate.note_heartbeat(heartbeat_naming(RUNNING_RELEASE))
+    gate.note_heartbeat(HEARTBEAT_FROM_A_1_1_SERVER)
+
+    assert gate.is_passed() is False
+    assert gate.describe_failure().endswith(f"it still names {RUNNING_RELEASE}")
+
+
+def test_a_version_named_before_hello_still_rules_out_heartbeats_without_one():
+    gate = HealthGate(PENDING)
+    gate.note_heartbeat(heartbeat_naming(RUNNING_RELEASE))
+    gate.note_hello(NEW_RELEASE)
+    gate.note_heartbeat(HEARTBEAT_FROM_A_1_1_SERVER)
+    assert gate.is_passed() is False
+
+
+@pytest.mark.parametrize("named", [5, "", ["1.2.0"]])
+def test_a_heartbeat_naming_something_that_is_not_a_version_says_so(named):
+    gate = HealthGate(PENDING)
+    gate.note_hello(NEW_RELEASE)
+    gate.note_heartbeat(heartbeat_naming(named))
+
+    assert gate.is_passed() is False
+    assert gate.describe_failure().endswith(f"it named {named!r}, which is not a version")
 
 
 def test_a_heartbeat_before_hello_does_not_pass_the_gate():

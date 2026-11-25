@@ -31,7 +31,7 @@ tempestas/v1/node/{nodeId}/gpio/set                   server→node  QoS1  retai
 tempestas/v1/node/{nodeId}/gpio/sync                  server→node  QoS1  retain=false
 tempestas/v1/node/{nodeId}/gpio/state/{pin}           node→server  QoS1  retain=true
 tempestas/v1/node/{nodeId}/gpio/result                node→server  QoS1  retain=false
-tempestas/v1/node/{nodeId}/control/heartbeat          server→node  QoS0  retain=false
+tempestas/v1/node/{nodeId}/control/heartbeat          server→node  QoS0  retain=false  (1.2)
 tempestas/v1/node/{nodeId}/alarm                      node→server  QoS1  retain=false
 tempestas/v1/node/{nodeId}/update                     server→node  QoS1  retain=FALSE ← hazard (1.1)
 tempestas/v1/node/{nodeId}/update/status              node→server  QoS1  retain=false  (1.1)
@@ -128,9 +128,10 @@ interface MqttEnvelope {
 - **`control/heartbeat`** — `controller` and `epoch`, every 5 s from the leader to every node it
   has heard from. A node binds to the controller that heartbeats at it and counts heartbeats for
   its dead-man. From 1.2 it also carries `agentVersion`: the version in the last `hello` the server
-  accepted from that node, or `null` if it has accepted none. A Linux agent's update gate passes
-  only on its own version, so a release whose `hello` the server refuses is rolled back. A
-  heartbeat without the field comes from a server before 1.2, and the gate takes any heartbeat.
+  accepted from that node, or `null` if it has accepted none. Accepted means the node registry has
+  stored it, not just that it arrived. A Linux agent's update gate passes only on its own version,
+  so a release whose `hello` the server refuses is rolled back. A heartbeat without the field comes
+  from a server before 1.2, and the gate takes it only until some heartbeat has carried the field.
 - **`alarm`** — an `AlarmCode` plus severity. Never retained: a retained alarm resurrects a cleared
   fault.
 - **`update`** (1.1) — `id`, `issuedBy`, `expiresAt`, `app`, `version`, `manifestUrl`,

@@ -1,8 +1,8 @@
 // Runs against tools/e2e-stack.sh: the fake driver plays each update through, a step every 1.5 s.
 const SIMULATED_PI = 'sim-pi';
 const SIMULATED_ESP32 = 'sim-esp32';
-const RUNNING_VERSION = '1.1.0';
-const OFFERED_VERSION = '1.1.1';
+const RUNNING_VERSION = '1.2.0';
+const OFFERED_VERSION = '1.2.1';
 const UPDATE_FINISHED_WITHIN_MILLISECONDS = 20_000;
 
 function findSoftwareCard(): Cypress.Chainable<JQuery<HTMLElement>> {

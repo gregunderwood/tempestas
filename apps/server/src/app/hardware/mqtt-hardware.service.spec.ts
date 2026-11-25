@@ -11,7 +11,10 @@ import {
 } from '@tempestas/domain';
 import { firstValueFrom } from 'rxjs';
 import { FixedClock } from '../common/clock';
-import { MqttHardwareService } from './mqtt-hardware.service';
+import {
+  HEARTBEAT_INTERVAL_MS,
+  MqttHardwareService,
+} from './mqtt-hardware.service';
 import type { UpdateOrder } from './hardware.service';
 
 vi.mock('mqtt', () => ({ connect: vi.fn() }));
@@ -277,7 +280,6 @@ describe('MqttHardwareService updates', () => {
 });
 
 describe('MqttHardwareService heartbeats', () => {
-  const HEARTBEAT_INTERVAL_MS = 5_000;
   let brokerClient: FakeBrokerClient;
   let service: MqttHardwareService;
 
@@ -293,6 +295,12 @@ describe('MqttHardwareService heartbeats', () => {
       capabilities: { contractVersion: 1, contractMinor: 2 },
       ...overrides,
     };
+  }
+
+  function storeEachHello(): void {
+    service.hello$.subscribe((accepted) =>
+      service.recordAcceptedHello(accepted),
+    );
   }
 
   async function sendHeartbeats(): Promise<Record<string, unknown>[]> {
@@ -325,7 +333,8 @@ describe('MqttHardwareService heartbeats', () => {
     vi.useRealTimers();
   });
 
-  it('names the agent version from the hello it accepted, so an update can tell it was taken', async () => {
+  it('names the agent version once the registry has stored its hello', async () => {
+    storeEachHello();
     brokerClient.deliver(mqttTopics.hello('patji'), hello());
 
     const [heartbeat] = await sendHeartbeats();
@@ -337,7 +346,34 @@ describe('MqttHardwareService heartbeats', () => {
     });
   });
 
-  it('keeps naming the last accepted version when a later hello is refused', async () => {
+  it('names no version for a hello the registry has not stored', async () => {
+    brokerClient.deliver(mqttTopics.hello('patji'), hello());
+
+    const [heartbeat] = await sendHeartbeats();
+
+    expect(heartbeat.agentVersion).toBeNull();
+  });
+
+  it('moves on to the new release once its hello is stored', async () => {
+    storeEachHello();
+    brokerClient.deliver(
+      mqttTopics.hello('patji'),
+      hello({ agentVersion: '1.1.0' }),
+    );
+    const [beforeUpdate] = await sendHeartbeats();
+    brokerClient.deliver(
+      mqttTopics.hello('patji'),
+      hello({ agentVersion: '1.2.0', bootId: 'boot-2' }),
+    );
+
+    const [afterUpdate] = await sendHeartbeats();
+
+    expect(beforeUpdate.agentVersion).toBe('1.1.0');
+    expect(afterUpdate.agentVersion).toBe('1.2.0');
+  });
+
+  it('keeps naming the last stored version when a later hello is refused', async () => {
+    storeEachHello();
     brokerClient.deliver(mqttTopics.hello('patji'), hello());
     brokerClient.deliver(
       mqttTopics.hello('patji'),
@@ -347,13 +383,5 @@ describe('MqttHardwareService heartbeats', () => {
     const [heartbeat] = await sendHeartbeats();
 
     expect(heartbeat.agentVersion).toBe('1.2.0');
-  });
-
-  it('names no version for a node whose hello it never accepted', async () => {
-    brokerClient.deliver(mqttTopics.hello('patji'), hello({ bootId: '' }));
-
-    const [heartbeat] = await sendHeartbeats();
-
-    expect(heartbeat.agentVersion).toBeNull();
   });
 });

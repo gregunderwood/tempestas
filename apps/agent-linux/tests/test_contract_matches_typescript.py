@@ -107,3 +107,11 @@ def test_commands_are_never_retained():
     for command in ("gpioSet", "gpioSync", "update"):
         _, retain = contract.QOS[command]
         assert retain is False, f"{command} must never be retained"
+
+
+def test_heartbeat_names_the_accepted_version_in_the_same_field(source: str):
+    block = re.search(r"interface HeartbeatPayload extends MqttEnvelope \{(.*?)\n\}", source, re.S)
+    assert block, "HeartbeatPayload not found in the TypeScript contract"
+    typescript_fields = re.findall(r"^\s*(\w+)\??:", block.group(1), re.M)
+
+    assert contract.HEARTBEAT_ACCEPTED_VERSION_FIELD in typescript_fields

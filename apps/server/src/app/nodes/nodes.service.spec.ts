@@ -153,7 +153,8 @@ function makeService(
         zones.find((zone) => zone.id === where.id) ?? null,
     ),
   } as unknown as Repository<ZoneEntity>;
-  const hardware = {} as unknown as HardwareService;
+  const recordAcceptedHello = vi.fn();
+  const hardware = { recordAcceptedHello } as unknown as HardwareService;
   const publishNodeState = vi.fn();
   const realtime = { publishNodeState } as unknown as RealtimeGateway;
 
@@ -174,6 +175,7 @@ function makeService(
     nodeRepository,
     publishNodeState,
     latestReadingRows,
+    recordAcceptedHello,
   };
 }
 
@@ -217,6 +219,45 @@ describe('NodesService hello ingest', () => {
       online: true,
       lastSeenAt: AT,
     });
+  });
+
+  it('tells the hardware a hello was accepted only once it is stored', async () => {
+    const { service, nodeRepository, recordAcceptedHello } = makeService([
+      node(),
+    ]);
+    const announced = hello({ agentVersion: '1.2.0' });
+    recordAcceptedHello.mockImplementation(() =>
+      expect(nodeRepository.save).toHaveBeenCalled(),
+    );
+
+    await service.handleHello(announced);
+
+    expect(recordAcceptedHello).toHaveBeenCalledWith(announced);
+  });
+
+  it('tells the hardware a new node said hello once it is stored', async () => {
+    const { service, rows, recordAcceptedHello } = makeService();
+    const announced = hello({ nodeId: 'ghost' });
+
+    await service.handleHello(announced);
+
+    expect(rows).toHaveLength(1);
+    expect(recordAcceptedHello).toHaveBeenCalledWith(announced);
+  });
+
+  it('does not call a hello accepted when storing it fails', async () => {
+    const { service, nodeRepository, recordAcceptedHello } = makeService([
+      node(),
+    ]);
+    vi.mocked(nodeRepository.save).mockRejectedValueOnce(
+      new Error('database is down'),
+    );
+
+    await expect(service.handleHello(hello())).rejects.toThrow(
+      'database is down',
+    );
+
+    expect(recordAcceptedHello).not.toHaveBeenCalled();
   });
 
   it('leaves the operator-owned fields alone', async () => {

@@ -24,18 +24,21 @@ class HealthGate:
 
     def __init__(self, pending: PendingUpdate):
         self.pending = pending
-        self.has_said_hello = False
-        self.has_heard_heartbeat = False
         self.hello_version: str | None = None
-        self.has_heard_another_accepted_version = False
-        self.server_accepted_version: str | None = None
+        self.has_server_accepted_hello = False
+        self.has_heard_versions_named = False
+        # One string, so the main loop never reads half of a refusal the MQTT thread is writing.
+        self.last_refusal: str | None = None
         self.is_start_recorded = False
         self._watched_seconds = 0.0
         self._watching_since: float | None = None
         self._clock_lock = threading.Lock()
 
+    @property
+    def has_said_hello(self) -> bool:
+        return self.hello_version is not None
+
     def note_hello(self, agent_version: str) -> None:
-        self.has_said_hello = True
         self.hello_version = agent_version
 
     def start_watching(self, now: float) -> None:
@@ -55,38 +58,46 @@ class HealthGate:
             return self._watched_seconds + running
 
     def note_heartbeat(self, heartbeat: dict) -> None:
+        field = contract.HEARTBEAT_ACCEPTED_VERSION_FIELD
+        if field in heartbeat:
+            self.has_heard_versions_named = True
         # Before our hello, a heartbeat proves only the broker.
         if not self.has_said_hello:
             return
-        if self._has_server_accepted_our_hello(heartbeat):
-            self.has_heard_heartbeat = True
+        if field not in heartbeat:
+            self._note_heartbeat_without_a_version()
+            return
+        accepted_version = heartbeat[field]
+        if accepted_version == self.hello_version:
+            self.has_server_accepted_hello = True
         else:
-            self.has_heard_another_accepted_version = True
-            self.server_accepted_version = heartbeat[contract.HEARTBEAT_ACCEPTED_VERSION]
+            self.last_refusal = describe_what_server_accepted(accepted_version)
 
-    def _has_server_accepted_our_hello(self, heartbeat: dict) -> bool:
-        # A server before contract 1.2 names no version, so any heartbeat is all it can show.
-        if contract.HEARTBEAT_ACCEPTED_VERSION not in heartbeat:
-            return True
-        return heartbeat[contract.HEARTBEAT_ACCEPTED_VERSION] == self.hello_version
+    def _note_heartbeat_without_a_version(self) -> None:
+        # Only a pre-1.2 server omits the version, so once one was named this proves nothing.
+        if not self.has_heard_versions_named:
+            self.has_server_accepted_hello = True
 
     def is_passed(self) -> bool:
-        return self.has_said_hello and self.has_heard_heartbeat
+        return self.has_server_accepted_hello
 
     def is_overdue(self, now: float) -> bool:
         return not self.is_passed() and self.read_watched_seconds(now) >= GATE_SECONDS
 
     def describe_failure(self) -> str:
         version = self.pending.version
-        if self.has_heard_another_accepted_version:
-            refusal = f"the server did not accept {version}'s hello in {GATE_SECONDS}s"
-            return f"{refusal}: {self._describe_what_server_accepted()}"
-        return f"{version} heard no heartbeat in {GATE_SECONDS}s with the server online"
+        refusal = self.last_refusal
+        if refusal is None:
+            return f"{version} heard no heartbeat in {GATE_SECONDS}s with the server online"
+        return f"the server did not accept {version}'s hello in {GATE_SECONDS}s: {refusal}"
 
-    def _describe_what_server_accepted(self) -> str:
-        if self.server_accepted_version is None:
-            return "it has accepted no hello from this node"
-        return f"it still names {self.server_accepted_version}"
+
+def describe_what_server_accepted(accepted_version: object) -> str:
+    if accepted_version is None:
+        return "it has accepted no hello from this node"
+    if not isinstance(accepted_version, str) or not accepted_version:
+        return f"it named {accepted_version!r}, which is not a version"
+    return f"it still names {accepted_version}"
 
 
 def settle_update_on_start(

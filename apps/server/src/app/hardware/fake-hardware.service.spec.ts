@@ -176,7 +176,7 @@ describe('FakeHardwareService updates', () => {
     await hardware.sendUpdate('sim-pi', {
       id: 'update-1',
       app: AgentApp.Linux,
-      version: '1.1.1',
+      version: '1.2.1',
       manifestUrl: 'http://localhost/manifest.json',
       manifestSha256: 'c'.repeat(64),
     });
@@ -189,7 +189,7 @@ describe('FakeHardwareService updates', () => {
       UpdateState.Restarting,
       UpdateState.Healthy,
     ]);
-    expect(hellos.map((hello) => hello.agentVersion)).toEqual(['1.1.1']);
+    expect(hellos.map((hello) => hello.agentVersion)).toEqual(['1.2.1']);
     hardware.onModuleDestroy();
   });
 });
