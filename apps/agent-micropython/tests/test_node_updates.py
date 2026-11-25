@@ -269,3 +269,14 @@ def test_a_gate_that_passed_but_could_not_be_written_stays_open(store, monkeypat
         heartbeat_naming(node, NEW_VERSION)
 
     assert node.agent.updates.gate is not None
+
+
+def test_a_pending_slot_without_a_gate_still_refuses_another_update(store):
+    store.start_pending("b", "update-1", NEW_VERSION)
+    node = AgentUnderTest(store=store, running_version="1.2.1-mislabelled")
+    node.heartbeat()
+
+    send_update(node, id="update-2", version="1.2.2")
+
+    assert update_statuses(node) == [("update-2", "failed", ANOTHER_UPDATE_IN_PROGRESS)]
+    assert node.installer.installed_commands == []

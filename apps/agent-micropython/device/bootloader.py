@@ -5,7 +5,7 @@ import sys
 import slots
 
 # Raised whenever this file or slots.py changes, so a node's boot log says which bootloader it has.
-BOOTLOADER_VERSION = 2
+BOOTLOADER_VERSION = 3
 BOOT_GRACE_MILLISECONDS = 5000
 GRACE_POLL_MILLISECONDS = 100
 # Here rather than in the slot, so a release that never reaches its own gate still uses up its boots.
@@ -68,7 +68,12 @@ def start_pending_deadline(board, store, slot, log):
     log("booting pending slot %s; it resets in %d min unless kept" % (slot, deadline_minutes))
 
     def reset_if_still_pending(timer):
-        if is_pending(store, slot):
+        try:
+            is_still_pending = is_pending(store, slot)
+        except Exception:
+            # The timer fires once, so a failed check must count as still pending.
+            is_still_pending = True
+        if is_still_pending:
             board.reset()
 
     board.start_one_shot_timer(PENDING_SLOT_DEADLINE_MILLISECONDS, reset_if_still_pending)

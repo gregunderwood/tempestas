@@ -122,21 +122,24 @@ refused quietly, as `gpio/set` is. The full rules are in
 4. **`restarting`**, then a reset.
 
 Anything that fails clears the other slot and answers `failed` with the reason; the running slot
-never changed. An update is refused while a new slot is still on its gate, for the version already
-running, and for a bundle that carries a file only USB changes, such as `settings.py`.
+never changed. An update is refused while any slot is pending, for the version already
+running, and for a bundle that carries a module only USB changes, such as `settings.py` or
+`settings.mpy`. Any other failure while installing, a `MemoryError` included, still clears the slot
+and answers `failed`.
 
 ### The health gate
 
 The bootloader counts every boot of a pending slot before it runs it, so a crash, a watchdog
 reset, or an exception before the agent starts all use up a boot. After 3 boots it goes back to the
-active slot and records `rolled-back`, "1.2.1 did not come up healthy in 3 boots". The agent arms
-the watchdog, so a hang while the slot's modules import, before that, needs a power cycle, which
-still counts as a boot.
+active slot and records `rolled-back`, "1.2.1 did not come up healthy in 3 boots". A hang while
+a pending slot's modules import, before the agent arms the watchdog, ends at the timer below; in the
+active slot it needs a power cycle.
 
 The bootloader also starts a 10-minute one-shot timer for a pending slot, which resets the board
 if `slots.json` still names that slot pending. So a release that never reaches its own gate, through
 a Wi-Fi or MQTT bug, a main loop that stops tending it, or a `deployed_version.py` that differs from
-the command, still uses up its boots and rolls back within about half an hour.
+the command, still uses up its boots and rolls back within about half an hour. If the timer cannot
+read `slots.json` it resets anyway, as it fires only once. Ctrl-C into the REPL does not stop it.
 
 The bootloader cannot be fixed over the air, so it runs a slot whenever `slots.json` names a usable
 active one. A pending entry it cannot count is dropped, and if the flash refuses the write that
@@ -168,12 +171,14 @@ on firmware without it the board boots its slot as usual, with Ctrl-C as the onl
 The bootloader, `settings.py` and `credentials.py`. A bootloader change still raises the agent's
 version, since it lives in the agent, but an update leaves the old one in place. So:
 
-- Raise `BOOTLOADER_VERSION` in `bootloader.py` with any change to it or `slots.py`. The boot banner
-  prints it, which is the only way to tell which bootloader a node has.
+- Raise `BOOTLOADER_VERSION` in `bootloader.py` with any change to `main.py`, `bootloader.py` or
+  `slots.py`, and pin the new digest in
+  [`tests/test_agent_files.py`](../../apps/agent-micropython/tests/test_agent_files.py), which fails
+  until both are done. The boot banner prints it, which is the only way to tell which bootloader a
+  node has.
 - Keep `slots.json`'s shape stable: the bootloader reads it and nothing else from the agent.
-- Slot code may use only the `slots.py` names pinned in
-  [`tests/test_agent_files.py`](../../apps/agent-micropython/tests/test_agent_files.py), as every
-  node keeps the `slots.py` of its last USB deploy. Adding one to that list means a USB deploy of
+- Slot code may use only the `slots.py` names and signatures pinned in the same test, as every node
+  keeps the `slots.py` of its last USB deploy. Adding one to that list means a USB deploy of
   every node before a release that uses it.
 
 ## Running the tests
@@ -216,9 +221,9 @@ tools/deploy-agent-micropython.sh [/dev/ttyACM0]
 
 It runs the agent's tests, hard-resets the board and catches it inside the bootloader's 5 s grace.
 It removes `slots.json` and any agent files left at the root by the flat layout before slots,
-then clears slot `a`, running
-[`usb/clear_slot.py`](../../apps/agent-micropython/usb/clear_slot.py) on the board. It copies the agent into `a` with `boards/<settings.BOARD>.py` as `board.py`
-and a `deployed_version.py` holding the version, copies the bootloader and the node's settings to
+then clears slot `a`, running [`usb/clear_slot.py`](../../apps/agent-micropython/usb/clear_slot.py)
+on the board. It copies the agent into `a` with `boards/<settings.BOARD>.py` as `board.py` and a
+`deployed_version.py` holding the version, copies the bootloader and the node's settings to
 the root, writes `slots.json` making `a` active, and resets again. A deploy cut short leaves no
 `slots.json`, so the bootloader runs nothing and says to deploy again. The board file's
 `refuse_if_watchdog_armed()` runs first, so a deploy that missed the grace stops before it

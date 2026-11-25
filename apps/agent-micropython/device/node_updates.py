@@ -41,12 +41,19 @@ class NodeUpdates:
         if not verdict.is_accepted:
             self.answer_refusal(verdict)
             return
-        if self.gate is not None:
+        if self.is_update_in_progress():
             self.agent.send_update_status(
                 verdict.command_id, contract.UpdateState.FAILED, ANOTHER_UPDATE_IN_PROGRESS
             )
             return
         self.install(verdict.command)
+
+    def is_update_in_progress(self):
+        # Any pending slot counts, as one with a mislabelled version runs with no gate.
+        if self.gate is not None:
+            return True
+        state = self.store.read()
+        return state is not None and state["pending"] is not None
 
     def answer_refusal(self, verdict):
         self.log("refused an update: %s" % verdict.reason)

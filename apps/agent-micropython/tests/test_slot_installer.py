@@ -219,3 +219,33 @@ def test_builds_each_file_url_beside_the_manifest_keeping_its_query():
         build_file_url(MANIFEST_URL + "?token=t", "boards/pico_w.py")
         == BUNDLE_URL + "/files/boards/pico_w.py?token=t"
     )
+
+
+class FetcherThatRunsOutOfMemory(FakeFetcher):
+    def __init__(self, bodies_by_url, failing_url):
+        super().__init__(bodies_by_url)
+        self.failing_url = failing_url
+
+    def fetch(self, url, write_chunk, max_bytes):
+        if url == self.failing_url:
+            raise MemoryError("memory allocation failed")
+        super().fetch(url, write_chunk, max_bytes)
+
+
+def test_any_failure_mid_install_clears_the_slot_and_says_what_it_was(tmp_path):
+    fetcher = FetcherThatRunsOutOfMemory(serve_bundle().bodies_by_url, BUNDLE_URL + "/files/node_runtime.py")
+    install = Install(tmp_path, fetcher)
+
+    assert fail_install(install, build_command()) == "MemoryError: memory allocation failed"
+    assert not (tmp_path / "b").exists()
+
+
+@pytest.mark.parametrize(
+    "path", ["settings.mpy", "settings/__init__.py", "slots.mpy", "credentials/__init__.py", "main.mpy"]
+)
+def test_refuses_a_root_only_module_in_any_form(tmp_path, path):
+    files = dict(BUNDLE_FILES, **{path: b"x"})
+    manifest = build_manifest(files)
+    install = Install(tmp_path, serve_bundle(manifest, files))
+
+    assert "only a USB deploy changes" in fail_install(install, build_command(manifest))

@@ -195,3 +195,17 @@ def test_runs_the_slots_own_node_runtime_ahead_of_any_other(tmp_path, monkeypatc
     assert (tmp_path / "node_runtime.py.ran").exists()
     assert sys.path[0] == str(tmp_path)
     sys.modules.pop("node_runtime", None)
+
+
+def test_a_deadline_that_cannot_read_the_state_resets_anyway(store, monkeypatch):
+    store.start_pending("b", "update-1", "1.2.1")
+    board = FakeBootBoard()
+    boot(board, store, SlotRunner(), RecordingLog())
+
+    def run_out_of_memory():
+        raise MemoryError()
+
+    monkeypatch.setattr(store, "read", run_out_of_memory)
+    board.fire_timers()
+
+    assert board.resets == 1

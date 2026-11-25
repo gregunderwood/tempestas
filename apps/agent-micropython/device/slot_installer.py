@@ -24,8 +24,9 @@ STAT_SIZE = 6
 STATVFS_FRAGMENT_SIZE = 1
 STATVFS_AVAILABLE_BLOCKS = 4
 COPY_CHUNK_BYTES = 1024
-# The slot is first on sys.path, so a slot copy of these would replace the node's own.
+# The slot is first on sys.path, so a slot module of these names, in any form, would replace the node's own.
 ROOT_ONLY_FILES = ("main.py", "bootloader.py", "slots.py", "settings.py", "credentials.py")
+ROOT_ONLY_MODULES = tuple(name[: -len(".py")] for name in ROOT_ONLY_FILES)
 
 
 class UpdateFailed(Exception):
@@ -55,12 +56,13 @@ class SlotInstaller:
             report(contract.UpdateState.INSTALLING)
             self.install_board_file(target_directory)
             self.store.start_pending(target_slot, command["id"], version)
-        except (FetchFailed, OSError) as error:
-            remove_tree(target_directory)
-            raise UpdateFailed(str(error)) from error
         except UpdateFailed:
             remove_tree(target_directory)
             raise
+        except Exception as error:
+            # Any failure, a MemoryError included, must clear the slot and still answer failed.
+            remove_tree(target_directory)
+            raise UpdateFailed(describe_failure(error)) from error
         return target_slot
 
     def choose_target_slot(self, version):
@@ -152,9 +154,20 @@ def describe_manifest_problem(manifest, version):
     for listed_file in files:
         if not is_listed_file_well_formed(listed_file):
             return "the manifest lists %s, not a safe path with a sha256" % json.dumps(listed_file)
-        if listed_file["path"] in ROOT_ONLY_FILES:
+        if is_root_only_module(listed_file["path"]):
             return "the bundle carries %s, which only a USB deploy changes" % listed_file["path"]
     return None
+
+
+def is_root_only_module(path):
+    top_level_name = path.split("/")[0]
+    return top_level_name.split(".")[0] in ROOT_ONLY_MODULES
+
+
+def describe_failure(error):
+    if isinstance(error, (FetchFailed, OSError)):
+        return str(error)
+    return "%s: %s" % (type(error).__name__, error)
 
 
 def is_listed_file_well_formed(listed_file):

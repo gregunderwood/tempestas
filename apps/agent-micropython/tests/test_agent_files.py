@@ -1,10 +1,12 @@
 import ast
 import hashlib
+import inspect
 import json
 import subprocess
 from pathlib import Path
 
 import slots
+from bootloader import BOOTLOADER_VERSION
 from slot_installer import ROOT_ONLY_FILES, SlotInstaller
 from slots import SlotStore
 
@@ -19,15 +21,26 @@ RUNNING_VERSION = "1.2.0"
 BOARD = "pico_w"
 BUNDLE_URL = "http://elantris:7000/api/agent-releases/agent-micropython/" + BUNDLED_VERSION
 # A node keeps the slots.py of its last USB deploy, so a release may use only what every node has.
-FROZEN_SLOTS_MODULE_NAMES = {"SlotStore", "find_other_slot", "join_path"}
-FROZEN_SLOT_STORE_NAMES = {
-    "abandon_pending",
-    "clear_outcome",
-    "keep_pending",
-    "locate",
-    "read",
-    "root",
-    "start_pending",
+FROZEN_SLOTS_MODULE_SIGNATURES = {
+    "SlotStore": "(root='/')",
+    "find_other_slot": "(slot)",
+    "join_path": "(directory, name)",
+}
+FROZEN_SLOT_STORE_SIGNATURES = {
+    "abandon_pending": "(self, reason)",
+    "clear_outcome": "(self)",
+    "keep_pending": "(self)",
+    "locate": "(self, name)",
+    "read": "(self)",
+    "start_pending": "(self, slot, command_id, version)",
+}
+FROZEN_SLOT_STORE_ATTRIBUTES = {"root"}
+FROZEN_SLOTS_MODULE_NAMES = set(FROZEN_SLOTS_MODULE_SIGNATURES)
+FROZEN_SLOT_STORE_NAMES = set(FROZEN_SLOT_STORE_SIGNATURES) | FROZEN_SLOT_STORE_ATTRIBUTES
+FROZEN_FILES = ("main.py", "bootloader.py", "slots.py")
+# Changing a frozen file fails here until BOOTLOADER_VERSION is raised and its digest added.
+FROZEN_FILES_SHA256_BY_BOOTLOADER_VERSION = {
+    3: "89c8987fbb7dfbaa5ab5e6ad1aa92222f615dd69460f0ef1bc95077c67abe70e",
 }
 
 
@@ -119,17 +132,29 @@ def list_frozen_names_used(module_path):
     for node in ast.walk(ast.parse(module_path.read_text())):
         if isinstance(node, ast.ImportFrom) and node.module == "slots":
             module_names.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.Attribute) and is_named(node.value, "slots"):
+            assert all(alias.asname is None for alias in node.names), module_path
+        elif isinstance(node, ast.Import):
+            assert all(alias.asname is None for alias in node.names if alias.name == "slots"), module_path
+        elif isinstance(node, ast.Attribute) and read_name(node.value) == "slots":
             module_names.add(node.attr)
-        elif isinstance(node, ast.Attribute) and is_named(node.value, "store"):
+        elif isinstance(node, ast.Attribute) and is_slot_store(node.value):
             store_names.add(node.attr)
     return module_names, store_names
 
 
-def is_named(expression, name):
+def read_name(expression):
     if isinstance(expression, ast.Name):
-        return expression.id == name
-    return isinstance(expression, ast.Attribute) and expression.attr == name
+        return expression.id
+    if isinstance(expression, ast.Attribute):
+        return expression.attr
+    return None
+
+
+def is_slot_store(expression):
+    if isinstance(expression, ast.Call):
+        return read_name(expression.func) == "SlotStore"
+    name = read_name(expression)
+    return name is not None and name.endswith("store")
 
 
 def test_slot_code_uses_only_the_frozen_slots_interface():
@@ -139,7 +164,18 @@ def test_slot_code_uses_only_the_frozen_slots_interface():
         assert store_names <= FROZEN_SLOT_STORE_NAMES, module
 
 
-def test_the_frozen_slots_interface_exists():
-    store = SlotStore()
-    assert all(hasattr(slots, name) for name in FROZEN_SLOTS_MODULE_NAMES)
-    assert all(hasattr(store, name) for name in FROZEN_SLOT_STORE_NAMES)
+def test_the_frozen_slots_interface_keeps_its_signatures():
+    for name, signature in FROZEN_SLOTS_MODULE_SIGNATURES.items():
+        assert str(inspect.signature(getattr(slots, name))) == signature, name
+    for name, signature in FROZEN_SLOT_STORE_SIGNATURES.items():
+        assert str(inspect.signature(getattr(SlotStore, name))) == signature, name
+    assert all(hasattr(SlotStore(), name) for name in FROZEN_SLOT_STORE_ATTRIBUTES)
+
+
+def test_a_change_to_a_frozen_file_raises_the_bootloader_version():
+    digest = hashlib.sha256()
+    for name in FROZEN_FILES:
+        digest.update((DEVICE_DIRECTORY / name).read_bytes())
+    assert FROZEN_FILES_SHA256_BY_BOOTLOADER_VERSION.get(BOOTLOADER_VERSION) == digest.hexdigest(), (
+        "main.py, bootloader.py or slots.py changed: raise BOOTLOADER_VERSION and pin the new digest"
+    )
