@@ -70,7 +70,7 @@ const UPCOMING_REPORTS: readonly string[] = [
       @if (runtimeState() !== 'loading' && runtimeDevices().length === 0) {
         <p class="temp-muted">No devices yet.</p>
       }
-      <div class="temp-runtime-cards">
+      <div class="temp-card-grid temp-runtime-cards">
         @for (device of runtimeDevices(); track device.deviceId) {
           <temp-equipment-runtime-card
             [device]="device"
@@ -95,7 +95,7 @@ const UPCOMING_REPORTS: readonly string[] = [
       ) {
         <p class="temp-muted">No zone has a heater or heat tape yet.</p>
       }
-      <div class="temp-runtime-cards">
+      <div class="temp-card-grid temp-freeze-margin-cards">
         @for (zone of freezeMarginZones(); track zone.zoneId) {
           <temp-freeze-margin-card [zone]="zone" />
         }
@@ -119,10 +119,19 @@ const UPCOMING_REPORTS: readonly string[] = [
     .temp-propane-unit {
       margin-bottom: 1rem;
     }
-    .temp-runtime-cards {
+    .temp-card-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+      grid-template-columns: repeat(
+        auto-fill,
+        minmax(min(100%, var(--temp-card-min-width)), 1fr)
+      );
       gap: 1rem;
+    }
+    .temp-runtime-cards {
+      --temp-card-min-width: 22rem;
+    }
+    .temp-freeze-margin-cards {
+      --temp-card-min-width: 40rem;
     }
     .temp-freeze-margin,
     .temp-upcoming {
