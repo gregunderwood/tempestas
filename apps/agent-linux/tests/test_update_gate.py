@@ -346,16 +346,24 @@ def test_a_prune_skips_a_release_another_prune_removed_first(tmp_path, monkeypat
     for release in older_releases:
         layout.locate_release(release).mkdir()
     vanished = layout.locate_release(older_releases[0])
-    real_stat = type(vanished).stat
+    path_type = type(vanished)
+    real_is_dir, real_stat = path_type.is_dir, path_type.stat
+
+    # Listed as a directory, then gone by the time its age is read.
+    def is_dir_before_another_prune(path, *arguments, **options):
+        return path == vanished or real_is_dir(path, *arguments, **options)
 
     def stat_after_another_prune(path, *arguments, **options):
         if path == vanished:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(path))
         return real_stat(path, *arguments, **options)
 
-    monkeypatch.setattr(type(vanished), "stat", stat_after_another_prune)
+    monkeypatch.setattr(path_type, "is_dir", is_dir_before_another_prune)
+    monkeypatch.setattr(path_type, "stat", stat_after_another_prune)
 
-    layout.prune_releases(protected={RUNNING_RELEASE})
+    removed = layout.prune_releases(protected={RUNNING_RELEASE})
+
+    assert removed[-1] == older_releases[0]
 
 
 def test_an_unreadable_pending_record_is_dropped_rather_than_stopping_the_start(tmp_path):

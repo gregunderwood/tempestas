@@ -191,6 +191,11 @@ describe('HealthService', () => {
     expect(report.problems).toContainEqual('1 node(s) awaiting admission');
   });
 
+  it('reports no release or product version when run from a checkout', async () => {
+    const report = await makeService().check();
+    expect(report).toMatchObject({ releaseId: null, productVersion: null });
+  });
+
   // The caller is trying to find out what broke; a 500 tells them nothing.
   it('reports what is knowable when the database is unreachable', async () => {
     const report = await makeService({ isDatabaseUp: false }).check();

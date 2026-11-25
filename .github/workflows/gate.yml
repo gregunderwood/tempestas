@@ -7,31 +7,36 @@ on:
 
 concurrency:
   group: gate-${{ github.ref }}
-  cancel-in-progress: true
+  # Every push to main keeps its own result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 env:
-  # Debian bookworm's, the oldest Python a node runs.
-  UV_PYTHON: '3.11'
+  # A uv.lock out of step with pyproject.toml fails here rather than being quietly relocked.
+  UV_LOCKED: '1'
 
 jobs:
   gate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      # Debian bookworm's, the oldest Python a node runs.
+      UV_PYTHON: '3.11'
     steps:
       # Full history: agent versions count commits, and the product version reads tags.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
 
       - run: npm ci
 
@@ -41,5 +46,22 @@ jobs:
       - name: Server coverage
         run: npx nx test server --coverage
 
-      - name: Product version
-        run: tools/describe-product-version.sh
+  linux-agent-on-trixie:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      # Debian trixie's, which taldain runs.
+      UV_PYTHON: '3.13'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Lint and test the Linux agent
+        working-directory: apps/agent-linux
+        run: |
+          uv run ruff check .
+          uv run pytest -q

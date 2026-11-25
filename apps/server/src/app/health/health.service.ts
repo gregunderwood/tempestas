@@ -104,7 +104,7 @@ export class HealthService {
       status: problems.some(isDegrading) ? 'degraded' : 'ok',
       db: true,
       releaseId: RELEASE_ID,
-      version: PRODUCT_VERSION,
+      productVersion: PRODUCT_VERSION,
       uptimeSeconds: Math.round(process.uptime()),
       nodes: counts,
       readings: {
@@ -184,7 +184,7 @@ function unreachableDatabaseReport(): HealthReport {
     status: 'degraded',
     db: false,
     releaseId: RELEASE_ID,
-    version: PRODUCT_VERSION,
+    productVersion: PRODUCT_VERSION,
     uptimeSeconds: Math.round(process.uptime()),
     nodes: { total: 0, online: 0, pending: 0 },
     readings: { latestAt: null, ageSeconds: null },

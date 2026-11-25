@@ -29,8 +29,8 @@ RELEASE_SYSTEMCTL_LINES=(
 describe_release_id() {
   local repository="$1"
   local stamp commit released_commit
-  if ! git -C "$repository" fetch --quiet origin main 2>/dev/null; then
-    echo "Could not fetch origin/main, so the release ID compares against the last fetch." >&2
+  if ! git -C "$repository" fetch --quiet --tags origin main 2>/dev/null; then
+    echo "Could not fetch origin/main and its tags, so the release ID and product version use the last fetch." >&2
   fi
   stamp="$(date -u +%Y%m%d-%H%M%S)"
   commit="$(git -C "$repository" rev-parse --short="$COMMIT_ID_LENGTH" HEAD)"

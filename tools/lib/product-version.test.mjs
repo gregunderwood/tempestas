@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,6 +36,12 @@ function runGit(repository, ...gitArguments) {
 function commit(repository, message) {
   runGit(repository, 'commit', '--quiet', '--allow-empty', '-m', message);
   return runGit(repository, 'rev-parse', `--short=${COMMIT_ID_LENGTH}`, 'HEAD');
+}
+
+function runDescribeProductVersion(repository) {
+  return spawnSync(DESCRIBE_PRODUCT_VERSION, [repository], {
+    encoding: 'utf8',
+  });
 }
 
 function describeProductVersion(repository) {
@@ -86,5 +92,42 @@ describe('describe-product-version.sh', () => {
     const head = commit(repository, 'second');
     writeFileSync(join(repository, 'changed.txt'), 'changed again');
     assert.equal(describeProductVersion(repository), `1.2.0+1.g${head}.dirty`);
+  });
+
+  it('keeps a pre-release tag, so any branch can name a dev build', () => {
+    const repository = makeRepository();
+    commit(repository, 'first');
+    runGit(repository, 'tag', 'v1.2.0');
+    commit(repository, 'second');
+    runGit(repository, 'tag', 'v1.3.0-dev.1');
+    assert.equal(describeProductVersion(repository), '1.3.0-dev.1');
+    const head = commit(repository, 'third');
+    assert.equal(describeProductVersion(repository), `1.3.0-dev.1+1.g${head}`);
+  });
+
+  it('refuses a shallow clone, whose tags and counts are missing', () => {
+    const repository = makeRepository();
+    commit(repository, 'first');
+    commit(repository, 'second');
+    const shallow = mkdtempSync(join(tmpdir(), 'product-version-shallow-'));
+    execFileSync('git', [
+      'clone',
+      '--quiet',
+      '--depth',
+      '1',
+      `file://${repository}`,
+      shallow,
+    ]);
+    const result = runDescribeProductVersion(shallow);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /shallow clone/);
+  });
+
+  it('refuses a directory that is not a repository', () => {
+    const result = runDescribeProductVersion(
+      mkdtempSync(join(tmpdir(), 'product-version-none-')),
+    );
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, '');
   });
 });
