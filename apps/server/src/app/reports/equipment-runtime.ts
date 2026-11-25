@@ -7,8 +7,8 @@ import type {
   RelayState,
 } from '@tempestas/domain';
 import {
-  MILLISECONDS_PER_SECOND,
-  MINUTES_PER_HOUR,
+  MILLISECONDS_PER_HOUR,
+  MILLISECONDS_PER_MINUTE,
 } from '../common/time-units';
 import {
   buildSpansByLine,
@@ -62,8 +62,6 @@ interface DayDurations {
   unknownMs: number;
 }
 
-const MILLISECONDS_PER_MINUTE = 60 * MILLISECONDS_PER_SECOND;
-const MILLISECONDS_PER_HOUR = MINUTES_PER_HOUR * MILLISECONDS_PER_MINUTE;
 const HOUR_DECIMALS = 2;
 const MINUTE_DECIMALS = 1;
 // Natural Resources Canada gives propane 25.31 MJ/L, about 23,990 BTU per litre.

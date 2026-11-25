@@ -15,6 +15,7 @@ import {
   mapSightingsByNode,
 } from '../devices/relay-history';
 import { NodesService } from '../nodes/nodes.service';
+import { resolveDefaultTimezone } from '../readings/zone-daylight';
 import { parseZoneRulesConfig } from '../rules/rules-config';
 import type { ZoneEntity } from '../zones/models';
 import {
@@ -22,7 +23,6 @@ import {
   type RuntimeDevice,
 } from './equipment-runtime';
 
-const DEFAULT_TIMEZONE = 'America/Vancouver';
 // A day of slack reaches back past the earliest local midnight in any zone; the summary trims to it.
 const LOOKBACK_SLACK_DAYS = 1;
 
@@ -85,6 +85,6 @@ export class ReportsService {
   private resolveTimezone(zone: ZoneEntity): string {
     const parsed = parseZoneRulesConfig(zone.rulesConfig);
     if (parsed.ok) return parsed.config.timezone;
-    return this.config.get<string>('TEMPESTAS_TZ', DEFAULT_TIMEZONE);
+    return resolveDefaultTimezone(this.config);
   }
 }
