@@ -6,6 +6,7 @@ import {
   type DeviceRuntime,
   type EquipmentRuntimeReport,
   type FreezeMarginReport,
+  type NodeHealthReport,
   type Reading,
   type ZoneFreezeMargin,
 } from '@tempestas/domain';
@@ -138,24 +139,53 @@ function latestReading(nodeId: string): Reading {
   };
 }
 
+function nodeHealthReport(): NodeHealthReport {
+  return {
+    days: 30,
+    generatedAt: '2026-09-09T19:00:00Z',
+    nodes: [
+      {
+        nodeId: 'patji',
+        nodeName: 'Pumphouse Pi',
+        timezone: 'America/Edmonton',
+        hasSensors: true,
+        firstReadingAt: '2026-08-10T19:00:00Z',
+        gaps: [
+          {
+            from: '2026-09-01T07:30:00.000Z',
+            to: '2026-09-01T11:00:00.000Z',
+            minutes: 210,
+            isOngoing: false,
+          },
+        ],
+        reboots: [{ at: '2026-09-01T11:00:00.000Z' }],
+        versionChanges: [],
+      },
+    ],
+  };
+}
+
 interface FreezeMarginAnswers {
   freezeMargin?: Observable<FreezeMarginReport>[];
+  nodeHealth?: Observable<NodeHealthReport>[];
 }
 
 interface RenderedReportsPage {
   page: HTMLElement;
   requestCount(): number;
   freezeMarginRequestCount(): number;
+  nodeHealthRequestCount(): number;
   render(): void;
   realtime: ReturnType<typeof fakeRealtime>;
 }
 
 function renderReportsPage(
   answers: Observable<EquipmentRuntimeReport>[],
-  { freezeMargin = [] }: FreezeMarginAnswers = {},
+  { freezeMargin = [], nodeHealth = [] }: FreezeMarginAnswers = {},
 ): RenderedReportsPage {
   let requests = 0;
   let freezeMarginRequests = 0;
+  let nodeHealthRequests = 0;
   const realtime = fakeRealtime();
   TestBed.configureTestingModule({
     imports: [ReportsPage],
@@ -172,6 +202,10 @@ function renderReportsPage(
             freezeMarginRequests += 1;
             return freezeMargin.shift() ?? NEVER;
           },
+          fetchNodeHealth: () => {
+            nodeHealthRequests += 1;
+            return nodeHealth.shift() ?? NEVER;
+          },
         },
       },
       { provide: RealtimeService, useValue: realtime },
@@ -183,6 +217,7 @@ function renderReportsPage(
     page: fixture.nativeElement as HTMLElement,
     requestCount: () => requests,
     freezeMarginRequestCount: () => freezeMarginRequests,
+    nodeHealthRequestCount: () => nodeHealthRequests,
     render: () => {
       TestBed.tick();
       fixture.detectChanges();
@@ -203,7 +238,7 @@ describe('ReportsPage', () => {
     const listed = Array.from(page.querySelectorAll('li')).map((item) =>
       item.textContent?.trim(),
     );
-    expect(listed).toEqual(['Time in range', 'CO2 enrichment', 'Node health']);
+    expect(listed).toEqual(['Time in range', 'CO2 enrichment']);
   });
 
   it('shows a card per device with its totals and shortest run', () => {
@@ -359,6 +394,66 @@ describe('ReportsPage', () => {
         freezeMargin: [throwError(() => new Error('offline'))],
       });
       expect(page.textContent).toContain('Could not load the freeze margin.');
+    });
+  });
+
+  describe('node health', () => {
+    it("shows a card per node with its gaps and reboots in the node's timezone", () => {
+      const { page } = renderReportsPage([NEVER], {
+        nodeHealth: [of(nodeHealthReport())],
+      });
+      const card = page.querySelector('temp-node-health-card');
+      expect(card?.textContent).toContain('Pumphouse Pi');
+      expect(card?.textContent).toContain(
+        'patji · 3 h 30 min without readings',
+      );
+      expect(card?.textContent).toContain(
+        '1 gap, 1 reboot, no agent updates in the last 30 days.',
+      );
+      const rows = Array.from(card?.querySelectorAll('tbody tr') ?? [], (row) =>
+        Array.from(row.children, (cell) => cell.textContent?.trim()).join(
+          ' | ',
+        ),
+      );
+      expect(rows).toEqual([
+        'Tue 1 Sept, 05:00 | Rebooted | —',
+        'Tue 1 Sept, 01:30 | No readings | 3 h 30 min',
+      ]);
+    });
+
+    it('says stale-sensor holds are not recorded', () => {
+      const { page } = renderReportsPage([NEVER]);
+      expect(page.textContent).toContain(
+        'Times the rules held a device because its sensors were stale are not recorded yet',
+      );
+    });
+
+    it('says so when there are no admitted nodes', () => {
+      const { page } = renderReportsPage([NEVER], {
+        nodeHealth: [of({ ...nodeHealthReport(), nodes: [] })],
+      });
+      expect(page.textContent).toContain('No admitted nodes yet.');
+    });
+
+    it('says it could not load node health when the request fails', () => {
+      const { page } = renderReportsPage([NEVER], {
+        nodeHealth: [throwError(() => new Error('offline'))],
+      });
+      expect(page.textContent).toContain('Could not load the node health.');
+    });
+
+    it('fetches again when a node goes quiet or comes back, not when a device switches', () => {
+      const rendered = renderReportsPage([NEVER], {
+        nodeHealth: [of(nodeHealthReport()), of(nodeHealthReport())],
+      });
+      rendered.render();
+      expect(rendered.nodeHealthRequestCount()).toBe(1);
+      pushDevice(rendered.realtime, device());
+      rendered.render();
+      expect(rendered.nodeHealthRequestCount()).toBe(1);
+      pushNode(rendered.realtime, { ...node('patji', null), online: false });
+      rendered.render();
+      expect(rendered.nodeHealthRequestCount()).toBe(2);
     });
   });
 

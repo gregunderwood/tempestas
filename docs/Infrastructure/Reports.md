@@ -2,11 +2,11 @@
 
 ## What it is
 
-Summaries the raw tables never gave: how hard each device worked, how it cycled, and how close the
-pumphouse came to freezing. One server module, `apps/server/src/app/reports`, with one endpoint per
+Summaries the raw tables never gave: how hard each device worked, how it cycled, how close the
+pumphouse came to freezing, and which nodes went quiet or rebooted. One server module, `apps/server/src/app/reports`, with one endpoint per
 report, the response types in `libs/domain/src/lib/reports`, and a section per report on the web
-Reports screen. Equipment runtime was the first and freeze margin the second; the next reports
-follow the same shape.
+Reports screen. Equipment runtime was the first, freeze margin the second and node health the
+third; the next reports follow the same shape.
 
 ## Key files
 
@@ -20,12 +20,17 @@ follow the same shape.
 - [../../apps/server/src/app/reports/heating-setpoints.ts](../../apps/server/src/app/reports/heating-setpoints.ts) — the warning temperature, borrowed from the zone's heat rules
 - [../../apps/server/src/app/reports/freeze-margin.service.ts](../../apps/server/src/app/reports/freeze-margin.service.ts) — finds the heated zones, their nights, readings and relay spans
 - [../../apps/web/src/app/features/reports/freeze-margin-card.ts](../../apps/web/src/app/features/reports/freeze-margin-card.ts) — the card, one per heated zone
+- [../../apps/server/src/app/readings/reading-breaks.ts](../../apps/server/src/app/readings/reading-breaks.ts) — the gaps and boot changes in `sensor_readings`, found in Postgres
+- [../../apps/server/src/app/reports/node-health.ts](../../apps/server/src/app/reports/node-health.ts) — breaks and updates to each node's gaps, reboots and version changes, pure
+- [../../apps/server/src/app/reports/node-health.service.ts](../../apps/server/src/app/reports/node-health.service.ts) — loads the admitted nodes, their breaks and their healthy updates
+- [../../apps/web/src/app/features/reports/node-health-card.ts](../../apps/web/src/app/features/reports/node-health-card.ts) — the card, one per admitted node
 
 ## The API
 
 ```
 GET /api/reports/equipment-runtime?days=     per device per day; days defaults to 30, caps at 90
 GET /api/reports/freeze-margin?nights=       per heated zone per night; nights defaults to 30, caps at 90
+GET /api/reports/node-health?days=           per admitted node; days defaults to 30, caps at 90
 ```
 
 ## Equipment runtime
@@ -115,7 +120,32 @@ newest first, tonight included while it runs.
 The CO2 generator doubles as the greenhouse's night heater, but it is not one of `HEATING_ROLES`, so
 the greenhouse is not in this report.
 
+## Node health
+
+A night with no readings otherwise just disappears from the averages, and a node that rebooted five
+times looks like one that ran all week. Per admitted node, over the last 30 days, newest first:
+
+- **Gaps** are silences longer than `NODE_HEALTH_GAP_MINUTES`, 5 minutes, between one reading from
+  the node and the next, any sensor. That is 30 samples at the Linux agent's 10 s interval and still
+  several at the slowest. A silence that runs up to now is an ongoing gap. Postgres walks the
+  readings with `LAG`, so a month of 10 s samples never reaches Node.
+- **Reboots** are changes of `boot_id` from one reading to the next, stamped at the first reading of
+  the new boot. A null boot id predates the column and proves nothing, and the dev seeder's
+  `seeded-history` rows are left out, so the seed meeting the first real reading is not a reboot. A
+  reboot that left a long enough silence is a gap as well.
+- **Agent version changes** are the `node_updates` rows that finished `healthy`. Only updates run
+  from the Nodes page are recorded; an agent installed by hand or by a deploy script changes
+  `agent_version` on the node with no history, so it is not listed.
+- **Stale-sensor holds are not recorded.** When a role's sensors go stale the rules hold its last
+  state and only log it, so this report cannot list those periods. Recording them is a separate
+  decision.
+- A gap that straddles the start of the window is not counted, and a node with no sensors has no
+  readings to read gaps or reboots from; its card lists updates only.
+
+The other reports should mark periods with gaps rather than average over them; this report is where
+the gaps themselves are listed.
+
 ## When to update this file
 
 - A report is added, or a default or cap changes
-- The runtime or freeze margin rules above change
+- The runtime, freeze margin or node health rules above change

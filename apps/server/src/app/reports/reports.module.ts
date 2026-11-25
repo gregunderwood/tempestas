@@ -2,16 +2,25 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Clock, SystemClock } from '../common/clock';
 import { DeviceEntity, PinTransitionEntity } from '../devices/models';
+import { NodeUpdateEntity } from '../nodes/models';
 import { NodesModule } from '../nodes/nodes.module';
+import { SensorReadingEntity } from '../readings/models';
 import { ReadingsModule } from '../readings/readings.module';
 import { ZoneEntity } from '../zones/models';
 import { FreezeMarginService } from './freeze-margin.service';
+import { NodeHealthService } from './node-health.service';
 import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ZoneEntity, DeviceEntity, PinTransitionEntity]),
+    TypeOrmModule.forFeature([
+      ZoneEntity,
+      DeviceEntity,
+      PinTransitionEntity,
+      SensorReadingEntity,
+      NodeUpdateEntity,
+    ]),
     NodesModule,
     ReadingsModule,
   ],
@@ -19,6 +28,7 @@ import { ReportsService } from './reports.service';
   providers: [
     ReportsService,
     FreezeMarginService,
+    NodeHealthService,
     { provide: Clock, useClass: SystemClock },
   ],
 })
