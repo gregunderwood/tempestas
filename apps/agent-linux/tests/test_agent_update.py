@@ -18,6 +18,7 @@ from release_fixtures import (
 from tempestas_agent import contract
 from tempestas_agent.agent import (
     ANOTHER_UPDATE_IN_PROGRESS,
+    HELLO_REPEAT_S,
     LAST_OUTCOME_UNDELIVERED,
     LAST_UPDATE_UNSETTLED,
     NOT_INSTALLED_FROM_A_RELEASE,
@@ -70,6 +71,15 @@ def make_updating_agent(monkeypatch, tmp_path, installer=None):
     agent.settle_update()
     agent.on_heartbeat(HEARTBEAT)
     return agent, clock
+
+
+def count_hellos(agent) -> int:
+    hello_topic = contract.build_hello_topic(agent.config.node_id)
+    return sum(1 for topic, *_ in agent.client.published if topic == hello_topic)
+
+
+def heartbeat_naming(accepted_version: str | None) -> bytes:
+    return json.dumps({"controller": SERVER, "epoch": 1, "agentVersion": accepted_version}).encode()
 
 
 def update_statuses(agent) -> list[tuple[str, str | None]]:
@@ -268,6 +278,22 @@ def test_a_new_release_rolls_back_when_the_server_names_no_accepted_hello(tmp_pa
 
     assert agent.layout.read_current_release() == RUNNING_RELEASE
     assert agent.layout.read_outcome().reason.endswith("it has accepted no hello from this node")
+
+
+def test_a_new_release_says_hello_again_when_the_server_has_not_taken_it(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+
+    agent.on_heartbeat(heartbeat_naming(RUNNING_RELEASE))
+    assert count_hellos(agent) == 1
+    clock.advance(HELLO_REPEAT_S)
+    agent.on_heartbeat(heartbeat_naming(RUNNING_RELEASE))
+    assert count_hellos(agent) == 2
+    agent.on_heartbeat(heartbeat_naming(NEW_RELEASE))
+    agent.tend_update()
+
+    assert count_hellos(agent) == 2
+    assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
 
 
 def test_a_new_release_is_healthy_once_the_server_names_it_in_a_heartbeat(tmp_path):

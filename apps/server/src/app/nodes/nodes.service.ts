@@ -156,8 +156,7 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
       where: { slug: facts.nodeId },
     });
     if (!existing) {
-      await this.registerPendingNode(facts);
-      this.hardware.recordAcceptedHello(hello);
+      await this.registerPendingNode(hello, facts);
       return;
     }
 
@@ -322,10 +321,14 @@ export class NodesService implements OnModuleInit, OnModuleDestroy {
     return this.queue;
   }
 
-  private async registerPendingNode(facts: HelloFacts): Promise<void> {
+  private async registerPendingNode(
+    hello: NodeHello,
+    facts: HelloFacts,
+  ): Promise<void> {
     const node = await this.nodes.save(
       this.nodes.create(newNodeFromHello(facts)),
     );
+    this.hardware.recordAcceptedHello(hello);
     await this.publishNodeState(node);
     this.logger.warn(
       `Node "${facts.nodeId}" announced itself and is PENDING - it receives no commands and ` +

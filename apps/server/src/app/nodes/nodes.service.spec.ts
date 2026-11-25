@@ -236,12 +236,16 @@ describe('NodesService hello ingest', () => {
   });
 
   it('tells the hardware a new node said hello once it is stored', async () => {
-    const { service, rows, recordAcceptedHello } = makeService();
+    const { service, rows, recordAcceptedHello, publishNodeState } =
+      makeService();
     const announced = hello({ nodeId: 'ghost' });
+    recordAcceptedHello.mockImplementation(() => {
+      expect(rows).toHaveLength(1);
+      expect(publishNodeState).not.toHaveBeenCalled();
+    });
 
     await service.handleHello(announced);
 
-    expect(rows).toHaveLength(1);
     expect(recordAcceptedHello).toHaveBeenCalledWith(announced);
   });
 

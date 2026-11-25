@@ -204,7 +204,7 @@ def test_a_heartbeat_without_a_version_does_not_pass_once_the_server_has_named_v
     gate.note_heartbeat(HEARTBEAT_FROM_A_1_1_SERVER)
 
     assert gate.is_passed() is False
-    assert gate.describe_failure().endswith(f"it still names {RUNNING_RELEASE}")
+    assert gate.describe_failure().endswith("it stopped naming the version it accepted")
 
 
 def test_a_version_named_before_hello_still_rules_out_heartbeats_without_one():
@@ -212,7 +212,9 @@ def test_a_version_named_before_hello_still_rules_out_heartbeats_without_one():
     gate.note_heartbeat(heartbeat_naming(RUNNING_RELEASE))
     gate.note_hello(NEW_RELEASE)
     gate.note_heartbeat(HEARTBEAT_FROM_A_1_1_SERVER)
+
     assert gate.is_passed() is False
+    assert gate.describe_failure().endswith("it stopped naming the version it accepted")
 
 
 @pytest.mark.parametrize("named", [5, "", ["1.2.0"]])

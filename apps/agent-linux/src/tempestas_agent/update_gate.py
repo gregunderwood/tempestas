@@ -58,16 +58,18 @@ class HealthGate:
             return self._watched_seconds + running
 
     def note_heartbeat(self, heartbeat: dict) -> None:
-        field = contract.HEARTBEAT_ACCEPTED_VERSION_FIELD
-        if field in heartbeat:
+        accepted_version_field = contract.HEARTBEAT_ACCEPTED_VERSION_FIELD
+        if accepted_version_field in heartbeat:
             self.has_heard_versions_named = True
         # Before our hello, a heartbeat proves only the broker.
         if not self.has_said_hello:
             return
-        if field not in heartbeat:
+        if accepted_version_field in heartbeat:
+            self._note_named_version(heartbeat[accepted_version_field])
+        else:
             self._note_heartbeat_without_a_version()
-            return
-        accepted_version = heartbeat[field]
+
+    def _note_named_version(self, accepted_version: object) -> None:
         if accepted_version == self.hello_version:
             self.has_server_accepted_hello = True
         else:
@@ -75,11 +77,16 @@ class HealthGate:
 
     def _note_heartbeat_without_a_version(self) -> None:
         # Only a pre-1.2 server omits the version, so once one was named this proves nothing.
-        if not self.has_heard_versions_named:
+        if self.has_heard_versions_named:
+            self.last_refusal = "it stopped naming the version it accepted"
+        else:
             self.has_server_accepted_hello = True
 
     def is_passed(self) -> bool:
         return self.has_server_accepted_hello
+
+    def is_refused(self) -> bool:
+        return not self.is_passed() and self.last_refusal is not None
 
     def is_overdue(self, now: float) -> bool:
         return not self.is_passed() and self.read_watched_seconds(now) >= GATE_SECONDS

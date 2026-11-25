@@ -222,6 +222,10 @@ export class MqttHardwareService
     return this.lastReports.get(toPinKey(nodeId, pin)) ?? null;
   }
 
+  recordAcceptedHello(hello: NodeHello): void {
+    this.acceptedAgentVersions.set(hello.nodeId, hello.agentVersion);
+  }
+
   private buildClientOptions(): IClientOptions & { clientId: string } {
     const username = this.config.get<string>('MQTT_USERNAME', '');
     const password = this.config.get<string>('MQTT_PASSWORD', '');
@@ -726,10 +730,6 @@ export class MqttHardwareService
         mqttQos.heartbeat,
       );
     }
-  }
-
-  recordAcceptedHello(hello: NodeHello): void {
-    this.acceptedAgentVersions.set(hello.nodeId, hello.agentVersion);
   }
 
   private buildHeartbeat(nodeId: NodeId): HeartbeatPayload {

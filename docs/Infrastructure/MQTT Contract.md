@@ -31,7 +31,7 @@ tempestas/v1/node/{nodeId}/gpio/set                   server→node  QoS1  retai
 tempestas/v1/node/{nodeId}/gpio/sync                  server→node  QoS1  retain=false
 tempestas/v1/node/{nodeId}/gpio/state/{pin}           node→server  QoS1  retain=true
 tempestas/v1/node/{nodeId}/gpio/result                node→server  QoS1  retain=false
-tempestas/v1/node/{nodeId}/control/heartbeat          server→node  QoS0  retain=false  (1.2)
+tempestas/v1/node/{nodeId}/control/heartbeat          server→node  QoS0  retain=false
 tempestas/v1/node/{nodeId}/alarm                      node→server  QoS1  retain=false
 tempestas/v1/node/{nodeId}/update                     server→node  QoS1  retain=FALSE ← hazard (1.1)
 tempestas/v1/node/{nodeId}/update/status              node→server  QoS1  retain=false  (1.1)
@@ -132,6 +132,8 @@ interface MqttEnvelope {
   stored it, not just that it arrived. A Linux agent's update gate passes only on its own version,
   so a release whose `hello` the server refuses is rolled back. A heartbeat without the field comes
   from a server before 1.2, and the gate takes it only until some heartbeat has carried the field.
+  The field names a version, not a particular `hello`, and the server keeps it in memory: it is
+  `null` again after a restart until each node says `hello`, and stays after a node is deleted.
 - **`alarm`** — an `AlarmCode` plus severity. Never retained: a retained alarm resurrects a cleared
   fault.
 - **`update`** (1.1) — `id`, `issuedBy`, `expiresAt`, `app`, `version`, `manifestUrl`,
