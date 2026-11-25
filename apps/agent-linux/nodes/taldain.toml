@@ -1,0 +1,21 @@
+# taldain: the Pi 5 in the greenhouse, a sensor-only bench node installed from the package.
+# Install to /etc/tempestas/agent.toml (0640 root:tempestas); credentials live in /etc/tempestas/agent.env.
+
+node_id = "taldain"
+kind = "rpi"
+
+deadman_s = 30.0
+
+[mqtt]
+url = "mqtt://192.168.2.70:1883"
+
+[sensor]
+kind = "scd4x"
+sensor_id = "scd4x-0"
+bus = 1
+address = 0x62
+sample_interval_s = 10.0
+
+[gpio]
+# Its relay board is wired but drives nothing; a line is claimed only by a human edit, with docs/Safety.md read first.
+lines = []
