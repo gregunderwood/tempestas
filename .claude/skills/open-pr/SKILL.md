@@ -82,5 +82,5 @@ After a new recording, republish to the same artifact and run `--player-url` aga
 
 ## 6. Hand over to review
 
-Review then follows `/review-round`. Merging is the user's call: never merge your own PR, and
-never push to `main`.
+Review then follows [review-round](../review-round/SKILL.md). Merging is the user's call: never
+merge your own PR, and never push to `main`.

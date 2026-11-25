@@ -77,6 +77,8 @@ Work is tracked on GitHub (`gregunderwood/tempestas`, private) with `gh`.
 - **Reviewing one follows the `review-round` skill** in [.claude/skills/review-round](.claude/skills/review-round/SKILL.md):
   rated rounds until only nits remain, then a `Nits addressed` clean-up with no further review.
 - **Merging is the user's call.** Do not merge your own PR; do not push to `main`.
+- Deploying to elantris from a branch is fine for a bench test; say so in the PR, because the
+  box is then running code `main` does not have.
 
 ## Who owns what right now
 

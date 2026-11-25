@@ -14,7 +14,8 @@ issue and against [AGENTS.md](../../../AGENTS.md). Read [docs/Safety.md](../../.
 first if anything in the change can energise a relay.
 
 Check that screenshots are on the PR if it changes what a page shows, and a video if it is about
-interaction. Both are covered in `/open-pr`. Compare before with after, and watch the video.
+interaction or adds or changes a stack spec. Both are covered in [open-pr](../open-pr/SKILL.md).
+Compare before with after, and watch the video.
 
 Rate each finding:
 
@@ -30,7 +31,7 @@ line, and what is wrong.
 ## As the author, after a round with blocking or important findings
 
 1. Fix every blocking and important finding, or reply saying why it is declined.
-2. Run the gate (see `/open-pr`, step 1) and push.
+2. Run the gate (see [open-pr](../open-pr/SKILL.md), step 1) and push.
 3. If the fixes change a page or an interaction, refresh the screenshots or video.
 4. Start the next round. It reviews afresh rather than only checking the fixes.
 
