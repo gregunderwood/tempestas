@@ -63,7 +63,9 @@ export class FakeBrokerClient extends EventEmitter {
   }
 }
 
-export function buildHelloPayload(overrides: Record<string, unknown> = {}) {
+export function buildHelloPayload(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     schema: MQTT_SCHEMAS.hello,
     node: 'patji',

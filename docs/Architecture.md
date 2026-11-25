@@ -107,14 +107,16 @@ HardwareService (abstract)  ──fake──►  FakeHardwareService   closed-lo
 
 ### The hardware seam
 
-`HardwareService` is an abstract class with `setPin`, `syncPins` and `sendUpdate`, and the
-observables `samples$`, `availability$`, `hello$`, `pinStates$` and `updateStatuses$`. Every
-consumer injects the abstract class. The fake plays an update through in a few seconds and says
-hello again on the new version, so the node page can be tried without a node.
+`HardwareService` is an abstract class with `setPin`, `syncPins`, `sendUpdate` and
+`recordAcceptedHello`, and the observables `samples$`, `availability$`, `hello$`, `pinStates$` and
+`updateStatuses$`. Every consumer injects the abstract class. The fake plays an update through in a
+few seconds and says hello again on the new version, so the node page can be tried without a node.
 
 - **Nothing outside `app/hardware/` may import `mqtt`.** Not `@nestjs/microservices` either: its
   envelope and pattern routing would make the contract harder for a 60-line Python script to speak
-  and impossible to drive by hand from `mosquitto_pub`.
+  and impossible to drive by hand from `mosquitto_pub`. The one exception is
+  `nodes.service.spec.ts`, which runs a `hello` through the real registry and MQTT driver to the
+  next heartbeat.
 - `HARDWARE_DRIVER=fake` binds the simulator; anything else that is not `mqtt` throws at boot.
   Failing loudly beats silently falling back to a simulator on a box that controls a burner.
 - The fake driver is a **closed loop**, not a random number generator: the burner raises temperature

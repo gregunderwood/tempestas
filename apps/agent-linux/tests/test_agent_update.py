@@ -28,7 +28,7 @@ from tempestas_agent.agent import (
 from tempestas_agent.release_installer import ReleaseInstaller, UpdateFailed
 from tempestas_agent.release_layout import PendingUpdate, UpdateOutcome
 from tempestas_agent.update_gate import GATE_SECONDS
-from test_agent import PUBLISH_NO_CONNECTION, make_agent
+from test_agent import PUBLISH_NO_CONNECTION, PUBLISH_QUEUED, make_agent
 from test_update_command import SERVER, build_update
 
 UPDATE_STATUS_TOPIC = contract.build_update_status_topic("bench")
@@ -297,6 +297,20 @@ def test_a_new_release_says_hello_again_when_the_server_has_not_taken_it(tmp_pat
 
     assert count_hellos(agent) == 2
     assert update_statuses(agent) == [(contract.UpdateState.HEALTHY, None)]
+
+
+def test_a_repeated_hello_that_never_left_does_not_put_off_the_next_try(tmp_path):
+    agent, clock = start_new_release_on_its_gate(tmp_path)
+    agent.say_hello()
+    clock.advance(HELLO_REPEAT_S)
+    agent.client.publish_rc = PUBLISH_NO_CONNECTION
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
+
+    agent.client.publish_rc = PUBLISH_QUEUED
+    clock.advance(HEARTBEAT_INTERVAL_S)
+    agent.on_heartbeat(encode_heartbeat_naming(RUNNING_RELEASE))
+
+    assert count_hellos(agent) == 3
 
 
 def test_a_new_release_says_hello_again_when_the_server_has_accepted_none(tmp_path):
