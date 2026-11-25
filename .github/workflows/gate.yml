@@ -12,6 +12,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Debian bookworm's, the oldest Python a node runs.
+  UV_PYTHON: '3.11'
+
 jobs:
   gate:
     runs-on: ubuntu-24.04

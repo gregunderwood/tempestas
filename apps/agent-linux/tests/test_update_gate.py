@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 
@@ -349,7 +350,7 @@ def test_a_prune_skips_a_release_another_prune_removed_first(tmp_path, monkeypat
 
     def stat_after_another_prune(path, *arguments, **options):
         if path == vanished:
-            raise FileNotFoundError(path)
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(path))
         return real_stat(path, *arguments, **options)
 
     monkeypatch.setattr(type(vanished), "stat", stat_after_another_prune)
