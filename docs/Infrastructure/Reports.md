@@ -146,8 +146,8 @@ daylight and per night period, newest first, the running one included.
   `TIME_IN_RANGE_LONGEST_HELD_MINUTES`, 1 minute.** Computed in SQL with `LEAD` over
   `sensor_readings` and summed into 5-minute buckets per probe, each probe's average judged against
   the band. A hold that runs past its bucket's end goes on in the next bucket, so a node that never
-  missed a sample has no hours without readings. A stretch counts for as long as any of the zone's
-  probes held in it.
+  missed a sample has no hours without readings. A stretch counts for as long as its longest-held
+  probe held in it.
 - **The 1-minute cap assumes every node samples at least once a minute.** A node sampling less
   often shows part of each period as without readings. Holding for each node's own
   `sampleIntervalMs` would lift that.

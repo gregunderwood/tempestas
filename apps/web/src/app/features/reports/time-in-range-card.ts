@@ -36,11 +36,17 @@ const RECENT_PERIOD_COUNT = 14;
           <li>{{ lowerBound() }}</li>
           <li>{{ upperBound() }}</li>
         </ul>
-        @for (line of shareInRange(); track line) {
-          <p class="range-summary">{{ line }}</p>
-        } @empty {
+        @if (hasPeriods()) {
+          @for (line of shareInRange(); track line) {
+            <p class="range-summary">{{ line }}</p>
+          } @empty {
+            <p class="range-summary">
+              No readings in any of these days or nights.
+            </p>
+          }
+        } @else {
           <p class="range-summary">
-            No readings in the last {{ zone().periods.length }} periods.
+            No day or night periods: the daylight window has no length.
           </p>
         }
         <temp-time-in-range-table
@@ -91,6 +97,9 @@ export class TimeInRangeCard {
 
   protected readonly bucketMinutes = TIME_IN_RANGE_BUCKET_MINUTES;
   protected readonly longestHeldMinutes = TIME_IN_RANGE_LONGEST_HELD_MINUTES;
+  protected readonly hasPeriods = computed(
+    () => this.zone().periods.length > 0,
+  );
   protected readonly hasLowerBound = computed(() => hasLowerBound(this.zone()));
   protected readonly hasUpperBound = computed(() => hasUpperBound(this.zone()));
   protected readonly lowerBound = computed(() =>
