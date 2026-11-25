@@ -137,7 +137,12 @@ PR's head commit or if tracked files have changes. It then:
   `tools/seed-reading-history.mjs` after the first real readings arrive. See below.
 - **uses ports 7020 and 4220**, and refuses to start if anything listens on either. Other ports:
   `PR_SCREENSHOTS_SERVER_PORT` and `PR_SCREENSHOTS_WEB_PORT`.
-- **takes each page at 1280 px and 390 px** with headless Chrome.
+- **takes each page at 1280 px and 390 px, the full height of the page**, with headless Chrome
+  driven over its DevTools protocol by `tools/lib/full-page-screenshot.mjs`. The phone shot is a
+  mobile viewport at twice the scale. Each waits for the page to settle first, as Chrome's
+  `--virtual-time-budget` does: its clock runs for 8 s, paused while any request is pending. A
+  long page makes a tall image; the comment shows it small and links to the full-size file. It
+  needs Node 22.4 or later, for the built-in `WebSocket`.
 - **adds a commit to the `pr-screenshots` branch** with the images in `<pr>/`, through a temporary
   worktree, so no checkout changes branch. If another run pushed first, it replays its commit on
   top and tries again.
@@ -386,7 +391,8 @@ And `mosquitto_pub -r` of a `gpio/set` **must** be dropped and alarmed.
 
 - A new coverage-enforced path is added
 - A new class of test appears (fault injection, contract, e2e)
-- `tools/pr-screenshots.sh` changes how it starts its stack or where it stores images
+- `tools/pr-screenshots.sh` changes how it starts its stack, how it captures a page or where it
+  stores images
 - `tools/seed-runtime-history.mjs` or `tools/seed-reading-history.mjs` changes which databases it
   accepts or what history it writes
 - A porting landmine or boundary case is discovered that future work must not undo
