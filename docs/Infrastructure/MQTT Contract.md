@@ -339,7 +339,8 @@ What this means for anything speaking the contract:
 - **Only `tempestas-server` may publish `update`**, and a node may publish only its own
   `update/status`.
 - **Only `tempestas-server` may publish `server/status`**, so another node cannot fake the server's
-  LWT.
+  LWT. Of the servers, only the leader does: a follower publishes neither the will nor an explicit
+  `online` or `offline`. See [Multi-Controller](../Multi-Controller.md).
 - **Read and write are separate grants.** A credential that publishes samples cannot subscribe to
   them - which is why a logger needs its own read-only identity rather than borrowing a node's.
 

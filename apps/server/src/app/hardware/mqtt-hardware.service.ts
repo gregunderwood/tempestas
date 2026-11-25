@@ -120,7 +120,7 @@ export class MqttHardwareService
 
   private readonly controllerId = `nestjs-${process.pid}`;
   private readonly epoch: number;
-  // A follower ingests everything, commands nothing, and neither heartbeats nor registers a will.
+  // A follower ingests everything, commands nothing, and neither heartbeats nor publishes the server status.
   private readonly role: ControllerRole;
 
   constructor(
@@ -157,13 +157,7 @@ export class MqttHardwareService
     if (!client) return;
 
     // Explicit, because a graceful disconnect fires no will.
-    try {
-      await this.publishServerStatus(client, 'offline');
-    } catch (error: unknown) {
-      this.logger.warn(
-        `Could not publish the offline status: ${describeError(error)}`,
-      );
-    }
+    await this.announceServerStatus(client, 'offline');
     await client.endAsync();
   }
 
@@ -685,24 +679,26 @@ export class MqttHardwareService
   private async announceServerOnline(): Promise<void> {
     const client = this.client;
     if (!client) return;
-    try {
-      await this.publishServerStatus(client, 'online');
-    } catch (error: unknown) {
-      this.logger.warn(
-        `Could not announce the server as online: ${describeError(error)}`,
-      );
-    }
+    await this.announceServerStatus(client, 'online');
   }
 
-  private publishServerStatus(
+  // Leader only, like the will: a follower's retained status would speak for the server nodes obey.
+  private async announceServerStatus(
     client: MqttClient,
     state: 'online' | 'offline',
-  ): Promise<unknown> {
-    return client.publishAsync(
-      mqttTopics.serverStatus,
-      JSON.stringify(buildStatus('server', state, this.clock.now())),
-      mqttQos.serverStatus,
-    );
+  ): Promise<void> {
+    if (!this.isLeader) return;
+    try {
+      await client.publishAsync(
+        mqttTopics.serverStatus,
+        JSON.stringify(buildStatus('server', state, this.clock.now())),
+        mqttQos.serverStatus,
+      );
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Could not announce the server as ${state}: ${describeError(error)}`,
+      );
+    }
   }
 
   private startHeartbeat(): void {
